@@ -91,6 +91,17 @@ impl Hub {
         cx.notify();
     }
 
+    /// Change the shared settings from outside a fit window, e.g. from an editor window, write
+    /// them out and let every window pull them in.
+    pub fn edit_saved(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut Saved)) {
+        edit(&mut self.saved);
+        self.generation += 1;
+        if let Err(e) = self.saved.save() {
+            eprintln!("saving fits: {e}");
+        }
+        cx.notify();
+    }
+
     pub fn set_prices(&mut self, prices: Rc<Prices>, cx: &mut Context<Self>) {
         self.prices = prices;
         cx.notify();

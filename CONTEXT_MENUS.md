@@ -202,7 +202,7 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 - [x] Fill Cargo With {Category} | active fit, item is charge or commodity (gyfa: any cargo-only item) | adds max units that fit. GuiAddCargoCommand | cargoFill.py
 - [x] Add {Charge} to Cargo (x1000) / (x8) for Scan Probes | active fit, category Charge | adds 1000 (or 8). GuiAddCargoCommand | cargoAddAmmo.py
 - [ ] Project {Category} onto Fit | active non-structure fit, item has a projected effect (pref project) | adds as projected module/drone/fighter. GuiAddProjectedModule/Drone/FighterCommand | itemProject.py
-- [ ] Set {Category} as Damage Pattern | active fit, item has em/therm/kin/exp damage attrs (pref ammoPattern) | sets fit damage pattern to the item's damage ratio | ammoToDmgPattern.py
+- [x] Set {Category} as Damage Pattern | active fit, item has em/therm/kin/exp damage attrs (pref ammoPattern) | sets fit damage pattern to the item's damage ratio | ammoToDmgPattern.py; gyfa shows it for items with nonzero damage, the pattern is called Selected Ammo as in pyfa
 
 ## Fitting browser (gui/builtinShipBrowser)
 
@@ -244,11 +244,11 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 - [x] Implants && Boosters | always | checkbox: include implants/boosters | priceOptions.py
 
 ### resistancesViewFull
-- [~] {damage pattern names} | always (disabled with no fit) | top-level checkable entries for root patterns (Uniform, Selected Ammo, ...) plus category submenus; sets fit damage pattern (EHP) | damagePatternChange.py; builtin patterns only, no user patterns yet
+- [x] {damage pattern names} | always (disabled with no fit) | top-level checkable entries for root patterns (Uniform, Selected Ammo, ...) plus category submenus; sets fit damage pattern (EHP) | damagePatternChange.py
 
 ### firepowerViewFull
 - [x] Factor in Reload Time | always (disabled with no fit) | checkbox, global setting, reload included in DPS | factorReload.py
-- [ ] Target Resists | active fit | checkable "No Profile", separator, target profile tree; sets fit target profile for applied DPS | targetProfile/switcher.py; left out until refine can apply damage to a profile instead of a projectee item
+- [x] Target Resists | active fit | checkable "No Profile", separator, target profile tree; sets fit target profile for applied DPS | targetProfile/switcher.py
 
 ## Graphs (graphs/gui)
 
@@ -416,12 +416,12 @@ refine API paths are under refine-core/src/api. "ui only" = no engine involvemen
 - Price toggles (Drones, Cargo, Implants && Boosters): ui only.
 - Damage pattern (resistances panel): yes, FitStats::get_stat_ehp(Some(DpsProfile)).
 - Factor in Reload Time: yes, StatTimeOptions::Sim with optional_reloads (Sol::set_default_optional_reloads, Module::set_optional_reload_override); burst DPS ignores reload.
-- Target Resists: partial, get_stat_dmg_applied needs a projectee item; no abstract resist/sig profile, would need a target ship item or own resist math on StatDmg.
+- Target Resists: yes, own resist math on get_stat_dmg per damage type, which is all pyfa's firepower view applies (no projectee needed).
 
 ## Graphs
 - Add Fit... / Add Currently Open Fit / Remove / Open in New Tab: ui only.
 - Plot with Different Ammo...: yes, Module::set_charge_type_id per sample (or scratch fit copies).
-- Add Target Profile / Edit Target Profile: partial, same projectee limitation as Target Resists.
+- Add Target Profile / Edit Target Profile: ui only for the menus (ui::profile_menus, ui::profile_editor); applying speed and signature needs pyfa's graph application math or a projectee item for get_stat_dmg_applied.
 - Resist Mode: no engine (graph math choosing which layer's resists to apply).
 - Apply Projected Items / Apply Projected Effects: yes, include or omit projections when computing.
 - Ignore Target Resists: yes, use get_stat_dmg instead of get_stat_dmg_applied.

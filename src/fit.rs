@@ -140,6 +140,9 @@ pub struct Fit {
     pub inactive_implants: Vec<TypeId>,
     #[serde(default)]
     pub implant_source: ImplantSource,
+    /// What the firepower view applies damage to; none shows raw damage.
+    #[serde(default)]
+    pub target_profile: Option<crate::target_profile::TargetProfile>,
 }
 
 /// Incoming damage that effective HP, effective repair rates and the reactive armor hardener

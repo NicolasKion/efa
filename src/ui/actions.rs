@@ -104,6 +104,7 @@ pub enum Action {
     /// A cargo stack dragged onto a slot position.
     CargoToModule(TypeId, (Slot, usize), Transfer),
     SetDamageProfile(DamageProfile),
+    SetTargetProfile(Option<crate::target_profile::TargetProfile>),
 }
 
 /// The additions pane's tabs that list items.
@@ -472,6 +473,7 @@ impl Gyfa {
             Action::SetMode(mode) => fit.mode = Some(mode),
             Action::SetSecStatus(sec) => fit.sec_status = sec,
             Action::SetDamageProfile(profile) => fit.damage_profile = profile,
+            Action::SetTargetProfile(profile) => fit.target_profile = profile,
             Action::ToggleBoosters(main, rows) => {
                 let Some(on) = fit.boosters.get(main).map(|b| !b.active) else {
                     return;

@@ -7,6 +7,8 @@ mod columns;
 mod fitting;
 mod hub;
 mod implant_sets;
+pub mod profile_editor;
+pub mod profile_menus;
 mod side;
 mod stats;
 mod widgets;
@@ -777,6 +779,7 @@ impl Gyfa {
                         )
                     }),
             )
+            .child(profile_editor::editors_button(&self.hub))
             .when_some(self.status.clone(), |bar, status| {
                 bar.child(
                     div()

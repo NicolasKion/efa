@@ -1,27 +1,24 @@
 //! The tank sections: resistances with effective HP and the damage pattern (resistancesViewFull),
 //! recharge rates (rechargeViewFull) and bombs to kill (bombingViewFull).
 
-use std::{rc::Rc, sync::LazyLock};
+use std::rc::Rc;
 
 use gpui_kit::component::{
     ActiveTheme, Sizable,
     button::{Button, ButtonVariants},
-    h_flex,
-    menu::{PopupMenu, PopupMenuItem},
-    v_flex,
+    h_flex, v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Context, IntoElement, ParentElement, Styled, WeakEntity, Window,
-    div, px,
+    AnyElement, App, ClickEvent, Context, IntoElement, ParentElement, Styled, WeakEntity, div, px,
 };
 
-use super::{Pane, Section, format, ids, profiles::Tree, tip, title};
+use super::{Pane, Section, format, ids, tip, title};
 use crate::{
     engine::Layer,
-    fit::DamageProfile,
     ui::{
         Gyfa,
         actions::Action,
+        profile_menus::{PickPattern, damage_pattern_menu},
         widgets::{DAMAGE_COLORS, gauge, icon},
     },
 };
@@ -36,8 +33,6 @@ const DAMAGE_ICONS: [(i32, &str); 4] = [
 /// Width of one resist gauge; pyfa's are 48 px at its smaller font.
 /// Width of the value column, which fits `WWWWk` in pyfa.
 const VALUE: f32 = 64.;
-
-static PATTERNS: LazyLock<Tree> = LazyLock::new(Tree::builtin);
 
 /// The tank layers with their name, icon and pyfa's tooltip.
 fn layers(p: &Pane<'_>) -> [(&'static str, i32, Layer, &'static str); 3] {
@@ -166,88 +161,22 @@ pub(super) fn resistances(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &Context<Gy
             cx,
         ));
 
-    let (this, current) = (this.clone(), p.fit.damage_profile.clone());
+    let this = this.clone();
+    let pick: PickPattern = Rc::new(move |profile, _, cx| {
+        Gyfa::app_update(&this, cx, |g, cx| {
+            g.apply(Action::SetDamageProfile(profile), cx);
+        });
+    });
+    let (current, user) = (p.fit.damage_profile.clone(), p.damage_patterns.clone());
     Section {
         action: None,
         key: "Resistances",
         title: header,
         body: body.into_any_element(),
         menu: Some(Rc::new(move |menu, window, cx| {
-            pattern_menu(menu, &this, &current, window, cx)
+            damage_pattern_menu(menu, &user, &current, &pick, window, cx)
         })),
     }
-}
-
-/// pyfa's damage pattern menu: Uniform and Selected Ammo first, then the builtin categories.
-fn pattern_menu(
-    menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
-    current: &DamageProfile,
-    window: &mut Window,
-    cx: &mut Context<PopupMenu>,
-) -> PopupMenu {
-    let pick = |this: &WeakEntity<Gyfa>, profile: DamageProfile| {
-        let this = this.clone();
-        move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-            Gyfa::app_update(&this, cx, |g, cx| {
-                g.apply(Action::SetDamageProfile(profile.clone()), cx);
-            });
-        }
-    };
-    let menu = menu
-        .item(
-            PopupMenuItem::new("Uniform")
-                .checked(*current == DamageProfile::Uniform)
-                .on_click(pick(this, DamageProfile::Uniform)),
-        )
-        .item(
-            PopupMenuItem::new("Selected Ammo")
-                .checked(*current == DamageProfile::SelectedAmmo)
-                .on_click(pick(this, DamageProfile::SelectedAmmo)),
-        );
-    // Uniform already sits at the top as its own entry.
-    let root: &'static Tree = &PATTERNS;
-    root.children.iter().fold(menu, |menu, (name, level)| {
-        pattern_submenu(menu, name, level, this, current, window, cx)
-    })
-}
-
-fn pattern_submenu(
-    menu: PopupMenu,
-    name: &'static str,
-    level: &'static Tree,
-    this: &WeakEntity<Gyfa>,
-    current: &DamageProfile,
-    window: &mut Window,
-    cx: &mut Context<PopupMenu>,
-) -> PopupMenu {
-    let (this, current) = (this.clone(), current.clone());
-    menu.submenu(name, window, cx, move |menu, window, cx| {
-        let menu = level.children.iter().fold(menu, |menu, (name, child)| {
-            pattern_submenu(menu, name, child, &this, &current, window, cx)
-        });
-        level
-            .patterns
-            .iter()
-            .fold(menu, |menu, &(short, raw, amounts)| {
-                let checked =
-                    matches!(&current, DamageProfile::Pattern { name, .. } if name == raw);
-                let this = this.clone();
-                menu.item(
-                    PopupMenuItem::new(short)
-                        .checked(checked)
-                        .on_click(move |_, _, cx| {
-                            let profile = DamageProfile::Pattern {
-                                name: raw.to_owned(),
-                                amounts,
-                            };
-                            Gyfa::app_update(&this, cx, |g, cx| {
-                                g.apply(Action::SetDamageProfile(profile), cx);
-                            });
-                        }),
-                )
-            })
-    })
 }
 
 /// Rounds the way pyfa compares spool ranges: to one decimal.

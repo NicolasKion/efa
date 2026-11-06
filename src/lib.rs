@@ -1,10 +1,13 @@
 pub mod cdn;
+pub mod damage_pattern;
 pub mod data;
 pub mod engine;
 pub mod fit;
 pub mod icons;
 pub mod implant_set;
 pub mod prices;
+pub mod profile;
 pub mod store;
+pub mod target_profile;
 pub mod theme;
 pub mod ui;

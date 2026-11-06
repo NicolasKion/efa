@@ -6,7 +6,6 @@ mod format;
 mod misc;
 mod offense;
 mod price;
-mod profiles;
 mod resources;
 
 use std::rc::Rc;
@@ -71,6 +70,9 @@ struct Pane<'a> {
     /// A price fetch is out.
     prices_updating: bool,
     price_totals: PriceTotals,
+    /// The user's patterns and profiles, for the header menus.
+    damage_patterns: Rc<Vec<crate::damage_pattern::DamagePattern>>,
+    target_profiles: Rc<Vec<crate::target_profile::TargetProfile>>,
 }
 
 impl Pane<'_> {
@@ -171,6 +173,8 @@ impl Gyfa {
             prices: &self.prices,
             prices_updating: self.prices_fetch.is_some(),
             price_totals: self.saved.price_totals,
+            damage_patterns: Rc::new(self.saved.damage_patterns.clone()),
+            target_profiles: Rc::new(self.saved.target_profiles.clone()),
         };
         let this = Self::weak(cx);
         let sections = [
