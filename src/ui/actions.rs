@@ -62,12 +62,26 @@ pub enum Action {
     /// Put copies of a module into every free slot of its rack.
     FillRack(Slot, TypeId),
     SetDronesActive(usize, u32),
-    RemoveDrones(usize),
-    RemoveImplant(usize),
-    RemoveBooster(usize),
-    RemoveCargo(usize),
     AddCargo(TypeId, u32),
     AddDrones(TypeId, u32),
+    /// Remove rows of an additions tab.
+    RemoveAdditions(AddKind, Vec<usize>),
+    /// Set the size of drone stacks or cargo stacks.
+    SetAmount(AddKind, Vec<usize>, u32),
+    /// Move this many drones out of a stack into a new one.
+    SplitDrones(usize, u32),
+    SwapAdditions(AddKind, Vec<usize>, TypeId),
+    /// Add pasted items to a tab.
+    AddAdditions(AddKind, Vec<(TypeId, u32)>),
+}
+
+/// The additions pane's tabs that list items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddKind {
+    Drones,
+    Implants,
+    Boosters,
+    Cargo,
 }
 
 impl Gyfa {
@@ -147,6 +161,8 @@ impl Gyfa {
     pub(super) fn clear_selection(&mut self) {
         self.selection.clear();
         self.anchor = None;
+        self.additions_selection.clear();
+        self.additions_anchor = None;
     }
 
     pub fn apply(&mut self, action: Action, cx: &mut Context<Self>) {
@@ -261,20 +277,99 @@ impl Gyfa {
                 }
             }
             Action::SetDronesActive(i, n) => fit.drones[i].active = n.min(fit.drones[i].count),
-            Action::RemoveDrones(i) => {
-                fit.drones.remove(i);
-            }
-            Action::RemoveImplant(i) => {
-                fit.implants.remove(i);
-            }
-            Action::RemoveBooster(i) => {
-                fit.boosters.remove(i);
-            }
-            Action::RemoveCargo(i) => {
-                fit.cargo.remove(i);
-            }
             Action::AddCargo(type_id, count) => fit.add_cargo(type_id, count),
             Action::AddDrones(type_id, count) => fit.add_drones(type_id, count),
+            Action::RemoveAdditions(kind, rows) => {
+                let rows: BTreeSet<usize> = rows.into_iter().collect();
+                for i in rows.into_iter().rev() {
+                    match kind {
+                        AddKind::Drones if i < fit.drones.len() => {
+                            fit.drones.remove(i);
+                        }
+                        AddKind::Implants if i < fit.implants.len() => {
+                            fit.implants.remove(i);
+                        }
+                        AddKind::Boosters if i < fit.boosters.len() => {
+                            fit.boosters.remove(i);
+                        }
+                        AddKind::Cargo if i < fit.cargo.len() => {
+                            fit.cargo.remove(i);
+                        }
+                        _ => {}
+                    }
+                }
+                structural = true;
+            }
+            Action::SetAmount(kind, rows, amount) => {
+                for i in rows {
+                    match kind {
+                        AddKind::Drones => {
+                            if let Some(stack) = fit.drones.get_mut(i) {
+                                stack.count = amount.max(1);
+                                stack.active = stack.active.min(stack.count);
+                            }
+                        }
+                        AddKind::Cargo => {
+                            if let Some(stack) = fit.cargo.get_mut(i) {
+                                stack.1 = amount.max(1);
+                            }
+                        }
+                        AddKind::Implants | AddKind::Boosters => {}
+                    }
+                }
+            }
+            Action::SplitDrones(i, amount) => {
+                if let Some(stack) = fit.drones.get_mut(i)
+                    && amount > 0
+                    && amount < stack.count
+                {
+                    stack.count -= amount;
+                    let moved_active = stack.active.saturating_sub(stack.count);
+                    stack.active -= moved_active;
+                    let split = crate::fit::DroneStack {
+                        type_id: stack.type_id,
+                        count: amount,
+                        active: moved_active,
+                    };
+                    fit.drones.insert(i + 1, split);
+                }
+            }
+            Action::SwapAdditions(kind, rows, type_id) => {
+                for i in rows {
+                    match kind {
+                        AddKind::Drones => {
+                            if let Some(stack) = fit.drones.get_mut(i) {
+                                stack.type_id = type_id;
+                            }
+                        }
+                        AddKind::Implants => {
+                            if let Some(t) = fit.implants.get_mut(i) {
+                                *t = type_id;
+                            }
+                        }
+                        AddKind::Boosters => {
+                            if let Some(t) = fit.boosters.get_mut(i) {
+                                *t = type_id;
+                            }
+                        }
+                        AddKind::Cargo => {
+                            if let Some(stack) = fit.cargo.get_mut(i) {
+                                stack.0 = type_id;
+                            }
+                        }
+                    }
+                }
+            }
+            Action::AddAdditions(kind, items) => {
+                for (type_id, count) in items {
+                    match kind {
+                        AddKind::Drones => fit.add_drones(type_id, count),
+                        AddKind::Implants => fit.implants.push(type_id),
+                        AddKind::Boosters => fit.boosters.push(type_id),
+                        AddKind::Cargo => fit.add_cargo(type_id, count),
+                    }
+                }
+            }
         }
         if structural {
             self.clear_selection();

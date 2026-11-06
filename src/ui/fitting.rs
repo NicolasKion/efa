@@ -3,9 +3,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Sizable,
-    button::{Button, ButtonVariants},
-    h_flex,
+    ActiveTheme, h_flex,
     menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
     v_flex,
 };
@@ -16,7 +14,7 @@ use gpui_kit::{
 };
 
 use super::{
-    Action, AdditionsTab, Gyfa, Loaded, RowRef, Scope,
+    Action, Gyfa, Loaded, RowRef, Scope,
     widgets::{color, icon, icon_box, km, short},
 };
 use crate::{
@@ -293,188 +291,6 @@ impl Gyfa {
                         .child(div().truncate().child(catalog.name(charge)))
                 }),
         )
-    }
-
-    pub(super) fn additions(
-        &mut self,
-        loaded: &Loaded,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let Some(current) = self.saved.current else {
-            return div().into_any_element();
-        };
-        let fit = &self.saved.fits[current];
-        let theme = cx.theme();
-        let tabs = [
-            (AdditionsTab::Drones, "Drones", fit.drones.len()),
-            (AdditionsTab::Implants, "Implants", fit.implants.len()),
-            (AdditionsTab::Boosters, "Boosters", fit.boosters.len()),
-            (AdditionsTab::Cargo, "Cargo", fit.cargo.len()),
-            (AdditionsTab::Notes, "Notes", 0),
-        ];
-        let tab_bar = h_flex()
-            .gap_1()
-            .p_1()
-            .bg(theme.tab_bar)
-            .border_t_1()
-            .border_b_1()
-            .border_color(theme.border)
-            .children(tabs.into_iter().map(|(tab, label, count)| {
-                let selected = self.additions_tab == tab;
-                let text = if count > 0 {
-                    format!("{label} ({count})")
-                } else {
-                    label.to_owned()
-                };
-                div()
-                    .id(label)
-                    .px_3()
-                    .py_0p5()
-                    .rounded(px(4.))
-                    .when(selected, |t| {
-                        t.bg(theme.tab_active)
-                            .text_color(theme.tab_active_foreground)
-                    })
-                    .when(!selected, |t| t.text_color(theme.tab_foreground))
-                    .child(text)
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.additions_tab = tab;
-                        cx.notify();
-                    }))
-            }));
-
-        let catalog = &loaded.catalog;
-        let simple =
-            |id: TypeId, label: String, n: usize, remove: Action, cx: &mut Context<Self>| {
-                removable(
-                    h_flex()
-                        .id(SharedString::from(format!("addition-{n}")))
-                        .gap_2()
-                        .h(px(26.))
-                        .px_2()
-                        .hover(|s| s.bg(cx.theme().list_hover))
-                        .child(icon_box(catalog, &loaded.icons, Icon::Type(id), 22.))
-                        .child(label),
-                    remove,
-                    cx,
-                )
-            };
-        let content: Vec<AnyElement> = match self.additions_tab {
-            AdditionsTab::Drones if fit.drones.is_empty() => vec![
-                div()
-                    .p_2()
-                    .text_color(theme.muted_foreground)
-                    .child("Double-click drones in the market to add them.")
-                    .into_any_element(),
-            ],
-            AdditionsTab::Drones => fit
-                .drones
-                .iter()
-                .enumerate()
-                .map(|(i, d)| {
-                    let (active, count) = (d.active, d.count);
-                    removable(
-                        h_flex()
-                            .id(SharedString::from(format!("drone-{i}")))
-                            .gap_2()
-                            .h(px(28.))
-                            .px_2()
-                            .hover(|s| s.bg(cx.theme().list_hover))
-                            .child(
-                                Button::new(SharedString::from(format!("drone-less-{i}")))
-                                    .ghost()
-                                    .xsmall()
-                                    .label("−")
-                                    .disabled(active == 0)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        cx.stop_propagation();
-                                        this.apply(
-                                            Action::SetDronesActive(i, active.saturating_sub(1)),
-                                            cx,
-                                        );
-                                    })),
-                            )
-                            .child(div().w(px(36.)).child(format!("{active}/{count}")))
-                            .child(
-                                Button::new(SharedString::from(format!("drone-more-{i}")))
-                                    .ghost()
-                                    .xsmall()
-                                    .label("+")
-                                    .disabled(active >= count)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        cx.stop_propagation();
-                                        this.apply(Action::SetDronesActive(i, active + 1), cx);
-                                    })),
-                            )
-                            .child(icon_box(catalog, &loaded.icons, Icon::Type(d.type_id), 22.))
-                            .child(catalog.name(d.type_id)),
-                        Action::RemoveDrones(i),
-                        cx,
-                    )
-                })
-                .collect(),
-            AdditionsTab::Implants => fit
-                .implants
-                .iter()
-                .enumerate()
-                .map(|(i, &id)| simple(id, catalog.name(id), i, Action::RemoveImplant(i), cx))
-                .collect(),
-            AdditionsTab::Boosters => fit
-                .boosters
-                .iter()
-                .enumerate()
-                .map(|(i, &id)| simple(id, catalog.name(id), i, Action::RemoveBooster(i), cx))
-                .collect(),
-            AdditionsTab::Cargo => {
-                let used = fit.cargo_volume(catalog);
-                let capacity = self
-                    .stats
-                    .as_ref()
-                    .and_then(|s| s.cargo_capacity)
-                    .unwrap_or(0.0);
-                let summary = div()
-                    .px_2()
-                    .py_1()
-                    .text_xs()
-                    .when(used > capacity + 1e-6, |d| d.text_color(theme.danger))
-                    .when(used <= capacity + 1e-6, |d| {
-                        d.text_color(theme.muted_foreground)
-                    })
-                    .child(format!("{} / {} m³", short(used), short(capacity)))
-                    .into_any_element();
-                std::iter::once(summary)
-                    .chain(fit.cargo.iter().enumerate().map(|(i, &(id, count))| {
-                        simple(
-                            id,
-                            format!("{} x{count}", catalog.name(id)),
-                            i,
-                            Action::RemoveCargo(i),
-                            cx,
-                        )
-                    }))
-                    .collect()
-            }
-            AdditionsTab::Notes => vec![
-                div()
-                    .p_2()
-                    .size_full()
-                    .child(self.notes_field())
-                    .into_any_element(),
-            ],
-        };
-
-        v_flex()
-            .size_full()
-            .child(tab_bar)
-            .child(
-                v_flex()
-                    .id("additions-list")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .children(content),
-            )
-            .into_any_element()
     }
 }
 
@@ -951,24 +767,6 @@ fn structure_charges(catalog: &Catalog, module: &ItemType, charges: &[TypeId]) -
             ChargeMenu::Flat(charges.iter().map(|c| c.id).collect())
         }
     }
-}
-
-/// Double-click or right-click > Remove on a row runs `remove`.
-fn removable(row: Stateful<Div>, remove: Action, cx: &mut Context<Gyfa>) -> AnyElement {
-    let this = Gyfa::weak(cx);
-    let on_double = remove.clone();
-    row.on_click(cx.listener(move |g, event: &ClickEvent, _, cx| {
-        if event.click_count() >= 2 {
-            g.apply(on_double.clone(), cx);
-        }
-    }))
-    .context_menu(move |menu, _, _| {
-        let (this, remove) = (this.clone(), remove.clone());
-        menu.item(PopupMenuItem::new("Remove").on_click(move |_, _, cx| {
-            Gyfa::app_update(&this, cx, |g, cx| g.apply(remove.clone(), cx));
-        }))
-    })
-    .into_any_element()
 }
 
 /// The fitting view's rows: each rack under its header, padded with empty slots to what the ship

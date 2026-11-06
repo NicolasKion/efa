@@ -330,7 +330,7 @@ impl Gyfa {
     }
 
     /// Units of an item that still fit in the cargo hold.
-    fn cargo_room_for(&self, loaded: &Loaded, item: TypeId) -> u32 {
+    pub(super) fn cargo_room_for(&self, loaded: &Loaded, item: TypeId) -> u32 {
         let (Some(fit), Some(stats)) = (self.fit(), &self.stats) else {
             return 0;
         };

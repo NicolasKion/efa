@@ -342,7 +342,7 @@ impl Fit {
 }
 
 /// "Hobgoblin II x5" -> ("Hobgoblin II", Some(5))
-fn split_count(line: &str) -> (&str, Option<u32>) {
+pub fn split_count(line: &str) -> (&str, Option<u32>) {
     if let Some((name, count)) = line.rsplit_once(" x")
         && let Ok(count) = count.trim().parse()
     {

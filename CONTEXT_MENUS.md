@@ -53,18 +53,18 @@ Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 
 ### droneItem
 - [ ] Drone Stats | row clicked | stats window | itemStats.py
-- [ ] Drone Market Group | has market group | market jump | itemMarketJump.py
+- [x] Drone Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Drone Stack | row clicked | removes whole stacks of selection (multi). GuiRemoveLocalDronesCommand | itemRemove.py
-- [ ] Change Drone Quantity | row clicked | dialog "New Amount", sets stack size. GuiChangeLocalDroneAmountCommand | itemAmountChange.py
-- [ ] Split Drone Stack | stack amount > 1 | dialog for amount, splits into a new stack. GuiSplitLocalDroneStackCommand | droneSplitStack.py
-- [ ] Variations | 2+ variations | variation submenu, swaps selected drones with same variation set. GuiChangeLocalDroneMetasCommand | itemVariationChange.py
+- [x] Change Drone Quantity | row clicked | dialog "New Amount", sets stack size. GuiChangeLocalDroneAmountCommand | itemAmountChange.py
+- [x] Split Drone Stack | stack amount > 1 | dialog for amount, splits into a new stack. GuiSplitLocalDroneStackCommand | droneSplitStack.py
+- [x] Variations | 2+ variations | variation submenu, swaps selected drones with same variation set. GuiChangeLocalDroneMetasCommand | itemVariationChange.py
 - [ ] Apply Mutaplasmid / Revert to {base} | drone has mutaplasmids or is mutated | as modules. GuiConvertMutatedLocalDroneCommand / GuiRevertMutatedLocalDroneCommand | itemMutations.py
 - [ ] Change Drone Skills | skills affect drone | skill level submenu | skillAffectors.py
 
 ### droneItemMisc
-- [ ] Copy Selected Drones | selection non-empty (pref additionsCopyPaste) | EFT-style export of selection to clipboard | additionsExportSelection.py
-- [ ] Copy All Drones | fit has drones | export all drones | additionsExportAll.py
-- [ ] Paste Drones | clipboard non-empty | parses clipboard, imports drone lines. GuiImportLocalDronesCommand | additionsImport.py
+- [x] Copy Selected Drones | selection non-empty (pref additionsCopyPaste) | EFT-style export of selection to clipboard | additionsExportSelection.py
+- [x] Copy All Drones | fit has drones | export all drones | additionsExportAll.py
+- [x] Paste Drones | clipboard non-empty | parses clipboard, imports drone lines. GuiImportLocalDronesCommand | additionsImport.py
 
 ## Fighters pane (gui/builtinAdditionPanes/fighterView.py)
 
@@ -86,16 +86,16 @@ Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 
 ### cargoItem
 - [ ] {Category} Stats | row clicked | stats window | itemStats.py
-- [ ] {Category} Market Group | has market group | market jump | itemMarketJump.py
+- [x] {Category} Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove {Category} Stack | row clicked | removes selected cargo stacks (multi). GuiRemoveCargosCommand | itemRemove.py
-- [ ] Change Selection Quantity | row clicked | dialog, sets amount on all selected stacks. GuiChangeCargosAmountCommand | itemAmountChange.py
-- [ ] Variations | 2+ variations | variation swap for selected cargo with same variation set. GuiChangeCargoMetasCommand | itemVariationChange.py
-- [ ] Fill Cargo With {Category} | row clicked | adds as many units as fit in remaining cargo capacity. GuiAddCargoCommand | cargoFill.py
+- [x] Change Selection Quantity | row clicked | dialog, sets amount on all selected stacks. GuiChangeCargosAmountCommand | itemAmountChange.py
+- [x] Variations | 2+ variations | variation swap for selected cargo with same variation set. GuiChangeCargoMetasCommand | itemVariationChange.py
+- [x] Fill Cargo With {Category} | row clicked | adds as many units as fit in remaining cargo capacity. GuiAddCargoCommand | cargoFill.py
 
 ### cargoItemMisc
-- [ ] Copy Selected Cargo Items | selection | clipboard export | additionsExportSelection.py
-- [ ] Copy All Cargo Items | cargo non-empty | clipboard export | additionsExportAll.py
-- [ ] Paste Cargo Items | clipboard non-empty | import (non-abyssal items). GuiImportCargosCommand | additionsImport.py
+- [x] Copy Selected Cargo Items | selection | clipboard export | additionsExportSelection.py
+- [x] Copy All Cargo Items | cargo non-empty | clipboard export | additionsExportAll.py
+- [x] Paste Cargo Items | clipboard non-empty | import (non-abyssal items). GuiImportCargosCommand | additionsImport.py
 
 ## Implants pane (gui/builtinAdditionPanes/implantView.py)
 
@@ -103,9 +103,9 @@ Context depends on implant source: fit implants use implantItem/implantItemMisc,
 
 ### implantItem
 - [ ] Implant Stats | row clicked | stats window | itemStats.py
-- [ ] Implant Market Group | has market group | market jump | itemMarketJump.py
+- [x] Implant Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Implant | row clicked | removes selection (multi). GuiRemoveImplantsCommand | itemRemove.py
-- [ ] Variations | 2+ variations | variation submenu (unsorted by meta), swaps clicked implant. GuiChangeImplantMetaCommand | itemVariationChange.py
+- [x] Variations | 2+ variations | variation submenu (unsorted by meta), swaps clicked implant. GuiChangeImplantMetaCommand | itemVariationChange.py
 
 ### implantItemChar
 - [ ] Implant Stats | row clicked | stats window | itemStats.py
@@ -114,23 +114,23 @@ Context depends on implant source: fit implants use implantItem/implantItemMisc,
 ### implantItemMisc / implantItemMiscChar
 - [ ] Apply Implant Set | implantItemMisc only, any user or precalculated set exists | submenu: precalculated sets (pirate sets etc., grade submenus Low/Mid/High-grade), separator, "Saved Sets" submenu of user sets; adds all implants of the set | implantSetApply.py
 - [ ] Save as New Implant Set | fit has applied implants | name dialog, opens implant set editor with them | implantSetSave.py
-- [ ] Copy Selected Implants | selection | clipboard export | additionsExportSelection.py
-- [ ] Copy All Implants | implants non-empty | clipboard export | additionsExportAll.py
-- [ ] Paste Implants | clipboard non-empty | import. GuiImportImplantsCommand | additionsImport.py
+- [x] Copy Selected Implants | selection | clipboard export | additionsExportSelection.py
+- [x] Copy All Implants | implants non-empty | clipboard export | additionsExportAll.py
+- [x] Paste Implants | clipboard non-empty | import. GuiImportImplantsCommand | additionsImport.py
 
 ## Boosters pane (gui/builtinAdditionPanes/boosterView.py)
 
 ### boosterItem
 - [ ] Side Effects | booster has an implemented side effect | checkable list of side effects; toggles one. GuiToggleBoosterSideEffectStateCommand | boosterSideEffects.py
 - [ ] Booster Stats | row clicked | stats window | itemStats.py
-- [ ] Booster Market Group | has market group | market jump | itemMarketJump.py
+- [x] Booster Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Booster | row clicked | removes selection (multi). GuiRemoveBoostersCommand | itemRemove.py
-- [ ] Variations | 2+ variations | variation submenu sorted by side effect chance (or name if > 7). GuiChangeBoosterMetaCommand | itemVariationChange.py
+- [x] Variations | 2+ variations | variation submenu sorted by side effect chance (or name if > 7). GuiChangeBoosterMetaCommand | itemVariationChange.py
 
 ### boosterItemMisc
-- [ ] Copy Selected Boosters | selection | clipboard export | additionsExportSelection.py
-- [ ] Copy All Boosters | boosters non-empty | clipboard export | additionsExportAll.py
-- [ ] Paste Boosters | clipboard non-empty | import. GuiImportBoostersCommand | additionsImport.py
+- [x] Copy Selected Boosters | selection | clipboard export | additionsExportSelection.py
+- [x] Copy All Boosters | boosters non-empty | clipboard export | additionsExportAll.py
+- [x] Paste Boosters | clipboard non-empty | import. GuiImportBoostersCommand | additionsImport.py
 
 ## Projected pane (gui/builtinAdditionPanes/projectedView.py)
 

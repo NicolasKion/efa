@@ -2,6 +2,7 @@
 //! additions underneath, stats on the right.
 
 mod actions;
+mod additions;
 mod fitting;
 mod side;
 mod stats;
@@ -29,7 +30,7 @@ use gpui_kit::{
     Subscription, Task, WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
-pub use actions::{Action, RowRef, Scope};
+pub use actions::{Action, AddKind, RowRef, Scope};
 
 use crate::{
     data::{Catalog, Kind, TypeId},
@@ -92,6 +93,9 @@ pub struct Gyfa {
     selection: Vec<RowRef>,
     /// Where a Shift-click selection range starts.
     anchor: Option<RowRef>,
+    /// Selected rows of the open additions tab.
+    additions_selection: Vec<usize>,
+    additions_anchor: Option<usize>,
     collapsed_sections: HashSet<&'static str>,
     status: Option<SharedString>,
     palette: Palette,
@@ -180,6 +184,8 @@ impl Gyfa {
             fittings_ship: None,
             selection: Vec::new(),
             anchor: None,
+            additions_selection: Vec::new(),
+            additions_anchor: None,
             collapsed_sections: HashSet::new(),
             status: None,
             palette,
