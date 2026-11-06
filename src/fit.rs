@@ -2,6 +2,8 @@
 //! it whenever it changes.
 
 pub mod cargo;
+pub mod fighters;
+pub mod projected;
 
 use std::fmt::Write;
 
@@ -140,6 +142,17 @@ pub struct Fit {
     pub inactive_implants: Vec<TypeId>,
     #[serde(default)]
     pub implant_source: ImplantSource,
+    /// Identity other fits reference this one by when projecting it or taking its boosts. Zero
+    /// until something needs it; see [`crate::store::Saved::ensure_uid`].
+    #[serde(default)]
+    pub uid: u64,
+    #[serde(default)]
+    pub fighters: Vec<fighters::Fighter>,
+    #[serde(default)]
+    pub projected: projected::Projected,
+    /// Fleet boosters, pyfa's command fits.
+    #[serde(default)]
+    pub command: Vec<projected::CommandFit>,
 }
 
 /// Incoming damage that effective HP, effective repair rates and the reactive armor hardener
@@ -236,7 +249,8 @@ impl Fit {
                     return false;
                 }
             }
-            Kind::Drone | Kind::Fighter => {
+            Kind::Fighter => self.fighters.push(fighters::Fighter::new(type_id)),
+            Kind::Drone => {
                 let launch = self.launched() < MAX_LAUNCHED;
                 match self.drones.iter_mut().find(|d| d.type_id == type_id) {
                     Some(stack) => {
@@ -515,6 +529,16 @@ impl Fit {
                 .iter()
                 .map(|d| format!("{} x{}", catalog.name(d.type_id), d.count))
                 .collect(),
+            self.fighters
+                .iter()
+                .map(|f| {
+                    let size = f
+                        .amount
+                        .or_else(|| catalog.projection.squadron_size(f.type_id))
+                        .unwrap_or(1);
+                    format!("{} x{size}", catalog.name(f.type_id))
+                })
+                .collect(),
             self.implants.iter().map(|&i| catalog.name(i)).collect(),
             self.boosters
                 .iter()
@@ -596,7 +620,13 @@ impl Fit {
                 continue;
             };
             match (t.kind, count) {
-                (Kind::Drone | Kind::Fighter, Some(n)) => {
+                (Kind::Fighter, Some(n)) => {
+                    seen_stacks = true;
+                    let mut fighter = fighters::Fighter::new(t.id);
+                    fighter.set_amount(n, catalog.projection.squadron_size(t.id));
+                    fit.fighters.push(fighter);
+                }
+                (Kind::Drone, Some(n)) => {
                     seen_stacks = true;
                     fit.drones.push(DroneStack {
                         type_id: t.id,

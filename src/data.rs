@@ -10,6 +10,8 @@ use std::{
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+pub mod projection;
+
 pub type TypeId = i32;
 
 pub mod category {
@@ -228,11 +230,13 @@ pub struct Catalog {
     pub group_names: HashMap<i32, String>,
     /// Cargo-only types the market search finds, the way pyfa limits its search.
     pub cargo_searchable: HashSet<TypeId>,
+    /// Environmental effects, projectable items and fighter data.
+    pub projection: projection::Projection,
 }
 
 /// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
 /// instead of loaded.
-const CACHE_FORMAT: u32 = 1;
+const CACHE_FORMAT: u32 = 2;
 const CACHE_FILE: &str = "catalog.bin";
 
 /// The cache on disk: the key it was built for, then the catalog.
@@ -297,6 +301,7 @@ impl Catalog {
             .filter_map(|(id, g)| Some((id.parse().ok()?, g.category_id)))
             .collect();
 
+        let mut projection = projection::Builder::new(&effect_category);
         let mut types = HashMap::with_capacity(sde_types.len());
         let mut skills = Vec::new();
         for (id, t) in sde_types {
@@ -304,6 +309,7 @@ impl Catalog {
                 continue;
             };
             let category_id = group_category.get(&t.group_id).copied().unwrap_or(0);
+            projection.consider(id, &t, category_id, dogma.get(&id.to_string()));
             // Cargo can hold anything, but these are what pyfa's market offers or EFT cargo lines
             // usually name (fuel blocks, ice products); loading every category would mostly add
             // NPC and map junk.
@@ -451,6 +457,8 @@ impl Catalog {
             );
         }
 
+        let projection = projection.finish(dir);
+
         // Published names win when two types share one, which happens with old unpublished copies.
         let mut by_name = HashMap::with_capacity(types.len());
         for t in types.values() {
@@ -568,6 +576,7 @@ impl Catalog {
             meta_group_names,
             group_names,
             cargo_searchable,
+            projection,
         })
     }
 

@@ -3,11 +3,16 @@
 
 mod boosters;
 mod cargo;
+mod command;
 mod drones;
+mod fighters;
 mod implants;
+mod linked;
 mod notes;
+mod projected;
 
 pub(super) use cargo::{drop_transfer, goes_to_cargo};
+pub(super) use linked::{FitDrag, Link};
 
 use std::rc::Rc;
 
@@ -108,6 +113,7 @@ impl Gyfa {
         let theme = cx.theme();
         let tabs = [
             (AdditionsTab::Drones, "Drones", fit.drones.len()),
+            (AdditionsTab::Fighters, "Fighters", fit.fighters.len()),
             (
                 AdditionsTab::Implants,
                 "Implants",
@@ -116,6 +122,8 @@ impl Gyfa {
             ),
             (AdditionsTab::Boosters, "Boosters", fit.boosters.len()),
             (AdditionsTab::Cargo, "Cargo", fit.cargo.len()),
+            (AdditionsTab::Projected, "Projected", fit.projected.len()),
+            (AdditionsTab::Command, "Command", fit.command.len()),
             (AdditionsTab::Notes, "Notes", 0),
         ];
         let tab_bar = h_flex()
@@ -159,6 +167,9 @@ impl Gyfa {
             AdditionsTab::Boosters => self.boosters_tab(loaded, cx),
             AdditionsTab::Cargo => self.cargo_tab(loaded, cx),
             AdditionsTab::Notes => self.notes_tab(loaded, cx),
+            AdditionsTab::Fighters => self.fighters_tab(loaded, cx),
+            AdditionsTab::Projected => self.projected_tab(loaded, cx),
+            AdditionsTab::Command => self.command_tab(loaded, cx),
         };
         v_flex()
             .size_full()
