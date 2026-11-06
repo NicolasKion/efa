@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub type TypeId = i32;
 
@@ -72,7 +72,7 @@ mod attr {
 }
 
 /// Which kind of hardpoint a module takes, if any.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Hardpoint {
     None,
     Turret,
@@ -97,7 +97,7 @@ pub enum Slot {
     Subsystem,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Kind {
     Ship,
     Module(Slot),
@@ -114,7 +114,7 @@ pub enum Kind {
     Other,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "independent facts read from the data, not a state machine"
@@ -199,7 +199,7 @@ impl ItemType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarketGroup {
     pub id: i32,
     pub name: String,
@@ -209,6 +209,7 @@ pub struct MarketGroup {
     pub icon_id: Option<i32>,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Catalog {
     pub types: HashMap<TypeId, ItemType>,
     pub by_name: HashMap<String, TypeId>,
@@ -226,7 +227,45 @@ pub struct Catalog {
     pub cargo_searchable: HashSet<TypeId>,
 }
 
+/// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
+/// instead of loaded.
+const CACHE_FORMAT: u32 = 1;
+const CACHE_FILE: &str = "catalog.bin";
+
+/// The cache on disk: the key it was built for, then the catalog.
+#[derive(Deserialize)]
+struct CacheFile {
+    key: String,
+    catalog: Catalog,
+}
+
+/// [`CacheFile`] for writing, without copying the catalog. Same fields in the same order, which
+/// is all postcard's layout depends on.
+#[derive(Serialize)]
+struct CacheFileRef<'a> {
+    key: &'a str,
+    catalog: &'a Catalog,
+}
+
 impl Catalog {
+    /// The catalog from the cache when it was built from this exact data, otherwise built from
+    /// the JSON and cached. Building means parsing types.json, which takes seconds; the cache
+    /// loads in a fraction of that.
+    pub fn load_cached(dir: &Path, cache_dir: &Path) -> Result<Self, String> {
+        let path = cache_dir.join(CACHE_FILE);
+        let key = cache_key(dir);
+        if let Some(key) = &key
+            && let Some(catalog) = read_cache(&path, key)
+        {
+            return Ok(catalog);
+        }
+        let catalog = Self::load(dir)?;
+        if let Some(key) = key {
+            write_cache(&path, &key, &catalog);
+        }
+        Ok(catalog)
+    }
+
     pub fn load(dir: &Path) -> Result<Self, String> {
         let groups: HashMap<String, SdeGroup> = read(dir, "sde/groups.json")?;
         let market: HashMap<String, SdeMarketGroup> = read(dir, "sde/marketgroups.json")?;
@@ -640,6 +679,49 @@ fn prune_and_link(groups: &mut BTreeMap<i32, MarketGroup>) {
     let names: HashMap<i32, String> = groups.values().map(|g| (g.id, g.name.clone())).collect();
     for group in groups.values_mut() {
         group.children.sort_by(|a, b| names[a].cmp(&names[b]));
+    }
+}
+
+/// What a cache must have been built from: the cache format, gyfa's version, the dump's release
+/// and types.json's size and time, so hand-replaced data is noticed too. None if there is no
+/// data to describe.
+fn cache_key(dir: &Path) -> Option<String> {
+    let release = std::fs::read_to_string(dir.join("VERSION"))
+        .or_else(|_| std::fs::read_to_string(dir.join("phobos/metadata.json")))
+        .ok()?;
+    let types = std::fs::metadata(dir.join("sde/types.json")).ok()?;
+    let modified = types
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some(format!(
+        "{CACHE_FORMAT}:{}:{}:{}:{modified}",
+        env!("CARGO_PKG_VERSION"),
+        release.trim(),
+        types.len()
+    ))
+}
+
+fn read_cache(path: &Path, key: &str) -> Option<Catalog> {
+    let bytes = std::fs::read(path).ok()?;
+    let cache: CacheFile = postcard::from_bytes(&bytes).ok()?;
+    (cache.key == key).then_some(cache.catalog)
+}
+
+/// Best effort: without a cache the next start just builds the catalog again.
+fn write_cache(path: &Path, key: &str, catalog: &Catalog) {
+    let Ok(bytes) = postcard::to_stdvec(&CacheFileRef { key, catalog }) else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    // Per process, so two starts writing at once never interleave in one file.
+    let tmp = path.with_extension(format!("bin.{}.tmp", std::process::id()));
+    if std::fs::write(&tmp, bytes).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
     }
 }
 

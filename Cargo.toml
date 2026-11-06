@@ -17,6 +17,7 @@ serde_json = "1"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "gzip", "rustls"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
 gpui-kit = "0.9.0"
+postcard = { version = "1", features = ["use-std"] }
 
 [profile.dev.package."*"]
 # Loading 150 MB of JSON and running the engine unoptimized is painfully slow.

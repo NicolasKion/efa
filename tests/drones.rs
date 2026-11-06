@@ -25,7 +25,11 @@ fn stacks_get_their_own_numbers() {
         eprintln!("no EVE data in {DATA}, skipping");
         return;
     }
-    let catalog = Catalog::load(data).expect("the dump loads");
+    let catalog = Catalog::load_cached(
+        data,
+        &data.parent().expect("data/eve has a parent").join("cache"),
+    )
+    .expect("the dump loads");
     let engine = Engine::load(data, &data.join("../cache"), catalog.skills.clone())
         .expect("the engine loads");
     let (mut fit, unknown) = Fit::from_eft(&catalog, VEXOR).expect("the fit parses");

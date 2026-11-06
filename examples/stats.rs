@@ -7,7 +7,7 @@ use gyfa::{data::Catalog, engine::Engine, fit::Fit};
 fn main() {
     let dir = Path::new("data/eve");
     let t = Instant::now();
-    let catalog = Catalog::load(dir).unwrap();
+    let catalog = Catalog::load_cached(dir, Path::new("data/cache")).expect("the dump loads");
     println!(
         "catalog: {} types in {:?}",
         catalog.types.len(),

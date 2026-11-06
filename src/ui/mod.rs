@@ -637,8 +637,8 @@ fn load(data_dir: &Path) -> Result<Loaded, String> {
             data_dir.display()
         ));
     }
-    let catalog = Catalog::load(data_dir)?;
     let cache_dir = data_dir.parent().unwrap_or(data_dir).join("cache");
+    let catalog = Catalog::load_cached(data_dir, &cache_dir)?;
     let engine = Engine::load(data_dir, &cache_dir, catalog.skills.clone())?;
     let icons = Icons::new(data_dir, &cache_dir);
     Ok(Loaded {

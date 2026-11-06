@@ -261,10 +261,16 @@ impl Gyfa {
                 .flex_none()
                 .flex()
                 .items_center()
-                .child(UiIcon::new(mark).size(px(15.)).text_color(color(mark_color)))
+                .child(
+                    UiIcon::new(mark)
+                        .size(px(15.))
+                        .text_color(color(mark_color)),
+                )
                 .tooltip({
                     let label = m.state.label();
-                    move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label).build(window, cx)
+                    move |window, cx| {
+                        gpui_kit::component::tooltip::Tooltip::new(label).build(window, cx)
+                    }
                 })
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     cx.stop_propagation();

@@ -18,7 +18,7 @@ fn catalog() -> Option<Catalog> {
         eprintln!("no EVE data in {DATA}, skipping");
         return None;
     }
-    Some(Catalog::load(Path::new(DATA)).expect("the dump loads"))
+    Some(Catalog::load_cached(Path::new(DATA), Path::new("data/cache")).expect("the dump loads"))
 }
 
 fn id(catalog: &Catalog, name: &str) -> TypeId {
