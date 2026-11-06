@@ -3,6 +3,7 @@ pub mod data;
 pub mod engine;
 pub mod fit;
 pub mod icons;
+pub mod implant_set;
 pub mod store;
 pub mod theme;
 pub mod ui;

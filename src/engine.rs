@@ -22,6 +22,9 @@ use crate::{
 /// Type ID of the character item. EVE uses this one for everyone.
 const CHARACTER: i32 = 1373;
 
+/// Implants plugged into the built-in All 5 character. Like pyfa's, it has none.
+pub const CHARACTER_IMPLANTS: &[TypeId] = &[];
+
 pub struct Engine {
     src: Src,
     skills: Vec<TypeId>,
@@ -211,8 +214,11 @@ impl Engine {
                 );
             }
         }
-        for &implant in &fit.implants {
-            f.add_implant(ItemTypeId::from_i32(implant));
+        for (implant, active) in fit.applied_implants(CHARACTER_IMPLANTS) {
+            let mut implant = f.add_implant(ItemTypeId::from_i32(implant));
+            if !active {
+                implant.set_state(false);
+            }
         }
         for &booster in &fit.boosters {
             f.add_booster(ItemTypeId::from_i32(booster));

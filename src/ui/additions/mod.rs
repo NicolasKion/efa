@@ -106,7 +106,12 @@ impl Gyfa {
         let theme = cx.theme();
         let tabs = [
             (AdditionsTab::Drones, "Drones", fit.drones.len()),
-            (AdditionsTab::Implants, "Implants", fit.implants.len()),
+            (
+                AdditionsTab::Implants,
+                "Implants",
+                fit.applied_implants(crate::engine::CHARACTER_IMPLANTS)
+                    .count(),
+            ),
             (AdditionsTab::Boosters, "Boosters", fit.boosters.len()),
             (AdditionsTab::Cargo, "Cargo", fit.cargo.len()),
             (AdditionsTab::Notes, "Notes", 0),

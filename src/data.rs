@@ -53,6 +53,7 @@ mod attr {
     pub const DRONE_BANDWIDTH_USED: i32 = 1272;
     /// Maximum spool bonus, on Precursor weapons and mutadaptive repairers.
     pub const SPOOL_MAX: [i32; 2] = [2734, 2797];
+    pub const IMPLANTNESS: i32 = 331;
 }
 
 /// Which kind of hardpoint a module takes, if any.
@@ -134,6 +135,8 @@ pub struct ItemType {
     pub spools: bool,
     /// Bandwidth a drone takes while in space, in Mbit/s.
     pub drone_bandwidth: f64,
+    /// Which implant slot an implant plugs into; a character takes one implant per slot.
+    pub implant_slot: Option<u8>,
 }
 
 impl ItemType {
@@ -339,6 +342,7 @@ impl Catalog {
                         .iter()
                         .any(|&a| attr(a).is_some_and(|v| v > 0.0)),
                     drone_bandwidth: attr(attr::DRONE_BANDWIDTH_USED).unwrap_or(0.0),
+                    implant_slot: attr(attr::IMPLANTNESS).map(|v| v as u8),
                 },
             );
         }
