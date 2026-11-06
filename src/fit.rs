@@ -43,6 +43,61 @@ pub struct DroneStack {
     pub active: u32,
 }
 
+/// A booster and the switches pyfa keeps for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "BoosterSave")]
+pub struct Booster {
+    pub type_id: TypeId,
+    pub active: bool,
+    /// Side effects switched on, by effect ID. pyfa starts every booster with none.
+    pub side_effects: Vec<i32>,
+}
+
+impl Booster {
+    pub fn new(type_id: TypeId) -> Self {
+        Self {
+            type_id,
+            active: true,
+            side_effects: Vec::new(),
+        }
+    }
+}
+
+/// Saves from before boosters had switches hold bare type IDs.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum BoosterSave {
+    Bare(TypeId),
+    Full {
+        type_id: TypeId,
+        #[serde(default = "active_default")]
+        active: bool,
+        #[serde(default)]
+        side_effects: Vec<i32>,
+    },
+}
+
+fn active_default() -> bool {
+    true
+}
+
+impl From<BoosterSave> for Booster {
+    fn from(save: BoosterSave) -> Self {
+        match save {
+            BoosterSave::Bare(type_id) => Self::new(type_id),
+            BoosterSave::Full {
+                type_id,
+                active,
+                side_effects,
+            } => Self {
+                type_id,
+                active,
+                side_effects,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Fit {
     pub name: String,
@@ -56,7 +111,8 @@ pub struct Fit {
     pub subsystems: Vec<TypeId>,
     pub drones: Vec<DroneStack>,
     pub implants: Vec<TypeId>,
-    pub boosters: Vec<TypeId>,
+    /// One per booster slot, in slot order.
+    pub boosters: Vec<Booster>,
     pub cargo: Vec<(TypeId, u32)>,
     #[serde(default)]
     pub notes: String,
@@ -165,7 +221,9 @@ impl Fit {
                 }
             }
             Kind::Implant => self.implants.push(type_id),
-            Kind::Booster => self.boosters.push(type_id),
+            Kind::Booster => {
+                self.add_booster(catalog, Booster::new(type_id));
+            }
             Kind::Mode => self.mode = Some(type_id),
             Kind::Skill | Kind::Other => return false,
         }
@@ -202,6 +260,49 @@ impl Fit {
                 active: launch,
             }),
         }
+    }
+
+    /// Add a booster the way pyfa does: one already on the fit is left alone, and one sharing its
+    /// slot is replaced. Returns whether the fit changed.
+    pub fn add_booster(&mut self, catalog: &Catalog, booster: Booster) -> bool {
+        if self.boosters.iter().any(|b| b.type_id == booster.type_id) {
+            return false;
+        }
+        let slot = |id: TypeId| catalog.get(id).and_then(|t| t.booster_slot);
+        let wanted = slot(booster.type_id);
+        if wanted.is_some() {
+            self.boosters.retain(|b| slot(b.type_id) != wanted);
+        }
+        self.boosters.push(booster);
+        // pyfa lists boosters by slot; keeping them stored that way makes rows and indices agree.
+        self.boosters.sort_by_key(|b| slot(b.type_id).unwrap_or(0));
+        true
+    }
+
+    /// Swap a booster for a variation, keeping whether it is on and those of its side effects the
+    /// new one has too.
+    pub fn swap_booster(&mut self, catalog: &Catalog, index: usize, type_id: TypeId) -> bool {
+        let Some(old) = self.boosters.get(index) else {
+            return false;
+        };
+        if self.boosters.iter().any(|b| b.type_id == type_id) {
+            return false;
+        }
+        let effects = catalog
+            .get(type_id)
+            .map_or(&[][..], |t| t.side_effects.as_slice());
+        let new = Booster {
+            type_id,
+            active: old.active,
+            side_effects: old
+                .side_effects
+                .iter()
+                .copied()
+                .filter(|e| effects.contains(e))
+                .collect(),
+        };
+        self.boosters.remove(index);
+        self.add_booster(catalog, new)
     }
 
     /// High, mid and low modules, in that order.
@@ -251,7 +352,10 @@ impl Fit {
                 .map(|d| format!("{} x{}", catalog.name(d.type_id), d.count))
                 .collect(),
             self.implants.iter().map(|&i| catalog.name(i)).collect(),
-            self.boosters.iter().map(|&b| catalog.name(b)).collect(),
+            self.boosters
+                .iter()
+                .map(|b| catalog.name(b.type_id))
+                .collect(),
             self.cargo
                 .iter()
                 .map(|&(t, n)| format!("{} x{n}", catalog.name(t)))
@@ -401,4 +505,24 @@ pub fn split_count(line: &str) -> (&str, Option<u32>) {
         return (name.trim(), Some(count));
     }
     (line, None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn boosters_from_old_saves_load() {
+        let old: Vec<Booster> = serde_json::from_str("[10155]").expect("old boosters parse");
+        assert_eq!(old, [Booster::new(10155)]);
+
+        let booster = Booster {
+            type_id: 10155,
+            active: false,
+            side_effects: vec![2737],
+        };
+        let json = serde_json::to_string(&booster).expect("booster serializes");
+        let again: Booster = serde_json::from_str(&json).expect("booster parses");
+        assert_eq!(again, booster);
+    }
 }

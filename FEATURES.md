@@ -85,7 +85,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [~] Column: charge name and remaining charges/reload (ammo.py), name and icon only, refine: get_charge_count, get_charged_cycle_count
 - [ ] Column: drone EHP and drone regen (droneEhp.py, droneRegen.py), refine: drone stats get_stat_ehp, get_stat_rps
 - [ ] Column: fighter abilities (abilities.py), refine: iter_abilities
-- [ ] Column: booster side effects (sideEffects.py), refine: iter_side_effects
+- [x] Column: booster side effects (sideEffects.py), refine: iter_side_effects
 - [ ] Column: projection range (projectionRange.py), refine: proj get_range
 - [ ] Column: target resists, damp scan res (targetResists.py, dampScanRes.py)
 - [ ] Strategic cruiser subsystem slot changes reflected live (fittingView.py), refine: get_stat_*_slots handles it
@@ -119,7 +119,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Add charge/ammo to cargo, fill cargo (builtinContextMenus/cargoAdd.py, cargoAddAmmo.py, cargoFill.py)
 - [ ] Split/merge drone stacks (builtinContextMenus/droneSplitStack.py, droneAddStack.py)
 - [ ] Fighter ability toggles (builtinContextMenus/fighterAbilities.py), refine: get_ability / set state
-- [ ] Booster side effects toggles (builtinContextMenus/boosterSideEffects.py), refine: get_side_effect, set_state
+- [x] Booster side effects toggles (builtinContextMenus/boosterSideEffects.py), refine: get_side_effect, set_state
 - [ ] Apply/save implant set (builtinContextMenus/implantSetApply.py, implantSetSave.py)
 - [ ] Add fit from browser / currently open fits as projected or command (builtinContextMenus/fitAddBrowse.py, fitAddCurrentlyOpen.py, commandFitAdd.py)
 - [ ] Add command link bursts directly (builtinContextMenus/commandLinkAdd.py)
@@ -141,7 +141,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Cargo tab with amounts and volume (cargoView.py)
 - [ ] Implants: use character implants vs fit implants switch (implantView.py)
 - [ ] Implant slot conflict handling (implantView.py), refine: ValOptions implant_slot_index
-- [ ] Booster slot conflict and side effects (boosterView.py), refine: ValOptions booster_slot_index, iter_side_effects
+- [x] Booster slot conflict and side effects (boosterView.py): one booster per slot, listed by slot, on/off state, side effect and duration columns, drop from the market; no price column or keyboard shortcuts yet, refine: set_state, iter_side_effects
 - [ ] Projected tab: fits, modules, drones, fighters, environment effects (builtinAdditionPanes/projectedView.py), refine: add_proj, add_proj_effect, add_sw_effect
 - [ ] Projected item states and amounts (fitCommands/gui/projectedChangeStates.py)
 - [ ] Command tab: fleet booster fits (builtinAdditionPanes/commandView.py), refine: add_fleet, set_fleet
