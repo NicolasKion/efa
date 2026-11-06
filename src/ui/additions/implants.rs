@@ -13,7 +13,7 @@ use gpui_kit::{
     WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
-use super::{MENU_MAX_H, ROW_HEIGHT, export_lines, parse_lines};
+use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, export_lines, parse_lines, price_text};
 use crate::{
     data::{Kind, TypeId},
     fit::ImplantSource,
@@ -196,6 +196,14 @@ impl Gyfa {
                     .truncate()
                     .when(!active, |d| d.text_color(theme.muted_foreground))
                     .child(catalog.name(type_id)),
+            )
+            .child(
+                div()
+                    .w(px(PRICE_W))
+                    .flex_none()
+                    .text_right()
+                    .truncate()
+                    .children(price_text(&self.prices, type_id, 1)),
             )
             .on_click(cx.listener(move |g, event: &ClickEvent, _, cx| {
                 if event.click_count() >= 2 && own {

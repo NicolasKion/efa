@@ -11,12 +11,13 @@ use gpui_kit::{
     prelude::FluentBuilder, px,
 };
 
-use super::{ROW_HEIGHT, addition_menu, misc_entries};
+use super::{ROW_HEIGHT, addition_menu, misc_entries, price_text};
 use crate::{
     data::{Catalog, Kind},
     engine::{DroneInfo, Stats, drone_attr, drone_effect},
     fit::DroneStack,
     icons::Icon,
+    prices::Prices,
     ui::{
         Action, AddKind, Gyfa, Loaded,
         columns::{ICON_W, STATE_W, text_width},
@@ -66,7 +67,6 @@ const HANDLE_W: f32 = 6.;
 const HEADER_ICON: f32 = 18.;
 
 /// The drone pane's columns after the state mark and the icon, as in pyfa's `DEFAULT_COLS`.
-/// pyfa's price column is left out: gyfa has no price source yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Col {
     Name,
@@ -75,16 +75,18 @@ enum Col {
     Speed,
     Hp,
     Regen,
+    Price,
 }
 
 impl Col {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Name,
         Self::Range,
         Self::Misc,
         Self::Speed,
         Self::Hp,
         Self::Regen,
+        Self::Price,
     ];
 
     /// Name the width is saved under, next to the fitting view's.
@@ -96,6 +98,7 @@ impl Col {
             Self::Speed => "drones-speed",
             Self::Hp => "drones-hp",
             Self::Regen => "drones-regen",
+            Self::Price => "drones-price",
         }
     }
 
@@ -109,7 +112,7 @@ impl Col {
             Self::Speed => Some((SPEED_ICON, "Maximum Velocity")),
             Self::Hp => Some((icon::SHIELD, "Effective HP")),
             Self::Regen => Some((icon::RECHARGE, "Effective Shield Regeneration")),
-            Self::Name | Self::Misc => None,
+            Self::Name | Self::Misc | Self::Price => None,
         }
     }
 
@@ -117,11 +120,18 @@ impl Col {
         match self {
             Self::Name => "Name",
             Self::Misc => "Misc data",
+            Self::Price => "Price",
             Self::Range | Self::Speed | Self::Hp | Self::Regen => "",
         }
     }
 
-    fn text(self, catalog: &Catalog, stack: &DroneStack, info: &DroneInfo) -> Option<String> {
+    fn text(
+        self,
+        catalog: &Catalog,
+        prices: &Prices,
+        stack: &DroneStack,
+        info: &DroneInfo,
+    ) -> Option<String> {
         match self {
             Self::Name => Some(format!("{}x {}", stack.count, catalog.name(stack.type_id))),
             Self::Range => range_text(info),
@@ -133,6 +143,7 @@ impl Col {
             Self::Regen => info
                 .shield_regen
                 .map(|v| format!("{}/s", format_amount(v, 9, false))),
+            Self::Price => price_text(prices, stack.type_id, stack.count),
         }
     }
 }
@@ -495,7 +506,7 @@ impl Gyfa {
         let info = |i: usize| stats.drones.get(i).unwrap_or(&no_info);
         let cells: Vec<[Option<String>; Col::ALL.len()]> = order
             .iter()
-            .map(|&i| Col::ALL.map(|col| col.text(catalog, &fit.drones[i], info(i))))
+            .map(|&i| Col::ALL.map(|col| col.text(catalog, &self.prices, &fit.drones[i], info(i))))
             .collect();
         let layout = Layout::measure(&self.saved.columns, &cells, window);
 
@@ -577,7 +588,7 @@ impl Gyfa {
                 let targets = g.addition_targets(i);
                 g.apply(Action::ToggleDrones(i, targets), cx);
             }));
-        let [name, range, misc_text, speed, hp, regen] = cells;
+        let [name, range, misc_text, speed, hp, regen, price] = cells;
         let misc_cell = layout
             .cell(Col::Misc)
             .id(SharedString::from(format!("drone-misc-{i}")))
@@ -606,7 +617,8 @@ impl Gyfa {
             .child(misc_cell)
             .child(layout.cell(Col::Speed).truncate().children(speed))
             .child(layout.cell(Col::Hp).truncate().children(hp))
-            .child(layout.cell(Col::Regen).truncate().children(regen));
+            .child(layout.cell(Col::Regen).truncate().children(regen))
+            .child(layout.cell(Col::Price).truncate().children(price));
         if let Some(dragged) = Dragged::of(loaded, DragSource::Drone(i), Some(stack.type_id)) {
             row = row.on_drag(dragged, |dragged, _, _, cx| {
                 cx.new(|_| DragPreview(dragged.clone()))

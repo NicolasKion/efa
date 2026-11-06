@@ -81,7 +81,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Column: optimal + falloff range (maxRange.py), refine: item get_attr
 - [ ] Column: misc info per module type (dps, rep amount, web strength, etc.) (misc.py), refine: item stats get_stat_dmg, get_stat_rps
 - [ ] Column: heat damage / overload info (heat.py)
-- [ ] Column: price (price.py)
+- [x] Column: price (price.py)
 - [~] Column: charge name and remaining charges/reload (ammo.py), name and icon only, refine: get_charge_count, get_charged_cycle_count
 - [x] Column: drone EHP and drone regen (droneEhp.py, droneRegen.py), refine: item stats get_stat_ehp, get_stat_erps
 - [x] Column: fighter abilities (abilities.py), refine: iter_abilities
@@ -131,19 +131,19 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 
 ## Additions pane
 
-- [x] Drones pane: pyfa's columns (state, name, max range, misc, speed, EHP, regen) from per-drone engine stats, sorted by drone class, state click launches/recalls the selection, double-click removes one drone (Alt: stack), Delete/Escape/Ctrl+A, market drops (Alt: full stack), drag a stack onto another to merge, Ctrl to copy (builtinAdditionPanes/droneView.py), refine: add_drone, item stats. No price column yet
+- [x] Drones pane: pyfa's columns (state, name, max range, misc, speed, EHP, regen, price) from per-drone engine stats, sorted by drone class, state click launches/recalls the selection, double-click removes one drone (Alt: stack), Delete/Escape/Ctrl+A, market drops (Alt: full stack), drag a stack onto another to merge, Ctrl to copy (builtinAdditionPanes/droneView.py), refine: add_drone, item stats
 - [x] Implants and boosters list (builtinAdditionPanes/implantView.py, boosterView.py), refine: add_implant, add_booster
 - [x] Cargo: parsed from EFT and exported, added from the market (double-click with Ctrl/Alt batches, drag, menus), edited, dragged to and from the fit (builtinAdditionPanes/cargoView.py)
 - [~] Tabbed additions pane, in progress (gui/additionsPane.py)
 - [x] Tab names with counts (pyfaGeneralPreferences.py "Extra info in Additions panel tab names"): none, active or all items
 - [x] Drone stack amount editing, separate stacks (droneView.py)
-- [x] Fighters tab: squadrons with size, state, speed, EHP, regen and active abilities, sorted like pyfa, light/heavy/support tube counts, Delete/Escape/Ctrl+A, market drops, copy/paste, EFT in and out (builtinAdditionPanes/fighterView.py), refine: add_fighter, set_count_override, abilities, get_stat_launched_*_fighters. No price column yet
-- [x] Cargo tab with amounts and volume, sorted like pyfa, Delete/Ctrl+A/Escape keys (cargoView.py); price column waits for a price source
+- [x] Fighters tab: squadrons with size, state, speed, EHP, regen, active abilities and price, sorted like pyfa, light/heavy/support tube counts, Delete/Escape/Ctrl+A, market drops, copy/paste, EFT in and out (builtinAdditionPanes/fighterView.py), refine: add_fighter, set_count_override, abilities, get_stat_launched_*_fighters
+- [x] Cargo tab with amounts, volume and price, sorted like pyfa, Delete/Ctrl+A/Escape keys (cargoView.py)
 - [x] Commodities, materials, deployables and containers in the catalog for cargo; market tree shows pyfa's Deployable Structures and Filaments roots, search adds ice products (service/market.py)
 - [x] Implants: use character implants vs fit implants switch (implantView.py); the All 5 character has no implants until characters exist
 - [x] Implant slot conflict handling: one implant per slot, the new one replaces the old, listed in slot order (implantView.py, eos HandledImplantList)
-- [x] Implants pane columns: state checkbox (multi-select toggle), slot, icon, name; drag from the market onto the pane (implantView.py). No price column until prices exist, no Delete/Ctrl+A/Esc keys yet
-- [x] Booster slot conflict and side effects (boosterView.py): one booster per slot, listed by slot, on/off state, side effect and duration columns, drop from the market; no price column or keyboard shortcuts yet, refine: set_state, iter_side_effects
+- [x] Implants pane columns: state checkbox (multi-select toggle), slot, icon, name, price; drag from the market onto the pane (implantView.py). No Delete/Ctrl+A/Esc keys yet
+- [x] Booster slot conflict and side effects (boosterView.py): one booster per slot, listed by slot, on/off state, side effect, price and duration columns, drop from the market; no keyboard shortcuts yet, refine: set_state, iter_side_effects
 - [x] Projected tab: fits (N copies each), modules with charges and spool, drones, fighters, environment effects, pyfa's columns and order, drops from the market, the fitting view and the fittings browser, Delete/Escape/Ctrl+A (builtinAdditionPanes/projectedView.py), refine: add_proj, add_fw_effect, add_proj_effect
 - [x] Projected item states and amounts (fitCommands/gui/projectedChangeStates.py), left click toggles, right click overheats modules, Alt takes similar items, double-click takes one copy or drone (Alt: all)
 - [x] Command tab: fleet booster fits (builtinAdditionPanes/commandView.py), refine: add_fleet, set_fleet. Fits are referenced by a stable id that survives deletes and moves
@@ -283,7 +283,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 
 - [ ] Price fetching with cache (service/price.py)
 - [~] Market sources: Fuzzwork, EVE Tycoon, evemarketdata, cevemarket (service/marketSources/), ESI average and Fuzzwork at the five hubs or universe
-- [ ] Price column and price stats view (builtinViewColumns/price.py, builtinStatsViews/priceViewFull.py)
+- [x] Price column and price stats view (builtinViewColumns/price.py, builtinStatsViews/priceViewFull.py)
 - [ ] Optimize fit price: swap to cheaper equivalent modules (mainMenuBar.py optimizeFitPrice)
 - [ ] Delete all cached prices (pyfaDatabasePreferences.py)
 

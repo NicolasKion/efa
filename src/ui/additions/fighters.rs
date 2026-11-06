@@ -16,7 +16,7 @@ use gpui_kit::{
     StatefulInteractiveElement, Styled, WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
-use super::{MENU_MAX_H, ROW_HEIGHT, drones::format_amount};
+use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, drones::format_amount, price_text};
 use crate::{
     data::{Catalog, Kind, TypeId, projection::FighterClass},
     engine::{FighterInfo, Slots, Stats, drone_attr},
@@ -379,6 +379,7 @@ impl Gyfa {
             .child(header_icon(icon::SHIELD, "Effective HP"))
             .child(header_icon(icon::RECHARGE, "Effective Shield Regeneration"))
             .child(div().flex_1().min_w_0().child("Active Abilities"))
+            .child(div().w(px(PRICE_W)).flex_none().text_right().child("Price"))
             .into_any_element()
     }
 
@@ -437,6 +438,11 @@ impl Gyfa {
             .and_then(|i| i.stats.shield_regen)
             .map(|v| format!("{}/s", format_amount(v, 9, false)));
         let type_id = fighter.type_id;
+        let squadron = fighter
+            .amount
+            .or_else(|| catalog.projection.squadron_size(type_id))
+            .unwrap_or(1);
+        let price = price_text(&self.prices, type_id, squadron);
         h_flex()
             .id(SharedString::from(format!("fighter-{n}")))
             .h(px(ROW_HEIGHT))
@@ -488,6 +494,14 @@ impl Gyfa {
                     .min_w_0()
                     .truncate()
                     .child(abilities_text(catalog, info)),
+            )
+            .child(
+                div()
+                    .w(px(PRICE_W))
+                    .flex_none()
+                    .truncate()
+                    .text_right()
+                    .children(price),
             )
             .on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
                 window.focus(&g.additions_focus, cx);

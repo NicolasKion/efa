@@ -11,7 +11,7 @@ use gpui_kit::{
     StatefulInteractiveElement, Styled, div, prelude::FluentBuilder, px,
 };
 
-use super::{ROW_HEIGHT, addition_menu, misc_entries};
+use super::{PRICE_W, ROW_HEIGHT, addition_menu, misc_entries, price_text};
 use crate::{
     data::{CONTAINER_GROUPS, Catalog, Kind, Slot, TypeId},
     fit::cargo::Transfer,
@@ -168,7 +168,8 @@ impl Gyfa {
                     .text_right()
                     .when(over, |d| d.text_color(theme.danger))
                     .child(format!("{} / {} m³", short(used), short(capacity))),
-            );
+            )
+            .child(div().w(px(PRICE_W)).flex_none().text_right().child("Price"));
 
         let mut rows: Vec<AnyElement> = Vec::with_capacity(order.len().max(1));
         if order.is_empty() {
@@ -274,6 +275,14 @@ impl Gyfa {
                     .text_right()
                     .truncate()
                     .child(volume_text(unit, count)),
+            )
+            .child(
+                div()
+                    .w(px(PRICE_W))
+                    .flex_none()
+                    .text_right()
+                    .truncate()
+                    .children(price_text(&self.prices, type_id, count)),
             )
             .on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
                 window.focus(&g.additions_focus, cx);

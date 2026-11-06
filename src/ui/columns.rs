@@ -10,7 +10,7 @@ use gpui_kit::{
 };
 
 use super::{
-    Gyfa, Loaded,
+    Gyfa, Loaded, stats,
     widgets::{icon, icon_box, km, short},
 };
 use crate::{
@@ -121,7 +121,10 @@ impl Col {
                 _ => None,
             },
             // pyfa prices the module alone, not what it has loaded.
-            Self::Price => prices.get(m.type_id).map(short),
+            Self::Price => prices
+                .get(m.type_id)
+                .filter(|&p| p > 0.0)
+                .map(stats::format::currency),
             Self::Charge => m.charge.map(|c| catalog.name(c)),
         }
     }

@@ -33,6 +33,7 @@ use gpui_kit::{
 use super::{
     Action, AddKind, AdditionsTab, Gyfa, Loaded,
     item_stats::{StatsOf, stats_entry},
+    stats::format,
     widgets::{entry, icon_label, item_entry},
 };
 use crate::{
@@ -40,9 +41,21 @@ use crate::{
     engine::FitItem,
     fit::{Fit, split_count},
     preferences::AdditionsLabels,
+    prices::Prices,
 };
 
 const ROW_HEIGHT: f32 = 28.;
+/// Width of the price cell in the tabs with fixed-width columns.
+const PRICE_W: f32 = 64.;
+
+/// pyfa's price column (builtinViewColumns/price.py): the price of `amount` of the item, blank
+/// when it has none.
+fn price_text(prices: &Prices, type_id: TypeId, amount: u32) -> Option<String> {
+    prices
+        .get(type_id)
+        .filter(|&p| p > 0.0)
+        .map(|p| format::currency(p * f64::from(amount)))
+}
 /// Tallest a long menu grows before it scrolls.
 const MENU_MAX_H: f32 = 480.;
 

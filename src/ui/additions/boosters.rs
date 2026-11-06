@@ -14,7 +14,7 @@ use gpui_kit::{
     Window, div, prelude::FluentBuilder, px,
 };
 
-use super::{MENU_MAX_H, ROW_HEIGHT, misc_entries};
+use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, misc_entries, price_text};
 use crate::{
     data::{Catalog, ItemType, Kind, TypeId},
     engine::Stats,
@@ -240,6 +240,7 @@ impl Gyfa {
             .child(div().w(px(SLOT_W)).flex_none().child("Slot"))
             .child(div().flex_1().min_w_0().child("Name"))
             .child(div().flex_1().min_w_0().child("Active Side Effects"))
+            .child(div().w(px(PRICE_W)).flex_none().text_right().child("Price"))
             .child(div().w(px(DURATION_W)).flex_none().child("Duration"))
             .into_any_element()
     }
@@ -326,6 +327,14 @@ impl Gyfa {
                         d.text_color(theme.muted_foreground)
                     })
                     .child(effects_text),
+            )
+            .child(
+                div()
+                    .w(px(PRICE_W))
+                    .flex_none()
+                    .text_right()
+                    .truncate()
+                    .children(price_text(&self.prices, booster.type_id, 1)),
             )
             .child(div().w(px(DURATION_W)).flex_none().child(duration))
             .on_click(cx.listener(move |g, event: &ClickEvent, _, cx| {

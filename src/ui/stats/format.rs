@@ -11,6 +11,16 @@ pub fn amount(val: f64, prec: i32, lowest: i32, highest: i32) -> String {
     format(val, prec, lowest, highest, false)
 }
 
+/// ISK the way pyfa's price column writes it, `formatAmount(val, 3, 3, 9, currency=True)`:
+/// three digits, B rather than G for billions, no unit.
+pub fn currency(val: f64) -> String {
+    let text = amount(val, 3, 3, 9);
+    match text.strip_suffix('G') {
+        Some(mantissa) => format!("{mantissa}B"),
+        None => text,
+    }
+}
+
 /// Like [`amount`] with a plus sign on positive numbers.
 pub fn signed(val: f64, prec: i32, lowest: i32, highest: i32) -> String {
     format(val, prec, lowest, highest, true)
@@ -122,6 +132,14 @@ pub fn minutes_seconds(secs: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn currency_matches_pyfa_price_column() {
+        assert_eq!(currency(950.0), "950");
+        assert_eq!(currency(12_345.0), "12.3k");
+        assert_eq!(currency(999_999.0), "1M");
+        assert_eq!(currency(2_500_000_000.0), "2.5B");
+    }
 
     #[test]
     fn negative_zero_prints_as_zero() {

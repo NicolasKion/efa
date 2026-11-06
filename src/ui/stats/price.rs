@@ -78,11 +78,7 @@ impl FitPrice {
 
 /// ISK the way pyfa writes it: three digits, B for billions.
 fn isk(v: f64) -> String {
-    let text = format::amount(v, 3, 3, 9);
-    match text.strip_suffix('G') {
-        Some(mantissa) => format!("{mantissa}B ISK"),
-        None => format!("{text} ISK"),
-    }
+    format!("{} ISK", format::currency(v))
 }
 
 pub(super) fn section(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &App) -> Section {
