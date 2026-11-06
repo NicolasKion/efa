@@ -18,6 +18,7 @@ use crate::{
     engine::{ModuleInfo, Stats},
     fit::{Fit, Module},
     icons::Icon,
+    prices::Prices,
 };
 
 /// Room pyfa adds to a column's widest text when sizing it.
@@ -44,16 +45,18 @@ pub enum Col {
     Cpu,
     Capacitor,
     Range,
+    Price,
     Charge,
 }
 
 impl Col {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Name,
         Self::Powergrid,
         Self::Cpu,
         Self::Capacitor,
         Self::Range,
+        Self::Price,
         Self::Charge,
     ];
 
@@ -65,6 +68,7 @@ impl Col {
             Self::Cpu => "cpu",
             Self::Capacitor => "capacitor",
             Self::Range => "range",
+            Self::Price => "price",
             Self::Charge => "charge",
         }
     }
@@ -80,7 +84,7 @@ impl Col {
             Self::Cpu => Some((icon::CPU, "CPU")),
             Self::Capacitor => Some((icon::CAPACITOR, "Capacitor use")),
             Self::Range => Some((icon::RANGE, "Optimal + falloff")),
-            Self::Name | Self::Charge => None,
+            Self::Name | Self::Price | Self::Charge => None,
         }
     }
 
@@ -88,12 +92,19 @@ impl Col {
         match self {
             Self::Name => "Name",
             Self::Charge => "Charge",
+            Self::Price => "Price",
             Self::Powergrid | Self::Cpu | Self::Capacitor | Self::Range => "",
         }
     }
 
     /// What a module's cell shows in this column.
-    pub fn text(self, catalog: &Catalog, m: &Module, info: &ModuleInfo) -> Option<String> {
+    pub fn text(
+        self,
+        catalog: &Catalog,
+        prices: &Prices,
+        m: &Module,
+        info: &ModuleInfo,
+    ) -> Option<String> {
         match self {
             Self::Name => Some(match (m.spool, info.spool_max) {
                 (Some(cycles), Some(max)) => {
@@ -109,6 +120,8 @@ impl Col {
                 (Some(o), None) => Some(km(o)),
                 _ => None,
             },
+            // pyfa prices the module alone, not what it has loaded.
+            Self::Price => prices.get(m.type_id).map(short),
             Self::Charge => m.charge.map(|c| catalog.name(c)),
         }
     }
@@ -125,7 +138,7 @@ pub struct Layout {
 impl Default for Layout {
     fn default() -> Self {
         Self {
-            widths: [140., 56., 56., 66., 106., 190.],
+            widths: [140., 56., 56., 66., 106., 70., 190.],
             name_fixed: false,
         }
     }
@@ -207,7 +220,7 @@ impl Gyfa {
             };
             let widest = modules
                 .iter()
-                .filter_map(|(m, info)| col.text(&loaded.catalog, m, info))
+                .filter_map(|(m, info)| col.text(&loaded.catalog, &self.prices, m, info))
                 .map(|text| text_width(window, &text))
                 .fold(header, f32::max);
             let extra = if col == Col::Charge {

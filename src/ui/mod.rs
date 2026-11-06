@@ -14,7 +14,7 @@ use std::{
     collections::HashSet,
     path::{Path, PathBuf},
     rc::Rc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use gpui_kit::component::{
@@ -39,9 +39,13 @@ use crate::{
     engine::{Engine, Stats},
     fit::Fit,
     icons::{Icon, Icons},
+    prices::Prices,
     store::Saved,
     theme::{self, Palette},
 };
+
+/// How long to wait before asking ESI again after a failed price fetch.
+const PRICE_RETRY: Duration = Duration::from_secs(600);
 
 /// How often background work is checked: icons that finished downloading, theme switches.
 const POLL: Duration = Duration::from_millis(250);
@@ -50,6 +54,8 @@ pub struct Loaded {
     pub catalog: Catalog,
     pub engine: Engine,
     pub icons: Icons,
+    /// Where downloads and derived data are kept: icons, prices, the catalog cache.
+    pub cache_dir: PathBuf,
 }
 
 enum Loading {
@@ -110,6 +116,11 @@ pub struct Gyfa {
     status: Option<SharedString>,
     palette: Palette,
     theme_generation: Option<String>,
+    /// Item prices; replaced, not mutated, when a refresh lands.
+    prices: Rc<Prices>,
+    prices_fetch: Option<Task<()>>,
+    /// When a failed price fetch may be tried again.
+    prices_retry: Option<Instant>,
     _subscriptions: Vec<Subscription>,
     _tasks: Vec<Task<()>>,
 }
@@ -154,7 +165,11 @@ impl Gyfa {
             let result = cx.background_spawn(async move { load(&data_dir) }).await;
             let _ = this.update(cx, |this, cx| {
                 this.loading = match result {
-                    Ok(loaded) => Loading::Ready(Rc::new(loaded)),
+                    Ok(loaded) => {
+                        // Last session's prices show right away; a refresh follows if stale.
+                        this.prices = Rc::new(Prices::cached(&loaded.cache_dir));
+                        Loading::Ready(Rc::new(loaded))
+                    }
                     Err(e) => Loading::Failed(e.into()),
                 };
                 if let Some(text) = import {
@@ -201,6 +216,9 @@ impl Gyfa {
             status: None,
             palette,
             theme_generation: theme::generation(),
+            prices: Rc::new(Prices::default()),
+            prices_fetch: None,
+            prices_retry: None,
             _subscriptions: subscriptions,
             _tasks: vec![loader, poller],
         }
@@ -214,7 +232,39 @@ impl Gyfa {
     }
 
     /// Redraw for downloaded icons, restyle for a theme switch.
+    /// Fetch newer prices in the background when the ones we have are stale. After a failure it
+    /// waits a while before trying again, so being offline does not mean a request every poll.
+    fn refresh_prices(&mut self, cx: &mut Context<Self>) {
+        let Some(loaded) = self.loaded() else { return };
+        let waiting = self.prices_retry.is_some_and(|at| Instant::now() < at);
+        if self.prices_fetch.is_some() || waiting || !self.prices.is_stale() {
+            return;
+        }
+        let prices = (*self.prices).clone();
+        let cache_dir = loaded.cache_dir.clone();
+        self.prices_fetch = Some(cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx
+                .background_spawn(async move { prices.refresh(&cache_dir) })
+                .await;
+            let _ = this.update(cx, |g, cx| {
+                g.prices_fetch = None;
+                match result {
+                    Ok(prices) => {
+                        g.prices = Rc::new(prices);
+                        g.prices_retry = None;
+                        cx.notify();
+                    }
+                    Err(e) => {
+                        eprintln!("prices: {e}");
+                        g.prices_retry = Some(Instant::now() + PRICE_RETRY);
+                    }
+                }
+            });
+        }));
+    }
+
     fn poll(&mut self, cx: &mut Context<Self>) {
+        self.refresh_prices(cx);
         if std::mem::take(&mut self.unsaved) {
             self.save();
         }
@@ -645,6 +695,7 @@ fn load(data_dir: &Path) -> Result<Loaded, String> {
         catalog,
         engine,
         icons,
+        cache_dir,
     })
 }
 

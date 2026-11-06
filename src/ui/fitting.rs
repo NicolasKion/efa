@@ -18,7 +18,7 @@ use gpui_kit::{
 use super::{
     Action, Gyfa, Loaded, RowRef, Scope,
     columns::{Col, ICON_W, STATE_W},
-    widgets::{color, entry, icon, icon_box, icon_label, item_entry, item_label},
+    widgets::{color, entry, icon, icon_box, icon_label, item_entry, item_label, short},
 };
 use crate::{
     data::{Catalog, Hardpoint, ItemType, Kind, Slot, TypeId},
@@ -218,6 +218,17 @@ impl Gyfa {
                                     .truncate()
                                     .child(catalog.name(id)),
                             )
+                            // Empty cells up to the price, so it lines up with the modules'.
+                            .children(
+                                [Col::Powergrid, Col::Cpu, Col::Capacitor, Col::Range]
+                                    .map(|col| self.column_layout.cell(col)),
+                            )
+                            .child(
+                                self.column_layout
+                                    .cell(Col::Price)
+                                    .truncate()
+                                    .children(self.prices.get(id).map(short)),
+                            )
                     }
                 };
                 let dragged = Dragged::of(loaded, DragSource::Row(item), self.row_type(item));
@@ -253,7 +264,8 @@ impl Gyfa {
             ModuleState::Overload => (AssetIcon::Flame, palette.orange),
         };
         let layout = self.column_layout;
-        let text = |col: Col| col.text(catalog, m, &info);
+        let prices = &self.prices;
+        let text = |col: Col| col.text(catalog, prices, m, &info);
         base.child(
             div()
                 .id(SharedString::from(format!("state-{slot:?}-{i}")))
@@ -288,8 +300,14 @@ impl Gyfa {
                 .children(text(Col::Name)),
         )
         .children(
-            [Col::Powergrid, Col::Cpu, Col::Capacitor, Col::Range]
-                .map(|col| layout.cell(col).truncate().children(text(col))),
+            [
+                Col::Powergrid,
+                Col::Cpu,
+                Col::Capacitor,
+                Col::Range,
+                Col::Price,
+            ]
+            .map(|col| layout.cell(col).truncate().children(text(col))),
         )
         .child(layout.cell(Col::Charge).child(h_flex().gap_1().when_some(
             m.charge,
