@@ -1,5 +1,5 @@
 //! Item prices from ESI's public market prices route, which lists every traded type in one
-//! response. The result is kept on disk with its ETag and expiry, so a start within the hour
+//! response. The result is kept on disk with its `ETag` and expiry, so a start within the hour
 //! makes no request at all and a later one usually gets a cheap 304.
 //!
 //! The price is CCP's universe-wide average (what the game shows as estimated price), not a
@@ -28,7 +28,8 @@ pub struct Prices {
     /// Seconds since the epoch after which ESI may have newer data.
     expires: u64,
     etag: Option<String>,
-    prices: HashMap<TypeId, f64>,
+    #[serde(rename = "prices")]
+    by_type: HashMap<TypeId, f64>,
 }
 
 #[derive(Deserialize)]
@@ -48,11 +49,11 @@ impl Prices {
     }
 
     pub fn get(&self, type_id: TypeId) -> Option<f64> {
-        self.prices.get(&type_id).copied()
+        self.by_type.get(&type_id).copied()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.prices.is_empty()
+        self.by_type.is_empty()
     }
 
     /// Whether ESI may have something newer than this.
@@ -72,7 +73,7 @@ impl Prices {
         let mut request = http
             .get(URL)
             .header("X-Compatibility-Date", COMPATIBILITY_DATE);
-        if let Some(etag) = self.etag.as_deref().filter(|_| !self.prices.is_empty()) {
+        if let Some(etag) = self.etag.as_deref().filter(|_| !self.by_type.is_empty()) {
             request = request.header("If-None-Match", etag);
         }
         let response = request.send().map_err(|e| format!("{URL}: {e}"))?;
@@ -92,7 +93,7 @@ impl Prices {
             Self {
                 expires,
                 etag,
-                prices: parse(&body)?,
+                by_type: parse(&body)?,
             }
         };
         refreshed.store(cache_dir);
