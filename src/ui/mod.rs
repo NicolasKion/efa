@@ -3,6 +3,7 @@
 
 mod actions;
 mod additions;
+mod columns;
 mod fitting;
 mod side;
 mod stats;
@@ -93,6 +94,10 @@ pub struct Gyfa {
     selection: Vec<RowRef>,
     /// Where a Shift-click selection range starts.
     anchor: Option<RowRef>,
+    /// Changes not written yet; the poll saves them, so dragging does not write every frame.
+    unsaved: bool,
+    /// The fitting view's column widths for the frame being drawn.
+    column_layout: columns::Layout,
     /// Selected rows of the open additions tab.
     additions_selection: Vec<usize>,
     additions_anchor: Option<usize>,
@@ -184,6 +189,8 @@ impl Gyfa {
             fittings_ship: None,
             selection: Vec::new(),
             anchor: None,
+            unsaved: false,
+            column_layout: columns::Layout::default(),
             additions_selection: Vec::new(),
             additions_anchor: None,
             collapsed_sections: HashSet::new(),
@@ -204,6 +211,9 @@ impl Gyfa {
 
     /// Redraw for downloaded icons, restyle for a theme switch.
     fn poll(&mut self, cx: &mut Context<Self>) {
+        if std::mem::take(&mut self.unsaved) {
+            self.save();
+        }
         if self.loaded().is_some_and(|l| l.icons.take_updated()) {
             cx.notify();
         }
@@ -632,7 +642,7 @@ impl Render for Gyfa {
             .child(self.fit_tabs(&loaded, cx))
             .child(if self.fit().is_some() {
                 v_resizable("center")
-                    .child(resizable_panel().child(self.fitting_view(&loaded, cx)))
+                    .child(resizable_panel().child(self.fitting_view(&loaded, window, cx)))
                     .child(
                         resizable_panel()
                             .size(px(200.))

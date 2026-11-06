@@ -13,6 +13,8 @@ pub struct Saved {
     /// Fits open as tabs, by index into `fits`.
     pub open: Vec<usize>,
     pub current: Option<usize>,
+    /// Fitting view column widths the user set by dragging, by column.
+    pub columns: std::collections::BTreeMap<String, f32>,
 }
 
 impl Saved {

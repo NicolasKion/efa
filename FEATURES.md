@@ -61,6 +61,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Jump from fit to ship in browser (builtinContextMenus/shipJump.py)
 
 ## Fitting view and columns
+- [x] Columns auto-size to content, resize by dragging the header edge, double-click resets (gui/display.py); widths are kept across restarts, pyfa forgets them
 
 - [x] High/mid/low/rig/subsystem racks with empty slot rows (builtinViews/fittingView.py)
 - [x] Module state cycling offline/online/active/overload (builtinViewColumns/state.py), refine: set_state

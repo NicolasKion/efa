@@ -15,7 +15,8 @@ use gpui_kit::{
 
 use super::{
     Action, Gyfa, Loaded, RowRef, Scope,
-    widgets::{color, entry, icon, icon_box, icon_label, item_entry, item_label, km, short},
+    columns::{Col, ICON_W, STATE_W},
+    widgets::{color, entry, icon, icon_box, icon_label, item_entry, item_label},
 };
 use crate::{
     data::{Catalog, Hardpoint, ItemType, Kind, Slot, TypeId},
@@ -25,13 +26,6 @@ use crate::{
 };
 
 const ROW_HEIGHT: f32 = 24.;
-/// Widths of the fixed columns: state, icon, then PG, CPU, cap, range, charge.
-const STATE_W: f32 = 22.;
-const ICON_W: f32 = 26.;
-const NUMBER_W: f32 = 56.;
-const CAP_W: f32 = 66.;
-const RANGE_W: f32 = 106.;
-const CHARGE_W: f32 = 190.;
 /// Tallest a long menu grows before it scrolls.
 const MENU_MAX_H: f32 = 480.;
 
@@ -66,6 +60,7 @@ impl Gyfa {
     pub(super) fn fitting_view(
         &mut self,
         loaded: &Rc<Loaded>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let Some(current) = self.saved.current else {
@@ -78,8 +73,13 @@ impl Gyfa {
                 .child("Double-click a ship in the market to put it under this fit.")
                 .into_any_element();
         };
-        let fit = &self.saved.fits[current];
         let no_stats = Stats::default();
+        let layout = {
+            let stats = self.stats.as_ref().unwrap_or(&no_stats);
+            self.column_layout(loaded, &self.saved.fits[current], stats, window)
+        };
+        self.column_layout = layout;
+        let fit = &self.saved.fits[current];
         let stats = self.stats.as_ref().unwrap_or(&no_stats);
         let rows = fitting_rows(fit, stats);
 
@@ -102,27 +102,7 @@ impl Gyfa {
             .child(div().w(px(260.)).child(self.name_field()))
             .context_menu(ship_menu_builder(Self::weak(cx), ship));
 
-        let column_head = |icon_id: i32, width: f32| {
-            h_flex().w(px(width)).flex_none().child(icon_box(
-                &loaded.catalog,
-                &loaded.icons,
-                Icon::Id(icon_id),
-                18.,
-            ))
-        };
-        let table_head = h_flex()
-            .h(px(ROW_HEIGHT))
-            .px_1()
-            .gap_1()
-            .bg(cx.theme().table_head)
-            .text_color(cx.theme().table_head_foreground)
-            .child(div().w(px(STATE_W + ICON_W)).flex_none())
-            .child(div().flex_1().min_w(px(140.)).child("Name"))
-            .child(column_head(icon::POWERGRID, NUMBER_W))
-            .child(column_head(icon::CPU, NUMBER_W))
-            .child(column_head(icon::CAPACITOR, CAP_W))
-            .child(column_head(icon::RANGE, RANGE_W))
-            .child(div().w(px(CHARGE_W)).flex_none().child("Charge"));
+        let table_head = Self::column_header(loaded, layout, cx);
 
         let body: Vec<AnyElement> = rows
             .iter()
@@ -180,7 +160,12 @@ impl Gyfa {
                 total,
             } => base
                 .child(div().w(px(STATE_W)).flex_none())
-                .child(icon_box(catalog, &loaded.icons, Icon::Id(icon_id), 18.))
+                .child(div().w(px(ICON_W - 4.)).flex_none().child(icon_box(
+                    catalog,
+                    &loaded.icons,
+                    Icon::Id(icon_id),
+                    18.,
+                )))
                 .child(
                     div()
                         .font_weight(FontWeight::SEMIBOLD)
@@ -191,7 +176,12 @@ impl Gyfa {
             Row::Mode(mode) => base
                 .child(div().w(px(STATE_W)).flex_none())
                 .child(icon_box(catalog, &loaded.icons, Icon::Type(mode), 22.))
-                .child(div().flex_1().truncate().child(catalog.name(mode)))
+                .child(
+                    self.column_layout
+                        .cell(Col::Name)
+                        .truncate()
+                        .child(catalog.name(mode)),
+                )
                 .context_menu(ship_menu_builder(Self::weak(cx), ship))
                 .into_any_element(),
             Row::Empty(slot, pos) => {
@@ -220,7 +210,12 @@ impl Gyfa {
                         };
                         base.child(div().w(px(STATE_W)).flex_none())
                             .child(icon_box(catalog, &loaded.icons, Icon::Type(id), 22.))
-                            .child(div().flex_1().truncate().child(catalog.name(id)))
+                            .child(
+                                self.column_layout
+                                    .cell(Col::Name)
+                                    .truncate()
+                                    .child(catalog.name(id)),
+                            )
                     }
                 };
                 let dragged = Dragged::of(loaded, DragSource::Row(item), self.row_type(item));
@@ -254,22 +249,8 @@ impl Gyfa {
             ModuleState::Active => ("✓", palette.green),
             ModuleState::Overload => ("●", palette.orange),
         };
-        let number = |value: Option<String>, width: f32| {
-            div()
-                .w(px(width))
-                .flex_none()
-                .truncate()
-                .when_some(value, ParentElement::child)
-        };
-        let range = match (info.optimal, info.falloff) {
-            (Some(o), Some(f)) => Some(format!("{}+{}", km(o), km(f))),
-            (Some(o), None) => Some(km(o)),
-            _ => None,
-        };
-        let mut name = catalog.name(m.type_id);
-        if let (Some(cycles), Some(max)) = (m.spool, info.spool_max) {
-            name = format!("{name} ({cycles}/{max} cycles)");
-        }
+        let layout = self.column_layout;
+        let text = |col: Col| col.text(catalog, m, &info);
         base.child(
             div()
                 .id(SharedString::from(format!("state-{slot:?}-{i}")))
@@ -284,32 +265,25 @@ impl Gyfa {
         )
         .child(icon_box(catalog, &loaded.icons, Icon::Type(m.type_id), 22.))
         .child(
-            div()
-                .flex_1()
-                .min_w(px(140.))
+            layout
+                .cell(Col::Name)
                 .truncate()
                 .when(m.state == ModuleState::Offline, |d| {
                     d.text_color(theme.muted_foreground)
                 })
-                .child(name),
+                .children(text(Col::Name)),
         )
-        .child(number(info.powergrid.map(short), NUMBER_W))
-        .child(number(info.cpu.map(short), NUMBER_W))
-        .child(number(
-            info.cap_per_sec.map(|v| format!("{:+.1}/s", -v)),
-            CAP_W,
-        ))
-        .child(number(range, RANGE_W))
-        .child(
-            h_flex()
-                .w(px(CHARGE_W))
-                .flex_none()
-                .gap_1()
-                .when_some(m.charge, |cell, charge| {
-                    cell.child(icon_box(catalog, &loaded.icons, Icon::Type(charge), 20.))
-                        .child(div().truncate().child(catalog.name(charge)))
-                }),
+        .children(
+            [Col::Powergrid, Col::Cpu, Col::Capacitor, Col::Range]
+                .map(|col| layout.cell(col).truncate().children(text(col))),
         )
+        .child(layout.cell(Col::Charge).child(h_flex().gap_1().when_some(
+            m.charge,
+            |cell, charge| {
+                cell.child(icon_box(catalog, &loaded.icons, Icon::Type(charge), 20.))
+                    .child(div().truncate().children(text(Col::Charge)))
+            },
+        )))
     }
 }
 
