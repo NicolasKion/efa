@@ -13,13 +13,13 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Fits persisted between runs (eos/db, eframe storage in gyfa)
 - [x] New fit (mainMenuBar.py New Tab)
 - [x] Delete fit (shipBrowser fitItem.py)
-- [~] Close tab without deleting the fit, close all tabs (mainMenuBar.py), single tab close done
-- [ ] Reopen previous fits on startup as a preference (pyfaGeneralPreferences.py)
+- [x] Close tab without deleting the fit, close all tabs (mainMenuBar.py), Ctrl+W and Ctrl+Alt+W
+- [x] Reopen previous fits on startup as a preference (pyfaGeneralPreferences.py)
 - [ ] Rename fit (fitCommands/gui/fitRename.py)
 - [ ] Copy/duplicate fit (builtinShipBrowser/fitItem.py)
-- [ ] Reorder tabs by drag, tab tooltips (chrome_tabs.py)
+- [~] Reorder tabs by drag, tab tooltips (chrome_tabs.py), tooltips with the fit and hull behind a preference
 - [ ] Open fit in new tab vs same tab (builtinContextMenus/fitOpenNewTab.py)
-- [ ] Undo/redo for every fit change (gui/fitCommands/, mainMenuBar.py)
+- [x] Undo/redo for every fit change (gui/fitCommands/, mainMenuBar.py): one history per fit, every action and market add, Ctrl+Z/Ctrl+Y
 - [ ] Disable fitting restrictions toggle (fitCommands/gui/fitRestrictionToggle.py), refine: validate_fast/validate_verbose with ValOptions
 - [ ] Fit validation messages (over CPU/PG/slots/skills/max group fitted/rig size etc.) (eos/saveddata/fit.py), refine: validate_verbose
 - [ ] System security zone per fit (builtinContextMenus/fitSystemSecurity.py), refine: set_sec_zone
@@ -28,7 +28,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [~] Per-fit damage pattern and target profile (gui/builtinStatsViews, contextMenus/damagePatternChange.py), damage pattern done, no target profile
 - [x] Fit notes, carried by duplicates, shown in the fittings browser tooltip cut to 200 characters (builtinAdditionPanes/notesView.py, builtinShipBrowser/fitItem.py); EFT text has no notes in pyfa either
 - [ ] Mark fit as fleet booster / command fit (builtinAdditionPanes/commandView.py)
-- [ ] Backup all fits to XML (mainMenuBar.py backupFits)
+- [x] Backup all fits to XML (mainMenuBar.py backupFits)
 - [ ] Fit browser lite dialog for picking fits (gui/fitBrowserLite.py)
 
 ## Market browser
@@ -40,7 +40,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Meta group filter buttons: T1, T2, faction, storyline, deadspace, officer, structure (builtinMarketBrowser/metaButton.py)
 - [ ] Recently used items list (itemView.py, service/market.py)
 - [ ] "Charges for active fit" filter (itemView.py)
-- [ ] Search delay and meta button behaviour prefs (pyfaMarketPreferences.py)
+- [~] Search delay and meta button behaviour prefs (pyfaMarketPreferences.py), search delay done
 - [ ] Jump to market group from an item (builtinContextMenus/itemMarketJump.py)
 - [ ] Drag item from market onto fit/slot/additions (itemView.py, fittingView.py)
 - [ ] Item tooltip with description/price (itemView.py)
@@ -69,7 +69,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Ship name header with icon and fit name editing (fittingView.py)
 - [x] Module table with attribute columns (builtinViewColumns/attributeDisplay.py)
 - [ ] Rack labels and rack separators prefs (pyfaGeneralPreferences.py)
-- [ ] Color rows by slot type (pyfaGeneralPreferences.py)
+- [x] Color rows by slot type (pyfaGeneralPreferences.py)
 - [ ] Highlight modules with unmet skills or invalid fitting in red (fittingView.py), refine: validate_verbose skill_reqs
 - [ ] Drag and drop modules between slots, swap/rearrange (fittingView.py, fitCommands/gui/localModule)
 - [~] Shift/ctrl drag to copy module, drag module to cargo (fitCommands/gui/localModuleCargo), module/charge to and from cargo done with Ctrl to copy, copying between slots missing
@@ -98,7 +98,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Load/unload charge on module (builtinContextMenus/moduleAmmoChange.py), refine: set_charge_type_id
 - [x] Remove item (builtinContextMenus/itemRemove.py)
 - [ ] Charge picker grouped by damage type/range with ammo stats (moduleAmmoChange.py)
-- [ ] Change charge in all modules of the same type (pyfaGeneralPreferences.py)
+- [x] Change charge in all modules of the same type (pyfaGeneralPreferences.py), Ctrl/Alt does the other
 - [ ] Item variations: swap to T2/faction/deadspace variant (builtinContextMenus/itemVariationChange.py)
 - [ ] Fill all slots with module (builtinContextMenus/moduleFill.py)
 - [ ] Fill rack / item fill (builtinContextMenus/itemFill.py)
@@ -125,9 +125,9 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Add command link bursts directly (builtinContextMenus/commandLinkAdd.py)
 - [ ] Add environment effect (wormhole, incursion, abyssal weather, etc.) (builtinContextMenus/envEffectAdd.py), refine: add_sw_effect, add_proj_effect
 - [ ] Show skills affecting item, change skill level inline (builtinContextMenus/skillAffectors.py), refine: iter_modifiers, set_level
-- [ ] Price source options (builtinContextMenus/priceOptions.py)
+- [~] Price source options (builtinContextMenus/priceOptions.py), source and system in the preferences
 - [ ] Copy/paste/export/import additions lists (builtinContextMenus/additionsExportAll.py, additionsExportSelection.py, additionsImport.py)
-- [ ] Context menu enable/disable preferences (pyfaContextMenuPreferences.py)
+- [~] Context menu enable/disable preferences (pyfaContextMenuPreferences.py): variations, fill with module, spoolup, additions copy/paste and fill cargo hide; set as damage pattern, change skills and project onto fit are stored for when those entries exist
 
 ## Additions pane
 
@@ -135,7 +135,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Implants and boosters list (builtinAdditionPanes/implantView.py, boosterView.py), refine: add_implant, add_booster
 - [x] Cargo: parsed from EFT and exported, added from the market (double-click with Ctrl/Alt batches, drag, menus), edited, dragged to and from the fit (builtinAdditionPanes/cargoView.py)
 - [~] Tabbed additions pane, in progress (gui/additionsPane.py)
-- [ ] Tab names with counts (pyfaGeneralPreferences.py "Extra info in Additions panel tab names")
+- [x] Tab names with counts (pyfaGeneralPreferences.py "Extra info in Additions panel tab names"): none, active or all items
 - [x] Drone stack amount editing, separate stacks (droneView.py)
 - [ ] Fighters tab: squadrons, light/heavy/support tubes, abilities (builtinAdditionPanes/fighterView.py), refine: add_fighter, get_stat_launched_*_fighters, get_stat_fighter_bay_volume
 - [x] Cargo tab with amounts and volume, sorted like pyfa, Delete/Ctrl+A/Escape keys (cargoView.py); price column waits for a price source
@@ -165,7 +165,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Bombing: bombs to kill per damage type and Covert Ops level, collapsed by default as pyfa hides it (builtinStatsViews/bombingViewFull.py); wormhole bomb damage effects not applied
 - [x] Price: ship, fittings, character, drones, cargo, total from ESI prices, with the Drones/Cargo/Implants && Boosters total toggles (builtinStatsViews/priceViewFull.py, priceOptions.py)
 - [x] Collapsible stat sections with header menus, also on right-click (gui/toggle_panel.py, statsPane.py)
-- [ ] Per-view full/minimal/hidden preference (pyfaStatViewPreferences.py)
+- [~] Per-view full/minimal/hidden preference (pyfaStatViewPreferences.py), shown or hidden; gyfa has no minimal views
 - [ ] Capability flags: can warp/jump/dock/tether (no pyfa view), refine: get_stat_can_* (gyfa-only extra)
 - [ ] Neut resist, breach resist, d-scan range (no pyfa view), refine: get_stat_neut_resist, get_stat_breach_resist, get_stat_dscan_range
 
@@ -201,19 +201,19 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] EFT import via paste dialog (service/port/eft.py)
 - [x] EFT import from file on CLI (service/port/port.py importFitFromFiles)
 - [x] EFT export to clipboard (service/port/eft.py exportEft)
-- [~] EFT import of cargo and charges (eft.py), no mutations, no offline/ammo flags edge cases
-- [ ] EFT export options: implants, boosters, cargo, mutations, loaded charges (eft.py, gui/copySelectDialog.py)
-- [ ] Import from clipboard with format autodetect (port.py importAuto)
-- [ ] Import from file dialog, multiple files (port.py importFitsThreaded)
-- [ ] EFT .cfg legacy format (port.py importEftCfg); notes come from Description= lines, with | as line breaks
-- [ ] DNA import/export (service/port/dna.py)
-- [ ] XML import/export (EVE client format) (service/port/xml.py); notes are the description, exported cut to 400 characters with line breaks as <br>
-- [ ] ESI JSON import/export (service/port/esi.py); notes are the description, exported cut to 400 characters
-- [ ] Multibuy export (service/port/multibuy.py)
+- [~] EFT import of cargo and charges (eft.py), pyfa's /offline and several fits per paste; no mutations
+- [~] EFT export options: implants, boosters, cargo, mutations, loaded charges (eft.py, gui/copySelectDialog.py), in pyfa's layout with empty slots up to the ship's count; no mutations yet
+- [x] Import from clipboard with format autodetect (port.py importAuto), item lists go to the additions tabs or fit a single module
+- [x] Import from file dialog, multiple files (port.py importFitsThreaded)
+- [x] EFT .cfg legacy format (port.py importEftCfg); notes come from Description= lines, with | as line breaks
+- [x] DNA import/export (service/port/dna.py), chat links and the DNA: variant too
+- [x] XML import/export (EVE client format) (service/port/xml.py); notes are the description, exported cut to 400 characters with line breaks as <br>
+- [x] ESI JSON import/export (service/port/esi.py); notes are the description, exported cut to 400 characters
+- [~] Multibuy export (service/port/multibuy.py), no Optimize Prices
 - [ ] EFS stats JSON export (service/port/efs.py)
-- [ ] Ship stats export (service/port/shipstats.py)
+- [x] Ship stats export (service/port/shipstats.py)
 - [ ] Mutated item (muta) format (service/port/muta.py)
-- [ ] HTML export of all fits (pyfaHTMLExportPreferences.py)
+- [x] HTML export of all fits (pyfaHTMLExportPreferences.py), full and minimal
 - [ ] Export item stats to CSV (gui/itemStats.py)
 - [ ] Export implants/boosters/charges lists (builtinContextMenus/additionsExportAll.py)
 
@@ -251,18 +251,18 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 
 ## Preferences
 
-- [ ] Preferences dialog (gui/preferenceDialog.py)
-- [~] General: theme, language, tooltips, rack layout, omega icons, mutated names, tab info (pyfaGeneralPreferences.py), theme follows Omarchy live
-- [ ] Engine: strict skills, factor in reload, global default spool (pyfaEnginePreferences.py), refine: set_default_spool, set_default_optional_reloads
-- [ ] Stat view layout (pyfaStatViewPreferences.py)
-- [ ] Context menu toggles (pyfaContextMenuPreferences.py)
-- [ ] Market and prices: source, search delay, meta buttons, price total composition (pyfaMarketPreferences.py)
-- [ ] Network/proxy (pyfaNetworkPreferences.py)
+- [x] Preferences dialog (gui/preferenceDialog.py), its own window, changes apply to every window right away
+- [~] General: theme, language, tooltips, rack layout, omega icons, mutated names, tab info (pyfaGeneralPreferences.py), theme follows Omarchy live; character implants by default, slot colors, reopen fits, tab tooltips, open in new tab, ammo change all and tab info done
+- [~] Engine: strict skills, factor in reload, global default spool (pyfaEnginePreferences.py), reload and default spool done, refine: set_default_spool, set_default_optional_reloads
+- [~] Stat view layout (pyfaStatViewPreferences.py), each section shown or hidden
+- [x] Context menu toggles (pyfaContextMenuPreferences.py)
+- [~] Market and prices: source, search delay, meta buttons, price total composition (pyfaMarketPreferences.py), all but the meta buttons and market view modes
+- [x] Network/proxy (pyfaNetworkPreferences.py), for price requests
 - [ ] ESI/SSO server and auto-login (pyfaEsiPreferences.py)
 - [ ] Database paths and resets (pyfaDatabasePreferences.py)
 - [ ] Logging (pyfaLoggingPreferences.py)
 - [ ] Update checks (pyfaUpdatePreferences.py, service/update.py)
-- [ ] HTML export path (pyfaHTMLExportPreferences.py)
+- [x] HTML export path (pyfaHTMLExportPreferences.py)
 - [ ] Attribute overrides editor (gui/propertyEditor.py, mainMenuBar.py), refine: set_value on items if exposed
 
 ## ESI and SSO
@@ -276,7 +276,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 ## Prices
 
 - [ ] Price fetching with cache (service/price.py)
-- [ ] Market sources: Fuzzwork, EVE Tycoon, evemarketdata, cevemarket (service/marketSources/)
+- [~] Market sources: Fuzzwork, EVE Tycoon, evemarketdata, cevemarket (service/marketSources/), ESI average and Fuzzwork at the five hubs or universe
 - [ ] Price column and price stats view (builtinViewColumns/price.py, builtinStatsViews/priceViewFull.py)
 - [ ] Optimize fit price: swap to cheaper equivalent modules (mainMenuBar.py optimizeFitPrice)
 - [ ] Delete all cached prices (pyfaDatabasePreferences.py)
@@ -286,14 +286,14 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Load EVE data from local dump (gyfa data.rs, pyfa eos/db gamedata)
 - [x] Skip unknown items on import with a status message (port.py)
 - [~] In-game icons, in progress (gui/bitmap_loader.py)
-- [ ] Keyboard shortcuts (mainMenuBar.py: ctrl+T/W/Z/Y/C/V/O/S/G/K/I/B/E)
-- [ ] About dialog, version info (gui/aboutData.py)
+- [~] Keyboard shortcuts (mainMenuBar.py: ctrl+T/W/Z/Y/C/V/O/S/G/K/I/B/E), all but G and K (their windows) and B and E (ESI)
+- [x] About dialog, version info (gui/aboutData.py)
 - [ ] Error dialog with details (gui/errorDialog.py)
 - [ ] Update notifications (gui/updateDialog.py, service/update.py)
 - [ ] Data prefetch/cache warmup (service/prefetch.py)
 - [ ] Dark/bright themes (pyfaGeneralPreferences.py)
 - [ ] Translations (pyfa locale/)
-- [ ] Help links: wiki, forums (mainMenuBar.py)
+- [x] Help links: wiki, forums (mainMenuBar.py)
 - [ ] Dev tools window (gui/devTools.py)
 - [ ] Ammo service: best ammo per range (service/ammo.py)
 - [ ] Structures and services fitting (eos service slots), refine: add_service, get_stat_service_slots

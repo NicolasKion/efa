@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{fit::Fit, implant_set::ImplantSet};
+use crate::{fit::Fit, implant_set::ImplantSet, port::ExportSettings, preferences::Preferences};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -22,6 +22,12 @@ pub struct Saved {
     pub implant_sets: Vec<ImplantSet>,
     /// Which groups the price total counts, pyfa's price view menu.
     pub price_totals: PriceTotals,
+    /// The preferences window's settings.
+    #[serde(default)]
+    pub preferences: Preferences,
+    /// The copy dialog's last format and options.
+    #[serde(default)]
+    pub export: ExportSettings,
 }
 
 /// What besides ship and fittings the price total includes, with pyfa's defaults.

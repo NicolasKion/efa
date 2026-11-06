@@ -19,6 +19,9 @@ use crate::fit::DamageProfile;
 pub struct CalcOptions {
     /// Average reload time into DPS, repair rates and the capacitor simulation.
     pub factor_reload: bool,
+    /// Spool-up for modules without their own setting, as a fraction of full spool. None keeps
+    /// refine's default, full spool.
+    pub default_spool: Option<f64>,
 }
 
 impl CalcOptions {

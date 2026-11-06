@@ -293,6 +293,11 @@ impl Engine {
     pub fn compute_with(&self, fit: &Fit, options: CalcOptions) -> Stats {
         let mut stats = Stats::default();
         let mut sol = SolOwned::new(&self.src);
+        if let Some(spool) = options.default_spool {
+            sol.set_default_spool(rc::Spool::SpoolScale(rc::UnitInterval::from_f64_clamped(
+                spool,
+            )));
+        }
         let mut f = sol.add_fit();
         f.set_character(ItemTypeId::from_i32(CHARACTER));
         for &skill in &self.skills {

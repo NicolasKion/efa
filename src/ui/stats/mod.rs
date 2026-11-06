@@ -8,6 +8,7 @@ mod offense;
 mod price;
 mod profiles;
 mod resources;
+pub(super) mod text;
 
 use std::rc::Rc;
 
@@ -201,7 +202,12 @@ impl Gyfa {
                     .overflow_y_scroll()
                     .p_2()
                     .gap_2()
-                    .children(sections.into_iter().map(|s| self.section(s, cx))),
+                    .children(
+                        sections
+                            .into_iter()
+                            .filter(|s| self.saved.preferences.stats.shows(s.key))
+                            .map(|s| self.section(s, cx)),
+                    ),
             )
             .into_any_element()
     }

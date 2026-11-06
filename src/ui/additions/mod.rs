@@ -32,6 +32,7 @@ use super::{
 use crate::{
     data::{Catalog, Kind, TypeId},
     fit::{Fit, split_count},
+    preferences::AdditionsLabels,
 };
 
 const ROW_HEIGHT: f32 = 28.;
@@ -67,6 +68,26 @@ impl AddKind {
             Self::Boosters => fit.boosters.iter().map(|b| (b.type_id, 1)).collect(),
             Self::Cargo => fit.cargo.clone(),
         }
+    }
+}
+
+/// The number in an additions tab's name, as pyfa's "Extra info in Additions panel tab names"
+/// picks it: active items, all items, or none. Cargo counts stacks either way, as in pyfa.
+fn tab_count(fit: &Fit, tab: AdditionsTab, labels: AdditionsLabels) -> usize {
+    let active = labels == AdditionsLabels::Active;
+    match (labels, tab) {
+        (AdditionsLabels::None, _) | (_, AdditionsTab::Notes) => 0,
+        (_, AdditionsTab::Drones) => fit
+            .drones
+            .iter()
+            .map(|d| if active { d.active } else { d.count } as usize)
+            .sum(),
+        (_, AdditionsTab::Implants) => fit
+            .applied_implants(crate::engine::CHARACTER_IMPLANTS)
+            .filter(|&(_, on)| on || !active)
+            .count(),
+        (_, AdditionsTab::Boosters) => fit.boosters.iter().filter(|b| b.active || !active).count(),
+        (_, AdditionsTab::Cargo) => fit.cargo.len(),
     }
 }
 
@@ -106,18 +127,15 @@ impl Gyfa {
         };
         let fit = &self.saved.fits[current];
         let theme = cx.theme();
+        let labels = self.saved.preferences.general.additions_labels;
         let tabs = [
-            (AdditionsTab::Drones, "Drones", fit.drones.len()),
-            (
-                AdditionsTab::Implants,
-                "Implants",
-                fit.applied_implants(crate::engine::CHARACTER_IMPLANTS)
-                    .count(),
-            ),
-            (AdditionsTab::Boosters, "Boosters", fit.boosters.len()),
-            (AdditionsTab::Cargo, "Cargo", fit.cargo.len()),
-            (AdditionsTab::Notes, "Notes", 0),
-        ];
+            (AdditionsTab::Drones, "Drones"),
+            (AdditionsTab::Implants, "Implants"),
+            (AdditionsTab::Boosters, "Boosters"),
+            (AdditionsTab::Cargo, "Cargo"),
+            (AdditionsTab::Notes, "Notes"),
+        ]
+        .map(|(tab, label)| (tab, label, tab_count(fit, tab, labels)));
         let tab_bar = h_flex()
             .gap_1()
             .p_1()
@@ -128,7 +146,11 @@ impl Gyfa {
             .children(tabs.into_iter().map(|(tab, label, count)| {
                 let selected = self.additions_tab == tab;
                 let text = if tab == AdditionsTab::Notes {
-                    notes::tab_title(fit)
+                    if labels == AdditionsLabels::None {
+                        label.to_owned()
+                    } else {
+                        notes::tab_title(fit)
+                    }
                 } else if count > 0 {
                     format!("{label} ({count})")
                 } else {
@@ -324,7 +346,7 @@ fn addition_menu(
         ));
     }
     let variations = catalog.variations_of(type_id);
-    if variations.len() > 1 {
+    if variations.len() > 1 && super::hub::preferences(cx).context_menus.variations {
         let entries: Vec<(TypeId, String)> =
             variations.iter().map(|&v| (v, catalog.name(v))).collect();
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
@@ -353,7 +375,7 @@ fn addition_menu(
             },
         );
     }
-    if kind == AddKind::Cargo {
+    if kind == AddKind::Cargo && super::hub::preferences(cx).context_menus.cargo_fill {
         let this = this.clone();
         menu = menu.item(
             entry(IconName::Inbox, format!("Fill Cargo With {category}")).on_click(
@@ -381,6 +403,12 @@ fn misc_entries(
     clicked: Option<usize>,
     cx: &App,
 ) -> PopupMenu {
+    if !super::hub::preferences(cx)
+        .context_menus
+        .additions_copy_paste
+    {
+        return menu;
+    }
     let noun = kind.noun();
     let has_rows = this
         .upgrade()
