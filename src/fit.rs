@@ -1,0 +1,310 @@
+//! The fit as the user sees it. This is the source of truth; the engine rebuilds its own state from
+//! it whenever it changes.
+
+use std::fmt::Write;
+
+use serde::{Deserialize, Serialize};
+
+use crate::data::{Catalog, Kind, Slot, TypeId};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ModuleState {
+    Offline,
+    Online,
+    Active,
+    Overload,
+}
+
+impl ModuleState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Offline => "Offline",
+            Self::Online => "Online",
+            Self::Active => "Active",
+            Self::Overload => "Overheated",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Module {
+    pub type_id: TypeId,
+    pub state: ModuleState,
+    pub charge: Option<TypeId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DroneStack {
+    pub type_id: TypeId,
+    pub count: u32,
+    pub active: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Fit {
+    pub name: String,
+    pub ship: Option<TypeId>,
+    pub high: Vec<Module>,
+    pub mid: Vec<Module>,
+    pub low: Vec<Module>,
+    pub rigs: Vec<TypeId>,
+    pub subsystems: Vec<TypeId>,
+    pub drones: Vec<DroneStack>,
+    pub implants: Vec<TypeId>,
+    pub boosters: Vec<TypeId>,
+    pub cargo: Vec<(TypeId, u32)>,
+    #[serde(default)]
+    pub notes: String,
+}
+
+/// Drones a character can have in space at once, without skills or ship bonuses changing it.
+const MAX_LAUNCHED: u32 = 5;
+
+impl Fit {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn rack(&self, slot: Slot) -> &Vec<Module> {
+        match slot {
+            Slot::High => &self.high,
+            Slot::Mid => &self.mid,
+            _ => &self.low,
+        }
+    }
+
+    pub fn rack_mut(&mut self, slot: Slot) -> &mut Vec<Module> {
+        match slot {
+            Slot::High => &mut self.high,
+            Slot::Mid => &mut self.mid,
+            _ => &mut self.low,
+        }
+    }
+
+    /// Add whatever this type is to the fit, the way double-clicking it in pyfa does. Returns false
+    /// if it is not something a fit can hold.
+    pub fn add(&mut self, catalog: &Catalog, type_id: TypeId) -> bool {
+        let Some(t) = catalog.get(type_id) else {
+            return false;
+        };
+        match t.kind {
+            Kind::Ship => {
+                if self.name.is_empty()
+                    || self
+                        .ship
+                        .and_then(|s| catalog.get(s))
+                        .is_some_and(|s| s.name == self.name)
+                {
+                    self.name.clone_from(&t.name);
+                }
+                self.ship = Some(type_id);
+            }
+            Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low)) => {
+                let state = if t.activatable {
+                    ModuleState::Active
+                } else {
+                    ModuleState::Online
+                };
+                self.rack_mut(slot).push(Module {
+                    type_id,
+                    state,
+                    charge: None,
+                });
+            }
+            Kind::Module(Slot::Rig) => self.rigs.push(type_id),
+            Kind::Module(Slot::Subsystem) => self.subsystems.push(type_id),
+            Kind::Charge => {
+                let mut loaded = false;
+                for module in self
+                    .high
+                    .iter_mut()
+                    .chain(&mut self.mid)
+                    .chain(&mut self.low)
+                {
+                    if catalog.get(module.type_id).is_some_and(|m| t.fits_in(m)) {
+                        module.charge = Some(type_id);
+                        loaded = true;
+                    }
+                }
+                if !loaded {
+                    return false;
+                }
+            }
+            Kind::Drone | Kind::Fighter => {
+                let launch = self.launched() < MAX_LAUNCHED;
+                match self.drones.iter_mut().find(|d| d.type_id == type_id) {
+                    Some(stack) => {
+                        stack.count += 1;
+                        stack.active += u32::from(launch);
+                    }
+                    None => self.drones.push(DroneStack {
+                        type_id,
+                        count: 1,
+                        active: u32::from(launch),
+                    }),
+                }
+            }
+            Kind::Implant => self.implants.push(type_id),
+            Kind::Booster => self.boosters.push(type_id),
+            Kind::Skill | Kind::Other => return false,
+        }
+        true
+    }
+
+    pub fn launched(&self) -> u32 {
+        self.drones.iter().map(|d| d.active).sum()
+    }
+
+    pub fn to_eft(&self, catalog: &Catalog) -> String {
+        let mut out = String::new();
+        let ship = self
+            .ship
+            .map_or_else(|| "No ship".to_owned(), |s| catalog.name(s));
+        let _ = writeln!(out, "[{ship}, {}]", self.name);
+
+        let module_line = |m: &Module| {
+            let mut line = catalog.name(m.type_id);
+            if let Some(charge) = m.charge {
+                let _ = write!(line, ", {}", catalog.name(charge));
+            }
+            if m.state == ModuleState::Offline {
+                line.push_str(" /OFFLINE");
+            }
+            line
+        };
+        let mut sections: Vec<Vec<String>> = vec![
+            self.low.iter().map(module_line).collect(),
+            self.mid.iter().map(module_line).collect(),
+            self.high.iter().map(module_line).collect(),
+            self.rigs.iter().map(|&r| catalog.name(r)).collect(),
+            self.subsystems.iter().map(|&s| catalog.name(s)).collect(),
+            self.drones
+                .iter()
+                .map(|d| format!("{} x{}", catalog.name(d.type_id), d.count))
+                .collect(),
+            self.implants.iter().map(|&i| catalog.name(i)).collect(),
+            self.boosters.iter().map(|&b| catalog.name(b)).collect(),
+            self.cargo
+                .iter()
+                .map(|&(t, n)| format!("{} x{n}", catalog.name(t)))
+                .collect(),
+        ];
+        sections.retain(|s| !s.is_empty());
+        for (n, section) in sections.into_iter().enumerate() {
+            if n > 0 {
+                out.push('\n');
+            }
+            for line in section {
+                out.push_str(&line);
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    /// Parse an EFT block. Lines are placed by what the item is rather than which section it sits
+    /// in, so slightly mangled pastes still come through. Unknown names are returned alongside.
+    pub fn from_eft(catalog: &Catalog, text: &str) -> Result<(Self, Vec<String>), String> {
+        let mut lines = text.lines().map(str::trim).skip_while(|l| l.is_empty());
+        let header = lines.next().ok_or("nothing to import")?;
+        let header = header
+            .strip_prefix('[')
+            .and_then(|h| h.strip_suffix(']'))
+            .ok_or("an EFT fit starts with [Ship, Name]")?;
+        let (ship_name, fit_name) = header.split_once(',').unwrap_or((header, ""));
+        let ship = catalog
+            .find(ship_name)
+            .filter(|t| t.kind == Kind::Ship)
+            .ok_or_else(|| format!("unknown ship \"{}\"", ship_name.trim()))?;
+
+        let mut fit = Fit::new(fit_name.trim());
+        fit.ship = Some(ship.id);
+        let mut unknown = Vec::new();
+        let mut in_cargo_section = false;
+        let mut seen_stacks = false;
+
+        for line in lines {
+            if line.is_empty() {
+                // Charges after the drone section are cargo, not ammo for anything.
+                in_cargo_section = seen_stacks;
+                continue;
+            }
+            if line.starts_with("[Empty ") {
+                continue;
+            }
+            let (line, offline) = match line.strip_suffix("/OFFLINE") {
+                Some(rest) => (rest.trim(), true),
+                None => (line, false),
+            };
+            let (name, count) = split_count(line);
+            let (name, charge) = match count {
+                Some(_) => (name, None),
+                None => match name.split_once(", ") {
+                    Some((module, charge)) => (module, Some(charge)),
+                    None => (name, None),
+                },
+            };
+            let Some(t) = catalog.find(name) else {
+                unknown.push(name.to_owned());
+                continue;
+            };
+            match (t.kind, count) {
+                (Kind::Drone | Kind::Fighter, Some(n)) => {
+                    seen_stacks = true;
+                    fit.drones.push(DroneStack {
+                        type_id: t.id,
+                        count: n,
+                        active: 0,
+                    });
+                }
+                (_, Some(n)) => {
+                    seen_stacks = true;
+                    fit.cargo.push((t.id, n));
+                }
+                (Kind::Charge, None) if in_cargo_section => fit.cargo.push((t.id, 1)),
+                (Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low)), None) => {
+                    let state = match (offline, t.activatable) {
+                        (true, _) => ModuleState::Offline,
+                        (false, true) => ModuleState::Active,
+                        (false, false) => ModuleState::Online,
+                    };
+                    let charge = charge.and_then(|name| {
+                        let found = catalog.find(name).map(|c| c.id);
+                        if found.is_none() {
+                            unknown.push(name.to_owned());
+                        }
+                        found
+                    });
+                    fit.rack_mut(slot).push(Module {
+                        type_id: t.id,
+                        state,
+                        charge,
+                    });
+                }
+                _ => {
+                    fit.add(catalog, t.id);
+                }
+            }
+        }
+        // Launch drones in the order they were listed, up to what can be in space.
+        let mut room = MAX_LAUNCHED;
+        for stack in &mut fit.drones {
+            stack.active = stack.count.min(room);
+            room -= stack.active;
+        }
+        Ok((fit, unknown))
+    }
+}
+
+/// "Hobgoblin II x5" -> ("Hobgoblin II", Some(5))
+fn split_count(line: &str) -> (&str, Option<u32>) {
+    if let Some((name, count)) = line.rsplit_once(" x")
+        && let Ok(count) = count.trim().parse()
+    {
+        return (name.trim(), Some(count));
+    }
+    (line, None)
+}

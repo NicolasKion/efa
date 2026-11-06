@@ -1,0 +1,4 @@
+[toolchain]
+# refine uses unstable features.
+channel = "nightly-2026-11-05"
+components = ["rustfmt", "clippy"]
