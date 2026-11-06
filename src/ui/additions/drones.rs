@@ -224,7 +224,7 @@ fn order_rank(market_group: Option<&str>) -> usize {
 
 /// pyfa's formatAmount with three significant digits: 1234 -> 1.23k. Values of a thousand and up
 /// get a suffix, up to 10^`highest`.
-fn format_amount(value: f64, highest: i32, force_sign: bool) -> String {
+pub(super) fn format_amount(value: f64, highest: i32, force_sign: bool) -> String {
     const SUFFIXES: [(i32, &str); 3] = [(9, "G"), (6, "M"), (3, "k")];
     let (mut mantissa, mut suffix) = (value, "");
     if value.abs() > 1.0 {

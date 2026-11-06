@@ -17,12 +17,14 @@ use gpui_kit::{
 
 use super::{
     Action, Gyfa, Loaded, RowRef, Scope,
+    characters::skills_submenu,
     columns::{Col, ICON_W, STATE_W},
+    item_stats::{StatsOf, stats_entry},
     widgets::{color, entry, icon, icon_box, icon_label, item_entry, item_label, short},
 };
 use crate::{
     data::{Catalog, Hardpoint, ItemType, Kind, Slot, TypeId},
-    engine::{ModuleInfo, Stats},
+    engine::{FitItem, ModuleInfo, SkillTarget, Stats},
     fit::{Fit, Module, ModuleState},
     icons::Icon,
 };
@@ -133,12 +135,30 @@ impl Gyfa {
         let catalog = &loaded.catalog;
         let theme = cx.theme();
         let selected = matches!(row, Row::Item(r) if self.selection.contains(&r));
+        // pyfa's "Color fitting view by slot": a faint tint per rack.
+        let slot_tint = match row {
+            Row::Item(RowRef::Module(slot, _)) | Row::Empty(slot, _) => Some(slot),
+            Row::Item(RowRef::Rig(_)) => Some(Slot::Rig),
+            Row::Item(RowRef::Subsystem(_)) => Some(Slot::Subsystem),
+            Row::Header { .. } | Row::Mode(_) => None,
+        }
+        .filter(|_| self.saved.preferences.general.color_by_slot)
+        .map(|slot| {
+            match slot {
+                Slot::High => theme.danger,
+                Slot::Mid => theme.info,
+                Slot::Low => theme.success,
+                Slot::Rig | Slot::Subsystem => theme.warning,
+            }
+            .opacity(0.12)
+        });
         let base = h_flex()
             .id(SharedString::from(format!("fit-row-{n}")))
             .h(px(ROW_HEIGHT))
             .px_1()
             .gap_1()
             .when(n % 2 == 1, |r| r.bg(theme.table_even))
+            .when_some(slot_tint, Styled::bg)
             .when(selected, |r| r.bg(theme.table_active))
             .hover(|s| s.bg(theme.table_hover));
         match row {
@@ -170,7 +190,21 @@ impl Gyfa {
                         .truncate()
                         .child(catalog.name(mode)),
                 )
-                .context_menu(ship_menu_builder(Self::weak(cx), ship))
+                .context_menu({
+                    // pyfa's fittingMode entries come before the ship's.
+                    let ship_menu = ship_menu_builder(Self::weak(cx), ship);
+                    let this = Self::weak(cx);
+                    move |menu, window, cx| {
+                        let menu = menu
+                            .item(stats_entry(
+                                &this,
+                                "Tactical Mode",
+                                StatsOf::Fitted(FitItem::Mode),
+                            ))
+                            .separator();
+                        ship_menu(menu, window, cx)
+                    }
+                })
                 .into_any_element(),
             Row::Empty(slot, pos) => {
                 let row = base.child(div().w(px(STATE_W + ICON_W)).flex_none()).child(
@@ -574,6 +608,7 @@ fn item_menu(
         return menu;
     };
     let mut menu = menu;
+    let shown = super::hub::preferences(cx).context_menus;
 
     if let Some(m) = &snapshot.module {
         let charges = compatible_charges(catalog, type_id);
@@ -581,10 +616,24 @@ fn item_menu(
             let structure = structure_charges(catalog, t, &charges);
             menu = charge_submenu(menu, this, loaded, item, structure, m.charge, window, cx);
         }
-        if let Some(max) = snapshot.info.spool_max.filter(|_| t.spools) {
+        if let Some(max) = snapshot
+            .info
+            .spool_max
+            .filter(|_| t.spools && shown.spoolup)
+        {
             menu = spool_submenu(menu, this, item, m.spool, max, window, cx);
         }
     }
+    let fitted = match item {
+        RowRef::Module(slot, i) => FitItem::Module(slot, i),
+        RowRef::Rig(i) => FitItem::Rig(i),
+        RowRef::Subsystem(i) => FitItem::Subsystem(i),
+    };
+    menu = menu.item(stats_entry(
+        this,
+        t.category_label(),
+        StatsOf::Fitted(fitted),
+    ));
     if t.market_group.is_some() {
         menu = menu.item(
             entry(IconName::Search, "Module Market Group").on_click(handler(
@@ -602,14 +651,15 @@ fn item_menu(
         Action::Remove,
     )));
     let variations = catalog.variations_of(type_id);
-    if variations.len() > 1 {
+    if variations.len() > 1 && shown.variations {
         menu = variations_submenu(menu, this, loaded, item, type_id, variations, window, cx);
     }
-    let slot = match item {
-        RowRef::Module(slot, _) => Some(slot),
-        RowRef::Rig(_) => Some(Slot::Rig),
-        RowRef::Subsystem(_) => None,
+    let rack = match item {
+        RowRef::Module(slot, _) => slot,
+        RowRef::Rig(_) => Slot::Rig,
+        RowRef::Subsystem(_) => Slot::Subsystem,
     };
+    let slot = (rack != Slot::Subsystem && shown.module_fill).then_some(rack);
     if let Some(slot) = slot {
         menu = menu.item(
             entry(IconName::Plus, format!("Fill With {}", t.category_label())).on_click(handler(
@@ -621,21 +671,46 @@ fn item_menu(
         );
     }
 
-    if let Some(charge) = snapshot.module.as_ref().and_then(|m| m.charge)
+    menu = skills_submenu(
+        menu,
+        this,
+        loaded,
+        SkillTarget::Module(rack, type_id),
+        window,
+        cx,
+    );
+
+    let charge = snapshot.module.as_ref().and_then(|m| m.charge);
+    if charge.is_some()
+        && let RowRef::Module(slot, i) = item
+    {
+        menu = menu.separator().item(stats_entry(
+            this,
+            "Charge",
+            StatsOf::Fitted(FitItem::Charge(slot, i)),
+        ));
+    }
+    if let Some(charge) = charge
         && catalog
             .get(charge)
             .is_some_and(|c| c.market_group.is_some())
     {
-        menu = menu
-            .separator()
-            .item(
-                entry(IconName::Search, "Charge Market Group").on_click(handler(
-                    this,
-                    move |g, _, window, cx| {
-                        g.jump_to_market(charge, window, cx);
-                    },
-                )),
-            );
+        menu = menu.item(
+            entry(IconName::Search, "Charge Market Group").on_click(handler(
+                this,
+                move |g, _, window, cx| {
+                    g.jump_to_market(charge, window, cx);
+                },
+            )),
+        );
+    }
+    if let Some(charge) = charge {
+        let target = SkillTarget::Charge {
+            slot: rack,
+            module: type_id,
+            charge,
+        };
+        menu = skills_submenu(menu, this, loaded, target, window, cx);
     }
 
     ship_entries(menu.separator(), this, ship, window, cx)
@@ -668,13 +743,14 @@ pub(super) fn ship_entries(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let Some(g) = this.upgrade() else { return menu };
-    let (loaded, mode, sec_status) = {
+    let (loaded, mode, sec_status, character_sec) = {
         let g = g.read(cx);
         let fit = g.fit();
         (
             g.loaded(),
             fit.and_then(|f| f.mode),
             fit.and_then(|f| f.sec_status),
+            g.characters.sec_status(g.fit_character()),
         )
     };
     let Some(loaded) = loaded else { return menu };
@@ -708,6 +784,7 @@ pub(super) fn ship_entries(
             },
         );
     }
+    menu = menu.item(stats_entry(this, "Ship", StatsOf::Fitted(FitItem::Ship)));
     if SEC_STATUS_SHIPS.contains(&ship_name.as_str()) {
         let this = this.clone();
         menu = menu.submenu_with_element(
@@ -728,7 +805,7 @@ pub(super) fn ship_entries(
                 };
                 let mut menu = menu
                     .item(
-                        PopupMenuItem::new("Character")
+                        PopupMenuItem::new(format!("Character ({})", py_round(character_sec)))
                             .checked(sec_status.is_none())
                             .on_click(set(None)),
                     )
@@ -757,17 +834,29 @@ pub(super) fn ship_entries(
             },
         );
     }
-    menu.item(
+    let menu = menu.item(
         entry(IconName::FolderOpen, "Open in Fitting Browser").on_click(handler(
             this,
             move |g, _, _, cx| {
                 g.jump_to_fittings(ship, cx);
             },
         )),
-    )
+    );
+    skills_submenu(menu, this, &loaded, SkillTarget::Ship, window, cx)
 }
 
-/// A charge entry: loads it into every similar module, or only the selection with Ctrl or Alt.
+/// A number as Python prints `round(x, 2)`, which pyfa shows the character's status as.
+fn py_round(value: f64) -> String {
+    let rounded = (value * 100.0).round() / 100.0;
+    if rounded.fract() == 0.0 {
+        format!("{rounded:.1}")
+    } else {
+        format!("{rounded}")
+    }
+}
+
+/// A charge entry: loads it into the selection, or every similar module when the preference
+/// says so; Ctrl or Alt swaps the two.
 fn charge_entry(
     this: &WeakEntity<Gyfa>,
     loaded: &Rc<Loaded>,
@@ -777,9 +866,27 @@ fn charge_entry(
 ) -> PopupMenuItem {
     item_entry(loaded, id, loaded.catalog.name(id))
         .checked(loaded_charge == Some(id))
-        .on_click(scoped(this, item, Scope::Similar, move |rows| {
+        .on_click(ammo_scoped(this, item, move |rows| {
             Action::SetCharge(rows, Some(id))
         }))
+}
+
+/// A charge change: to every module of the same type or just the selection, as the "Change
+/// charge in all modules of the same type" preference says, with Ctrl or Alt doing the other.
+fn ammo_scoped(
+    this: &WeakEntity<Gyfa>,
+    item: RowRef,
+    action: impl Fn(Vec<RowRef>) -> Action + 'static,
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    handler(this, move |g, event, _, cx| {
+        let default = if g.saved.preferences.general.ammo_change_all {
+            Scope::Similar
+        } else {
+            Scope::Selection
+        };
+        let targets = g.targets(item, Scope::from_click(default, event));
+        g.apply(action(targets), cx);
+    })
 }
 
 /// A submenu of charges between pyfa's "Less Damage" and "More Damage" markers.
@@ -882,10 +989,9 @@ fn charge_submenu(
                     }
                 }
             }
-            menu.item(entry(IconName::CircleX, "Empty").on_click(scoped(
+            menu.item(entry(IconName::CircleX, "Empty").on_click(ammo_scoped(
                 &this,
                 item,
-                Scope::Similar,
                 |rows| Action::SetCharge(rows, None),
             )))
         },
@@ -992,7 +1098,7 @@ fn variations_submenu(
 }
 
 /// A module's charges, structured the way pyfa's Charge menu shows them.
-enum ChargeMenu {
+pub(super) enum ChargeMenu {
     /// Families of the same charge in different grades, from long range to short.
     Turret(Vec<Vec<TypeId>>),
     /// By damage type, each from less damage to more.
@@ -1000,7 +1106,11 @@ enum ChargeMenu {
     Flat(Vec<TypeId>),
 }
 
-fn structure_charges(catalog: &Catalog, module: &ItemType, charges: &[TypeId]) -> ChargeMenu {
+pub(super) fn structure_charges(
+    catalog: &Catalog,
+    module: &ItemType,
+    charges: &[TypeId],
+) -> ChargeMenu {
     let charges: Vec<&ItemType> = charges.iter().filter_map(|&c| catalog.get(c)).collect();
     let damage = |c: &ItemType| c.damage.iter().sum::<f64>();
     let name_base = |c: &ItemType| {
@@ -1134,7 +1244,7 @@ fn fitting_rows(fit: &Fit, stats: &Stats) -> Vec<Row> {
 }
 
 /// Published charges that fit a module type, by name.
-fn compatible_charges(catalog: &Catalog, module: TypeId) -> Vec<TypeId> {
+pub(super) fn compatible_charges(catalog: &Catalog, module: TypeId) -> Vec<TypeId> {
     let Some(m) = catalog.get(module).filter(|m| !m.charge_groups.is_empty()) else {
         return Vec::new();
     };

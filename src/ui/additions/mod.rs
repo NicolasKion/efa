@@ -3,11 +3,16 @@
 
 mod boosters;
 mod cargo;
+mod command;
 mod drones;
+mod fighters;
 mod implants;
+mod linked;
 mod notes;
+mod projected;
 
 pub(super) use cargo::{drop_transfer, goes_to_cargo};
+pub(super) use linked::{FitDrag, Link};
 
 use std::rc::Rc;
 
@@ -27,11 +32,14 @@ use gpui_kit::{
 
 use super::{
     Action, AddKind, AdditionsTab, Gyfa, Loaded,
+    item_stats::{StatsOf, stats_entry},
     widgets::{entry, icon_label, item_entry},
 };
 use crate::{
     data::{Catalog, Kind, TypeId},
+    engine::FitItem,
     fit::{Fit, split_count},
+    preferences::AdditionsLabels,
 };
 
 const ROW_HEIGHT: f32 = 28.;
@@ -67,6 +75,34 @@ impl AddKind {
             Self::Boosters => fit.boosters.iter().map(|b| (b.type_id, 1)).collect(),
             Self::Cargo => fit.cargo.clone(),
         }
+    }
+}
+
+/// The number in an additions tab's name, as pyfa's "Extra info in Additions panel tab names"
+/// picks it: active items, all items, or none. Cargo counts stacks either way, as in pyfa.
+fn tab_count(
+    fit: &Fit,
+    tab: AdditionsTab,
+    labels: AdditionsLabels,
+    character_implants: &[TypeId],
+) -> usize {
+    let active = labels == AdditionsLabels::Active;
+    match (labels, tab) {
+        (AdditionsLabels::None, _) | (_, AdditionsTab::Notes) => 0,
+        (_, AdditionsTab::Drones) => fit
+            .drones
+            .iter()
+            .map(|d| if active { d.active } else { d.count } as usize)
+            .sum(),
+        (_, AdditionsTab::Implants) => fit
+            .applied_implants(character_implants)
+            .filter(|&(_, on)| on || !active)
+            .count(),
+        (_, AdditionsTab::Boosters) => fit.boosters.iter().filter(|b| b.active || !active).count(),
+        (_, AdditionsTab::Cargo) => fit.cargo.len(),
+        (_, AdditionsTab::Fighters) => fit.fighters.iter().filter(|f| f.active || !active).count(),
+        (_, AdditionsTab::Projected) => fit.projected.len(),
+        (_, AdditionsTab::Command) => fit.command.iter().filter(|c| c.active || !active).count(),
     }
 }
 
@@ -106,18 +142,24 @@ impl Gyfa {
         };
         let fit = &self.saved.fits[current];
         let theme = cx.theme();
+        let labels = self.saved.preferences.general.additions_labels;
         let tabs = [
-            (AdditionsTab::Drones, "Drones", fit.drones.len()),
+            (AdditionsTab::Drones, "Drones"),
+            (AdditionsTab::Fighters, "Fighters"),
+            (AdditionsTab::Implants, "Implants"),
+            (AdditionsTab::Boosters, "Boosters"),
+            (AdditionsTab::Cargo, "Cargo"),
+            (AdditionsTab::Projected, "Projected"),
+            (AdditionsTab::Command, "Command"),
+            (AdditionsTab::Notes, "Notes"),
+        ]
+        .map(|(tab, label)| {
             (
-                AdditionsTab::Implants,
-                "Implants",
-                fit.applied_implants(crate::engine::CHARACTER_IMPLANTS)
-                    .count(),
-            ),
-            (AdditionsTab::Boosters, "Boosters", fit.boosters.len()),
-            (AdditionsTab::Cargo, "Cargo", fit.cargo.len()),
-            (AdditionsTab::Notes, "Notes", 0),
-        ];
+                tab,
+                label,
+                tab_count(fit, tab, labels, self.character_implants()),
+            )
+        });
         let tab_bar = h_flex()
             .gap_1()
             .p_1()
@@ -128,7 +170,11 @@ impl Gyfa {
             .children(tabs.into_iter().map(|(tab, label, count)| {
                 let selected = self.additions_tab == tab;
                 let text = if tab == AdditionsTab::Notes {
-                    notes::tab_title(fit)
+                    if labels == AdditionsLabels::None {
+                        label.to_owned()
+                    } else {
+                        notes::tab_title(fit)
+                    }
                 } else if count > 0 {
                     format!("{label} ({count})")
                 } else {
@@ -159,6 +205,9 @@ impl Gyfa {
             AdditionsTab::Boosters => self.boosters_tab(loaded, cx),
             AdditionsTab::Cargo => self.cargo_tab(loaded, cx),
             AdditionsTab::Notes => self.notes_tab(loaded, cx),
+            AdditionsTab::Fighters => self.fighters_tab(loaded, cx),
+            AdditionsTab::Projected => self.projected_tab(loaded, cx),
+            AdditionsTab::Command => self.command_tab(loaded, cx),
         };
         v_flex()
             .size_full()
@@ -261,7 +310,13 @@ fn addition_menu(
         }
     };
 
-    let mut menu = menu;
+    let stats_of = match kind {
+        AddKind::Drones => StatsOf::Fitted(FitItem::Drone(i)),
+        AddKind::Implants => StatsOf::Fitted(FitItem::Implant(type_id)),
+        AddKind::Boosters => StatsOf::Fitted(FitItem::Booster(type_id)),
+        AddKind::Cargo => StatsOf::Type(type_id),
+    };
+    let mut menu = menu.item(stats_entry(this, category, stats_of));
     if t.market_group
         .is_some_and(|g| catalog.market_groups.contains_key(&g))
     {
@@ -324,7 +379,7 @@ fn addition_menu(
         ));
     }
     let variations = catalog.variations_of(type_id);
-    if variations.len() > 1 {
+    if variations.len() > 1 && super::hub::preferences(cx).context_menus.variations {
         let entries: Vec<(TypeId, String)> =
             variations.iter().map(|&v| (v, catalog.name(v))).collect();
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
@@ -353,7 +408,12 @@ fn addition_menu(
             },
         );
     }
-    if kind == AddKind::Cargo {
+    if kind == AddKind::Drones
+        && let Some(target) = super::characters::stack_target(loaded, type_id)
+    {
+        menu = super::characters::skills_submenu(menu, this, loaded, target, window, cx);
+    }
+    if kind == AddKind::Cargo && super::hub::preferences(cx).context_menus.cargo_fill {
         let this = this.clone();
         menu = menu.item(
             entry(IconName::Inbox, format!("Fill Cargo With {category}")).on_click(
@@ -381,6 +441,12 @@ fn misc_entries(
     clicked: Option<usize>,
     cx: &App,
 ) -> PopupMenu {
+    if !super::hub::preferences(cx)
+        .context_menus
+        .additions_copy_paste
+    {
+        return menu;
+    }
     let noun = kind.noun();
     let has_rows = this
         .upgrade()

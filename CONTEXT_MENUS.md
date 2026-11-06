@@ -2,7 +2,7 @@
 
 152 menu entries in 35 right-click contexts (pyfa ContextMenu registry plus 4 hand-built menus).
 gyfa progress is tracked per line below; fitting rows have Shift/Ctrl selection and Ctrl/Alt "all similar" now.
-Biggest gaps: projected pane (29 incl. env effects), market item actions (9), module extras (variations, mutaplasmids, spool, RAH, fill, skills), drone/fighter quantity and abilities, command fits and generic links, ship menu (tactical mode, sec status), additions copy/paste, stats-pane and graph options.
+Biggest gaps: market item actions (9), module extras (variations, mutaplasmids, spool, RAH, fill, skills), generic links, ship menu (tactical mode, sec status), additions copy/paste, stats-pane and graph options.
 
 Legend: `[x]` in gyfa, `[~]` partial, `[ ]` missing. Line format: label | when it shows | what it does | pyfa file (in gui/builtinContextMenus/ unless a path is given).
 
@@ -22,44 +22,44 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 - [x] Charge | module has loadable charges (fitting or projected module) | submenu by module kind: turrets "Long Range" list with per-family submenus ("Less Damage"/"More Damage"), missiles by damage type (EM/Thermal/Explosive/Kinetic/Mixed), mining crystals by ore class, else flat list; last item "Empty" unloads. Applies to all similar modules by default (pref ammoChangeAll), Ctrl/Alt inverts to selection only. GuiChangeLocalModuleChargesCommand | moduleAmmoChange.py
 - [x] Spoolup Cycles | module group "Precursor Weapon" or "Mutadaptive Remote Armor Repairer" (pref spoolup) | checkable list of cycle counts (default marked "(default)", min..max, current) + "Reset". GuiChangeLocalModuleSpoolCommand | moduleSpool.py
 - [ ] RAH Damage Pattern | module group "Armor Resistance Shift Hardener" | checkable: "Fit Pattern", "Do Not Adapt", separator, damage profiles tree (builtin + user, categories as submenus). sFit.setRahPattern | moduleRahPattern.py, shared/patterns.py
-- [ ] {Module} Stats | always | opens item stats window (Shift reuses last window) | itemStats.py
+- [x] {Module} Stats | always | opens item stats window (Shift reuses last window) | itemStats.py
 - [x] {Module} Market Group | item has a market group (mutated: base item's) | jumps market browser to the item | itemMarketJump.py
 - [x] Remove {Module} | always | removes selection (multi); Ctrl/Alt removes all similar. GuiRemoveLocalModuleCommand | itemRemove.py
 - [x] Variations | item has 2+ variations, not hidden (pref metaSwap) | submenu of meta variants grouped by meta group (disabled header rows), sorted by meta level; unfittable ones disabled. Swaps selection modules with identical variation set; Ctrl/Alt all similar. GuiChangeLocalModuleMetasCommand | itemVariationChange.py
 - [ ] Apply Mutaplasmid / Revert to {base} | item has mutaplasmids or is mutated | not mutated: submenu of mutaplasmids (Glorified sorted after base name); mutated: plain entry reverting to base item. GuiConvertMutatedLocalModuleCommand / GuiRevertMutatedLocalModuleCommand | itemMutations.py
 - [x] Fill With {Module} | always (pref moduleFill) | clones the module into all free slots of that rack. GuiFillWithClonedLocalModulesCommand | moduleFill.py
 - [ ] Copy Module to Clipboard | module is mutated | copies EFT mutant block (item, mutaplasmid, attrs) | moduleMutatedExport.py
-- [ ] Change {Module} Skills | some skill modifies a non-zero attr of the item (pref changeAffectingSkills) | submenu per affecting skill, each with "Not Learned", "Level 0".."Level 5" (checked current); changes character skill level and refreshes fit | skillAffectors.py
+- [x] Change {Module} Skills | some skill modifies a non-zero attr of the item (pref changeAffectingSkills) | submenu per affecting skill, each with "Not Learned", "Level 0".."Level 5" (checked current); changes character skill level and refreshes fit | skillAffectors.py. gyfa lists the skill's current level after its name and greys the levels out for All 0/All 5, which ignore changes in pyfa too; no visibility pref yet
 
 ### fittingCharge
-- [ ] {Charge} Stats | charge loaded | stats window for the charge | itemStats.py
+- [x] {Charge} Stats | charge loaded | stats window for the charge | itemStats.py
 - [x] {Charge} Market Group | charge has market group | jump to charge in market | itemMarketJump.py
-- [ ] Change {Charge} Skills | skills affect charge attrs | as above, on chargeModifiedAttributes | skillAffectors.py
+- [x] Change {Charge} Skills | skills affect charge attrs | as above, on chargeModifiedAttributes | skillAffectors.py
 
 ### fittingMode
-- [ ] Tactical Mode Stats | right-click the mode row | stats window for the mode item | itemStats.py
+- [x] Tactical Mode Stats | right-click the mode row | stats window for the mode item | itemStats.py
 
 ### fittingShip
 - [x] Tactical Mode | ship has modes (T3 destroyers) | radio submenu Defense/Propulsion/Sharpshooter (or Primary/Secondary/Tertiary). GuiChangeShipModeCommand | shipModeChange.py
-- [ ] Ship Stats / Citadel Stats | always | stats window for the ship | itemStats.py
+- [x] Ship Stats / Citadel Stats | always | stats window for the ship | itemStats.py (no citadels in gyfa yet)
 - [ ] Citadel System Security | fit is a structure | radio: High Security, Low Security, Null Security, W-Space. GuiChangeFitSystemSecurityCommand | fitSystemSecurity.py
 - [x] Pilot Security Status | ship is Pacifier, Enforcer, Marshal, Sidewinder, Cobra or Python | radio: "Character (x.xx)", "Custom (x)" (dialog, -10..5), separator, presets -10,-8,-6,-4,-2,0,1,2,3,4,5. GuiChangeFitPilotSecurityCommand | fitPilotSecurity.py
 - [x] Open in Fitting Browser | unless fitting browser already shows this ship's fit list | switches to fittings tab, stage 3 for the ship | shipJump.py
-- [ ] Change Ship Skills / Change Citadel Skills | skills affect ship attrs | skill level submenu as above | skillAffectors.py
+- [x] Change Ship Skills / Change Citadel Skills | skills affect ship attrs | skill level submenu as above | skillAffectors.py. Always "Ship": gyfa has no citadel fits
 
 ## Drones pane (gui/builtinAdditionPanes/droneView.py)
 
 Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 
 ### droneItem
-- [ ] Drone Stats | row clicked | stats window | itemStats.py. Not yet: no item stats window
+- [x] Drone Stats | row clicked | stats window | itemStats.py
 - [x] Drone Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Drone Stack | row clicked | removes whole stacks of selection (multi). GuiRemoveLocalDronesCommand | itemRemove.py
 - [x] Change Drone Quantity | row clicked | dialog "New Amount", sets stack size. GuiChangeLocalDroneAmountCommand | itemAmountChange.py
 - [x] Split Drone Stack | stack amount > 1 | dialog for amount, splits into a new stack. GuiSplitLocalDroneStackCommand | droneSplitStack.py
 - [x] Variations | 2+ variations | variation submenu, swaps selected drones with same variation set. GuiChangeLocalDroneMetasCommand | itemVariationChange.py
 - [ ] Apply Mutaplasmid / Revert to {base} | drone has mutaplasmids or is mutated | as modules. GuiConvertMutatedLocalDroneCommand / GuiRevertMutatedLocalDroneCommand | itemMutations.py. Not yet: needs mutaplasmid data in the catalog, mutated items in the fit model and EFT, and the stats window to edit rolls; best done with modules
-- [ ] Change Drone Skills | skills affect drone | skill level submenu | skillAffectors.py. Not yet: no characters, every skill is at V
+- [x] Change Drone Skills | skills affect drone | skill level submenu | skillAffectors.py
 
 ### droneItemMisc
 - [x] Copy Selected Drones | selection non-empty (pref additionsCopyPaste) | EFT-style export of selection to clipboard | additionsExportSelection.py
@@ -69,23 +69,23 @@ Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 ## Fighters pane (gui/builtinAdditionPanes/fighterView.py)
 
 ### fighterItem
-- [ ] Abilities | row clicked | checkable list of implemented abilities; toggles on selection, Ctrl/Alt on all similar. GuiToggleLocalFighterAbilityStateCommand | fighterAbilities.py
+- [x] Abilities | row clicked | checkable list of implemented abilities; toggles on selection, Ctrl/Alt on all similar. GuiToggleLocalFighterAbilityStateCommand | fighterAbilities.py
 - [ ] Fighter Stats | row clicked | stats window | itemStats.py
-- [ ] Fighter Market Group | has market group | market jump | itemMarketJump.py
-- [ ] Remove Fighter | row clicked | removes selection, Ctrl/Alt all similar. GuiRemoveLocalFightersCommand | itemRemove.py
-- [ ] Change Fighter Quantity | row clicked | dialog, sets squadron size. GuiChangeLocalFighterAmountCommand | itemAmountChange.py
-- [ ] Variations | 2+ variations | variation swap, Ctrl/Alt similar. GuiChangeLocalFighterMetasCommand | itemVariationChange.py
+- [x] Fighter Market Group | has market group | market jump | itemMarketJump.py
+- [x] Remove Fighter | row clicked | removes selection, Ctrl/Alt all similar. GuiRemoveLocalFightersCommand | itemRemove.py
+- [x] Change Fighter Quantity | row clicked | dialog, sets squadron size. GuiChangeLocalFighterAmountCommand | itemAmountChange.py
+- [x] Variations | 2+ variations | variation swap, Ctrl/Alt similar. GuiChangeLocalFighterMetasCommand | itemVariationChange.py
 - [ ] Change Fighter Skills | skills affect fighter | skill level submenu | skillAffectors.py
 
 ### fighterItemMisc
-- [ ] Copy Selected Fighters | selection | clipboard export | additionsExportSelection.py
-- [ ] Copy All Fighters | fit has fighters | clipboard export | additionsExportAll.py
-- [ ] Paste Fighters | clipboard non-empty | import. GuiImportLocalFightersCommand | additionsImport.py
+- [x] Copy Selected Fighters | selection | clipboard export | additionsExportSelection.py
+- [x] Copy All Fighters | fit has fighters | clipboard export | additionsExportAll.py
+- [x] Paste Fighters | clipboard non-empty | import. GuiImportLocalFightersCommand | additionsImport.py
 
 ## Cargo pane (gui/builtinAdditionPanes/cargoView.py)
 
 ### cargoItem
-- [ ] {Category} Stats | row clicked | stats window (needs the item stats window) | itemStats.py
+- [x] {Category} Stats | row clicked | stats window | itemStats.py
 - [x] {Category} Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove {Category} Stack | row clicked | removes selected cargo stacks (multi). GuiRemoveCargosCommand | itemRemove.py
 - [x] Change Selection Quantity | row clicked | dialog, sets amount on all selected stacks; 0 removes them. GuiChangeCargosAmountCommand | itemAmountChange.py
@@ -102,13 +102,13 @@ Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 Context depends on implant source: fit implants use implantItem/implantItemMisc, character implants use implantItemChar/implantItemMiscChar.
 
 ### implantItem
-- [ ] Implant Stats | row clicked | stats window | itemStats.py
+- [x] Implant Stats | row clicked | stats window | itemStats.py
 - [x] Implant Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Implant | row clicked | removes selection (multi). GuiRemoveImplantsCommand | itemRemove.py
 - [x] Variations | 2+ variations | variation submenu (unsorted by meta), swaps clicked implant. GuiChangeImplantMetaCommand | itemVariationChange.py
 
 ### implantItemChar
-- [ ] Implant Stats | row clicked | stats window | itemStats.py
+- [x] Implant Stats | row clicked | stats window | itemStats.py
 - [x] Implant Market Group | has market group | market jump | itemMarketJump.py
 
 ### implantItemMisc / implantItemMiscChar
@@ -122,7 +122,7 @@ Context depends on implant source: fit implants use implantItem/implantItemMisc,
 
 ### boosterItem
 - [x] Side Effects | booster has an implemented side effect | checkable list of side effects; toggles one. GuiToggleBoosterSideEffectStateCommand | boosterSideEffects.py
-- [ ] Booster Stats | row clicked | stats window | itemStats.py
+- [x] Booster Stats | row clicked | stats window | itemStats.py
 - [x] Booster Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Booster | row clicked | removes selection (multi). GuiRemoveBoostersCommand | itemRemove.py
 - [x] Variations | 2+ variations | boosters of the same slot in the same market group (or none), sorted by side effect chance (or name if > 7); swaps the clicked booster only, keeping state and side effects. GuiChangeBoosterMetaCommand | itemVariationChange.py
@@ -137,104 +137,104 @@ Context depends on implant source: fit implants use implantItem/implantItemMisc,
 Contexts: one of projectedModule (+ projectedCharge if loaded) / projectedDrone / projectedFighter / projectedFit, then always projected. Right-click on the state column opens no menu. itemContext is "Projected Item".
 
 ### projectedModule (incl. environment effects, which are projected modules)
-- [ ] Charge | module has loadable charges | same submenu as fittingModule. GuiChangeProjectedModuleChargesCommand | moduleAmmoChange.py
-- [ ] Spoolup Cycles | Precursor Weapon / Mutadaptive RR | as fittingModule. GuiChangeProjectedModuleSpoolCommand | moduleSpool.py
+- [x] Charge | module has loadable charges | same submenu as fittingModule. GuiChangeProjectedModuleChargesCommand | moduleAmmoChange.py
+- [x] Spoolup Cycles | Precursor Weapon / Mutadaptive RR | as fittingModule. GuiChangeProjectedModuleSpoolCommand | moduleSpool.py
 - [ ] Projected Item Stats | row clicked | stats window | itemStats.py
-- [ ] Projected Item Market Group | has market group | market jump | itemMarketJump.py
-- [ ] Remove Projected Item | row clicked | removes selection, Ctrl/Alt all similar. GuiRemoveProjectedItemsCommand | itemRemove.py
-- [ ] Change Projected Item Range | not an exclusive system effect | dialog "New Range, km" (empty = no range) for selection, Ctrl/Alt similar. GuiChangeProjectedItemsProjectionRangeCommand | itemProjectionRange.py
-- [ ] Variations | 2+ variations | variation swap (no fit check). GuiChangeProjectedModuleMetasCommand | itemVariationChange.py
+- [x] Projected Item Market Group | has market group | market jump | itemMarketJump.py
+- [x] Remove Projected Item | row clicked | removes selection, Ctrl/Alt all similar. GuiRemoveProjectedItemsCommand | itemRemove.py
+- [x] Change Projected Item Range | not an exclusive system effect | dialog "New Range, km" (empty = no range) for selection, Ctrl/Alt similar. GuiChangeProjectedItemsProjectionRangeCommand | itemProjectionRange.py
+- [x] Variations | 2+ variations | variation swap (no fit check). GuiChangeProjectedModuleMetasCommand | itemVariationChange.py
 
 ### projectedCharge
 - [ ] {Charge} Stats | charge loaded | stats window | itemStats.py
-- [ ] {Charge} Market Group | has market group | market jump | itemMarketJump.py
+- [x] {Charge} Market Group | has market group | market jump | itemMarketJump.py
 
 ### projectedDrone
 - [ ] Projected Item Stats | row clicked | stats window | itemStats.py
-- [ ] Projected Item Market Group | has market group | market jump | itemMarketJump.py
-- [ ] Remove Projected Item Stack | row clicked | removes selection. GuiRemoveProjectedItemsCommand | itemRemove.py
-- [ ] Change Projected Item Quantity | row clicked | dialog, amount. GuiChangeProjectedDroneAmountCommand | itemAmountChange.py
-- [ ] Change Projected Item Range | row clicked | range dialog. GuiChangeProjectedItemsProjectionRangeCommand | itemProjectionRange.py
-- [ ] Variations | 2+ variations | variation swap. GuiChangeProjectedDroneMetasCommand | itemVariationChange.py
+- [x] Projected Item Market Group | has market group | market jump | itemMarketJump.py
+- [x] Remove Projected Item Stack | row clicked | removes selection. GuiRemoveProjectedItemsCommand | itemRemove.py
+- [x] Change Projected Item Quantity | row clicked | dialog, amount. GuiChangeProjectedDroneAmountCommand | itemAmountChange.py
+- [x] Change Projected Item Range | row clicked | range dialog. GuiChangeProjectedItemsProjectionRangeCommand | itemProjectionRange.py
+- [x] Variations | 2+ variations | variation swap. GuiChangeProjectedDroneMetasCommand | itemVariationChange.py
 
 ### projectedFighter
-- [ ] Abilities | row clicked | ability toggles. GuiToggleProjectedFighterAbilityStateCommand | fighterAbilities.py
+- [x] Abilities | row clicked | ability toggles. GuiToggleProjectedFighterAbilityStateCommand | fighterAbilities.py
 - [ ] Projected Item Stats | row clicked | stats window | itemStats.py
-- [ ] Projected Item Market Group | has market group | market jump | itemMarketJump.py
-- [ ] Remove Projected Item | row clicked | removes selection, Ctrl/Alt similar. GuiRemoveProjectedItemsCommand | itemRemove.py
-- [ ] Change Projected Item Quantity | row clicked | dialog, squadron size. GuiChangeProjectedFighterAmountCommand | itemAmountChange.py
-- [ ] Change Projected Item Range | row clicked | range dialog. GuiChangeProjectedItemsProjectionRangeCommand | itemProjectionRange.py
-- [ ] Variations | 2+ variations | variation swap, Ctrl/Alt similar. GuiChangeProjectedFighterMetasCommand | itemVariationChange.py
+- [x] Projected Item Market Group | has market group | market jump | itemMarketJump.py
+- [x] Remove Projected Item | row clicked | removes selection, Ctrl/Alt similar. GuiRemoveProjectedItemsCommand | itemRemove.py
+- [x] Change Projected Item Quantity | row clicked | dialog, squadron size. GuiChangeProjectedFighterAmountCommand | itemAmountChange.py
+- [x] Change Projected Item Range | row clicked | range dialog. GuiChangeProjectedItemsProjectionRangeCommand | itemProjectionRange.py
+- [x] Variations | 2+ variations | variation swap, Ctrl/Alt similar. GuiChangeProjectedFighterMetasCommand | itemVariationChange.py
 
 ### projectedFit
-- [ ] Open Fit in New Tab | projected fit is not the active fit | opens it in a new tab | fitOpenNewTab.py
-- [ ] Remove Projected Item Stack | row clicked | removes selected projected fits. GuiRemoveProjectedItemsCommand | itemRemove.py
-- [ ] Change Projected Item Quantity | row clicked | dialog (0-20), number of copies projected. GuiChangeProjectedFitAmountCommand | itemAmountChange.py
-- [ ] Change Projected Item Range | row clicked | range dialog. GuiChangeProjectedItemsProjectionRangeCommand | itemProjectionRange.py
+- [x] Open Fit in New Tab | projected fit is not the active fit | opens it in a new tab | fitOpenNewTab.py
+- [x] Remove Projected Item Stack | row clicked | removes selected projected fits. GuiRemoveProjectedItemsCommand | itemRemove.py
+- [x] Change Projected Item Quantity | row clicked | dialog (0-20), number of copies projected. GuiChangeProjectedFitAmountCommand | itemAmountChange.py
+- [x] Change Projected Item Range | row clicked | range dialog. GuiChangeProjectedItemsProjectionRangeCommand | itemProjectionRange.py
 
 ### projected (pane background, always last)
-- [ ] Add Fit... | always | fit browser dialog (excludes already added), projects chosen fits | fitAddBrowse.py
-- [ ] Add Currently Open Fit | active fit exists | submenu "Ship: Fit" for each open tab; projects it | fitAddCurrentlyOpen.py
-- [ ] Add Environmental Effect | always | submenu: Metaliminal Storm (Electrical/Exotic/Gamma/Plasma, by strength), Wormhole (Black Hole, Cataclysmic Variable, Magnetar, Pulsar, Red Giant, Wolf Rayet, by class), Abyssal Weather (5 weathers by tier, plus Localized: Bioluminescence/Tachyon/Filament clouds), Sansha Incursion, Drifter Incursion, Triglavian Invasion, FW/Insurgency, IHub Upgrades (Electric/Plasma/Exotic/Gamma). GuiAddProjectedModuleCommand | envEffectAdd.py
+- [x] Add Fit... | always | fit browser dialog (excludes already added), projects chosen fits | fitAddBrowse.py
+- [x] Add Currently Open Fit | active fit exists | submenu "Ship: Fit" for each open tab; projects it | fitAddCurrentlyOpen.py
+- [x] Add Environmental Effect | always | submenu: Metaliminal Storm (Electrical/Exotic/Gamma/Plasma, by strength), Wormhole (Black Hole, Cataclysmic Variable, Magnetar, Pulsar, Red Giant, Wolf Rayet, by class), Abyssal Weather (5 weathers by tier, plus Localized: Bioluminescence/Tachyon/Filament clouds), Sansha Incursion, Drifter Incursion, Triglavian Invasion, FW/Insurgency, IHub Upgrades (Electric/Plasma/Exotic/Gamma). GuiAddProjectedModuleCommand | envEffectAdd.py. gyfa: effects act on the fit like pyfa; abyssal weather and clouds project onto the ship, everything else is a fit-wide effect. No range for them: refine projects environment effects without one
 
 ## Command pane (gui/builtinAdditionPanes/commandView.py)
 
 Contexts: commandFit (row is a fit, not a generic link), separator, commandView (always).
 
 ### commandFit
-- [ ] Open Fit in New Tab | not the active fit | opens it in a new tab | fitOpenNewTab.py
-- [ ] Remove Command Fit | row clicked | removes selected command fits. GuiRemoveCommandFitsCommand | itemRemove.py
+- [x] Open Fit in New Tab | not the active fit | opens it in a new tab | fitOpenNewTab.py
+- [x] Remove Command Fit | row clicked | removes selected command fits. GuiRemoveCommandFitsCommand | itemRemove.py
 
 ### commandView
-- [ ] Add Fit... | always | fit browser dialog, adds as command fits | fitAddBrowse.py
-- [ ] Add Currently Open Fit | active fit exists | submenu of open tabs | fitAddCurrentlyOpen.py
-- [ ] Command Fits | active fit and any saved fit carries a command burst | submenu of those fits ("(Ship) Fit"; grouped per ship if 15+). GuiAddCommandFitsCommand | commandFitAdd.py
-- [ ] Generic Links | active fit | submenu: "Max Links", separator, "All Links" (strength x mindlink grid), separator, Shield/Armor/Skirmish/Information/Expedition/Mining category submenus, each link type with leaves "5%/lvl + Mindlink".."0%/lvl + Mindlink", separator, "5%/lvl".."0%/lvl". Injects warfare buffs without a booster fit. GuiAddCommandLinkCommand | commandLinkAdd.py, eos/saveddata/commandLink.py
+- [x] Add Fit... | always | fit browser dialog, adds as command fits | fitAddBrowse.py. gyfa: a searchable list of saved fits, click to pick, double-click to add one
+- [x] Add Currently Open Fit | active fit exists | submenu of open tabs | fitAddCurrentlyOpen.py
+- [x] Command Fits | active fit and any saved fit carries a command burst | submenu of those fits ("(Ship) Fit"; grouped per ship if 15+). GuiAddCommandFitsCommand | commandFitAdd.py
+- [ ] Generic Links | active fit | submenu: "Max Links", separator, "All Links" (strength x mindlink grid), separator, Shield/Armor/Skirmish/Information/Expedition/Mining category submenus, each link type with leaves "5%/lvl + Mindlink".."0%/lvl + Mindlink", separator, "5%/lvl".."0%/lvl". Injects warfare buffs without a booster fit. GuiAddCommandLinkCommand | commandLinkAdd.py, eos/saveddata/commandLink.py. Left out: refine has no way to add warfare buffs without a burst module on a fit, and a stand-in fit cannot reach pyfa's 0-5%/lvl ship bonus strengths
 
 ## Market browser item list (gui/builtinMarketBrowser/itemView.py)
 
 Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
-- [ ] {Category} Stats | always | stats window | itemStats.py
+- [x] {Category} Stats | always | stats window | itemStats.py
 - [x] {Category} Market Group | marketItemMisc only | jumps to the item's group | itemMarketJump.py
 - [x] Fill With Module | active fit, category Module (pref moduleFill) | adds the module to every free slot. GuiFillWithNewLocalModulesCommand | itemFill.py
 - [x] Add {Drone} to Drone Bay (xN) | active fit, category Drone, room for >= 1 | adds stack sized to bay/bandwidth limit. GuiAddLocalDroneCommand | droneAddStack.py
 - [x] Add {Category} to Cargo | active fit (structures: charges only) | adds 1 to cargo. GuiAddCargoCommand | cargoAdd.py
 - [x] Fill Cargo With {Category} | active fit, item is charge or commodity (gyfa: any cargo-only item) | adds max units that fit. GuiAddCargoCommand | cargoFill.py
 - [x] Add {Charge} to Cargo (x1000) / (x8) for Scan Probes | active fit, category Charge | adds 1000 (or 8). GuiAddCargoCommand | cargoAddAmmo.py
-- [ ] Project {Category} onto Fit | active non-structure fit, item has a projected effect (pref project) | adds as projected module/drone/fighter. GuiAddProjectedModule/Drone/FighterCommand | itemProject.py
-- [ ] Set {Category} as Damage Pattern | active fit, item has em/therm/kin/exp damage attrs (pref ammoPattern) | sets fit damage pattern to the item's damage ratio | ammoToDmgPattern.py
+- [x] Project {Category} onto Fit | active non-structure fit, item has a projected effect (pref project) | adds as projected module/drone/fighter. GuiAddProjectedModule/Drone/FighterCommand | itemProject.py
+- [x] Set {Category} as Damage Pattern | active fit, item has em/therm/kin/exp damage attrs (pref ammoPattern) | sets fit damage pattern to the item's damage ratio | ammoToDmgPattern.py; gyfa shows it for items with nonzero damage, the pattern is called Selected Ammo as in pyfa
 
 ## Fitting browser (gui/builtinShipBrowser)
 
 ### baseShip (ship row, shipItem.py)
-- [ ] Ship Basic Stats | always | stats window for the ship type | itemStats.py
+- [~] Ship Basic Stats | always | stats window for the ship type | itemStats.py. gyfa has no ship list stage, so it sits on the ship header of a narrowed fit list
 
 ### fit row (fitItem.py, hand-built wx.Menu, only when a fit is active)
 - [x] Open in new tab | active fit exists | opens the fit in a new tab | gui/builtinShipBrowser/fitItem.py
-- [ ] Project onto Active Fit | active fit exists | projects this fit onto the active fit | gui/builtinShipBrowser/fitItem.py
-- [ ] Add Command Booster | active fit exists | adds this fit as command fit | gui/builtinShipBrowser/fitItem.py
+- [x] Project onto Active Fit | active fit exists | projects this fit onto the active fit | gui/builtinShipBrowser/fitItem.py
+- [x] Add Command Booster | active fit exists | adds this fit as command fit | gui/builtinShipBrowser/fitItem.py
 
 ## Character selection, missing-skills icon (gui/characterSelection.py, hand-built)
-- [ ] Grant Missing Skills | fit needs skills | raises character skills to fit requirements | gui/characterSelection.py
-- [ ] Copy Missing Skills | same | clipboard, one skill per line | gui/characterSelection.py
-- [ ] Copy Missing Skills (condensed) | same | clipboard, condensed | gui/characterSelection.py
-- [ ] Copy Missing Skills (EVEMon) | same | clipboard, EVEMon plan XML | gui/characterSelection.py
+- [x] Grant Missing Skills | fit needs skills | raises character skills to fit requirements | gui/characterSelection.py. Pending until the character is saved, as in pyfa
+- [x] Copy Missing Skills | same | clipboard, one skill per line | gui/characterSelection.py
+- [x] Copy Missing Skills (condensed) | same | clipboard, condensed | gui/characterSelection.py
+- [x] Copy Missing Skills (EVEMon) | same | clipboard, "Name IV" lines with Roman numerals (not XML) | gui/characterSelection.py
 
 ## Character editor (gui/characterEditor.py)
 
 ### skillItem (skill tree leaf)
 - [ ] Skill Stats | always | stats window | itemStats.py
-- [ ] Unlearn, Level 0 .. Level 5 | character is not "All 0"/"All 5" (appended after separator) | sets skill level | gui/characterEditor.py
+- [x] Unlearn, Level 0 .. Level 5 | character is not "All 0"/"All 5" (appended after separator) | sets skill level | gui/characterEditor.py. Keys 0-5 too
 
 ### implantEditor (character implants list)
-- [ ] Apply Implant Set | any set exists | set submenu as above, adds to character | implantSetApply.py
+- [x] Apply Implant Set | any set exists | set submenu as above, adds to character | implantSetApply.py
 
 ## Item stats window (gui/builtinItemStatsViews)
 
 ### itemStats (Affected By tree node)
-- [ ] {Type} Stats | node is an item/container | opens stats window for that afflictor | itemStats.py, itemAffectedBy.py
+- [x] {Type} Stats | node is an item/container | opens stats window for that afflictor | itemStats.py, itemAffectedBy.py
 ### description / traits text (hand-built)
-- [ ] Copy | always | copies text | itemDescription.py, itemTraits.py
+- [x] Copy | always | copies text | itemDescription.py, itemTraits.py (copies the whole text; selecting and Ctrl+C copies a part)
 
 ## Stats pane panels (gui/statsPane.py, menu icon on panel header)
 
@@ -244,11 +244,11 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 - [x] Implants && Boosters | always | checkbox: include implants/boosters | priceOptions.py
 
 ### resistancesViewFull
-- [~] {damage pattern names} | always (disabled with no fit) | top-level checkable entries for root patterns (Uniform, Selected Ammo, ...) plus category submenus; sets fit damage pattern (EHP) | damagePatternChange.py; builtin patterns only, no user patterns yet
+- [x] {damage pattern names} | always (disabled with no fit) | top-level checkable entries for root patterns (Uniform, Selected Ammo, ...) plus category submenus; sets fit damage pattern (EHP) | damagePatternChange.py
 
 ### firepowerViewFull
 - [x] Factor in Reload Time | always (disabled with no fit) | checkbox, global setting, reload included in DPS | factorReload.py
-- [ ] Target Resists | active fit | checkable "No Profile", separator, target profile tree; sets fit target profile for applied DPS | targetProfile/switcher.py; left out until refine can apply damage to a profile instead of a projectee item
+- [x] Target Resists | active fit | checkable "No Profile", separator, target profile tree; sets fit target profile for applied DPS | targetProfile/switcher.py
 
 ## Graphs (graphs/gui)
 
@@ -263,9 +263,9 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 ### graphTgtList (targets list) then graphTgtListMisc
 - [x] Add Fit... | always | submenu of every fit | fitAddBrowse.py
 - [x] Add Currently Open Fit | always | open tabs submenu | fitAddCurrentlyOpen.py
-- [x] Add Target Profile | always | submenu: Ideal Target, builtin profile tree (user profiles once the profile editor lands) | targetProfile/adder.py
+- [x] Add Target Profile | always | submenu: Ideal Target, builtin and user profile tree | targetProfile/adder.py
 - [x] Resist Mode | fit row and ignoreResists off | radio Auto/Shield/Armor/Hull/Weighted Average | resistMode.py
-- [ ] Edit Target Profile | user (non-builtin) profile row | opens target profile editor | targetProfile/editor.py
+- [x] Edit Target Profile | user (non-builtin) profile row | opens target profile editor | targetProfile/editor.py
 - [x] Remove Target | row clicked | removes the row (also double-click) | itemRemove.py
 - [x] Open Fit in New Tab | fit row | opens a tab in the main window | fitOpenNewTab.py
 - [x] Lightness and line style | left-click the line swatch | pyfa's picker popups | graphLightness.py, graphLineStyle.py
@@ -418,12 +418,12 @@ refine API paths are under refine-core/src/api. "ui only" = no engine involvemen
 - Price toggles (Drones, Cargo, Implants && Boosters): ui only.
 - Damage pattern (resistances panel): yes, FitStats::get_stat_ehp(Some(DpsProfile)).
 - Factor in Reload Time: yes, StatTimeOptions::Sim with optional_reloads (Sol::set_default_optional_reloads, Module::set_optional_reload_override); burst DPS ignores reload.
-- Target Resists: partial, get_stat_dmg_applied needs a projectee item; no abstract resist/sig profile, would need a target ship item or own resist math on StatDmg.
+- Target Resists: yes, own resist math on get_stat_dmg per damage type, which is all pyfa's firepower view applies (no projectee needed).
 
 ## Graphs
 - Add Fit... / Add Currently Open Fit / Remove / Open in New Tab: ui only.
 - Plot with Different Ammo...: yes, Module::set_charge_type_id per sample (or scratch fit copies).
-- Add Target Profile: no projectee for abstract profiles in refine, so application is pyfa's math graph-side on refine's attributes; Edit Target Profile waits for the profile editor.
+- Add Target Profile / Edit Target Profile: menus are ui only (ui::profile_menus, ui::profile_editor); refine has no projectee for abstract profiles, so the graphs apply pyfa's math graph-side on refine's attributes.
 - Resist Mode: no engine (graph math choosing which layer's resists to apply).
 - Apply Projected Items: graph-side, the attacker's webs and painters from refine's attributes.
 - Ignore Target Resists: graph-side, refine's applied damage has no resists in it either.

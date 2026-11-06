@@ -19,6 +19,7 @@ fn main() {
         .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            gyfa::ui::init_menus(cx);
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::centered(size(px(1500.), px(900.)), cx)),
                 app_id: Some("gyfa".into()),

@@ -20,6 +20,10 @@ use super::{
     style::{self, Lightness, LineColor, LineStyle},
 };
 use crate::graphs::{defs::Column, plot::ResistMode, profiles::TargetProfile, snapshot::Ship};
+use crate::ui::{
+    profile_editor::open_target_profile_editor,
+    profile_menus::{FirstProfile, PickProfile, target_profile_menu},
+};
 
 /// A fit plotted, in its color.
 #[derive(Debug, Clone)]
@@ -369,11 +373,13 @@ pub fn targets(g: &mut GraphsWindow, cx: &mut Context<GraphsWindow>) -> AnyEleme
 
 /// The row a menu was opened on: its index, whether it is a fit, and the resist mode to offer
 /// (fits only, while resists count).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct TargetRow {
     index: usize,
     fit: bool,
     resist_mode: Option<ResistMode>,
+    /// A user profile's name, for "Edit Target Profile".
+    user_profile: Option<SharedString>,
 }
 
 fn target_menu(
@@ -387,27 +393,39 @@ fn target_menu(
 ) -> PopupMenu {
     let mut menu = add_fit_submenus(menu, this, fits, tabs, true, window, cx);
     let profiles = this.clone();
+    let user: Rc<Vec<crate::target_profile::TargetProfile>> =
+        Rc::new(this.upgrade().map_or_else(Vec::new, |g| {
+            g.read(cx).hub.read(cx).saved.target_profiles.clone()
+        }));
     menu = menu.submenu("Add Target Profile", window, cx, move |menu, window, cx| {
-        let add = |p: TargetProfile, this: Weak| {
-            move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                let p = p.clone();
-                with(&this, cx, |g, _| g.add_target(TargetKind::Profile(p)));
-            }
-        };
-        let menu = menu
-            .item(
-                PopupMenuItem::new("Ideal Target")
-                    .on_click(add(TargetProfile::ideal(), profiles.clone())),
-            )
-            .separator();
-        profile_tree(menu, &profiles, &[], window, cx, &add)
+        let this = profiles.clone();
+        let pick: PickProfile = Rc::new(move |profile, _, cx| {
+            let profile = profile.unwrap_or_else(crate::target_profile::TargetProfile::ideal);
+            with(&this, cx, |g, _| {
+                g.add_target(TargetKind::Profile(TargetProfile::from(&profile)));
+            });
+        });
+        target_profile_menu(menu, &user, None, FirstProfile::Ideal, &pick, window, cx)
     });
     if let Some(TargetRow {
         index: row,
         fit: is_fit,
         resist_mode,
+        user_profile,
     }) = row
     {
+        if let Some(name) = user_profile {
+            let this = this.clone();
+            menu = menu
+                .separator()
+                .item(
+                    PopupMenuItem::new("Edit Target Profile").on_click(move |_, _, cx| {
+                        let Some(g) = this.upgrade() else { return };
+                        let hub = g.read(cx).hub.clone();
+                        open_target_profile_editor(hub, Some(name.to_string()), cx);
+                    }),
+                );
+        }
         if let Some(mode) = resist_mode {
             let this = this.clone();
             menu = menu
@@ -452,48 +470,6 @@ fn target_menu(
                 },
             ));
         }
-    }
-    menu
-}
-
-/// pyfa's builtin profiles as a tree of their `[Category]` prefixes.
-fn profile_tree<F, H>(
-    menu: PopupMenu,
-    this: &Weak,
-    path: &[String],
-    window: &mut Window,
-    cx: &mut Context<PopupMenu>,
-    add: &F,
-) -> PopupMenu
-where
-    F: Fn(TargetProfile, Weak) -> H + Clone + 'static,
-    H: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    let mut menu = menu;
-    let mut seen: Vec<String> = Vec::new();
-    for profile in TargetProfile::builtins() {
-        let cats = profile.categories();
-        if cats.len() < path.len() || cats[..path.len()] != *path {
-            continue;
-        }
-        if cats.len() == path.len() {
-            menu = menu.item(
-                PopupMenuItem::new(profile.short_name().to_owned())
-                    .on_click(add(profile.clone(), this.clone())),
-            );
-            continue;
-        }
-        let next = cats[path.len()].to_owned();
-        if seen.contains(&next) {
-            continue;
-        }
-        seen.push(next.clone());
-        let mut sub_path = path.to_vec();
-        sub_path.push(next.clone());
-        let (this, add) = (this.clone(), add.clone());
-        menu = menu.submenu(next, window, cx, move |menu, window, cx| {
-            profile_tree(menu, &this, &sub_path, window, cx, &add)
-        });
     }
     menu
 }
@@ -618,8 +594,14 @@ fn target_row(
                 index: i,
                 fit: is_fit,
                 resist_mode: (is_fit && !ignore_resists).then_some(target.resist_mode),
+                user_profile: match &target.kind {
+                    TargetKind::Profile(p) if p.user => Some(p.name.clone().into()),
+                    _ => None,
+                },
             };
-            move |menu, window, cx| target_menu(menu, &this, &fits, &tabs, Some(row), window, cx)
+            move |menu, window, cx| {
+                target_menu(menu, &this, &fits, &tabs, Some(row.clone()), window, cx)
+            }
         })
         .into_any_element()
 }

@@ -79,13 +79,12 @@ pub fn open(hub: Entity<Hub>, fit: Option<usize>, cx: &mut App) {
     }
 }
 
-/// The main window's "Graphs" menu button, pyfa's graph toolbar button.
-pub fn menu_button(hub: Entity<Hub>, current: Option<usize>) -> impl IntoElement {
-    Button::new("menu-graphs")
-        .ghost()
-        .small()
-        .label("Graphs")
-        .on_click(move |_, _, cx| open(hub.clone(), current, cx))
+impl super::Gyfa {
+    /// pyfa's Fit > Graphs (Ctrl+G), starting with the current fit. The new window only reads the
+    /// hub, never this window, so opening it from inside this window's update is safe.
+    pub(super) fn open_graphs(&mut self, cx: &mut App) {
+        open(self.hub.clone(), self.saved.current, cx);
+    }
 }
 
 /// A misc input field as currently laid out.
@@ -101,6 +100,8 @@ pub struct GraphsWindow {
     /// The main window's tabs, for "Add Currently Open Fit".
     open_tabs: Vec<usize>,
     synced: u64,
+    /// The characters the snapshots were flown with; a new list means they are out of date.
+    characters: Option<Rc<crate::character::Characters>>,
     snapshots: HashMap<usize, Rc<FitSnapshot>>,
     graph: Graph,
     x: usize,
@@ -152,6 +153,7 @@ impl GraphsWindow {
             fits: Vec::new(),
             open_tabs: Vec::new(),
             synced: u64::MAX,
+            characters: None,
             snapshots: HashMap::new(),
             graph: Graph::DamageStats,
             x: 0,
@@ -203,6 +205,15 @@ impl GraphsWindow {
             self.loaded = Some(Rc::clone(loaded));
             changed = true;
         }
+        if self
+            .characters
+            .as_ref()
+            .is_none_or(|c| !Rc::ptr_eq(c, &hub.characters))
+        {
+            self.characters = Some(Rc::clone(&hub.characters));
+            self.snapshots.clear();
+            changed = true;
+        }
         if hub.generation == self.synced {
             if changed {
                 self.recompute(cx);
@@ -217,6 +228,18 @@ impl GraphsWindow {
             .map(|&(_, index)| index)
             .collect();
         self.fits = hub.saved.fits.clone();
+        // A user profile edited or deleted in the profile editor follows here, as in pyfa.
+        let user = &hub.saved.target_profiles;
+        self.targets.retain_mut(|t| match &mut t.kind {
+            TargetKind::Profile(p) if p.user => match user.iter().find(|u| u.name == p.name) {
+                Some(u) => {
+                    *p = TargetProfile::from(u);
+                    true
+                }
+                None => false,
+            },
+            _ => true,
+        });
         self.open_tabs = hub.saved.open.clone();
         self.synced = hub.generation;
         for index in deleted {
@@ -255,11 +278,13 @@ impl GraphsWindow {
         if let Some(snap) = self.snapshots.get(&fit) {
             return Some(Rc::clone(snap));
         }
-        let snap = Rc::new(
-            loaded
-                .engine
-                .graph_snapshot(self.fits.get(fit)?, &loaded.catalog),
+        let f = self.fits.get(fit)?;
+        // Each fit flies with its own character, as in the main window.
+        let pilot = self.characters.as_ref().map_or_else(
+            || loaded.engine.all5().clone(),
+            |c| c.pilot(f.character, &loaded.catalog.skills),
         );
+        let snap = Rc::new(loaded.engine.graph_snapshot(f, &pilot, &loaded.catalog));
         self.snapshots.insert(fit, Rc::clone(&snap));
         Some(snap)
     }

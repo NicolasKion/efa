@@ -2852,12 +2852,14 @@ dependencies = [
 name = "gyfa"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "gpui-kit",
  "postcard",
  "refine-adc",
  "refine-core",
  "refine-edh",
  "reqwest",
+ "roxmltree 0.21.2",
  "serde",
  "serde_json",
  "toml 0.9.12+spec-1.1.0",

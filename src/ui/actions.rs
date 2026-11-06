@@ -104,6 +104,7 @@ pub enum Action {
     /// A cargo stack dragged onto a slot position.
     CargoToModule(TypeId, (Slot, usize), Transfer),
     SetDamageProfile(DamageProfile),
+    SetTargetProfile(Option<crate::target_profile::TargetProfile>),
 }
 
 /// The additions pane's tabs that list items.
@@ -201,6 +202,8 @@ impl Gyfa {
         let Some(current) = self.saved.current else {
             return;
         };
+        // Kept for undo; recorded only if the action changed the fit.
+        let before = self.saved.fits[current].clone();
         let free = |slot: Slot, used: usize, stats: Option<&crate::engine::Stats>| {
             let total = stats.map_or(0, |s| match slot {
                 Slot::High => s.high.total.unwrap_or(0),
@@ -472,6 +475,7 @@ impl Gyfa {
             Action::SetMode(mode) => fit.mode = Some(mode),
             Action::SetSecStatus(sec) => fit.sec_status = sec,
             Action::SetDamageProfile(profile) => fit.damage_profile = profile,
+            Action::SetTargetProfile(profile) => fit.target_profile = profile,
             Action::ToggleBoosters(main, rows) => {
                 let Some(on) = fit.boosters.get(main).map(|b| !b.active) else {
                     return;
@@ -528,6 +532,8 @@ impl Gyfa {
         if structural {
             self.clear_selection();
         }
+        self.history
+            .record(current, before, &self.saved.fits[current]);
         self.changed(cx);
     }
 }

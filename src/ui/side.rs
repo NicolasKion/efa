@@ -13,8 +13,8 @@ use gpui_kit::{
 };
 
 use super::{
-    Action, BrowserTab, Gyfa, Loaded,
-    additions::goes_to_cargo,
+    Action, AdditionsTab, BrowserTab, Gyfa, Loaded,
+    additions::{FitDrag, Link, goes_to_cargo},
     fitting::{DragPreview, DragSource, Dragged},
     widgets::{entry, icon_box},
 };
@@ -252,6 +252,17 @@ impl Gyfa {
                     20.,
                 ))
                 .child(div().flex_1().child(loaded.catalog.name(ship)))
+                // pyfa's baseShip menu, on the ship the list is narrowed to.
+                .context_menu({
+                    let this = Self::weak(cx);
+                    move |menu, _, _| {
+                        menu.item(super::item_stats::stats_entry(
+                            &this,
+                            "Ship Basic",
+                            super::item_stats::StatsOf::Type(ship),
+                        ))
+                    }
+                })
                 .child(
                     div()
                         .id("fittings-show-all")
@@ -307,27 +318,56 @@ impl Gyfa {
                             ),
                         )
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.open_fit(i, cx);
+                            this.open_from_browser(i, cx);
                         }))
+                        // The Projected and Command tabs take fits dragged from here.
+                        .on_drag(
+                            FitDrag {
+                                index: i,
+                                label: fit.name.clone().into(),
+                            },
+                            |drag, _, _, cx| cx.new(|_| drag.clone()),
+                        )
                         .context_menu({
                             let this = Self::weak(cx);
+                            let has_fit = self.saved.current.is_some();
                             move |menu, _, _| {
                                 let (open, delete) = (this.clone(), this.clone());
-                                menu.item(entry(IconName::FolderOpen, "Open in new tab").on_click(
-                                    move |_, _, cx| {
-                                        Self::app_update(&open, cx, |this, cx| {
-                                            this.open_fit(i, cx);
-                                        });
-                                    },
-                                ))
-                                .separator()
-                                .item(
-                                    entry(IconName::Delete, "Delete").on_click(move |_, _, cx| {
-                                        Self::app_update(&delete, cx, |this, cx| {
-                                            this.delete_fit(i, cx);
-                                        });
-                                    }),
-                                )
+                                let link = |link: Link| {
+                                    let this = this.clone();
+                                    move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                                        Self::app_update(&this, cx, |g, cx| g.link(link, &[i], cx));
+                                    }
+                                };
+                                let menu = menu.item(
+                                    entry(IconName::FolderOpen, "Open in new tab").on_click(
+                                        move |_, _, cx| {
+                                            Self::app_update(&open, cx, |this, cx| {
+                                                this.open_fit(i, cx);
+                                            });
+                                        },
+                                    ),
+                                );
+                                let menu = if has_fit {
+                                    menu.item(
+                                        entry(IconName::Globe, "Project onto Active Fit")
+                                            .on_click(link(Link::Projected)),
+                                    )
+                                    .item(
+                                        entry(IconName::Network, "Add Command Booster")
+                                            .on_click(link(Link::Command)),
+                                    )
+                                } else {
+                                    menu
+                                };
+                                menu.separator()
+                                    .item(entry(IconName::Delete, "Delete").on_click(
+                                        move |_, _, cx| {
+                                            Self::app_update(&delete, cx, |this, cx| {
+                                                this.delete_fit(i, cx);
+                                            });
+                                        },
+                                    ))
                             }
                         })
                 })),
@@ -393,7 +433,11 @@ fn market_menu(
         }
     };
 
-    let mut menu = menu;
+    let mut menu = menu.item(super::item_stats::stats_entry(
+        this,
+        category,
+        super::item_stats::StatsOf::Type(id),
+    ));
     // Ice products are found by search but sit outside the market tree, so there is no group.
     let listed = t
         .market_group
@@ -412,6 +456,7 @@ fn market_menu(
     }
     if let Kind::Module(slot) = t.kind
         && slot != Slot::Subsystem
+        && g.saved.preferences.context_menus.module_fill
     {
         menu = menu.item(
             entry(IconName::Plus, "Fill With Module").on_click(apply(Action::FillRack(slot, id))),
@@ -437,7 +482,7 @@ fn market_menu(
     };
     menu =
         menu.item(entry(IconName::Inbox, format!("Add {category} to Cargo")).on_click(to_cargo(1)));
-    if goes_to_cargo(t.kind) {
+    if goes_to_cargo(t.kind) && g.saved.preferences.context_menus.cargo_fill {
         menu = menu.item(
             entry(IconName::Inbox, format!("Fill Cargo With {category}"))
                 .on_click(on(|g, id, _, cx| g.fill_cargo_with(id, cx))),
@@ -455,6 +500,34 @@ fn market_menu(
                 format!("Add {category} to Cargo (x{batch})"),
             )
             .on_click(to_cargo(batch)),
+        );
+    }
+    let shown = super::hub::preferences(cx).context_menus;
+    if shown.ammo_pattern && t.damage.iter().any(|&d| d > 0.0) {
+        let profile = crate::fit::DamageProfile::Pattern {
+            name: crate::damage_pattern::SELECTED_AMMO.to_owned(),
+            amounts: t.damage,
+        };
+        menu = menu.item(
+            entry(
+                IconName::ChartPie,
+                format!("Set {category} as Damage Pattern"),
+            )
+            .on_click(apply(Action::SetDamageProfile(profile))),
+        );
+    }
+    if shown.project && loaded.catalog.projection.projectable.contains(&id) {
+        menu = menu.item(
+            entry(IconName::Globe, format!("Project {category} onto Fit")).on_click(on(
+                |g, id, _, cx| {
+                    g.project_item(id, cx);
+                    if g.additions_tab != AdditionsTab::Projected {
+                        g.additions_tab = AdditionsTab::Projected;
+                        g.clear_selection();
+                        cx.notify();
+                    }
+                },
+            )),
         );
     }
     menu

@@ -15,6 +15,24 @@ pub struct TargetProfile {
     pub radius: f64,
     /// Total HP, when the profile knows it.
     pub hp: Option<f64>,
+    /// One of the user's own, which the profile editor can change.
+    pub user: bool,
+}
+
+impl From<&crate::target_profile::TargetProfile> for TargetProfile {
+    fn from(p: &crate::target_profile::TargetProfile) -> Self {
+        let builtin = crate::target_profile::TargetProfile::ideal().name == p.name
+            || BUILTIN.iter().any(|b| b.name == p.name);
+        Self {
+            name: p.name.clone(),
+            resists: p.resists,
+            max_velocity: p.max_velocity(),
+            sig_radius: p.signature_radius,
+            radius: p.radius(),
+            hp: p.hp,
+            user: !builtin,
+        }
+    }
 }
 
 impl TargetProfile {
@@ -27,6 +45,7 @@ impl TargetProfile {
             sig_radius: None,
             radius: 0.0,
             hp: None,
+            user: false,
         }
     }
 
@@ -57,6 +76,7 @@ impl TargetProfile {
             sig_radius: b.sig,
             radius: b.radius.unwrap_or(0.0),
             hp: None,
+            user: false,
         })
     }
 }

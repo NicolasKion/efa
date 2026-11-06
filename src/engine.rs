@@ -2,15 +2,18 @@
 //! keeps refine's state from ever drifting from what the UI shows.
 
 mod graph;
+mod inspect;
 mod pane;
+mod pilot;
+mod surroundings;
 
 use std::path::Path;
 
 use std::collections::{HashMap, HashSet};
 
 use rc::{
-    AddMode, AttrId, EveAttrId, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack, SkillLevel,
-    SolOwned, Src,
+    AddMode, AttrId, EveAttrId, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack, SolOwned,
+    Src,
     stats::{
         ItemStatsCommon, StatCapBlcSrcKinds, StatCapSim, StatCritOptions, StatDmgEntry,
         StatDmgItemKinds, StatMiningResourceKind, StatResource, StatSlot, StatTimeOptions,
@@ -22,19 +25,20 @@ use crate::{
     fit::{Fit, ModuleState},
 };
 
+pub use inspect::{AttrValue, FitItem, Inspection, ModOp, Modifier, Source, SourceKind};
 pub use pane::{
     CalcOptions, CapDetail, FirepowerDetail, Mining, MiningRate, Misc, Outgoing, SpoolRange, Tank,
 };
+pub use pilot::{MAX_LEVEL, Pilot, SkillTarget};
+pub use surroundings::{AbilityInfo, FighterClasses, FighterInfo};
 
 /// Type ID of the character item. EVE uses this one for everyone.
 const CHARACTER: i32 = 1373;
 
-/// Implants plugged into the built-in All 5 character. Like pyfa's, it has none.
-pub const CHARACTER_IMPLANTS: &[TypeId] = &[];
-
 pub struct Engine {
     src: Src,
-    skills: Vec<TypeId>,
+    /// The built-in All 5 character, which [`Engine::compute`] flies fits with.
+    all5: Pilot,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -275,6 +279,13 @@ pub struct Stats {
     pub boosters: Vec<BoosterInfo>,
     /// Items refine refused, e.g. a module the ship has no rack position for.
     pub problems: Vec<String>,
+    /// Per squadron, in the fit's order.
+    pub fighters: Vec<FighterInfo>,
+    /// Per projected squadron, in the fit's order.
+    pub projected_fighters: Vec<FighterInfo>,
+    pub fighter_classes: FighterClasses,
+    /// Cycles to full spool per projected module, for those that spool up.
+    pub projected_spool: Vec<Option<u32>>,
 }
 
 impl Engine {
@@ -284,21 +295,50 @@ impl Engine {
         let edh = redh::PhbFsEdh::new(data_dir).into();
         let adc = radc::PostcardZfsAdc::new(cache_dir, "tq").into();
         let src = Src::new(&edh, Some(&adc)).map_err(|e| format!("loading engine data: {e}"))?;
-        Ok(Self { src, skills })
+        let all5 = Pilot {
+            skills: skills.into_iter().map(|s| (s, MAX_LEVEL)).collect(),
+            ..Pilot::default()
+        };
+        Ok(Self { src, all5 })
+    }
+
+    /// The built-in All 5 character.
+    pub fn all5(&self) -> &Pilot {
+        &self.all5
     }
 
     pub fn compute(&self, fit: &Fit) -> Stats {
         self.compute_with(fit, CalcOptions::default())
     }
 
+    /// Stats with the All 5 character; [`Engine::compute_for`] takes the fit's own.
     pub fn compute_with(&self, fit: &Fit, options: CalcOptions) -> Stats {
+        self.compute_for(fit, &self.all5, options)
+    }
+
+    /// The fit's stats flown by `pilot`, alone in space.
+    pub fn compute_for(&self, fit: &Fit, pilot: &Pilot, options: CalcOptions) -> Stats {
+        self.compute_among(fit, &[], pilot, options)
+    }
+
+    /// The fit's stats flown by `pilot`, with what surrounds it: `fits` are the saved fits its
+    /// projected and command fits are looked up in.
+    pub fn compute_among(
+        &self,
+        fit: &Fit,
+        fits: &[Fit],
+        pilot: &Pilot,
+        options: CalcOptions,
+    ) -> Stats {
         let mut stats = Stats::default();
         let mut sol = SolOwned::new(&self.src);
-        let mut f = sol.add_fit();
-        f.set_character(ItemTypeId::from_i32(CHARACTER));
-        for &skill in &self.skills {
-            let _ = f.add_skill(ItemTypeId::from_i32(skill), SkillLevel::from_i32_clamped(5));
+        if let Some(spool) = options.default_spool {
+            sol.set_default_spool(rc::Spool::SpoolScale(rc::UnitInterval::from_f64_clamped(
+                spool,
+            )));
         }
+        let mut f = sol.add_fit();
+        pilot.board(&mut f);
         let Some(ship) = fit.ship else { return stats };
         let ship_id = f
             .set_ship(ItemTypeId::from_i32(ship), None, None)
@@ -337,9 +377,9 @@ impl Engine {
         if let Some(mode) = fit.mode {
             f.set_stance(ItemTypeId::from_i32(mode));
         }
-        if let Some(sec) = fit.sec_status {
-            f.set_sec_status(rc::FitSecStatus::from_f64_clamped(sec));
-        }
+        f.set_sec_status(rc::FitSecStatus::from_f64_clamped(
+            fit.sec_status.unwrap_or(pilot.sec_status),
+        ));
         for &rig in fit.rigs.iter().flatten() {
             f.add_rig(ItemTypeId::from_i32(rig));
         }
@@ -367,7 +407,7 @@ impl Engine {
             }
             drone_ids.push(first);
         }
-        for (implant, active) in fit.applied_implants(CHARACTER_IMPLANTS) {
+        for (implant, active) in fit.applied_implants(&pilot.implants) {
             let mut implant = f.add_implant(ItemTypeId::from_i32(implant));
             if !active {
                 implant.set_state(false);
@@ -386,10 +426,16 @@ impl Engine {
             booster_ids.push(item.get_item_id());
         }
 
+        let fighter_ids = surroundings::add_fighters(&mut f, &fit.fighters);
+        let fit_id = f.get_fit_id();
+        let projections = self.add_surroundings(&mut sol, fit_id, ship_id, fit, fits);
+        let Ok(mut f) = sol.get_fit(&fit_id) else {
+            return stats;
+        };
+
         stats.incoming = pane::incoming_mix(&mut f, &fit.damage_profile);
         let incoming = pane::dps_profile(stats.incoming);
         f.set_rah_incoming_dps(Some(incoming));
-        let fit_id = f.get_fit_id();
 
         fit_stats(&mut f, &mut stats, incoming, options);
         stats.firepower = pane::firepower_detail(&mut f, options.time());
@@ -408,6 +454,27 @@ impl Engine {
             .iter()
             .map(|id| id.map_or_default(|id| drone_info(&mut sol, id)))
             .collect();
+        stats.fighters = fighter_ids
+            .into_iter()
+            .map(|id| surroundings::fighter_info(&mut sol, id))
+            .collect();
+        stats.projected_fighters = projections
+            .fighters
+            .into_iter()
+            .map(|id| surroundings::fighter_info(&mut sol, id))
+            .collect();
+        stats.projected_spool = projections
+            .modules
+            .iter()
+            .map(|id| {
+                let id = id.as_ref()?;
+                let mut module = sol.get_module(id).ok()?;
+                module
+                    .get_spool_cycle_count()
+                    .map(|info| info.max.into_u32())
+            })
+            .collect();
+        stats.fighter_classes = surroundings::fighter_classes(&mut sol, fit_id);
 
         for &(slot, i, id) in &module_ids {
             let spool_max = sol

@@ -16,7 +16,6 @@ use gpui_kit::{
 use super::{MENU_MAX_H, ROW_HEIGHT, export_lines, parse_lines};
 use crate::{
     data::{Kind, TypeId},
-    engine::CHARACTER_IMPLANTS,
     fit::ImplantSource,
     icons::Icon,
     implant_set::{self, PrecalcSet},
@@ -37,11 +36,12 @@ struct Snapshot {
 impl Snapshot {
     fn take(this: &WeakEntity<Gyfa>, cx: &App) -> Option<Self> {
         let g = this.upgrade()?;
-        let fit = g.read(cx).fit()?;
+        let g = g.read(cx);
+        let fit = g.fit()?;
         Some(Self {
             source: fit.implant_source,
             rows: fit
-                .applied_implants(CHARACTER_IMPLANTS)
+                .applied_implants(g.character_implants())
                 .map(|(t, _)| t)
                 .collect(),
         })
@@ -65,7 +65,7 @@ impl Gyfa {
         }
         let fit = &self.saved.fits[current];
         let source = fit.implant_source;
-        let rows: Vec<(TypeId, bool)> = fit.applied_implants(CHARACTER_IMPLANTS).collect();
+        let rows: Vec<(TypeId, bool)> = fit.applied_implants(self.character_implants()).collect();
 
         let empty_text = match source {
             ImplantSource::Fit => "Double-click or drag implants from the market to add them.",
@@ -240,6 +240,11 @@ fn implant_menu(
     if let Some((i, type_id)) = clicked_type
         && let Some(t) = loaded.catalog.get(type_id)
     {
+        menu = menu.item(super::super::item_stats::stats_entry(
+            this,
+            "Implant",
+            super::super::item_stats::StatsOf::Fitted(crate::engine::FitItem::Implant(type_id)),
+        ));
         if t.market_group.is_some() {
             let this = this.clone();
             menu = menu.item(entry(IconName::Search, "Implant Market Group").on_click(
@@ -299,7 +304,7 @@ fn item_entries(
     };
     let mut menu = menu.item(remove);
     let variations = catalog.variations_of(type_id);
-    if variations.len() > 1 {
+    if variations.len() > 1 && crate::ui::hub::preferences(cx).context_menus.variations {
         let entries: Vec<(TypeId, String)> =
             variations.iter().map(|&v| (v, catalog.name(v))).collect();
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
@@ -440,6 +445,12 @@ fn copy_paste_entries(
     clicked: Option<usize>,
     cx: &App,
 ) -> PopupMenu {
+    if !crate::ui::hub::preferences(cx)
+        .context_menus
+        .additions_copy_paste
+    {
+        return menu;
+    }
     let kind = AddKind::Implants;
     let lines = |implants: &[TypeId]| {
         let rows: Vec<(TypeId, u32)> = implants.iter().map(|&t| (t, 1)).collect();

@@ -8,14 +8,14 @@ use std::collections::HashSet;
 
 use rc::{
     AddMode, AttrId, Count, EveAttrId, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack,
-    SkillLevel, SolOwned, Spool,
+    SolOwned, Spool,
     stats::{
         ItemStatsCommon, StatCritOptions, StatDmg, StatItemChargeOptions, StatTimeOptions,
         StatTimeOptionsBurst,
     },
 };
 
-use super::{CHARACTER, CHARACTER_IMPLANTS, Engine, module_state};
+use super::{CalcOptions, Engine, Pilot, module_state};
 use crate::{
     data::{Catalog, Hardpoint},
     fit::{Fit, ModuleState},
@@ -142,14 +142,14 @@ struct PlacedDrones {
 
 impl Engine {
     /// Everything the graphs need about `fit`, read from refine.
-    pub fn graph_snapshot(&self, fit: &Fit, catalog: &Catalog) -> FitSnapshot {
+    pub fn graph_snapshot(&self, fit: &Fit, pilot: &Pilot, catalog: &Catalog) -> FitSnapshot {
         let mut snap = FitSnapshot::default();
         if fit.ship.is_none() {
             return snap;
         }
-        let stats = self.compute(fit);
+        let stats = self.compute_for(fit, pilot, CalcOptions::default());
         let mut sol = SolOwned::new(&self.src);
-        let Some((ship_id, modules, drones)) = self.place(&mut sol, fit) else {
+        let Some((ship_id, modules, drones)) = Self::place(&mut sol, fit, pilot) else {
             return snap;
         };
 
@@ -201,7 +201,7 @@ impl Engine {
             ship.shield_recharge = get(attr::SHIELD_RECHARGE_RATE) / 1000.0;
         }
         ship.subwarp_speed = self
-            .subwarp_speed(fit, catalog)
+            .subwarp_speed(fit, pilot, catalog)
             .unwrap_or(ship.max_velocity);
 
         for placed in &modules {
@@ -258,7 +258,7 @@ impl Engine {
     }
 
     /// Top speed with the modules that cannot run in warp switched off.
-    fn subwarp_speed(&self, fit: &Fit, catalog: &Catalog) -> Option<f64> {
+    fn subwarp_speed(&self, fit: &Fit, pilot: &Pilot, catalog: &Catalog) -> Option<f64> {
         let mut grounded = fit.clone();
         let mut changed = false;
         for module in [&mut grounded.high, &mut grounded.mid, &mut grounded.low]
@@ -277,21 +277,19 @@ impl Engine {
         if !changed {
             return None;
         }
-        self.compute(&grounded).speed
+        self.compute_for(&grounded, pilot, CalcOptions::default())
+            .speed
     }
 
     /// Put the fit into `sol` the way [`Engine::compute_with`] does, keeping item IDs.
     fn place(
-        &self,
         sol: &mut SolOwned,
         fit: &Fit,
+        pilot: &Pilot,
     ) -> Option<(ItemId, Vec<Placed>, Vec<PlacedDrones>)> {
         let ship = fit.ship?;
         let mut f = sol.add_fit();
-        f.set_character(ItemTypeId::from_i32(CHARACTER));
-        for &skill in &self.skills {
-            let _ = f.add_skill(ItemTypeId::from_i32(skill), SkillLevel::from_i32_clamped(5));
-        }
+        pilot.board(&mut f);
         let ship_id = f
             .set_ship(ItemTypeId::from_i32(ship), None, None)
             .get_item_id();
@@ -327,9 +325,9 @@ impl Engine {
         if let Some(mode) = fit.mode {
             f.set_stance(ItemTypeId::from_i32(mode));
         }
-        if let Some(sec) = fit.sec_status {
-            f.set_sec_status(rc::FitSecStatus::from_f64_clamped(sec));
-        }
+        f.set_sec_status(rc::FitSecStatus::from_f64_clamped(
+            fit.sec_status.unwrap_or(pilot.sec_status),
+        ));
         for &rig in fit.rigs.iter().flatten() {
             f.add_rig(ItemTypeId::from_i32(rig));
         }
@@ -357,7 +355,7 @@ impl Engine {
                 });
             }
         }
-        for (implant, active) in fit.applied_implants(CHARACTER_IMPLANTS) {
+        for (implant, active) in fit.applied_implants(&pilot.implants) {
             let mut implant = f.add_implant(ItemTypeId::from_i32(implant));
             if !active {
                 implant.set_state(false);
@@ -983,8 +981,10 @@ Damage Control II
     /// surface, before resists.
     fn refine_applied(engine: &Engine, attacker: &Fit, target: &Fit, distance: f64) -> f64 {
         let mut sol = SolOwned::new(&engine.src);
-        let (atk_ship, modules, _) = engine.place(&mut sol, attacker).expect("attacker places");
-        let (tgt_ship, _, _) = engine.place(&mut sol, target).expect("target places");
+        let (atk_ship, modules, _) =
+            Engine::place(&mut sol, attacker, engine.all5()).expect("attacker places");
+        let (tgt_ship, _, _) =
+            Engine::place(&mut sol, target, engine.all5()).expect("target places");
         let c2c = distance
             + attr_of(&mut sol, atk_ship, attr::RADIUS)
             + attr_of(&mut sol, tgt_ship, attr::RADIUS);
@@ -1023,8 +1023,8 @@ Damage Control II
     }
 
     fn graph_dps(engine: &Engine, catalog: &Catalog, attacker: &Fit, target: &Fit) -> plot::Series {
-        let src = engine.graph_snapshot(attacker, catalog);
-        let tgt = engine.graph_snapshot(target, catalog);
+        let src = engine.graph_snapshot(attacker, engine.all5(), catalog);
+        let tgt = engine.graph_snapshot(target, engine.all5(), catalog);
         let target = TargetData {
             max_velocity: tgt.ship.max_velocity,
             sig_radius: tgt.ship.sig_radius,
@@ -1088,9 +1088,9 @@ Damage Control II
             return;
         };
         let attacker = fit(&catalog, RUPTURE);
-        let snap = engine.graph_snapshot(&attacker, &catalog);
+        let snap = engine.graph_snapshot(&attacker, engine.all5(), &catalog);
         let mut sol = SolOwned::new(&engine.src);
-        let (ship, _, _) = engine.place(&mut sol, &attacker).expect("places");
+        let (ship, _, _) = Engine::place(&mut sol, &attacker, engine.all5()).expect("places");
         let fit_id = sol.get_ship(&ship).expect("ship").get_fit_id();
         for time in [30.0, 61.0, 125.0] {
             let options = StatTimeOptions::Sim(rc::stats::StatTimeOptionsSim {
@@ -1122,7 +1122,7 @@ Damage Control II
         let Some((catalog, engine)) = setup() else {
             return;
         };
-        let snap = engine.graph_snapshot(&fit(&catalog, RUPTURE), &catalog);
+        let snap = engine.graph_snapshot(&fit(&catalog, RUPTURE), engine.all5(), &catalog);
         assert_eq!(snap.weapons.len(), 4);
         let gun = &snap.weapons[0];
         assert!(matches!(gun.kind, WeaponKind::Turret(g) if g.optimal > 0.0 && g.falloff > 0.0));
