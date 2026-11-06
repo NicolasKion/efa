@@ -63,7 +63,7 @@ impl AddKind {
         match self {
             Self::Drones => fit.drones.iter().map(|d| (d.type_id, d.count)).collect(),
             Self::Implants => fit.implants.iter().map(|&t| (t, 1)).collect(),
-            Self::Boosters => fit.boosters.iter().map(|&t| (t, 1)).collect(),
+            Self::Boosters => fit.boosters.iter().map(|b| (b.type_id, 1)).collect(),
             Self::Cargo => fit.cargo.clone(),
         }
     }

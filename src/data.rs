@@ -2,7 +2,7 @@
 //! charges go where. refine works on type IDs only, so all of this comes from the dump directly.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fs::File,
     io::BufReader,
     path::{Path, PathBuf},
@@ -53,6 +53,10 @@ mod attr {
     pub const DRONE_BANDWIDTH_USED: i32 = 1272;
     /// Maximum spool bonus, on Precursor weapons and mutadaptive repairers.
     pub const SPOOL_MAX: [i32; 2] = [2734, 2797];
+    /// The booster slot, which pyfa calls boosterness.
+    pub const BOOSTERNESS: i32 = 1087;
+    /// Chance of a booster's first side effect, which pyfa ranks booster variations by.
+    pub const BOOSTER_EFFECT_CHANCE1: i32 = 1089;
 }
 
 /// Which kind of hardpoint a module takes, if any.
@@ -134,6 +138,12 @@ pub struct ItemType {
     pub spools: bool,
     /// Bandwidth a drone takes while in space, in Mbit/s.
     pub drone_bandwidth: f64,
+    /// Slot a booster goes into; a fit holds one booster per slot.
+    pub booster_slot: Option<u32>,
+    /// Chance of a booster's first side effect, missing on boosters without one.
+    pub booster_chance: Option<f64>,
+    /// Effects that may come with a booster, by effect ID: the ones with a usage chance.
+    pub side_effects: Vec<i32>,
 }
 
 impl ItemType {
@@ -204,6 +214,11 @@ impl Catalog {
             .filter_map(|(id, icon)| Some((id.parse().ok()?, icon.icon_file?)))
             .collect();
 
+        let chance_effects: HashSet<i32> = effects
+            .iter()
+            .filter(|(_, e)| e.fitting_usage_chance_attribute_id.is_some())
+            .filter_map(|(id, _)| id.parse().ok())
+            .collect();
         let effect_category: HashMap<i32, i32> = effects
             .into_iter()
             .filter_map(|(id, e)| Some((id.parse().ok()?, e.effect_category)))
@@ -339,6 +354,17 @@ impl Catalog {
                         .iter()
                         .any(|&a| attr(a).is_some_and(|v| v > 0.0)),
                     drone_bandwidth: attr(attr::DRONE_BANDWIDTH_USED).unwrap_or(0.0),
+                    booster_slot: attr(attr::BOOSTERNESS)
+                        .filter(|_| kind == Kind::Booster)
+                        .map(|s| s as u32),
+                    booster_chance: attr(attr::BOOSTER_EFFECT_CHANCE1),
+                    side_effects: dogma.map_or_default(|d| {
+                        d.effects
+                            .iter()
+                            .map(|e| e.effect_id)
+                            .filter(|id| chance_effects.contains(id))
+                            .collect()
+                    }),
                 },
             );
         }
@@ -615,6 +641,8 @@ struct SdeMetaGroup {
 struct PhbEffect {
     #[serde(rename = "effectCategory", default)]
     effect_category: i32,
+    #[serde(rename = "fittingUsageChanceAttributeID", default)]
+    fitting_usage_chance_attribute_id: Option<i32>,
 }
 
 #[derive(Deserialize)]

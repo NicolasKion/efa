@@ -121,11 +121,11 @@ Context depends on implant source: fit implants use implantItem/implantItemMisc,
 ## Boosters pane (gui/builtinAdditionPanes/boosterView.py)
 
 ### boosterItem
-- [ ] Side Effects | booster has an implemented side effect | checkable list of side effects; toggles one. GuiToggleBoosterSideEffectStateCommand | boosterSideEffects.py
+- [x] Side Effects | booster has an implemented side effect | checkable list of side effects; toggles one. GuiToggleBoosterSideEffectStateCommand | boosterSideEffects.py
 - [ ] Booster Stats | row clicked | stats window | itemStats.py
 - [x] Booster Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Booster | row clicked | removes selection (multi). GuiRemoveBoostersCommand | itemRemove.py
-- [x] Variations | 2+ variations | variation submenu sorted by side effect chance (or name if > 7). GuiChangeBoosterMetaCommand | itemVariationChange.py
+- [x] Variations | 2+ variations | boosters of the same slot in the same market group (or none), sorted by side effect chance (or name if > 7); swaps the clicked booster only, keeping state and side effects. GuiChangeBoosterMetaCommand | itemVariationChange.py
 
 ### boosterItemMisc
 - [x] Copy Selected Boosters | selection | clipboard export | additionsExportSelection.py

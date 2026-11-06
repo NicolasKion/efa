@@ -74,6 +74,22 @@ pub struct ModuleInfo {
     pub spool_max: Option<u32>,
 }
 
+/// What the Boosters tab shows for a booster, after skills.
+#[derive(Debug, Clone, Default)]
+pub struct BoosterInfo {
+    /// How long a dose lasts, in seconds.
+    pub duration: Option<f64>,
+    pub side_effects: Vec<SideEffectInfo>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SideEffectInfo {
+    pub effect_id: i32,
+    /// How much it changes its attribute, in percent, where it changes it by one amount.
+    pub strength: Option<f64>,
+    pub active: bool,
+}
+
 mod attr {
     pub const CPU: i32 = 50;
     pub const POWER: i32 = 30;
@@ -83,6 +99,7 @@ mod attr {
     pub const OPTIMAL: i32 = 54;
     pub const FALLOFF: i32 = 158;
     pub const CAPACITY: i32 = 38;
+    pub const BOOSTER_DURATION: i32 = 330;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -127,6 +144,8 @@ pub struct Stats {
     pub scan_res: Option<f64>,
     pub locks: Option<u32>,
     pub sensor_strength: Option<f64>,
+    /// Per booster, in the fit's order.
+    pub boosters: Vec<BoosterInfo>,
     /// Items refine refused, e.g. a module the ship has no rack position for.
     pub problems: Vec<String>,
 }
@@ -214,8 +233,17 @@ impl Engine {
         for &implant in &fit.implants {
             f.add_implant(ItemTypeId::from_i32(implant));
         }
-        for &booster in &fit.boosters {
-            f.add_booster(ItemTypeId::from_i32(booster));
+        let mut booster_ids = Vec::with_capacity(fit.boosters.len());
+        for booster in &fit.boosters {
+            let mut item = f.add_booster(ItemTypeId::from_i32(booster.type_id));
+            item.set_state(booster.active);
+            for &effect in &booster.side_effects {
+                let id = rc::EffectId::Dogma(rc::DogmaEffectId::from_i32(effect));
+                if let Ok(mut side_effect) = item.get_side_effect(&id) {
+                    side_effect.set_state(true);
+                }
+            }
+            booster_ids.push(item.get_item_id());
         }
 
         fit_stats(&mut f, &mut stats);
@@ -225,6 +253,11 @@ impl Engine {
                 .ok()
                 .map(|v| v.modified.into_f64())
         });
+
+        stats.boosters = booster_ids
+            .iter()
+            .map(|&id| booster_info(&mut sol, id))
+            .collect();
 
         for (slot, i, id) in module_ids {
             let spool_max = sol
@@ -342,6 +375,36 @@ fn fit_stats(f: &mut rc::Fit<'_>, stats: &mut Stats) {
     stats.scan_res = s.get_stat_scan_res().ok().map(rc::PValue::into_f64);
     stats.locks = s.get_stat_locks().ok().map(rc::Count::into_u32);
     stats.sensor_strength = s.get_stat_sensors().ok().map(|v| v.strength.into_f64());
+}
+
+fn booster_info(sol: &mut SolOwned, id: ItemId) -> BoosterInfo {
+    use rc::Lender;
+
+    let duration = sol.get_item(&id).ok().and_then(|mut item| {
+        item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr::BOOSTER_DURATION)))
+            .ok()
+            .map(|v| v.modified.into_f64() / 1000.0)
+    });
+    let mut side_effects = Vec::new();
+    if let Ok(mut booster) = sol.get_booster(&id) {
+        let mut iter = booster.iter_side_effects();
+        while let Some(mut side_effect) = iter.next() {
+            let rc::EffectId::Dogma(effect_id) = side_effect.get_effect_id() else {
+                continue;
+            };
+            side_effects.push(SideEffectInfo {
+                effect_id: effect_id.into_i32(),
+                strength: side_effect
+                    .get_strength()
+                    .map(|s| s.get_strength().into_f64()),
+                active: side_effect.get_state(),
+            });
+        }
+    }
+    BoosterInfo {
+        duration,
+        side_effects,
+    }
 }
 
 fn module_state(state: ModuleState) -> rc::ModuleState {

@@ -322,6 +322,14 @@ impl Gyfa {
             return;
         };
         let added = self.saved.fits[i].add(catalog, id);
+        // pyfa brings the Boosters tab up even when the booster was already there.
+        if catalog.get(id).is_some_and(|t| t.kind == Kind::Booster)
+            && self.additions_tab != AdditionsTab::Boosters
+        {
+            self.additions_tab = AdditionsTab::Boosters;
+            self.additions_selection.clear();
+            self.additions_anchor = None;
+        }
         self.status =
             (!added).then(|| format!("Nothing on this fit takes {}", catalog.name(id)).into());
         self.changed(cx);

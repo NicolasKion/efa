@@ -79,6 +79,10 @@ pub enum Action {
     AddAdditions(AddKind, Vec<(TypeId, u32)>),
     SetMode(TypeId),
     SetSecStatus(Option<f64>),
+    /// Switch boosters on or off, all the opposite of the clicked one, as pyfa does.
+    ToggleBoosters(usize, Vec<usize>),
+    /// Switch one side effect of a booster, by effect ID.
+    ToggleBoosterSideEffect(usize, i32),
 }
 
 /// The additions pane's tabs that list items.
@@ -419,9 +423,7 @@ impl Gyfa {
                             }
                         }
                         AddKind::Boosters => {
-                            if let Some(t) = fit.boosters.get_mut(i) {
-                                *t = type_id;
-                            }
+                            fit.swap_booster(&loaded.catalog, i, type_id);
                         }
                         AddKind::Cargo => {
                             if let Some(stack) = fit.cargo.get_mut(i) {
@@ -433,12 +435,35 @@ impl Gyfa {
             }
             Action::SetMode(mode) => fit.mode = Some(mode),
             Action::SetSecStatus(sec) => fit.sec_status = sec,
+            Action::ToggleBoosters(main, rows) => {
+                let Some(on) = fit.boosters.get(main).map(|b| !b.active) else {
+                    return;
+                };
+                for i in rows.into_iter().chain([main]) {
+                    if let Some(b) = fit.boosters.get_mut(i) {
+                        b.active = on;
+                    }
+                }
+            }
+            Action::ToggleBoosterSideEffect(i, effect) => {
+                let Some(b) = fit.boosters.get_mut(i) else {
+                    return;
+                };
+                match b.side_effects.iter().position(|&e| e == effect) {
+                    Some(at) => {
+                        b.side_effects.remove(at);
+                    }
+                    None => b.side_effects.push(effect),
+                }
+            }
             Action::AddAdditions(kind, items) => {
                 for (type_id, count) in items {
                     match kind {
                         AddKind::Drones => fit.add_drones(type_id, count),
                         AddKind::Implants => fit.implants.push(type_id),
-                        AddKind::Boosters => fit.boosters.push(type_id),
+                        AddKind::Boosters => {
+                            fit.add_booster(&loaded.catalog, crate::fit::Booster::new(type_id));
+                        }
                         AddKind::Cargo => fit.add_cargo(type_id, count),
                     }
                 }
