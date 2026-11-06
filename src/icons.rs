@@ -1,19 +1,21 @@
-//! Icons for items and attributes, as `file://` URIs egui's image loaders can open.
+//! Icons for items and attributes, as files on disk.
 //!
 //! The deimos dump carries the attribute and market group icons. Item icons are fetched from CCP's
-//! CDN the first time they are shown and kept on disk, so the cost is paid once per icon.
+//! CDN the first time they are asked for and kept on disk, so the cost is paid once per icon.
 
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, Sender},
     },
 };
 
 use crate::{cdn::Cdn, data::Catalog};
 
+/// Downloads running at once. Opening a market group asks for dozens of icons together.
 const WORKERS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -24,59 +26,56 @@ pub enum Icon {
     Type(i32),
 }
 
+#[derive(Debug)]
 enum State {
-    Ready(String),
+    Ready(PathBuf),
     Fetching,
     Missing,
 }
 
+type States = Arc<Mutex<HashMap<Icon, State>>>;
+
 pub struct Icons {
     dump_dir: PathBuf,
     cache_dir: PathBuf,
-    states: Arc<Mutex<HashMap<Icon, State>>>,
+    states: States,
     fetch: Sender<(Icon, String, PathBuf)>,
+    /// Set when a download lands, so the UI knows to redraw.
+    updated: Arc<AtomicBool>,
 }
 
 impl Icons {
-    pub fn new(data_dir: &Path, cache_dir: &Path, ctx: &eframe::egui::Context) -> Self {
-        let states: Arc<Mutex<HashMap<Icon, State>>> = Arc::default();
+    pub fn new(data_dir: &Path, cache_dir: &Path) -> Self {
+        let states: States = Arc::default();
+        let updated = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::channel::<(Icon, String, PathBuf)>();
         let rx = Arc::new(Mutex::new(rx));
         // Connecting costs a few seconds the first time, so it only happens once something is
         // actually missing, and the workers share the one connection.
         let cdn: Arc<OnceLock<Result<Cdn, String>>> = Arc::default();
         for _ in 0..WORKERS {
-            let (rx, states, cdn, ctx) = (
+            let (rx, states, cdn, updated) = (
                 Arc::clone(&rx),
                 Arc::clone(&states),
                 Arc::clone(&cdn),
-                ctx.clone(),
+                Arc::clone(&updated),
             );
             let cdn_cache = cache_dir.to_owned();
             std::thread::spawn(move || {
                 loop {
-                    let Ok((icon, res_path, dest)) =
-                        rx.lock().expect("icon queue lock poisoned").recv()
-                    else {
+                    let job = rx.lock().expect("icon queue lock poisoned").recv();
+                    let Ok((icon, res_path, dest)) = job else {
                         return;
                     };
-                    let result = match cdn.get_or_init(|| Cdn::connect(&cdn_cache)) {
-                        Ok(cdn) => cdn.fetch(&res_path).and_then(|bytes| {
-                            std::fs::create_dir_all(dest.parent().unwrap_or(&dest))
-                                .map_err(|e| e.to_string())?;
-                            std::fs::write(&dest, bytes).map_err(|e| e.to_string())
-                        }),
-                        Err(e) => Err(e.clone()),
-                    };
-                    let state = match result {
-                        Ok(()) => State::Ready(uri(&dest)),
+                    let state = match fetch(&cdn, &cdn_cache, &res_path, &dest) {
+                        Ok(()) => State::Ready(dest),
                         Err(_) => State::Missing,
                     };
                     states
                         .lock()
                         .expect("icon state lock poisoned")
                         .insert(icon, state);
-                    ctx.request_repaint();
+                    updated.store(true, Ordering::Release);
                 }
             });
         }
@@ -85,14 +84,15 @@ impl Icons {
             cache_dir: cache_dir.join("icons"),
             states,
             fetch: tx,
+            updated,
         }
     }
 
-    /// URI of the icon if it is on disk; otherwise starts fetching it and returns None for now.
-    pub fn get(&self, catalog: &Catalog, icon: Icon) -> Option<String> {
+    /// Path of the icon if it is on disk; otherwise starts fetching it and returns None for now.
+    pub fn path(&self, catalog: &Catalog, icon: Icon) -> Option<PathBuf> {
         let mut states = self.states.lock().expect("icon state lock poisoned");
         match states.get(&icon) {
-            Some(State::Ready(uri)) => return Some(uri.clone()),
+            Some(State::Ready(path)) => return Some(path.clone()),
             Some(State::Fetching | State::Missing) => return None,
             None => {}
         }
@@ -108,18 +108,19 @@ impl Icons {
                 catalog.get(id).and_then(|t| t.icon.clone()),
             ),
         };
-        if let Some(path) = dumped
+        let on_disk = dumped
             .filter(|p| p.exists())
-            .or_else(|| cached.exists().then(|| cached.clone()))
-        {
-            let uri = uri(&path);
-            states.insert(icon, State::Ready(uri.clone()));
-            return Some(uri);
+            .or_else(|| cached.exists().then(|| cached.clone()));
+        if let Some(path) = on_disk {
+            let path = std::path::absolute(&path).unwrap_or(path);
+            states.insert(icon, State::Ready(path.clone()));
+            return Some(path);
         }
         match res_path {
             Some(res_path) => {
                 states.insert(icon, State::Fetching);
-                let _ = self.fetch.send((icon, res_path, cached));
+                let dest = std::path::absolute(&cached).unwrap_or(cached);
+                let _ = self.fetch.send((icon, res_path, dest));
             }
             None => {
                 states.insert(icon, State::Missing);
@@ -127,9 +128,24 @@ impl Icons {
         }
         None
     }
+
+    /// Whether any icon arrived since the last call.
+    pub fn take_updated(&self) -> bool {
+        self.updated.swap(false, Ordering::AcqRel)
+    }
 }
 
-fn uri(path: &Path) -> String {
-    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_owned());
-    format!("file://{}", absolute.display())
+fn fetch(
+    cdn: &OnceLock<Result<Cdn, String>>,
+    cache: &Path,
+    res_path: &str,
+    dest: &Path,
+) -> Result<(), String> {
+    let cdn = cdn
+        .get_or_init(|| Cdn::connect(cache))
+        .as_ref()
+        .map_err(Clone::clone)?;
+    let bytes = cdn.fetch(res_path)?;
+    std::fs::create_dir_all(dest.parent().unwrap_or(dest)).map_err(|e| e.to_string())?;
+    std::fs::write(dest, bytes).map_err(|e| e.to_string())
 }

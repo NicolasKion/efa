@@ -1,31 +1,28 @@
 use std::path::PathBuf;
 
-use eframe::egui;
+use gpui_kit::{AppContext, WindowBounds, WindowOptions, px, size};
 
-fn main() -> eframe::Result {
+fn main() {
     let data_dir =
         std::env::var_os("GYFA_DATA").map_or_else(|| PathBuf::from("data/eve"), PathBuf::from);
     // An EFT file given on the command line is imported as a new fit.
-    let import = match std::env::args_os().nth(1) {
-        Some(path) => match std::fs::read_to_string(&path) {
-            Ok(text) => Some(text),
-            Err(e) => {
-                eprintln!("{}: {e}", PathBuf::from(path).display());
-                std::process::exit(1);
-            }
-        },
-        None => None,
-    };
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("gyfa")
-            .with_app_id("gyfa")
-            .with_inner_size([1400.0, 850.0]),
-        ..Default::default()
-    };
-    eframe::run_native(
-        "gyfa",
-        options,
-        Box::new(move |cc| Ok(Box::new(gyfa::app::App::new(cc, data_dir, import)))),
-    )
+    let import = std::env::args_os().nth(1).map(|path| {
+        std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            eprintln!("{}: {e}", PathBuf::from(path).display());
+            std::process::exit(1);
+        })
+    });
+
+    gpui_kit::application().run(move |cx| {
+        gpui_kit::init(cx);
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::centered(size(px(1500.), px(900.)), cx)),
+            app_id: Some("gyfa".into()),
+            ..Default::default()
+        };
+        gpui_kit::open_window(options, cx, move |window, cx| {
+            cx.new(|cx| gyfa::ui::Gyfa::new(data_dir, import, window, cx))
+        })
+        .expect("the main window opens");
+    });
 }

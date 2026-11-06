@@ -1,0 +1,245 @@
+//! Small building blocks shared by the views: icons, bars, the theme mapping, number formatting.
+
+use gpui_kit::component::{ActiveTheme, Theme, ThemeMode, h_flex};
+use gpui_kit::{
+    App, Div, FontWeight, Hsla, ParentElement, SharedString, Styled, div, img, px, relative, rgb,
+};
+
+use crate::{
+    data::Catalog,
+    icons::{Icon, Icons},
+    theme::{Palette, Rgb},
+};
+
+/// Icon IDs the game uses for these attributes, which label the matching stats.
+pub mod icon {
+    pub const CPU: i32 = 1405;
+    pub const POWERGRID: i32 = 70;
+    pub const CALIBRATION: i32 = 2887;
+    pub const TURRET: i32 = 387;
+    pub const LAUNCHER: i32 = 168;
+    pub const DRONE_BANDWIDTH: i32 = 2987;
+    pub const DRONE_BAY: i32 = 1084;
+    pub const SHIELD: i32 = 1384;
+    pub const ARMOR: i32 = 1383;
+    pub const HULL: i32 = 67;
+    pub const EM: i32 = 1396;
+    pub const THERMAL: i32 = 1394;
+    pub const KINETIC: i32 = 1393;
+    pub const EXPLOSIVE: i32 = 1395;
+    pub const CAPACITOR: i32 = 1668;
+    pub const RECHARGE: i32 = 1392;
+    pub const RANGE: i32 = 1391;
+    pub const DAMAGE: i32 = 1432;
+    pub const HIGH: i32 = 293;
+    pub const MID: i32 = 294;
+    pub const LOW: i32 = 295;
+    pub const RIG: i32 = 3266;
+    pub const SUBSYSTEM: i32 = 3756;
+}
+
+/// EM, thermal, kinetic, explosive, in the colors the game uses for them.
+pub const DAMAGE_COLORS: [Rgb; 4] = [0x0034_78be, 0x00b4_322d, 0x0078_7878, 0x00be_821e];
+
+pub fn color(value: Rgb) -> Hsla {
+    rgb(value).into()
+}
+
+/// An icon of the given size, or an empty box of that size while it downloads.
+pub fn icon_box(catalog: &Catalog, icons: &Icons, icon: Icon, size: f32) -> Div {
+    let slot = div().flex_none().size(px(size));
+    match icons.path(catalog, icon) {
+        Some(path) => slot.child(img(path).size(px(size))),
+        None => slot,
+    }
+}
+
+/// A filled bar with its text centered on top, like pyfa's resource and resist gauges.
+pub fn gauge(fraction: f64, fill: Rgb, text: impl Into<SharedString>, width: f32, cx: &App) -> Div {
+    let fraction = fraction.clamp(0.0, 1.0) as f32;
+    div()
+        .relative()
+        .w(px(width))
+        .h(px(16.))
+        .rounded(px(3.))
+        .bg(cx.theme().muted)
+        .overflow_hidden()
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .h_full()
+                .w(relative(fraction))
+                .bg(color(fill)),
+        )
+        .child(
+            h_flex()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .justify_center()
+                .text_xs()
+                .text_color(cx.theme().foreground)
+                .child(text.into()),
+        )
+}
+
+pub fn section_title(text: impl Into<SharedString>) -> Div {
+    div().font_weight(FontWeight::SEMIBOLD).child(text.into())
+}
+
+/// Map the Omarchy palette onto gpui-component's theme.
+pub fn apply_palette(palette: &Palette, cx: &mut App) {
+    let mode = if palette.dark {
+        ThemeMode::Dark
+    } else {
+        ThemeMode::Light
+    };
+    Theme::change(mode, None, cx);
+    let p = palette;
+    let c = color;
+    let colors = &mut Theme::global_mut(cx).colors;
+
+    colors.background = c(p.background);
+    colors.foreground = c(p.foreground);
+    colors.border = c(p.lighter_background);
+    colors.window_border = c(p.lighter_background);
+    colors.muted = c(p.darker_background);
+    colors.muted_foreground = c(p.dark_foreground);
+    colors.accent = c(p.selection);
+    colors.accent_foreground = c(p.foreground);
+    colors.selection = c(p.selection);
+    colors.ring = c(p.accent);
+    colors.caret = c(p.accent);
+    colors.link = c(p.accent);
+    colors.link_hover = c(p.accent);
+    colors.link_active = c(p.accent);
+
+    colors.primary = c(p.accent);
+    colors.primary_hover = c(p.accent);
+    colors.primary_active = c(p.accent);
+    colors.primary_foreground = c(p.darker_background);
+    colors.secondary = c(p.lighter_background);
+    colors.secondary_hover = c(p.selection);
+    colors.secondary_active = c(p.selection);
+    colors.secondary_foreground = c(p.foreground);
+
+    colors.input = c(p.lighter_background);
+    colors.popover = c(p.dark_background);
+    colors.popover_foreground = c(p.foreground);
+    colors.overlay = c(p.darker_background).opacity(0.6);
+
+    colors.list = c(p.background);
+    colors.list_even = c(p.dark_background);
+    colors.list_hover = c(p.selection).opacity(0.5);
+    colors.list_active = c(p.selection);
+    colors.list_active_border = c(p.accent);
+    colors.list_head = c(p.dark_background);
+    colors.table = c(p.background);
+    colors.table_even = c(p.dark_background);
+    colors.table_hover = c(p.selection).opacity(0.5);
+    colors.table_active = c(p.selection);
+    colors.table_active_border = c(p.accent);
+    colors.table_head = c(p.dark_background);
+    colors.table_head_foreground = c(p.dark_foreground);
+    colors.table_row_border = c(p.lighter_background).opacity(0.4);
+
+    colors.tab_bar = c(p.dark_background);
+    colors.tab = c(p.dark_background);
+    colors.tab_active = c(p.background);
+    colors.tab_foreground = c(p.dark_foreground);
+    colors.tab_active_foreground = c(p.foreground);
+    colors.title_bar = c(p.dark_background);
+    colors.title_bar_border = c(p.lighter_background);
+    colors.sidebar = c(p.dark_background);
+    colors.sidebar_foreground = c(p.foreground);
+    colors.sidebar_border = c(p.lighter_background);
+    colors.sidebar_accent = c(p.selection);
+    colors.sidebar_accent_foreground = c(p.foreground);
+    colors.scrollbar = c(p.background).opacity(0.0);
+    colors.scrollbar_thumb = c(p.lighter_background);
+    colors.scrollbar_thumb_hover = c(p.muted);
+    colors.progress_bar = c(p.accent);
+    colors.drag_border = c(p.accent);
+    colors.drop_target = c(p.selection).opacity(0.4);
+
+    colors.danger = c(p.red);
+    colors.danger_hover = c(p.red);
+    colors.danger_active = c(p.red);
+    colors.warning = c(p.yellow);
+    colors.warning_hover = c(p.yellow);
+    colors.warning_active = c(p.yellow);
+    colors.success = c(p.green);
+    colors.success_hover = c(p.green);
+    colors.success_active = c(p.green);
+    colors.info = c(p.blue);
+    colors.red = c(p.red);
+    colors.green = c(p.green);
+    colors.yellow = c(p.yellow);
+    colors.blue = c(p.blue);
+    cx.refresh_windows();
+}
+
+/// Short numbers the way pyfa writes them: 1.38k, 16.6k, 2.25M.
+pub fn short(v: f64) -> String {
+    let magnitude = v.abs();
+    let (scaled, suffix) = if magnitude >= 1e9 {
+        (v / 1e9, "B")
+    } else if magnitude >= 1e6 {
+        (v / 1e6, "M")
+    } else if magnitude >= 1e4 {
+        (v / 1e3, "k")
+    } else if magnitude >= 100.0 || v.fract().abs() < 1e-9 {
+        return format!("{v:.0}");
+    } else {
+        return format!("{v:.1}");
+    };
+    let digits = match scaled.abs() {
+        a if a >= 100.0 => 0,
+        a if a >= 10.0 => 1,
+        _ => 2,
+    };
+    format!("{scaled:.digits$}{suffix}")
+}
+
+pub fn km(meters: f64) -> String {
+    if meters >= 1000.0 {
+        format!("{:.1}km", meters / 1000.0)
+    } else {
+        format!("{meters:.0}m")
+    }
+}
+
+pub fn duration(secs: f64) -> String {
+    let secs = secs.round() as u64;
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{}m {}s", secs / 60, secs % 60),
+        _ => format!("{}h {}m", secs / 3600, (secs % 3600) / 60),
+    }
+}
+
+/// Dash for a missing value.
+pub fn or_dash(value: Option<f64>, fmt: impl Fn(f64) -> String) -> String {
+    value.map_or_else(|| "–".to_owned(), fmt)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_numbers_match_pyfa() {
+        for (value, want) in [
+            (0.0, "0"),
+            (12.5, "12.5"),
+            (630.0, "630"),
+            (16_590.0, "16.6k"),
+            (2_250_000.0, "2.25M"),
+        ] {
+            assert_eq!(short(value), want, "value {value}");
+        }
+    }
+}

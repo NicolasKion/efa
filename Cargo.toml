@@ -2,7 +2,7 @@
 name = "gyfa"
 version = "0.1.0"
 edition = "2024"
-description = "EVE Online fitting tool: egui on top of the refine fitting engine"
+description = "EVE Online fitting tool: GPUI on top of the refine fitting engine"
 # refine is AGPL, and gyfa links it.
 license = "AGPL-3.0-or-later"
 publish = false
@@ -12,14 +12,11 @@ publish = false
 rc = { package = "refine-core", git = "https://github.com/DarkFenX/refine", rev = "2f816366c1ef2a33cef7d18ecb142f5f2eb30530" }
 redh = { package = "refine-edh", git = "https://github.com/DarkFenX/refine", rev = "2f816366c1ef2a33cef7d18ecb142f5f2eb30530", features = ["phb-fs"] }
 radc = { package = "refine-adc", git = "https://github.com/DarkFenX/refine", rev = "2f816366c1ef2a33cef7d18ecb142f5f2eb30530", features = ["postcard-zfs"] }
-
-eframe = { version = "0.37", features = ["persistence"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-egui_extras = { version = "0.37", features = ["file", "image"] }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "gzip", "rustls"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
+gpui-kit = "0.9.0"
 
 [profile.dev.package."*"]
 # Loading 150 MB of JSON and running the engine unoptimized is painfully slow.

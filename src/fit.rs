@@ -154,6 +154,11 @@ impl Fit {
         true
     }
 
+    /// High, mid and low modules, in that order.
+    pub fn modules(&self) -> impl Iterator<Item = &Module> {
+        self.high.iter().chain(&self.mid).chain(&self.low)
+    }
+
     pub fn launched(&self) -> u32 {
         self.drones.iter().map(|d| d.active).sum()
     }

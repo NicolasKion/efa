@@ -1,58 +1,53 @@
-//! Follows the Omarchy theme. The active theme's `colors.toml` is mapped onto egui's visuals, and
-//! a watcher reapplies it whenever `omarchy theme set` swaps the theme.
+//! The Omarchy theme's palette. The active theme's `colors.toml` is read here; the UI maps it onto
+//! its widgets and polls [`generation`] to notice `omarchy theme set`.
 //!
-//! Without Omarchy the app keeps egui's own dark theme.
+//! Without Omarchy, [`Palette::default`] gives a plain dark theme.
 
-use std::{
-    path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver},
-    time::Duration,
-};
+use std::path::PathBuf;
 
-use eframe::egui::{self, Color32, Stroke};
 use serde::Deserialize;
 
-/// How often the watcher looks for a theme change. Switching themes is rare and a one second lag
-/// is not noticeable next to the rest of the desktop restyling.
-const POLL: Duration = Duration::from_secs(1);
+/// A color as 0xRRGGBB.
+pub type Rgb = u32;
 
-/// The colors gyfa draws with, beyond what egui's visuals carry.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// The theme's colors that gyfa uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
     pub dark: bool,
-    pub accent: Color32,
-    pub selection: Color32,
-    pub muted: Color32,
-    pub background: Color32,
-    pub dark_background: Color32,
-    pub darker_background: Color32,
-    pub lighter_background: Color32,
-    pub foreground: Color32,
-    pub dark_foreground: Color32,
-    pub red: Color32,
-    pub yellow: Color32,
-    pub orange: Color32,
-    pub green: Color32,
+    pub accent: Rgb,
+    pub selection: Rgb,
+    pub muted: Rgb,
+    pub background: Rgb,
+    pub dark_background: Rgb,
+    pub darker_background: Rgb,
+    pub lighter_background: Rgb,
+    pub foreground: Rgb,
+    pub dark_foreground: Rgb,
+    pub red: Rgb,
+    pub yellow: Rgb,
+    pub orange: Rgb,
+    pub green: Rgb,
+    pub blue: Rgb,
 }
 
 impl Default for Palette {
-    /// egui's dark theme, so the rest of the app can always ask for a palette.
     fn default() -> Self {
         Self {
             dark: true,
-            accent: Color32::from_rgb(90, 170, 255),
-            selection: Color32::from_rgb(0, 92, 128),
-            muted: Color32::from_gray(110),
-            background: Color32::from_gray(27),
-            dark_background: Color32::from_gray(20),
-            darker_background: Color32::from_gray(10),
-            lighter_background: Color32::from_gray(40),
-            foreground: Color32::from_gray(200),
-            dark_foreground: Color32::from_gray(140),
-            red: Color32::from_rgb(230, 100, 100),
-            yellow: Color32::from_rgb(210, 180, 40),
-            orange: Color32::from_rgb(230, 90, 30),
-            green: Color32::from_rgb(90, 200, 80),
+            accent: 0x005a_aaff,
+            selection: 0x0000_5c80,
+            muted: 0x006e_6e6e,
+            background: 0x001b_1b1b,
+            dark_background: 0x0014_1414,
+            darker_background: 0x000a_0a0a,
+            lighter_background: 0x0028_2828,
+            foreground: 0x00c8_c8c8,
+            dark_foreground: 0x008c_8c8c,
+            red: 0x00e6_6464,
+            yellow: 0x00d2_b428,
+            orange: 0x00e6_5a1e,
+            green: 0x005a_c850,
+            blue: 0x0034_78be,
         }
     }
 }
@@ -60,8 +55,7 @@ impl Default for Palette {
 impl Palette {
     /// The active Omarchy theme's palette, or None when there is no Omarchy theme to follow.
     pub fn current() -> Option<Self> {
-        let path = theme_dir()?.join("colors.toml");
-        let text = std::fs::read_to_string(path).ok()?;
+        let text = std::fs::read_to_string(theme_dir()?.join("colors.toml")).ok()?;
         Self::parse(&text).ok()
     }
 
@@ -85,80 +79,15 @@ impl Palette {
             // A few themes have no orange; their yellow is the nearest warm color.
             orange: color(raw.orange.as_deref().unwrap_or(&raw.yellow))?,
             green: color(&raw.green)?,
+            blue: color(&raw.blue)?,
         })
     }
-
-    /// Restyle the whole app with this palette.
-    pub fn apply(&self, ctx: &egui::Context) {
-        let mut v = if self.dark {
-            egui::Visuals::dark()
-        } else {
-            egui::Visuals::light()
-        };
-        v.override_text_color = Some(self.foreground);
-        v.weak_text_color = Some(self.dark_foreground);
-        v.hyperlink_color = self.accent;
-        v.panel_fill = self.background;
-        v.window_fill = self.dark_background;
-        v.extreme_bg_color = self.darker_background;
-        v.faint_bg_color = self.lighter_background.gamma_multiply(0.5);
-        v.code_bg_color = self.darker_background;
-        v.warn_fg_color = self.yellow;
-        v.error_fg_color = self.red;
-        v.window_stroke = Stroke::new(1.0, self.lighter_background);
-        v.selection.bg_fill = self.selection;
-        v.selection.stroke = Stroke::new(1.0, self.accent);
-
-        let w = &mut v.widgets;
-        w.noninteractive.bg_fill = self.background;
-        w.noninteractive.weak_bg_fill = self.background;
-        w.noninteractive.bg_stroke = Stroke::new(1.0, self.lighter_background);
-        w.noninteractive.fg_stroke = Stroke::new(1.0, self.foreground);
-        for (state, fill) in [
-            (&mut w.inactive, self.lighter_background),
-            (&mut w.hovered, self.selection),
-            (&mut w.active, self.selection),
-            (&mut w.open, self.lighter_background),
-        ] {
-            state.bg_fill = fill;
-            state.weak_bg_fill = fill;
-            state.fg_stroke = Stroke::new(1.0, self.foreground);
-        }
-        w.hovered.bg_stroke = Stroke::new(1.0, self.accent);
-        w.active.bg_stroke = Stroke::new(1.0, self.accent);
-        ctx.set_visuals(v);
-    }
 }
 
-/// Watch for theme switches, sending the new palette each time and waking the UI so it repaints.
-/// The receiver never yields anything when there is no Omarchy theme.
-pub fn watch(ctx: egui::Context) -> Receiver<Palette> {
-    let (tx, rx) = mpsc::channel();
-    let Some(dir) = theme_dir() else { return rx };
-    // Omarchy bumps this on every `theme set`, after the new files are in place.
-    let generation_file = dir.with_file_name("theme.generation");
-    std::thread::spawn(move || {
-        let mut seen = generation(&generation_file);
-        loop {
-            std::thread::sleep(POLL);
-            let now = generation(&generation_file);
-            if now == seen {
-                continue;
-            }
-            seen = now;
-            if let Some(palette) = Palette::current() {
-                if tx.send(palette).is_err() {
-                    return;
-                }
-                ctx.request_repaint();
-            }
-        }
-    });
-    rx
-}
-
-fn generation(path: &Path) -> Option<String> {
-    std::fs::read_to_string(path).ok()
+/// Changes every time Omarchy switches theme, after the new files are in place. None without
+/// Omarchy.
+pub fn generation() -> Option<String> {
+    std::fs::read_to_string(theme_dir()?.with_file_name("theme.generation")).ok()
 }
 
 fn theme_dir() -> Option<PathBuf> {
@@ -168,13 +97,12 @@ fn theme_dir() -> Option<PathBuf> {
 }
 
 /// "#8bcbb1" or "8bcbb1".
-fn parse_hex(hex: &str) -> Option<Color32> {
+fn parse_hex(hex: &str) -> Option<Rgb> {
     let hex = hex.trim().trim_start_matches('#');
     if hex.len() != 6 {
         return None;
     }
-    let channel = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
-    Some(Color32::from_rgb(channel(0)?, channel(2)?, channel(4)?))
+    u32::from_str_radix(hex, 16).ok()
 }
 
 #[derive(Deserialize)]
@@ -193,6 +121,7 @@ struct RawColors {
     yellow: String,
     orange: Option<String>,
     green: String,
+    blue: String,
 }
 
 #[cfg(test)]
@@ -216,10 +145,11 @@ mod tests {
             red = "#d88d91"
             yellow = "#c5cc91"
             green = "#8bcbb1"
+            blue = "#96b7d0"
         "##;
         let palette = Palette::parse(text).expect("a full palette parses");
         assert!(palette.dark);
-        assert_eq!(palette.background, Color32::from_rgb(0x14, 0x26, 0x20));
+        assert_eq!(palette.background, 0x0014_2620);
         assert_eq!(
             palette.orange, palette.yellow,
             "orange falls back to yellow"
@@ -230,6 +160,6 @@ mod tests {
     fn rejects_bad_hex() {
         assert_eq!(parse_hex("#12345"), None);
         assert_eq!(parse_hex("zzzzzz"), None);
-        assert_eq!(parse_hex("ffffff"), Some(Color32::WHITE));
+        assert_eq!(parse_hex("ffffff"), Some(0x00ff_ffff));
     }
 }

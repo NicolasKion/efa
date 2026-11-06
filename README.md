@@ -1,6 +1,6 @@
 # gyfa
 
-EVE Online fitting tool in the spirit of pyfa: an egui front end on the
+EVE Online fitting tool in the spirit of pyfa: a GPUI (gpui-kit) front end on the
 [refine](https://github.com/DarkFenX/refine) fitting engine, fed with static data from
 [deimos](https://github.com/NicolasKion/deimos) releases.
 
@@ -18,10 +18,11 @@ Item icons come from CCP's client CDN the first time they are shown and are cach
 follows the current theme (`~/.local/state/omarchy/current/theme/colors.toml`) and restyles itself
 when it changes.
 
-The character has every skill at V. Fits are kept between runs, and EFT goes both ways (import
+The character has every skill at V. Fits are kept in `~/.local/share/gyfa/fits.json`, and EFT goes both ways (import
 dialog, copy to clipboard).
 
-FEATURES.md tracks parity with pyfa, whose source is the reference for behaviour and layout.
+FEATURES.md and CONTEXT_MENUS.md track parity with pyfa, whose source is the reference for behaviour
+and layout.
 
 `cargo run --example stats < fit.eft` prints the engine's numbers for a fit without the UI.
 

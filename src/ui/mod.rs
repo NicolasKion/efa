@@ -1,0 +1,700 @@
+//! The main window, laid out like pyfa: browsers on the left, the fit in the middle with its
+//! additions underneath, stats on the right.
+
+mod fitting;
+mod side;
+mod stats;
+mod widgets;
+
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    rc::Rc,
+    time::Duration,
+};
+
+use gpui_kit::component::{
+    ActiveTheme, Sizable, WindowExt,
+    button::{Button, ButtonVariants},
+    h_flex,
+    input::{Input, InputEvent, InputState, Textarea, TextareaState},
+    menu::{DropdownMenu, PopupMenuItem},
+    resizable::{h_resizable, resizable_panel, v_resizable},
+    v_flex,
+};
+use gpui_kit::{
+    App, AppContext, ClickEvent, ClipboardItem, Context, Entity, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Task,
+    WeakEntity, Window, div, prelude::FluentBuilder, px,
+};
+
+use crate::{
+    data::{Catalog, Kind, Slot, TypeId},
+    engine::{Engine, Stats},
+    fit::{Fit, ModuleState},
+    icons::{Icon, Icons},
+    store::Saved,
+    theme::{self, Palette},
+};
+
+/// How often background work is checked: icons that finished downloading, theme switches.
+const POLL: Duration = Duration::from_millis(250);
+
+pub struct Loaded {
+    pub catalog: Catalog,
+    pub engine: Engine,
+    pub icons: Icons,
+}
+
+enum Loading {
+    Pending,
+    Ready(Rc<Loaded>),
+    Failed(SharedString),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BrowserTab {
+    Market,
+    Fittings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdditionsTab {
+    Drones,
+    Implants,
+    Boosters,
+    Cargo,
+    Notes,
+}
+
+/// A change to the current fit, from a click or a menu.
+#[derive(Debug, Clone, Copy)]
+pub enum Action {
+    CycleState(Slot, usize),
+    SetState(Slot, usize, ModuleState),
+    SetCharge(Slot, usize, Option<TypeId>),
+    RemoveModule(Slot, usize),
+    RemoveRig(usize),
+    RemoveSubsystem(usize),
+    SetDronesActive(usize, u32),
+    RemoveDrones(usize),
+    RemoveImplant(usize),
+    RemoveBooster(usize),
+    RemoveCargo(usize),
+}
+
+pub struct Gyfa {
+    loading: Loading,
+    saved: Saved,
+    stats: Option<Stats>,
+    browser_tab: BrowserTab,
+    additions_tab: AdditionsTab,
+    search: Entity<InputState>,
+    search_text: String,
+    name_input: Entity<InputState>,
+    notes_input: Entity<TextareaState>,
+    /// The fit whose name and notes the inputs currently show.
+    inputs_show: Option<usize>,
+    expanded_groups: HashSet<i32>,
+    collapsed_sections: HashSet<&'static str>,
+    charges_for: HashMap<TypeId, Vec<TypeId>>,
+    status: Option<SharedString>,
+    palette: Palette,
+    theme_generation: Option<String>,
+    _subscriptions: Vec<Subscription>,
+    _tasks: Vec<Task<()>>,
+}
+
+impl Gyfa {
+    pub fn new(
+        data_dir: PathBuf,
+        import: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let palette = Palette::current().unwrap_or_default();
+        widgets::apply_palette(&palette, cx);
+
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search items"));
+        let name_input = cx.new(|cx| InputState::new(window, cx).placeholder("Fit name"));
+        let notes_input = cx.new(|cx| TextareaState::new(window, cx).rows(6).placeholder("Notes"));
+        let subscriptions = vec![
+            cx.subscribe(&search, |this, input, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.search_text = input.read(cx).value().to_string();
+                    cx.notify();
+                }
+            }),
+            cx.subscribe(&name_input, |this, input, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change)
+                    && let Some(i) = this.saved.current
+                {
+                    this.saved.fits[i].name = input.read(cx).value().to_string();
+                    this.save();
+                    cx.notify();
+                }
+            }),
+            cx.subscribe(&notes_input, |this, input, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change)
+                    && let Some(i) = this.saved.current
+                {
+                    this.saved.fits[i].notes = input.read(cx).value().to_string();
+                    this.save();
+                }
+            }),
+        ];
+
+        let loader = cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = cx.background_spawn(async move { load(&data_dir) }).await;
+            let _ = this.update(cx, |this, cx| {
+                this.loading = match result {
+                    Ok(loaded) => Loading::Ready(Rc::new(loaded)),
+                    Err(e) => Loading::Failed(e.into()),
+                };
+                if let Some(text) = import {
+                    this.import(&text);
+                }
+                this.recompute();
+                cx.notify();
+            });
+        });
+        let poller = cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            loop {
+                cx.background_executor().timer(POLL).await;
+                if this.update(cx, Gyfa::poll).is_err() {
+                    break;
+                }
+            }
+        });
+
+        Self {
+            loading: Loading::Pending,
+            saved: Saved::load(),
+            stats: None,
+            browser_tab: BrowserTab::Market,
+            additions_tab: AdditionsTab::Drones,
+            search,
+            search_text: String::new(),
+            name_input,
+            notes_input,
+            inputs_show: None,
+            expanded_groups: HashSet::new(),
+            collapsed_sections: HashSet::new(),
+            charges_for: HashMap::new(),
+            status: None,
+            palette,
+            theme_generation: theme::generation(),
+            _subscriptions: subscriptions,
+            _tasks: vec![loader, poller],
+        }
+    }
+
+    fn loaded(&self) -> Option<Rc<Loaded>> {
+        match &self.loading {
+            Loading::Ready(loaded) => Some(Rc::clone(loaded)),
+            Loading::Pending | Loading::Failed(_) => None,
+        }
+    }
+
+    /// Redraw for downloaded icons, restyle for a theme switch.
+    fn poll(&mut self, cx: &mut Context<Self>) {
+        if self.loaded().is_some_and(|l| l.icons.take_updated()) {
+            cx.notify();
+        }
+        let generation = theme::generation();
+        if generation != self.theme_generation {
+            self.theme_generation = generation;
+            if let Some(palette) = Palette::current() {
+                self.palette = palette;
+                widgets::apply_palette(&palette, cx);
+            }
+        }
+    }
+
+    fn fit(&self) -> Option<&Fit> {
+        self.saved.current.map(|i| &self.saved.fits[i])
+    }
+
+    fn recompute(&mut self) {
+        let Some(loaded) = self.loaded() else { return };
+        self.stats = self.fit().map(|fit| loaded.engine.compute(fit));
+    }
+
+    fn save(&self) {
+        if let Err(e) = self.saved.save() {
+            eprintln!("saving fits: {e}");
+        }
+    }
+
+    /// Recalculate, save and redraw after the fits changed.
+    fn changed(&mut self, cx: &mut Context<Self>) {
+        self.recompute();
+        self.save();
+        cx.notify();
+    }
+
+    fn open_fit(&mut self, index: usize, cx: &mut Context<Self>) {
+        if !self.saved.open.contains(&index) {
+            self.saved.open.push(index);
+        }
+        self.saved.current = Some(index);
+        self.changed(cx);
+    }
+
+    fn add_fit(&mut self, fit: Fit, cx: &mut Context<Self>) {
+        self.saved.fits.push(fit);
+        self.open_fit(self.saved.fits.len() - 1, cx);
+    }
+
+    fn close_fit(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.saved.open.retain(|&i| i != index);
+        if self.saved.current == Some(index) {
+            self.saved.current = self.saved.open.last().copied();
+        }
+        self.changed(cx);
+    }
+
+    fn delete_fit(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.saved.open.retain(|&i| i != index);
+        if self.saved.current == Some(index) {
+            self.saved.current = self.saved.open.last().copied();
+        }
+        self.saved.fits.remove(index);
+        let shift = |i: usize| if i > index { i - 1 } else { i };
+        self.saved.open = self.saved.open.iter().map(|&i| shift(i)).collect();
+        self.saved.current = self.saved.current.map(shift);
+        self.inputs_show = None;
+        self.changed(cx);
+    }
+
+    /// Import EFT text as a new open fit. Problems end up in the status line.
+    fn import(&mut self, text: &str) {
+        let Some(loaded) = self.loaded() else { return };
+        match Fit::from_eft(&loaded.catalog, text) {
+            Ok((fit, unknown)) => {
+                self.status = (!unknown.is_empty())
+                    .then(|| format!("Skipped unknown items: {}", unknown.join(", ")).into());
+                self.saved.fits.push(fit);
+                let index = self.saved.fits.len() - 1;
+                self.saved.open.push(index);
+                self.saved.current = Some(index);
+            }
+            Err(e) => self.status = Some(format!("Import failed: {e}").into()),
+        }
+    }
+
+    /// Add an item from the market the way double-clicking it in pyfa does.
+    fn add_item(&mut self, id: TypeId, cx: &mut Context<Self>) {
+        let Some(loaded) = self.loaded() else { return };
+        let catalog = &loaded.catalog;
+        let is_ship = catalog.get(id).is_some_and(|t| t.kind == Kind::Ship);
+        // A ship starts a new fit rather than swapping the hull under an existing one.
+        if is_ship {
+            let mut fit = Fit::new(catalog.name(id));
+            fit.ship = Some(id);
+            self.status = None;
+            self.add_fit(fit, cx);
+            return;
+        }
+        let Some(i) = self.saved.current else {
+            self.status = Some("Pick a ship first".into());
+            cx.notify();
+            return;
+        };
+        let added = self.saved.fits[i].add(catalog, id);
+        self.status =
+            (!added).then(|| format!("Nothing on this fit takes {}", catalog.name(id)).into());
+        self.changed(cx);
+    }
+
+    pub fn apply(&mut self, action: Action, cx: &mut Context<Self>) {
+        let Some(loaded) = self.loaded() else { return };
+        let Some(current) = self.saved.current else {
+            return;
+        };
+        let fit = &mut self.saved.fits[current];
+        match action {
+            Action::CycleState(slot, i) => {
+                let m = &mut fit.rack_mut(slot)[i];
+                let t = loaded.catalog.get(m.type_id);
+                let activatable = t.is_some_and(|t| t.activatable);
+                let overloadable = t.is_some_and(|t| t.overloadable);
+                m.state = match m.state {
+                    ModuleState::Offline => ModuleState::Online,
+                    ModuleState::Online if activatable => ModuleState::Active,
+                    ModuleState::Active if overloadable => ModuleState::Overload,
+                    _ => ModuleState::Offline,
+                };
+            }
+            Action::SetState(slot, i, state) => fit.rack_mut(slot)[i].state = state,
+            Action::SetCharge(slot, i, charge) => fit.rack_mut(slot)[i].charge = charge,
+            Action::RemoveModule(slot, i) => {
+                fit.rack_mut(slot).remove(i);
+            }
+            Action::RemoveRig(i) => {
+                fit.rigs.remove(i);
+            }
+            Action::RemoveSubsystem(i) => {
+                fit.subsystems.remove(i);
+            }
+            Action::SetDronesActive(i, n) => fit.drones[i].active = n.min(fit.drones[i].count),
+            Action::RemoveDrones(i) => {
+                fit.drones.remove(i);
+            }
+            Action::RemoveImplant(i) => {
+                fit.implants.remove(i);
+            }
+            Action::RemoveBooster(i) => {
+                fit.boosters.remove(i);
+            }
+            Action::RemoveCargo(i) => {
+                fit.cargo.remove(i);
+            }
+        }
+        self.changed(cx);
+    }
+
+    fn open_import_dialog(window: &mut Window, cx: &mut Context<Self>) {
+        let text = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .rows(16)
+                .placeholder("[Vexor, My Vexor]\nDrone Damage Amplifier II\n…")
+        });
+        let this = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let (text, this) = (text.clone(), this.clone());
+            dialog.title("Import EFT").w(px(560.)).child(
+                v_flex()
+                    .gap_3()
+                    .child(Textarea::new(&text).h(px(320.)))
+                    .child(
+                        h_flex().justify_end().child(
+                            Button::new("import-eft")
+                                .primary()
+                                .label("Import")
+                                .on_click(move |_, window, cx| {
+                                    let value = text.read(cx).value().to_string();
+                                    let _ = this.update(cx, |this, cx| {
+                                        this.import(&value);
+                                        this.changed(cx);
+                                    });
+                                    window.close_dialog(cx);
+                                }),
+                        ),
+                    ),
+            )
+        });
+    }
+
+    /// Point the name and notes inputs at the current fit when it changes.
+    fn sync_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.inputs_show == self.saved.current {
+            return;
+        }
+        self.inputs_show = self.saved.current;
+        let (name, notes) = self
+            .fit()
+            .map_or_default(|f| (f.name.clone(), f.notes.clone()));
+        self.name_input
+            .update(cx, |input, cx| input.set_value(name, window, cx));
+        self.notes_input
+            .update(cx, |input, cx| input.set_value(notes, window, cx));
+    }
+
+    fn menu_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let this = cx.entity().downgrade();
+        let has_fit = self.saved.current.is_some();
+        h_flex()
+            .gap_1()
+            .px_2()
+            .py_1()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().title_bar)
+            .child(
+                Button::new("menu-file")
+                    .ghost()
+                    .small()
+                    .label("File")
+                    .dropdown_menu({
+                        let this = this.clone();
+                        move |menu, _, _| {
+                            let (import, copy) = (this.clone(), this.clone());
+                            menu.item(PopupMenuItem::new("Import EFT…").on_click(
+                                move |_, window, cx| {
+                                    let _ = import.update(cx, |_, cx| {
+                                        Self::open_import_dialog(window, cx);
+                                    });
+                                },
+                            ))
+                            .item(
+                                PopupMenuItem::new("Copy as EFT")
+                                    .disabled(!has_fit)
+                                    .on_click(move |_, _, cx| {
+                                        let _ = copy.update(cx, Gyfa::copy_eft);
+                                    }),
+                            )
+                            .separator()
+                            .item(PopupMenuItem::new("Quit").on_click(|_, _, cx| cx.quit()))
+                        }
+                    }),
+            )
+            .child(
+                Button::new("menu-fit")
+                    .ghost()
+                    .small()
+                    .label("Fit")
+                    .dropdown_menu({
+                        let this = this.clone();
+                        move |menu, _, _| {
+                            let (new, duplicate, delete) =
+                                (this.clone(), this.clone(), this.clone());
+                            menu.item(PopupMenuItem::new("New fit").on_click(move |_, _, cx| {
+                                let _ = new
+                                    .update(cx, |this, cx| this.add_fit(Fit::new("New fit"), cx));
+                            }))
+                            .item(PopupMenuItem::new("Duplicate").disabled(!has_fit).on_click(
+                                move |_, _, cx| {
+                                    let _ = duplicate.update(cx, Gyfa::duplicate_fit);
+                                },
+                            ))
+                            .item(
+                                PopupMenuItem::new("Delete").disabled(!has_fit).on_click(
+                                    move |_, _, cx| {
+                                        let _ = delete.update(cx, |this, cx| {
+                                            if let Some(current) = this.saved.current {
+                                                this.delete_fit(current, cx);
+                                            }
+                                        });
+                                    },
+                                ),
+                            )
+                        }
+                    }),
+            )
+            .child(
+                Button::new("menu-character")
+                    .ghost()
+                    .small()
+                    .label("Character")
+                    .dropdown_menu(|menu, _, _| {
+                        menu.item(
+                            PopupMenuItem::new("All 5 (the only character for now)").disabled(true),
+                        )
+                    }),
+            )
+            .when_some(self.status.clone(), |bar, status| {
+                bar.child(
+                    div()
+                        .ml_4()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(status),
+                )
+            })
+    }
+
+    fn copy_eft(&mut self, cx: &mut Context<Self>) {
+        let (Some(loaded), Some(fit)) = (self.loaded(), self.fit()) else {
+            return;
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(fit.to_eft(&loaded.catalog)));
+        self.status = Some("Copied fit to clipboard".into());
+        cx.notify();
+    }
+
+    fn duplicate_fit(&mut self, cx: &mut Context<Self>) {
+        let Some(mut copy) = self.fit().cloned() else {
+            return;
+        };
+        copy.name = format!("{} copy", copy.name);
+        self.add_fit(copy, cx);
+    }
+
+    fn fit_tabs(&self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        h_flex()
+            .flex_wrap()
+            .gap_1()
+            .p_1()
+            .bg(theme.tab_bar)
+            .border_b_1()
+            .border_color(theme.border)
+            .children(self.saved.open.iter().map(|&i| {
+                let fit = &self.saved.fits[i];
+                let selected = self.saved.current == Some(i);
+                let label = match fit.ship {
+                    Some(ship) => format!("{}: {}", loaded.catalog.name(ship), fit.name),
+                    None => fit.name.clone(),
+                };
+                h_flex()
+                    .id(SharedString::from(format!("tab-{i}")))
+                    .gap_1()
+                    .px_2()
+                    .py_0p5()
+                    .rounded(px(4.))
+                    .bg(if selected {
+                        theme.tab_active
+                    } else {
+                        theme.tab
+                    })
+                    .text_color(if selected {
+                        theme.tab_active_foreground
+                    } else {
+                        theme.tab_foreground
+                    })
+                    .border_1()
+                    .border_color(if selected { theme.ring } else { theme.border })
+                    .when_some(fit.ship, |tab, ship| {
+                        tab.child(widgets::icon_box(
+                            &loaded.catalog,
+                            &loaded.icons,
+                            Icon::Type(ship),
+                            16.,
+                        ))
+                    })
+                    .child(div().text_sm().child(label))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.saved.current = Some(i);
+                        this.changed(cx);
+                    }))
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("tab-close-{i}")))
+                            .px_1()
+                            .rounded(px(3.))
+                            .hover(|s| s.bg(cx.theme().secondary_hover))
+                            .child("×")
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                cx.stop_propagation();
+                                this.close_fit(i, cx);
+                            })),
+                    )
+            }))
+            .child(
+                Button::new("new-fit")
+                    .ghost()
+                    .xsmall()
+                    .label("+")
+                    .tooltip("New fit")
+                    .on_click(cx.listener(|this, _, _, cx| this.add_fit(Fit::new("New fit"), cx))),
+            )
+    }
+}
+
+fn load(data_dir: &Path) -> Result<Loaded, String> {
+    if !data_dir.join("phobos/metadata.json").exists() {
+        return Err(format!(
+            "No EVE data in {}.\nRun scripts/fetch-data.sh, or point GYFA_DATA at a deimos dump.",
+            data_dir.display()
+        ));
+    }
+    let catalog = Catalog::load(data_dir)?;
+    let cache_dir = data_dir.parent().unwrap_or(data_dir).join("cache");
+    let engine = Engine::load(data_dir, &cache_dir, catalog.skills.clone())?;
+    let icons = Icons::new(data_dir, &cache_dir);
+    Ok(Loaded {
+        catalog,
+        engine,
+        icons,
+    })
+}
+
+impl Render for Gyfa {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let root = v_flex()
+            .size_full()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .text_sm();
+        let loaded = match &self.loading {
+            Loading::Ready(loaded) => Rc::clone(loaded),
+            Loading::Pending => {
+                return root
+                    .items_center()
+                    .justify_center()
+                    .child("Loading EVE data…")
+                    .into_any_element();
+            }
+            Loading::Failed(e) => {
+                return root
+                    .items_center()
+                    .justify_center()
+                    .text_color(cx.theme().danger)
+                    .child(e.clone())
+                    .into_any_element();
+            }
+        };
+        self.sync_inputs(window, cx);
+
+        let center = v_flex()
+            .size_full()
+            .child(self.fit_tabs(&loaded, cx))
+            .child(if self.fit().is_some() {
+                v_resizable("center")
+                    .child(resizable_panel().child(self.fitting_view(&loaded, cx)))
+                    .child(
+                        resizable_panel()
+                            .size(px(200.))
+                            .size_range(px(80.)..px(600.))
+                            .child(self.additions(&loaded, cx)),
+                    )
+                    .into_any_element()
+            } else {
+                div()
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Double-click a ship in the market to start a fit, or import one from the File menu.")
+                    .into_any_element()
+            });
+
+        root.child(self.menu_bar(cx))
+            .child(
+                h_resizable("main")
+                    .child(
+                        resizable_panel()
+                            .size(px(280.))
+                            .size_range(px(200.)..px(520.))
+                            .child(self.browser(&loaded, cx)),
+                    )
+                    .child(resizable_panel().child(center))
+                    .child(
+                        resizable_panel()
+                            .size(px(340.))
+                            .size_range(px(260.)..px(560.))
+                            .child(self.stats_panel(&loaded, cx)),
+                    ),
+            )
+            .into_any_element()
+    }
+}
+
+/// Inputs that the views embed, exposed for them.
+impl Gyfa {
+    fn search_input(&self) -> Input {
+        Input::new(&self.search).small()
+    }
+
+    fn name_field(&self) -> Input {
+        Input::new(&self.name_input).small()
+    }
+
+    fn notes_field(&self) -> Textarea {
+        Textarea::new(&self.notes_input)
+    }
+
+    fn weak(cx: &Context<Self>) -> WeakEntity<Self> {
+        cx.entity().downgrade()
+    }
+
+    fn app_update(
+        weak: &WeakEntity<Self>,
+        cx: &mut App,
+        f: impl FnOnce(&mut Self, &mut Context<Self>),
+    ) {
+        let _ = weak.update(cx, f);
+    }
+}
