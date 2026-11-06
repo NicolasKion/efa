@@ -9,8 +9,9 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, AppContext, ClickEvent, Context, Div, FontWeight, InteractiveElement,
-    IntoElement, MouseButton, MouseDownEvent, ParentElement, Render, SharedString, Stateful,
-    StatefulInteractiveElement, Styled, WeakEntity, Window, div, img, prelude::FluentBuilder, px,
+    IntoElement, Modifiers, MouseButton, MouseDownEvent, ParentElement, Render, SharedString,
+    Stateful, StatefulInteractiveElement, Styled, WeakEntity, Window, div, img,
+    prelude::FluentBuilder, px,
 };
 
 use super::{
@@ -330,6 +331,8 @@ fn item_row_behaviour(
 pub enum DragSource {
     Market,
     Row(RowRef),
+    /// A stack in the cargo tab.
+    Cargo,
 }
 
 /// An item being dragged: from the market onto a slot, or between slots.
@@ -408,16 +411,22 @@ impl DropOn {
 /// Highlight a row while something is dragged over it, and handle the drop.
 fn drop_target(row: Stateful<Div>, on: DropOn, cx: &mut Context<Gyfa>) -> Stateful<Div> {
     row.drag_over::<Dragged>(|style, _, _, cx| style.bg(cx.theme().drop_target))
-        .on_drop(cx.listener(move |g, dragged: &Dragged, _, cx| {
+        .on_drop(cx.listener(move |g, dragged: &Dragged, window, cx| {
             cx.stop_propagation();
-            g.drop_on(on, dragged, cx);
+            g.drop_on(on, dragged, window.modifiers(), cx);
         }))
 }
 
 impl Gyfa {
     /// pyfa's drop rules: a module onto its own rack goes to that position, a charge onto a
     /// module loads it, a module dragged within its rack swaps places, anything else is added.
-    fn drop_on(&mut self, on: DropOn, dragged: &Dragged, cx: &mut Context<Self>) {
+    fn drop_on(
+        &mut self,
+        on: DropOn,
+        dragged: &Dragged,
+        modifiers: Modifiers,
+        cx: &mut Context<Self>,
+    ) {
         let Some(loaded) = self.loaded() else { return };
         let Some(t) = loaded.catalog.get(dragged.type_id) else {
             return;
@@ -440,6 +449,12 @@ impl Gyfa {
                 },
                 _ => self.add_item(t.id, cx),
             },
+            DragSource::Cargo => {
+                if let Some(onto) = on.position() {
+                    let transfer = super::additions::drop_transfer(modifiers);
+                    self.apply(Action::CargoToModule(t.id, onto, transfer), cx);
+                }
+            }
         }
     }
 }

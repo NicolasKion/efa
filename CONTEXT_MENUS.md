@@ -85,11 +85,11 @@ Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 ## Cargo pane (gui/builtinAdditionPanes/cargoView.py)
 
 ### cargoItem
-- [ ] {Category} Stats | row clicked | stats window | itemStats.py
+- [ ] {Category} Stats | row clicked | stats window (needs the item stats window) | itemStats.py
 - [x] {Category} Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove {Category} Stack | row clicked | removes selected cargo stacks (multi). GuiRemoveCargosCommand | itemRemove.py
-- [x] Change Selection Quantity | row clicked | dialog, sets amount on all selected stacks. GuiChangeCargosAmountCommand | itemAmountChange.py
-- [x] Variations | 2+ variations | variation swap for selected cargo with same variation set. GuiChangeCargoMetasCommand | itemVariationChange.py
+- [x] Change Selection Quantity | row clicked | dialog, sets amount on all selected stacks; 0 removes them. GuiChangeCargosAmountCommand | itemAmountChange.py
+- [x] Variations | 2+ variations | variation swap for selected cargo with same variation set, merging into an existing stack. GuiChangeCargoMetasCommand | itemVariationChange.py
 - [x] Fill Cargo With {Category} | row clicked | adds as many units as fit in remaining cargo capacity. GuiAddCargoCommand | cargoFill.py
 
 ### cargoItemMisc
@@ -199,7 +199,7 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 - [x] Fill With Module | active fit, category Module (pref moduleFill) | adds the module to every free slot. GuiFillWithNewLocalModulesCommand | itemFill.py
 - [x] Add {Drone} to Drone Bay (xN) | active fit, category Drone, room for >= 1 | adds stack sized to bay/bandwidth limit. GuiAddLocalDroneCommand | droneAddStack.py
 - [x] Add {Category} to Cargo | active fit (structures: charges only) | adds 1 to cargo. GuiAddCargoCommand | cargoAdd.py
-- [~] Fill Cargo With {Category} | active fit, item is charge or commodity | adds max units that fit. GuiAddCargoCommand | cargoFill.py
+- [x] Fill Cargo With {Category} | active fit, item is charge or commodity (gyfa: any cargo-only item) | adds max units that fit. GuiAddCargoCommand | cargoFill.py
 - [x] Add {Charge} to Cargo (x1000) / (x8) for Scan Probes | active fit, category Charge | adds 1000 (or 8). GuiAddCargoCommand | cargoAddAmmo.py
 - [ ] Project {Category} onto Fit | active non-structure fit, item has a projected effect (pref project) | adds as projected module/drone/fighter. GuiAddProjectedModule/Drone/FighterCommand | itemProject.py
 - [ ] Set {Category} as Damage Pattern | active fit, item has em/therm/kin/exp damage attrs (pref ammoPattern) | sets fit damage pattern to the item's damage ratio | ammoToDmgPattern.py

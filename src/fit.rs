@@ -1,6 +1,8 @@
 //! The fit as the user sees it. This is the source of truth; the engine rebuilds its own state from
 //! it whenever it changes.
 
+pub mod cargo;
+
 use std::fmt::Write;
 
 use serde::{Deserialize, Serialize};
@@ -240,6 +242,7 @@ impl Fit {
                 self.add_booster(catalog, Booster::new(type_id));
             }
             Kind::Mode => self.mode = Some(type_id),
+            Kind::Cargo => self.add_cargo(type_id, 1),
             Kind::Skill | Kind::Other => return false,
         }
         true

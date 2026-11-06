@@ -27,9 +27,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    App, AppContext, ClickEvent, ClipboardItem, Context, Entity, InteractiveElement, IntoElement,
-    ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Task, WeakEntity, Window, div, prelude::FluentBuilder, px,
+    App, AppContext, ClickEvent, ClipboardItem, Context, Entity, FocusHandle, InteractiveElement,
+    IntoElement, ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement,
+    Styled, Subscription, Task, WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
 pub use actions::{Action, AddKind, RowRef, Scope};
@@ -102,6 +102,8 @@ pub struct Gyfa {
     /// Selected rows of the open additions tab.
     additions_selection: Vec<usize>,
     additions_anchor: Option<usize>,
+    /// Keyboard focus of the additions list, for Delete, Ctrl+A and Escape.
+    additions_focus: FocusHandle,
     collapsed_sections: HashSet<&'static str>,
     status: Option<SharedString>,
     palette: Palette,
@@ -191,6 +193,7 @@ impl Gyfa {
             column_layout: columns::Layout::default(),
             additions_selection: Vec::new(),
             additions_anchor: None,
+            additions_focus: cx.focus_handle(),
             collapsed_sections: HashSet::new(),
             status: None,
             palette,
