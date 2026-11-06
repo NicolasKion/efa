@@ -331,6 +331,11 @@ impl Engine {
     ) -> Stats {
         let mut stats = Stats::default();
         let mut sol = SolOwned::new(&self.src);
+        if let Some(spool) = options.default_spool {
+            sol.set_default_spool(rc::Spool::SpoolScale(rc::UnitInterval::from_f64_clamped(
+                spool,
+            )));
+        }
         let mut f = sol.add_fit();
         pilot.board(&mut f);
         let Some(ship) = fit.ship else { return stats };

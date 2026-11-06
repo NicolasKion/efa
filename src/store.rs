@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    damage_pattern::DamagePattern, fit::Fit, implant_set::ImplantSet, target_profile::TargetProfile,
+    damage_pattern::DamagePattern, fit::Fit, implant_set::ImplantSet, port::ExportSettings,
+    preferences::Preferences, target_profile::TargetProfile,
 };
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -30,6 +31,12 @@ pub struct Saved {
     /// The user's target profiles, pyfa's Target Profile Editor.
     #[serde(default)]
     pub target_profiles: Vec<TargetProfile>,
+    /// The preferences window's settings.
+    #[serde(default)]
+    pub preferences: Preferences,
+    /// The copy dialog's last format and options.
+    #[serde(default)]
+    pub export: ExportSettings,
 }
 
 /// What besides ship and fittings the price total includes, with pyfa's defaults.

@@ -318,7 +318,7 @@ impl Gyfa {
                             ),
                         )
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.open_fit(i, cx);
+                            this.open_from_browser(i, cx);
                         }))
                         // The Projected and Command tabs take fits dragged from here.
                         .on_drag(
@@ -456,6 +456,7 @@ fn market_menu(
     }
     if let Kind::Module(slot) = t.kind
         && slot != Slot::Subsystem
+        && g.saved.preferences.context_menus.module_fill
     {
         menu = menu.item(
             entry(IconName::Plus, "Fill With Module").on_click(apply(Action::FillRack(slot, id))),
@@ -481,7 +482,7 @@ fn market_menu(
     };
     menu =
         menu.item(entry(IconName::Inbox, format!("Add {category} to Cargo")).on_click(to_cargo(1)));
-    if goes_to_cargo(t.kind) {
+    if goes_to_cargo(t.kind) && g.saved.preferences.context_menus.cargo_fill {
         menu = menu.item(
             entry(IconName::Inbox, format!("Fill Cargo With {category}"))
                 .on_click(on(|g, id, _, cx| g.fill_cargo_with(id, cx))),
@@ -501,7 +502,8 @@ fn market_menu(
             .on_click(to_cargo(batch)),
         );
     }
-    if t.damage.iter().any(|&d| d > 0.0) {
+    let shown = super::hub::preferences(cx).context_menus;
+    if shown.ammo_pattern && t.damage.iter().any(|&d| d > 0.0) {
         let profile = crate::fit::DamageProfile::Pattern {
             name: crate::damage_pattern::SELECTED_AMMO.to_owned(),
             amounts: t.damage,
@@ -514,7 +516,7 @@ fn market_menu(
             .on_click(apply(Action::SetDamageProfile(profile))),
         );
     }
-    if loaded.catalog.projection.projectable.contains(&id) {
+    if shown.project && loaded.catalog.projection.projectable.contains(&id) {
         menu = menu.item(
             entry(IconName::Globe, format!("Project {category} onto Fit")).on_click(on(
                 |g, id, _, cx| {

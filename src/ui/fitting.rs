@@ -135,12 +135,30 @@ impl Gyfa {
         let catalog = &loaded.catalog;
         let theme = cx.theme();
         let selected = matches!(row, Row::Item(r) if self.selection.contains(&r));
+        // pyfa's "Color fitting view by slot": a faint tint per rack.
+        let slot_tint = match row {
+            Row::Item(RowRef::Module(slot, _)) | Row::Empty(slot, _) => Some(slot),
+            Row::Item(RowRef::Rig(_)) => Some(Slot::Rig),
+            Row::Item(RowRef::Subsystem(_)) => Some(Slot::Subsystem),
+            Row::Header { .. } | Row::Mode(_) => None,
+        }
+        .filter(|_| self.saved.preferences.general.color_by_slot)
+        .map(|slot| {
+            match slot {
+                Slot::High => theme.danger,
+                Slot::Mid => theme.info,
+                Slot::Low => theme.success,
+                Slot::Rig | Slot::Subsystem => theme.warning,
+            }
+            .opacity(0.12)
+        });
         let base = h_flex()
             .id(SharedString::from(format!("fit-row-{n}")))
             .h(px(ROW_HEIGHT))
             .px_1()
             .gap_1()
             .when(n % 2 == 1, |r| r.bg(theme.table_even))
+            .when_some(slot_tint, Styled::bg)
             .when(selected, |r| r.bg(theme.table_active))
             .hover(|s| s.bg(theme.table_hover));
         match row {
@@ -590,6 +608,7 @@ fn item_menu(
         return menu;
     };
     let mut menu = menu;
+    let shown = super::hub::preferences(cx).context_menus;
 
     if let Some(m) = &snapshot.module {
         let charges = compatible_charges(catalog, type_id);
@@ -597,7 +616,11 @@ fn item_menu(
             let structure = structure_charges(catalog, t, &charges);
             menu = charge_submenu(menu, this, loaded, item, structure, m.charge, window, cx);
         }
-        if let Some(max) = snapshot.info.spool_max.filter(|_| t.spools) {
+        if let Some(max) = snapshot
+            .info
+            .spool_max
+            .filter(|_| t.spools && shown.spoolup)
+        {
             menu = spool_submenu(menu, this, item, m.spool, max, window, cx);
         }
     }
@@ -628,7 +651,7 @@ fn item_menu(
         Action::Remove,
     )));
     let variations = catalog.variations_of(type_id);
-    if variations.len() > 1 {
+    if variations.len() > 1 && shown.variations {
         menu = variations_submenu(menu, this, loaded, item, type_id, variations, window, cx);
     }
     let rack = match item {
@@ -636,7 +659,7 @@ fn item_menu(
         RowRef::Rig(_) => Slot::Rig,
         RowRef::Subsystem(_) => Slot::Subsystem,
     };
-    let slot = (rack != Slot::Subsystem).then_some(rack);
+    let slot = (rack != Slot::Subsystem && shown.module_fill).then_some(rack);
     if let Some(slot) = slot {
         menu = menu.item(
             entry(IconName::Plus, format!("Fill With {}", t.category_label())).on_click(handler(
@@ -832,7 +855,8 @@ fn py_round(value: f64) -> String {
     }
 }
 
-/// A charge entry: loads it into every similar module, or only the selection with Ctrl or Alt.
+/// A charge entry: loads it into the selection, or every similar module when the preference
+/// says so; Ctrl or Alt swaps the two.
 fn charge_entry(
     this: &WeakEntity<Gyfa>,
     loaded: &Rc<Loaded>,
@@ -842,9 +866,27 @@ fn charge_entry(
 ) -> PopupMenuItem {
     item_entry(loaded, id, loaded.catalog.name(id))
         .checked(loaded_charge == Some(id))
-        .on_click(scoped(this, item, Scope::Similar, move |rows| {
+        .on_click(ammo_scoped(this, item, move |rows| {
             Action::SetCharge(rows, Some(id))
         }))
+}
+
+/// A charge change: to every module of the same type or just the selection, as the "Change
+/// charge in all modules of the same type" preference says, with Ctrl or Alt doing the other.
+fn ammo_scoped(
+    this: &WeakEntity<Gyfa>,
+    item: RowRef,
+    action: impl Fn(Vec<RowRef>) -> Action + 'static,
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    handler(this, move |g, event, _, cx| {
+        let default = if g.saved.preferences.general.ammo_change_all {
+            Scope::Similar
+        } else {
+            Scope::Selection
+        };
+        let targets = g.targets(item, Scope::from_click(default, event));
+        g.apply(action(targets), cx);
+    })
 }
 
 /// A submenu of charges between pyfa's "Less Damage" and "More Damage" markers.
@@ -947,10 +989,9 @@ fn charge_submenu(
                     }
                 }
             }
-            menu.item(entry(IconName::CircleX, "Empty").on_click(scoped(
+            menu.item(entry(IconName::CircleX, "Empty").on_click(ammo_scoped(
                 &this,
                 item,
-                Scope::Similar,
                 |rows| Action::SetCharge(rows, None),
             )))
         },

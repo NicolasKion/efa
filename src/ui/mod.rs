@@ -6,10 +6,15 @@ mod additions;
 mod character_editor;
 mod characters;
 mod columns;
+mod export;
 mod fitting;
+mod history;
 mod hub;
 mod implant_sets;
 mod item_stats;
+mod menu;
+mod port;
+mod preferences;
 pub mod profile_editor;
 pub mod profile_menus;
 mod side;
@@ -28,19 +33,21 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
-    menu::{ContextMenuExt, DropdownMenu},
+    menu::ContextMenuExt,
     resizable::{h_resizable, resizable_panel, v_resizable},
+    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext, ClickEvent, ClipboardItem, Context, Entity, FocusHandle,
-    InteractiveElement, IntoElement, MouseUpEvent, ParentElement, Render, ScrollHandle,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window,
-    WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, size,
+    AnyElement, App, AppContext, ClickEvent, Context, Entity, FocusHandle, InteractiveElement,
+    IntoElement, MouseUpEvent, ParentElement, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window, WindowBounds,
+    WindowOptions, div, prelude::FluentBuilder, px, size,
 };
 
 pub use actions::{Action, AddKind, RowRef, Scope};
 pub use hub::Hub;
+pub use menu::init as init_menus;
 
 /// How pyfa names a rack in messages.
 fn slot_label(slot: Slot) -> &'static str {
@@ -191,6 +198,10 @@ pub struct Gyfa {
     /// Takes the drones pane's keys: Delete, Escape, Ctrl+A.
     drones_focus: FocusHandle,
     collapsed_sections: HashSet<&'static str>,
+    /// Undo and redo steps per fit.
+    history: history::History,
+    /// The market search waiting out the search delay preference.
+    search_debounce: Option<Task<()>>,
     stats_view: stats::View,
     status: Option<SharedString>,
     palette: Palette,
@@ -221,8 +232,8 @@ impl Gyfa {
         let subscriptions = vec![
             cx.subscribe(&search, |this, input, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
-                    this.search_text = input.read(cx).value().to_string();
-                    cx.notify();
+                    let text = input.read(cx).value().to_string();
+                    this.search_after_delay(text, cx);
                 }
             }),
             cx.subscribe(&name_input, |this, _, event: &InputEvent, cx| {
@@ -303,8 +314,10 @@ impl Gyfa {
             additions_anchor: None,
             additions_focus: cx.focus_handle(),
             drones_focus: cx.focus_handle(),
-            // pyfa hides the bombing view unless turned on in its preferences.
-            collapsed_sections: HashSet::from(["Bombing"]),
+            // Which sections show at all is a preference; bombing is off by default, as in pyfa.
+            collapsed_sections: HashSet::new(),
+            history: history::History::default(),
+            search_debounce: None,
             stats_view: stats::View::default(),
             status: None,
             palette,
@@ -356,11 +369,18 @@ impl Gyfa {
                 .map(|&(_, index)| index)
                 .collect();
             let (open, current) = (self.saved.open.clone(), self.saved.current);
+            // Edits not published yet survive a settings change from the preferences window.
+            let unpublished =
+                (self.unsaved && deleted.is_empty()).then(|| std::mem::take(&mut self.saved.fits));
             self.saved = hub.saved.clone();
             self.saved.open = open;
             self.saved.current = current;
+            if let Some(fits) = unpublished {
+                self.saved.fits = fits;
+            }
             for index in deleted {
                 hub::shift_tabs(&mut self.saved.open, &mut self.saved.current, index);
+                self.history.forget(index);
             }
             self.synced = hub.generation;
             self.inputs_show = None;
@@ -441,15 +461,40 @@ impl Gyfa {
     /// waits a while before trying again, so being offline does not mean a request every poll.
     fn refresh_prices(&mut self, cx: &mut Context<Self>) {
         let Some(loaded) = self.loaded() else { return };
+        let preferences = &self.saved.preferences;
+        if !preferences.network.enabled || !preferences.network.prices {
+            return;
+        }
         let waiting = self.prices_retry.is_some_and(|at| Instant::now() < at);
-        if self.prices_fetch.is_some() || waiting || !self.prices.is_stale() {
+        if self.prices_fetch.is_some() || waiting {
+            return;
+        }
+        let origin = crate::prices::Origin {
+            source: preferences.market.price_source,
+            system: preferences.market.price_system,
+        };
+        // Sources priced per type are asked about what the saved fits use.
+        let types: HashSet<TypeId> = if origin.source.uses_system() {
+            self.saved
+                .fits
+                .iter()
+                .flat_map(crate::port::fit_types)
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        if !self.prices.is_stale_for(origin, &types) {
             return;
         }
         let prices = (*self.prices).clone();
         let cache_dir = loaded.cache_dir.clone();
+        let proxy = preferences.network.proxy.clone();
         self.prices_fetch = Some(cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let result = cx
-                .background_spawn(async move { prices.refresh(&cache_dir) })
+                .background_spawn(async move {
+                    let http = proxy.client(crate::prices::user_agent())?;
+                    prices.refresh_from(&cache_dir, origin, &types, &http)
+                })
                 .await;
             let _ = this.update(cx, |g, cx| {
                 g.prices_fetch = None;
@@ -499,6 +544,7 @@ impl Gyfa {
         let Some(loaded) = self.loaded() else { return };
         let options = crate::engine::CalcOptions {
             factor_reload: self.saved.factor_reload,
+            default_spool: Some(self.saved.preferences.engine.default_spool),
         };
         // Older saves kept fighters as drone stacks; links can point at fits deleted since.
         if let Some(i) = self.saved.current
@@ -573,6 +619,7 @@ impl Gyfa {
             self.saved.current = self.saved.open.last().copied();
         }
         self.saved.fits.remove(index);
+        self.history.forget(index);
         self.pending_deletions.push(index);
         let shift = |i: usize| if i > index { i - 1 } else { i };
         self.saved.open = self.saved.open.iter().map(|&i| shift(i)).collect();
@@ -581,21 +628,9 @@ impl Gyfa {
         self.changed(cx);
     }
 
-    /// Import EFT text as a new open fit. Problems end up in the status line.
+    /// Import fits in any format as new open fits. Problems end up in the status line.
     fn import(&mut self, text: &str) {
-        let Some(loaded) = self.loaded() else { return };
-        match Fit::from_eft(&loaded.catalog, text) {
-            Ok((mut fit, unknown)) => {
-                self.status = (!unknown.is_empty())
-                    .then(|| format!("Skipped unknown items: {}", unknown.join(", ")).into());
-                fit.character = self.last_character;
-                self.saved.fits.push(fit);
-                let index = self.saved.fits.len() - 1;
-                self.saved.open.push(index);
-                self.saved.current = Some(index);
-            }
-            Err(e) => self.status = Some(format!("Import failed: {e}").into()),
-        }
+        self.import_fits(text, None);
     }
 
     /// Add an item from the market the way double-clicking it in pyfa does.
@@ -608,10 +643,12 @@ impl Gyfa {
             let mut fit = self.new_fit(catalog.name(id));
             fit.ship = Some(id);
             fit.mode = catalog.modes_for(id).first().copied();
+            self.new_fit_defaults(&mut fit);
             self.status = None;
             self.add_fit(fit, cx);
             return;
         }
+        let before = self.saved.current.map(|i| self.saved.fits[i].clone());
         let Some(i) = self.saved.current else {
             self.status = Some("Pick a ship first".into());
             cx.notify();
@@ -657,6 +694,9 @@ impl Gyfa {
         }
         self.status =
             (!added).then(|| format!("Nothing on this fit takes {}", catalog.name(id)).into());
+        if let Some(before) = before {
+            self.history.record(i, before, &self.saved.fits[i]);
+        }
         self.changed(cx);
     }
 
@@ -690,7 +730,7 @@ impl Gyfa {
         let this = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _, _| {
             let (text, this) = (text.clone(), this.clone());
-            dialog.title("Import EFT").w(px(560.)).child(
+            dialog.title("Import Fits").w(px(560.)).child(
                 v_flex()
                     .gap_3()
                     .child(Textarea::new(&text).h(px(320.)))
@@ -728,124 +768,6 @@ impl Gyfa {
             .update(cx, |input, cx| input.set_value(notes, window, cx));
     }
 
-    fn menu_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let this = cx.entity().downgrade();
-        let has_fit = self.saved.current.is_some();
-        h_flex()
-            .gap_1()
-            .px_2()
-            .py_1()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().title_bar)
-            .child(
-                Button::new("menu-file")
-                    .ghost()
-                    .small()
-                    .label("File")
-                    .dropdown_menu({
-                        let this = this.clone();
-                        move |menu, _, _| {
-                            let (import, copy) = (this.clone(), this.clone());
-                            menu.item(widgets::entry(IconName::FileText, "Import EFT…").on_click(
-                                move |_, window, cx| {
-                                    let _ = import.update(cx, |_, cx| {
-                                        Self::open_import_dialog(window, cx);
-                                    });
-                                },
-                            ))
-                            .item(
-                                widgets::entry(IconName::Copy, "Copy as EFT")
-                                    .disabled(!has_fit)
-                                    .on_click(move |_, _, cx| {
-                                        let _ = copy.update(cx, Gyfa::copy_eft);
-                                    }),
-                            )
-                            .separator()
-                            .item(
-                                widgets::entry(IconName::WindowClose, "Quit")
-                                    .on_click(|_, _, cx| cx.quit()),
-                            )
-                        }
-                    }),
-            )
-            .child(
-                Button::new("menu-fit")
-                    .ghost()
-                    .small()
-                    .label("Fit")
-                    .dropdown_menu({
-                        let this = this.clone();
-                        move |menu, _, _| {
-                            let (new, duplicate, delete) =
-                                (this.clone(), this.clone(), this.clone());
-                            menu.item(widgets::entry(IconName::Plus, "New fit").on_click(
-                                move |_, _, cx| {
-                                    let _ = new.update(cx, |this, cx| {
-                                        this.add_fit(this.new_fit("New fit"), cx);
-                                    });
-                                },
-                            ))
-                            .item(
-                                widgets::entry(IconName::Copy, "Duplicate")
-                                    .disabled(!has_fit)
-                                    .on_click(move |_, _, cx| {
-                                        let _ = duplicate.update(cx, Gyfa::duplicate_fit);
-                                    }),
-                            )
-                            .item(
-                                widgets::entry(IconName::Delete, "Delete")
-                                    .disabled(!has_fit)
-                                    .on_click(move |_, _, cx| {
-                                        let _ = delete.update(cx, |this, cx| {
-                                            if let Some(current) = this.saved.current {
-                                                this.delete_fit(current, cx);
-                                            }
-                                        });
-                                    }),
-                            )
-                        }
-                    }),
-            )
-            .child(
-                Button::new("menu-character")
-                    .ghost()
-                    .small()
-                    .label("Character")
-                    .dropdown_menu(move |menu, _, cx| {
-                        let editor = this.clone();
-                        Self::character_menu(menu, &this, cx).separator().item(
-                            widgets::entry(IconName::Settings2, "Implant Set Editor…").on_click(
-                                move |_, window, cx| {
-                                    Self::app_update(&editor, cx, |g, cx| {
-                                        g.open_implant_set_editor(None, window, cx);
-                                    });
-                                },
-                            ),
-                        )
-                    }),
-            )
-            .child(profile_editor::editors_button(&self.hub))
-            .when_some(self.status.clone(), |bar, status| {
-                bar.child(
-                    div()
-                        .ml_4()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(status),
-                )
-            })
-    }
-
-    fn copy_eft(&mut self, cx: &mut Context<Self>) {
-        let (Some(loaded), Some(fit)) = (self.loaded(), self.fit()) else {
-            return;
-        };
-        cx.write_to_clipboard(ClipboardItem::new_string(fit.to_eft(&loaded.catalog)));
-        self.status = Some("Copied fit to clipboard".into());
-        cx.notify();
-    }
-
     fn duplicate_fit(&mut self, cx: &mut Context<Self>) {
         let Some(mut copy) = self.fit().cloned() else {
             return;
@@ -881,9 +803,7 @@ impl Gyfa {
                     .xsmall()
                     .icon(IconName::Plus)
                     .tooltip("New fit")
-                    .on_click(
-                        cx.listener(|this, _, _, cx| this.add_fit(this.new_fit("New fit"), cx)),
-                    ),
+                    .on_click(cx.listener(|this, _, _, cx| this.new_tab(cx))),
             )
             .into_any_element()
     }
@@ -925,6 +845,10 @@ impl Gyfa {
         h_flex()
             .id(group.clone())
             .group(group.clone())
+            .when(self.saved.preferences.general.tab_tooltips, |tab| {
+                let tip: SharedString = label.clone().into();
+                tab.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+            })
             .flex_none()
             .max_w(px(TAB_MAX_W))
             .h(px(TAB_H))
@@ -1142,6 +1066,7 @@ impl Render for Gyfa {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .text_sm();
+        let root = Self::bind_actions(root, cx);
         let loaded = match &self.loading {
             Loading::Ready(loaded) => Rc::clone(loaded),
             Loading::Pending => {

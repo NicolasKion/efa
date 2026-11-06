@@ -6,10 +6,22 @@
 
 use std::{path::PathBuf, rc::Rc};
 
-use gpui_kit::{AnyWindowHandle, AppContext, Context, SharedString, WeakEntity};
+use gpui_kit::{AnyWindowHandle, App, AppContext, Context, Global, SharedString, WeakEntity};
 
 use super::{Loaded, character_editor::CharacterEditor, load};
-use crate::{character::Characters, prices::Prices, store::Saved};
+use crate::{character::Characters, preferences::Preferences, prices::Prices, store::Saved};
+
+/// The current preferences for code that has no window to ask, such as menu builders. The hub
+/// keeps it in step with its saved state.
+struct CurrentPreferences(Preferences);
+
+impl Global for CurrentPreferences {}
+
+/// The preferences in effect, or pyfa's defaults before the hub exists.
+pub fn preferences(cx: &App) -> Preferences {
+    cx.try_global::<CurrentPreferences>()
+        .map_or_default(|p| p.0.clone())
+}
 
 pub enum HubLoading {
     Pending,
@@ -53,9 +65,15 @@ impl Hub {
             });
         })
         .detach();
+        let mut saved = Saved::load();
+        if !saved.preferences.general.reopen_fits {
+            saved.open.clear();
+            saved.current = None;
+        }
+        cx.set_global(CurrentPreferences(saved.preferences.clone()));
         Self {
             loading: HubLoading::Pending,
-            saved: Saved::load(),
+            saved,
             generation: 0,
             deletions: Vec::new(),
             prices: Rc::new(Prices::default()),
@@ -113,18 +131,29 @@ impl Hub {
         if let Err(e) = self.saved.save() {
             eprintln!("saving fits: {e}");
         }
+        self.sync_preferences(cx);
         cx.notify();
     }
 
-    /// Change the shared settings from outside a fit window, e.g. from an editor window, write
-    /// them out and let every window pull them in.
-    pub fn edit_saved(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut Saved)) {
+    /// Change settings from outside a fit window, such as the preferences window, and pass them
+    /// on to every window.
+    pub fn update_saved(&mut self, edit: impl FnOnce(&mut Saved), cx: &mut Context<Self>) {
         edit(&mut self.saved);
         self.generation += 1;
         if let Err(e) = self.saved.save() {
-            eprintln!("saving fits: {e}");
+            eprintln!("saving settings: {e}");
         }
+        self.sync_preferences(cx);
         cx.notify();
+    }
+
+    fn sync_preferences(&self, cx: &mut Context<Self>) {
+        let changed = cx
+            .try_global::<CurrentPreferences>()
+            .is_none_or(|p| p.0 != self.saved.preferences);
+        if changed {
+            cx.set_global(CurrentPreferences(self.saved.preferences.clone()));
+        }
     }
 
     pub fn set_prices(&mut self, prices: Rc<Prices>, cx: &mut Context<Self>) {

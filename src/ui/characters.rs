@@ -459,6 +459,9 @@ pub(super) fn skills_submenu(
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
+    if !super::hub::preferences(cx).context_menus.change_skills {
+        return menu;
+    }
     let Some(g) = this.upgrade() else { return menu };
     let (ship, character, characters) = {
         let g = g.read(cx);

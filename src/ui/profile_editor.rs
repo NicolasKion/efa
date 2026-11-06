@@ -10,11 +10,10 @@
 use std::{marker::PhantomData, rc::Rc};
 
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName, Sizable, WindowExt,
+    ActiveTheme, Disableable, Sizable, WindowExt,
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
-    menu::DropdownMenu,
     v_flex,
 };
 use gpui_kit::{
@@ -27,7 +26,7 @@ use gpui_kit::{
 use super::{
     Loaded,
     hub::{Hub, HubLoading},
-    widgets::{entry, icon, icon_box},
+    widgets::{icon, icon_box},
 };
 use crate::{
     damage_pattern::{self, DamagePattern},
@@ -396,28 +395,6 @@ pub fn open_target_profile_editor(hub: Entity<Hub>, select: Option<String>, cx: 
     open::<TargetProfiles>(hub, select, cx);
 }
 
-/// The menu bar's Editors menu with pyfa's two pattern and profile editors.
-pub(super) fn editors_button(hub: &Entity<Hub>) -> impl IntoElement {
-    let hub = hub.clone();
-    Button::new("menu-editors")
-        .ghost()
-        .small()
-        .label("Editors")
-        .dropdown_menu(move |menu, _, _| {
-            let (patterns, profiles) = (hub.clone(), hub.clone());
-            menu.item(
-                entry(IconName::Settings2, "Damage Pattern Editor…").on_click(move |_, _, cx| {
-                    open_damage_pattern_editor(patterns.clone(), None, cx);
-                }),
-            )
-            .item(
-                entry(IconName::Settings2, "Target Profile Editor…").on_click(move |_, _, cx| {
-                    open_target_profile_editor(profiles.clone(), None, cx);
-                }),
-            )
-        })
-}
-
 fn open<K: Kind>(hub: Entity<Hub>, select: Option<String>, cx: &mut App) {
     let existing = cx
         .try_global::<OpenEditor<K>>()
@@ -588,7 +565,7 @@ impl<K: Kind> Editor<K> {
     }
 
     fn edit(&self, cx: &mut Context<Self>, edit: impl FnOnce(&mut Saved)) {
-        self.hub.update(cx, |hub, cx| hub.edit_saved(cx, edit));
+        self.hub.update(cx, |hub, cx| hub.update_saved(edit, cx));
     }
 
     /// Save what the fields say, as pyfa does after each edit.

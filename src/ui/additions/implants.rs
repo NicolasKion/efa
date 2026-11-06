@@ -304,7 +304,7 @@ fn item_entries(
     };
     let mut menu = menu.item(remove);
     let variations = catalog.variations_of(type_id);
-    if variations.len() > 1 {
+    if variations.len() > 1 && crate::ui::hub::preferences(cx).context_menus.variations {
         let entries: Vec<(TypeId, String)> =
             variations.iter().map(|&v| (v, catalog.name(v))).collect();
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
@@ -445,6 +445,12 @@ fn copy_paste_entries(
     clicked: Option<usize>,
     cx: &App,
 ) -> PopupMenu {
+    if !crate::ui::hub::preferences(cx)
+        .context_menus
+        .additions_copy_paste
+    {
+        return menu;
+    }
     let kind = AddKind::Implants;
     let lines = |implants: &[TypeId]| {
         let rows: Vec<(TypeId, u32)> = implants.iter().map(|&t| (t, 1)).collect();

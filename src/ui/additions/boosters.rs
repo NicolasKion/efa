@@ -427,7 +427,7 @@ fn booster_menu(
         ));
     }
     let variations = booster_variations(catalog, type_id);
-    if variations.len() > 1 {
+    if variations.len() > 1 && crate::ui::hub::preferences(cx).context_menus.variations {
         let entries: Vec<(TypeId, String)> =
             variations.iter().map(|&v| (v, catalog.name(v))).collect();
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
