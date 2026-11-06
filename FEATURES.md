@@ -1,7 +1,7 @@
 # Feature parity with pyfa
 
 Rough coverage: the core loop works (pick ship, add modules/charges/drones/implants/boosters, see the main stats, EFT in/out), plus the pyfa layout with in-game icons and the main module columns, which is maybe 20-25% of pyfa's surface.
-Biggest gaps: projected/command/fleet effects, fighters, graphs, ESI/SSO, and most context menus.
+Biggest gaps: fleet effects beyond command fits, graphs, ESI/SSO, and most context menus.
 Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, mutations, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
 Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time (needs looping over refine stats), lock/warp time formulas.
 
@@ -27,7 +27,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Per-fit character selection, stored on the fit; old fits fly All 5 and new fits get the character picked last (gui/characterSelection.py)
 - [x] Per-fit damage pattern and target profile (gui/builtinStatsViews, contextMenus/damagePatternChange.py, targetProfile/switcher.py)
 - [x] Fit notes, carried by duplicates, shown in the fittings browser tooltip cut to 200 characters (builtinAdditionPanes/notesView.py, builtinShipBrowser/fitItem.py); EFT text has no notes in pyfa either
-- [ ] Mark fit as fleet booster / command fit (builtinAdditionPanes/commandView.py)
+- [x] Mark fit as fleet booster / command fit (builtinAdditionPanes/commandView.py), from the fittings browser's "Add Command Booster", drags, and the Command tab's menus
 - [ ] Backup all fits to XML (mainMenuBar.py backupFits)
 - [ ] Fit browser lite dialog for picking fits (gui/fitBrowserLite.py)
 
@@ -84,9 +84,9 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Column: price (price.py)
 - [~] Column: charge name and remaining charges/reload (ammo.py), name and icon only, refine: get_charge_count, get_charged_cycle_count
 - [x] Column: drone EHP and drone regen (droneEhp.py, droneRegen.py), refine: item stats get_stat_ehp, get_stat_erps
-- [ ] Column: fighter abilities (abilities.py), refine: iter_abilities
+- [x] Column: fighter abilities (abilities.py), refine: iter_abilities
 - [x] Column: booster side effects (sideEffects.py), refine: iter_side_effects
-- [ ] Column: projection range (projectionRange.py), refine: proj get_range
+- [x] Column: projection range (projectionRange.py), refine places the projector that far from the target's surface
 - [ ] Column: target resists, damp scan res (targetResists.py, dampScanRes.py)
 - [ ] Strategic cruiser subsystem slot changes reflected live (fittingView.py), refine: get_stat_*_slots handles it
 - [ ] T3 destroyer stance/mode switching (builtinContextMenus/shipModeChange.py), refine: set_stance
@@ -102,11 +102,11 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Item variations: swap to T2/faction/deadspace variant (builtinContextMenus/itemVariationChange.py)
 - [ ] Fill all slots with module (builtinContextMenus/moduleFill.py)
 - [ ] Fill rack / item fill (builtinContextMenus/itemFill.py)
-- [~] Change item amount (drones, cargo, charges) (builtinContextMenus/itemAmountChange.py), cargo done
+- [~] Change item amount (drones, cargo, charges) (builtinContextMenus/itemAmountChange.py), cargo, fighters and projected fits, drones and fighters done
 - [x] Show item stats (builtinContextMenus/itemStats.py)
 - [ ] Jump to market group (itemMarketJump.py)
-- [ ] Project item onto fit (builtinContextMenus/itemProject.py), refine: add_proj
-- [ ] Projection range (builtinContextMenus/itemProjectionRange.py), refine: proj set_range
+- [x] Project item onto fit (builtinContextMenus/itemProject.py), refine: add_proj from a hidden capsule fit per projected item
+- [x] Projection range (builtinContextMenus/itemProjectionRange.py), refine: projector coordinates
 - [ ] Mutate item / mutaplasmid apply and edit (builtinContextMenus/itemMutations.py), refine: set_mutator_type_id, mutate, set_roll
 - [ ] Export mutated module (builtinContextMenus/moduleMutatedExport.py)
 - [ ] Spool-up percentage for spooling modules (builtinContextMenus/moduleSpool.py), refine: set_spool_override, set_default_spool
@@ -118,12 +118,12 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [~] Target profile switcher/adder/editor (builtinContextMenus/targetProfile/): switcher and editor done; the adder and "Edit Target Profile" belong to the graphs window (ui::profile_menus::target_profile_menu and open_target_profile_editor are ready for it)
 - [x] Add charge/ammo to cargo, fill cargo (builtinContextMenus/cargoAdd.py, cargoAddAmmo.py, cargoFill.py)
 - [x] Split/merge drone stacks (builtinContextMenus/droneSplitStack.py, droneAddStack.py), merge by dragging a stack onto another
-- [ ] Fighter ability toggles (builtinContextMenus/fighterAbilities.py), refine: get_ability / set state
+- [x] Fighter ability toggles (builtinContextMenus/fighterAbilities.py), refine: get_ability / set state, with pyfa's defaults (the attack, or everything but propulsion without one)
 - [x] Booster side effects toggles (builtinContextMenus/boosterSideEffects.py), refine: get_side_effect, set_state
 - [x] Apply/save implant set (builtinContextMenus/implantSetApply.py, implantSetSave.py)
-- [ ] Add fit from browser / currently open fits as projected or command (builtinContextMenus/fitAddBrowse.py, fitAddCurrentlyOpen.py, commandFitAdd.py)
-- [ ] Add command link bursts directly (builtinContextMenus/commandLinkAdd.py)
-- [ ] Add environment effect (wormhole, incursion, abyssal weather, etc.) (builtinContextMenus/envEffectAdd.py), refine: add_sw_effect, add_proj_effect
+- [x] Add fit from browser / currently open fits as projected or command (builtinContextMenus/fitAddBrowse.py, fitAddCurrentlyOpen.py, commandFitAdd.py)
+- [ ] Add command link bursts directly (builtinContextMenus/commandLinkAdd.py); refine cannot add warfare buffs without a burst on a fit, so pyfa's numbers are out of reach
+- [x] Add environment effect (wormhole, incursion, abyssal weather, etc.) (builtinContextMenus/envEffectAdd.py), refine: add_fw_effect, add_proj_effect for weather and clouds
 - [ ] Show skills affecting item, change skill level inline (builtinContextMenus/skillAffectors.py), refine: iter_modifiers, set_level
 - [ ] Price source options (builtinContextMenus/priceOptions.py)
 - [ ] Copy/paste/export/import additions lists (builtinContextMenus/additionsExportAll.py, additionsExportSelection.py, additionsImport.py)
@@ -137,16 +137,16 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [~] Tabbed additions pane, in progress (gui/additionsPane.py)
 - [ ] Tab names with counts (pyfaGeneralPreferences.py "Extra info in Additions panel tab names")
 - [x] Drone stack amount editing, separate stacks (droneView.py)
-- [ ] Fighters tab: squadrons, light/heavy/support tubes, abilities (builtinAdditionPanes/fighterView.py), refine: add_fighter, get_stat_launched_*_fighters, get_stat_fighter_bay_volume
+- [x] Fighters tab: squadrons with size, state, speed, EHP, regen and active abilities, sorted like pyfa, light/heavy/support tube counts, Delete/Escape/Ctrl+A, market drops, copy/paste, EFT in and out (builtinAdditionPanes/fighterView.py), refine: add_fighter, set_count_override, abilities, get_stat_launched_*_fighters. No price column yet
 - [x] Cargo tab with amounts and volume, sorted like pyfa, Delete/Ctrl+A/Escape keys (cargoView.py); price column waits for a price source
 - [x] Commodities, materials, deployables and containers in the catalog for cargo; market tree shows pyfa's Deployable Structures and Filaments roots, search adds ice products (service/market.py)
 - [x] Implants: use character implants vs fit implants switch (implantView.py); the All 5 character has no implants until characters exist
 - [x] Implant slot conflict handling: one implant per slot, the new one replaces the old, listed in slot order (implantView.py, eos HandledImplantList)
 - [x] Implants pane columns: state checkbox (multi-select toggle), slot, icon, name; drag from the market onto the pane (implantView.py). No price column until prices exist, no Delete/Ctrl+A/Esc keys yet
 - [x] Booster slot conflict and side effects (boosterView.py): one booster per slot, listed by slot, on/off state, side effect and duration columns, drop from the market; no price column or keyboard shortcuts yet, refine: set_state, iter_side_effects
-- [ ] Projected tab: fits, modules, drones, fighters, environment effects (builtinAdditionPanes/projectedView.py), refine: add_proj, add_proj_effect, add_sw_effect
-- [ ] Projected item states and amounts (fitCommands/gui/projectedChangeStates.py)
-- [ ] Command tab: fleet booster fits (builtinAdditionPanes/commandView.py), refine: add_fleet, set_fleet
+- [x] Projected tab: fits (N copies each), modules with charges and spool, drones, fighters, environment effects, pyfa's columns and order, drops from the market, the fitting view and the fittings browser, Delete/Escape/Ctrl+A (builtinAdditionPanes/projectedView.py), refine: add_proj, add_fw_effect, add_proj_effect
+- [x] Projected item states and amounts (fitCommands/gui/projectedChangeStates.py), left click toggles, right click overheats modules, Alt takes similar items, double-click takes one copy or drone (Alt: all)
+- [x] Command tab: fleet booster fits (builtinAdditionPanes/commandView.py), refine: add_fleet, set_fleet. Fits are referenced by a stable id that survives deletes and moves
 - [x] Notes tab: edits kept with the fit right away and written out shortly after, character count in the tab title, Ctrl+Backspace and undo from the text field (builtinAdditionPanes/notesView.py)
 
 ## Stats panes

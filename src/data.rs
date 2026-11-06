@@ -10,6 +10,8 @@ use std::{
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+pub mod projection;
+
 pub type TypeId = i32;
 
 pub mod category {
@@ -240,6 +242,8 @@ pub struct Catalog {
     /// Skills each type needs and at what level, in the order the type lists them. Skills have
     /// their prerequisites here too.
     pub required_skills: HashMap<TypeId, Vec<(TypeId, u8)>>,
+    /// Environmental effects, projectable items and fighter data.
+    pub projection: projection::Projection,
 }
 
 /// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
@@ -309,6 +313,7 @@ impl Catalog {
             .filter_map(|(id, g)| Some((id.parse().ok()?, g.category_id)))
             .collect();
 
+        let mut projection = projection::Builder::new(&effect_category);
         let mut types = HashMap::with_capacity(sde_types.len());
         let mut skills = Vec::new();
         let mut required_skills = HashMap::new();
@@ -317,6 +322,7 @@ impl Catalog {
                 continue;
             };
             let category_id = group_category.get(&t.group_id).copied().unwrap_or(0);
+            projection.consider(id, &t, category_id, dogma.get(&id.to_string()));
             // Cargo can hold anything, but these are what pyfa's market offers or EFT cargo lines
             // usually name (fuel blocks, ice products); loading every category would mostly add
             // NPC and map junk.
@@ -474,6 +480,8 @@ impl Catalog {
             );
         }
 
+        let projection = projection.finish(dir);
+
         // Published names win when two types share one, which happens with old unpublished copies.
         let mut by_name = HashMap::with_capacity(types.len());
         for t in types.values() {
@@ -592,6 +600,7 @@ impl Catalog {
             group_names,
             cargo_searchable,
             required_skills,
+            projection,
         })
     }
 

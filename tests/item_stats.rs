@@ -127,7 +127,11 @@ fn charges_ships_and_empty_places() {
             .inspect(&fit, engine.all5(), FitItem::Module(Slot::Mid, 3))
             .is_none()
     );
-    assert!(engine.inspect(&fit, engine.all5(), FitItem::Drone(0)).is_none());
+    assert!(
+        engine
+            .inspect(&fit, engine.all5(), FitItem::Drone(0))
+            .is_none()
+    );
 }
 
 #[test]

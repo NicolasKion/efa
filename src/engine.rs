@@ -4,6 +4,7 @@
 mod inspect;
 mod pane;
 mod pilot;
+mod surroundings;
 
 use std::path::Path;
 
@@ -28,12 +29,10 @@ pub use pane::{
     CalcOptions, CapDetail, FirepowerDetail, Mining, MiningRate, Misc, Outgoing, SpoolRange, Tank,
 };
 pub use pilot::{MAX_LEVEL, Pilot, SkillTarget};
+pub use surroundings::{AbilityInfo, FighterClasses, FighterInfo};
 
 /// Type ID of the character item. EVE uses this one for everyone.
 const CHARACTER: i32 = 1373;
-
-/// Implants plugged into the built-in characters. Like pyfa's, they have none.
-pub const CHARACTER_IMPLANTS: &[TypeId] = &[];
 
 pub struct Engine {
     src: Src,
@@ -279,6 +278,13 @@ pub struct Stats {
     pub boosters: Vec<BoosterInfo>,
     /// Items refine refused, e.g. a module the ship has no rack position for.
     pub problems: Vec<String>,
+    /// Per squadron, in the fit's order.
+    pub fighters: Vec<FighterInfo>,
+    /// Per projected squadron, in the fit's order.
+    pub projected_fighters: Vec<FighterInfo>,
+    pub fighter_classes: FighterClasses,
+    /// Cycles to full spool per projected module, for those that spool up.
+    pub projected_spool: Vec<Option<u32>>,
 }
 
 impl Engine {
@@ -309,7 +315,20 @@ impl Engine {
         self.compute_for(fit, &self.all5, options)
     }
 
+    /// The fit's stats flown by `pilot`, alone in space.
     pub fn compute_for(&self, fit: &Fit, pilot: &Pilot, options: CalcOptions) -> Stats {
+        self.compute_among(fit, &[], pilot, options)
+    }
+
+    /// The fit's stats flown by `pilot`, with what surrounds it: `fits` are the saved fits its
+    /// projected and command fits are looked up in.
+    pub fn compute_among(
+        &self,
+        fit: &Fit,
+        fits: &[Fit],
+        pilot: &Pilot,
+        options: CalcOptions,
+    ) -> Stats {
         let mut stats = Stats::default();
         let mut sol = SolOwned::new(&self.src);
         let mut f = sol.add_fit();
@@ -401,10 +420,16 @@ impl Engine {
             booster_ids.push(item.get_item_id());
         }
 
+        let fighter_ids = surroundings::add_fighters(&mut f, &fit.fighters);
+        let fit_id = f.get_fit_id();
+        let projections = self.add_surroundings(&mut sol, fit_id, ship_id, fit, fits);
+        let Ok(mut f) = sol.get_fit(&fit_id) else {
+            return stats;
+        };
+
         stats.incoming = pane::incoming_mix(&mut f, &fit.damage_profile);
         let incoming = pane::dps_profile(stats.incoming);
         f.set_rah_incoming_dps(Some(incoming));
-        let fit_id = f.get_fit_id();
 
         fit_stats(&mut f, &mut stats, incoming, options);
         stats.firepower = pane::firepower_detail(&mut f, options.time());
@@ -423,6 +448,27 @@ impl Engine {
             .iter()
             .map(|id| id.map_or_default(|id| drone_info(&mut sol, id)))
             .collect();
+        stats.fighters = fighter_ids
+            .into_iter()
+            .map(|id| surroundings::fighter_info(&mut sol, id))
+            .collect();
+        stats.projected_fighters = projections
+            .fighters
+            .into_iter()
+            .map(|id| surroundings::fighter_info(&mut sol, id))
+            .collect();
+        stats.projected_spool = projections
+            .modules
+            .iter()
+            .map(|id| {
+                let id = id.as_ref()?;
+                let mut module = sol.get_module(id).ok()?;
+                module
+                    .get_spool_cycle_count()
+                    .map(|info| info.max.into_u32())
+            })
+            .collect();
+        stats.fighter_classes = surroundings::fighter_classes(&mut sol, fit_id);
 
         for &(slot, i, id) in &module_ids {
             let spool_max = sol

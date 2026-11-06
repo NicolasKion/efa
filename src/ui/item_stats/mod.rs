@@ -150,7 +150,10 @@ pub fn open(
         Target::Fitted { item, .. } => request.fit.as_ref().and_then(|f| {
             // The pilot's implants only matter for an implant, which the fit lists itself
             // unless it uses the character's.
-            let pilot = hub.read(cx).characters.pilot(f.character, &loaded.catalog.skills);
+            let pilot = hub
+                .read(cx)
+                .characters
+                .pilot(f.character, &loaded.catalog.skills);
             item.type_in(f, &pilot.implants)
         }),
     };
@@ -366,7 +369,10 @@ impl ItemStats {
         if characters_changed {
             self.characters = Some(Rc::clone(&hub.characters));
             if let Some(fit) = &self.fit {
-                self.pilot = Rc::new(hub.characters.pilot(fit.character, &self.loaded.catalog.skills));
+                self.pilot = Rc::new(
+                    hub.characters
+                        .pilot(fit.character, &self.loaded.catalog.skills),
+                );
             }
         }
         if hub.generation == self.synced {
@@ -392,7 +398,10 @@ impl ItemStats {
                 // The fit is gone; the window keeps what it last showed.
                 self.target = Target::Type(self.type_id);
             } else if let Some(f) = hub.saved.fits.get(*fit) {
-                self.pilot = Rc::new(hub.characters.pilot(f.character, &self.loaded.catalog.skills));
+                self.pilot = Rc::new(
+                    hub.characters
+                        .pilot(f.character, &self.loaded.catalog.skills),
+                );
                 self.fit = Some(f.clone());
             }
         }

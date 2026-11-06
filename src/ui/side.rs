@@ -13,8 +13,8 @@ use gpui_kit::{
 };
 
 use super::{
-    Action, BrowserTab, Gyfa, Loaded,
-    additions::goes_to_cargo,
+    Action, AdditionsTab, BrowserTab, Gyfa, Loaded,
+    additions::{FitDrag, Link, goes_to_cargo},
     fitting::{DragPreview, DragSource, Dragged},
     widgets::{entry, icon_box},
 };
@@ -320,25 +320,54 @@ impl Gyfa {
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             this.open_fit(i, cx);
                         }))
+                        // The Projected and Command tabs take fits dragged from here.
+                        .on_drag(
+                            FitDrag {
+                                index: i,
+                                label: fit.name.clone().into(),
+                            },
+                            |drag, _, _, cx| cx.new(|_| drag.clone()),
+                        )
                         .context_menu({
                             let this = Self::weak(cx);
+                            let has_fit = self.saved.current.is_some();
                             move |menu, _, _| {
                                 let (open, delete) = (this.clone(), this.clone());
-                                menu.item(entry(IconName::FolderOpen, "Open in new tab").on_click(
-                                    move |_, _, cx| {
-                                        Self::app_update(&open, cx, |this, cx| {
-                                            this.open_fit(i, cx);
-                                        });
-                                    },
-                                ))
-                                .separator()
-                                .item(
-                                    entry(IconName::Delete, "Delete").on_click(move |_, _, cx| {
-                                        Self::app_update(&delete, cx, |this, cx| {
-                                            this.delete_fit(i, cx);
-                                        });
-                                    }),
-                                )
+                                let link = |link: Link| {
+                                    let this = this.clone();
+                                    move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                                        Self::app_update(&this, cx, |g, cx| g.link(link, &[i], cx));
+                                    }
+                                };
+                                let menu = menu.item(
+                                    entry(IconName::FolderOpen, "Open in new tab").on_click(
+                                        move |_, _, cx| {
+                                            Self::app_update(&open, cx, |this, cx| {
+                                                this.open_fit(i, cx);
+                                            });
+                                        },
+                                    ),
+                                );
+                                let menu = if has_fit {
+                                    menu.item(
+                                        entry(IconName::Globe, "Project onto Active Fit")
+                                            .on_click(link(Link::Projected)),
+                                    )
+                                    .item(
+                                        entry(IconName::Network, "Add Command Booster")
+                                            .on_click(link(Link::Command)),
+                                    )
+                                } else {
+                                    menu
+                                };
+                                menu.separator()
+                                    .item(entry(IconName::Delete, "Delete").on_click(
+                                        move |_, _, cx| {
+                                            Self::app_update(&delete, cx, |this, cx| {
+                                                this.delete_fit(i, cx);
+                                            });
+                                        },
+                                    ))
                             }
                         })
                 })),
@@ -483,6 +512,20 @@ fn market_menu(
                 format!("Set {category} as Damage Pattern"),
             )
             .on_click(apply(Action::SetDamageProfile(profile))),
+        );
+    }
+    if loaded.catalog.projection.projectable.contains(&id) {
+        menu = menu.item(
+            entry(IconName::Globe, format!("Project {category} onto Fit")).on_click(on(
+                |g, id, _, cx| {
+                    g.project_item(id, cx);
+                    if g.additions_tab != AdditionsTab::Projected {
+                        g.additions_tab = AdditionsTab::Projected;
+                        g.clear_selection();
+                        cx.notify();
+                    }
+                },
+            )),
         );
     }
     menu

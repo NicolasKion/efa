@@ -7,8 +7,7 @@
 use std::collections::HashMap;
 
 use rc::{
-    AddMode, AttrId, Item, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack, Op,
-    SolOwned,
+    AddMode, AttrId, Item, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack, Op, SolOwned,
 };
 
 use super::{Engine, Pilot, module_state, pane};

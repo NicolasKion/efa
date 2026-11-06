@@ -1057,7 +1057,7 @@ fn variations_submenu(
 }
 
 /// A module's charges, structured the way pyfa's Charge menu shows them.
-enum ChargeMenu {
+pub(super) enum ChargeMenu {
     /// Families of the same charge in different grades, from long range to short.
     Turret(Vec<Vec<TypeId>>),
     /// By damage type, each from less damage to more.
@@ -1065,7 +1065,11 @@ enum ChargeMenu {
     Flat(Vec<TypeId>),
 }
 
-fn structure_charges(catalog: &Catalog, module: &ItemType, charges: &[TypeId]) -> ChargeMenu {
+pub(super) fn structure_charges(
+    catalog: &Catalog,
+    module: &ItemType,
+    charges: &[TypeId],
+) -> ChargeMenu {
     let charges: Vec<&ItemType> = charges.iter().filter_map(|&c| catalog.get(c)).collect();
     let damage = |c: &ItemType| c.damage.iter().sum::<f64>();
     let name_base = |c: &ItemType| {
@@ -1199,7 +1203,7 @@ fn fitting_rows(fit: &Fit, stats: &Stats) -> Vec<Row> {
 }
 
 /// Published charges that fit a module type, by name.
-fn compatible_charges(catalog: &Catalog, module: TypeId) -> Vec<TypeId> {
+pub(super) fn compatible_charges(catalog: &Catalog, module: TypeId) -> Vec<TypeId> {
     let Some(m) = catalog.get(module).filter(|m| !m.charge_groups.is_empty()) else {
         return Vec::new();
     };

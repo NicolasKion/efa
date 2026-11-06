@@ -136,6 +136,9 @@ enum AdditionsTab {
     Boosters,
     Cargo,
     Notes,
+    Fighters,
+    Projected,
+    Command,
 }
 
 #[expect(
@@ -497,10 +500,19 @@ impl Gyfa {
         let options = crate::engine::CalcOptions {
             factor_reload: self.saved.factor_reload,
         };
+        // Older saves kept fighters as drone stacks; links can point at fits deleted since.
+        if let Some(i) = self.saved.current
+            && (self.saved.fits[i].move_fighters_out_of_drones(&loaded.catalog)
+                | self.saved.tidy_links(i))
+        {
+            self.unsaved = true;
+        }
         let pilot = self.pilot(&loaded);
-        self.stats = self
-            .fit()
-            .map(|fit| loaded.engine.compute_for(fit, &pilot, options));
+        self.stats = self.fit().map(|fit| {
+            loaded
+                .engine
+                .compute_among(fit, &self.saved.fits, &pilot, options)
+        });
     }
 
     /// Mark the fits as changed. The poll publishes them to the hub, which writes them out and
@@ -611,6 +623,12 @@ impl Gyfa {
         {
             self.status = Some(format!("No free {} slot", slot_label(slot)).into());
             cx.notify();
+            return;
+        }
+        // pyfa launches a new squadron only when a tube of its class is free.
+        if catalog.get(id).is_some_and(|t| t.kind == Kind::Fighter) {
+            self.status = None;
+            self.add_fighter_squadrons(vec![crate::fit::fighters::Fighter::new(id)], cx);
             return;
         }
         let added = self.saved.fits[i].add(catalog, id);
