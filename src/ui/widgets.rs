@@ -5,8 +5,13 @@ use gpui_kit::{
     App, Div, FontWeight, Hsla, ParentElement, SharedString, Styled, div, img, px, relative, rgb,
 };
 
+use std::rc::Rc;
+
+use gpui_kit::component::{IconName, menu::PopupMenuItem};
+
+use super::Loaded;
 use crate::{
-    data::Catalog,
+    data::{Catalog, TypeId},
     icons::{Icon, Icons},
     theme::{Palette, Rgb},
 };
@@ -180,6 +185,31 @@ pub fn apply_palette(palette: &Palette, cx: &mut App) {
     colors.yellow = c(p.yellow);
     colors.blue = c(p.blue);
     cx.refresh_windows();
+}
+
+/// A menu entry showing an item's own icon next to its label.
+pub fn item_entry(
+    loaded: &Rc<Loaded>,
+    id: TypeId,
+    label: impl Into<SharedString>,
+) -> PopupMenuItem {
+    let (loaded, label) = (Rc::clone(loaded), label.into());
+    PopupMenuItem::element(move |_, _| {
+        h_flex()
+            .gap_2()
+            .child(icon_box(
+                &loaded.catalog,
+                &loaded.icons,
+                Icon::Type(id),
+                18.,
+            ))
+            .child(label.clone())
+    })
+}
+
+/// A menu entry with one of the UI's own icons.
+pub fn entry(icon: IconName, label: impl Into<SharedString>) -> PopupMenuItem {
+    PopupMenuItem::new(label).icon(icon)
 }
 
 /// Short numbers the way pyfa writes them: 1.38k, 16.6k, 2.25M.

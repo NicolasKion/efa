@@ -4,11 +4,11 @@
 use std::rc::Rc;
 
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Sizable, WindowExt,
+    ActiveTheme, Disableable, Icon as UiIcon, IconName, Sizable, WindowExt,
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputState},
-    menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
+    menu::{ContextMenuExt, PopupMenu},
     v_flex,
 };
 use gpui_kit::{
@@ -19,7 +19,7 @@ use gpui_kit::{
 
 use super::{
     Action, AddKind, AdditionsTab, Gyfa, Loaded,
-    widgets::{icon_box, short},
+    widgets::{entry, icon_box, item_entry, short},
 };
 use crate::{
     data::{Catalog, Kind, TypeId},
@@ -325,15 +325,16 @@ impl Gyfa {
         }
     }
 
-    /// Ask for a number and turn it into an action.
-    fn open_amount_dialog(
+    /// Ask for a value and turn it into an action. Input that does not parse leaves the dialog
+    /// open.
+    pub(super) fn open_value_dialog<T: std::str::FromStr + 'static>(
         title: &'static str,
-        initial: u32,
+        initial: String,
         window: &mut Window,
         cx: &mut Context<Self>,
-        action: impl Fn(u32) -> Action + 'static,
+        action: impl Fn(T) -> Action + 'static,
     ) {
-        let input = cx.new(|cx| InputState::new(window, cx).default_value(initial.to_string()));
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(initial));
         let this = cx.entity().downgrade();
         let action = Rc::new(action);
         window.open_dialog(cx, move |dialog, _, _| {
@@ -345,8 +346,7 @@ impl Gyfa {
                     h_flex().justify_end().child(
                         Button::new("amount-ok").primary().label("OK").on_click(
                             move |_, window, cx| {
-                                let Ok(amount) = input.read(cx).value().trim().parse::<u32>()
-                                else {
+                                let Ok(amount) = input.read(cx).value().trim().parse::<T>() else {
                                     return;
                                 };
                                 Self::app_update(&this, cx, |g, cx| g.apply(action(amount), cx));
@@ -395,7 +395,7 @@ fn addition_menu(
     if t.market_group.is_some() {
         let this = this.clone();
         menu = menu.item(
-            PopupMenuItem::new(format!("{category} Market Group")).on_click(
+            entry(IconName::Search, format!("{category} Market Group")).on_click(
                 move |_, window, cx| {
                     Gyfa::app_update(&this, cx, |g, cx| g.jump_to_market(type_id, window, cx));
                 },
@@ -407,7 +407,7 @@ fn addition_menu(
         AddKind::Cargo => format!("Remove {category} Stack"),
         AddKind::Implants | AddKind::Boosters => format!("Remove {category}"),
     };
-    menu = menu.item(PopupMenuItem::new(remove_label).on_click(match kind {
+    menu = menu.item(entry(IconName::Delete, remove_label).on_click(match kind {
         AddKind::Drones => targeted(|rows| Action::RemoveAdditions(AddKind::Drones, rows)),
         AddKind::Implants => targeted(|rows| Action::RemoveAdditions(AddKind::Implants, rows)),
         AddKind::Boosters => targeted(|rows| Action::RemoveAdditions(AddKind::Boosters, rows)),
@@ -420,63 +420,81 @@ fn addition_menu(
             "Change Selection Quantity"
         };
         let this = this.clone();
-        menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
-            Gyfa::app_update(&this, cx, |g, cx| {
-                let targets = g.addition_targets(i);
-                Gyfa::open_amount_dialog("New Amount", amount, window, cx, move |n| {
-                    Action::SetAmount(kind, targets.clone(), n)
-                });
-            });
-        }));
-    }
-    if kind == AddKind::Drones && amount > 1 {
-        let this = this.clone();
         menu = menu.item(
-            PopupMenuItem::new("Split Drone Stack").on_click(move |_, window, cx| {
-                Gyfa::app_update(&this, cx, |_, cx| {
-                    Gyfa::open_amount_dialog("Split Off", amount / 2, window, cx, move |n| {
-                        Action::SplitDrones(i, n)
-                    });
+            entry(IconName::Settings2, label).on_click(move |_, window, cx| {
+                Gyfa::app_update(&this, cx, |g, cx| {
+                    let targets = g.addition_targets(i);
+                    Gyfa::open_value_dialog(
+                        "New Amount",
+                        amount.to_string(),
+                        window,
+                        cx,
+                        move |n| Action::SetAmount(kind, targets.clone(), n),
+                    );
                 });
             }),
         );
+    }
+    if kind == AddKind::Drones && amount > 1 {
+        let this = this.clone();
+        menu = menu.item(entry(IconName::Minus, "Split Drone Stack").on_click(
+            move |_, window, cx| {
+                Gyfa::app_update(&this, cx, |_, cx| {
+                    Gyfa::open_value_dialog(
+                        "Split Off",
+                        (amount / 2).to_string(),
+                        window,
+                        cx,
+                        move |n| Action::SplitDrones(i, n),
+                    );
+                });
+            },
+        ));
     }
     let variations = catalog.variations_of(type_id);
     if variations.len() > 1 {
         let entries: Vec<(TypeId, String)> =
             variations.iter().map(|&v| (v, catalog.name(v))).collect();
-        let this = this.clone();
-        menu = menu.submenu("Variations", window, cx, move |menu, _, _| {
-            entries.iter().fold(
-                menu.scrollable(true).max_h(px(MENU_MAX_H)),
-                |menu, (v, name)| {
-                    let (this, v) = (this.clone(), *v);
-                    menu.item(
-                        PopupMenuItem::new(name.clone())
-                            .checked(v == type_id)
-                            .on_click(move |_, _, cx| {
-                                Gyfa::app_update(&this, cx, |g, cx| {
-                                    let targets = g.addition_targets(i);
-                                    g.apply(Action::SwapAdditions(kind, targets, v), cx);
-                                });
-                            }),
-                    )
-                },
-            )
-        });
+        let (this, loaded) = (this.clone(), Rc::clone(loaded));
+        menu = menu.submenu_with_icon(
+            Some(UiIcon::new(IconName::Replace)),
+            "Variations",
+            window,
+            cx,
+            move |menu, _, _| {
+                entries.iter().fold(
+                    menu.scrollable(true).max_h(px(MENU_MAX_H)),
+                    |menu, (v, name)| {
+                        let (this, v) = (this.clone(), *v);
+                        menu.item(
+                            item_entry(&loaded, v, name.clone())
+                                .checked(v == type_id)
+                                .on_click(move |_, _, cx| {
+                                    Gyfa::app_update(&this, cx, |g, cx| {
+                                        let targets = g.addition_targets(i);
+                                        g.apply(Action::SwapAdditions(kind, targets, v), cx);
+                                    });
+                                }),
+                        )
+                    },
+                )
+            },
+        );
     }
     if kind == AddKind::Cargo {
         let this = this.clone();
         menu = menu.item(
-            PopupMenuItem::new(format!("Fill Cargo With {category}")).on_click(move |_, _, cx| {
-                Gyfa::app_update(&this, cx, |g, cx| {
-                    let Some(loaded) = g.loaded() else { return };
-                    let room = g.cargo_room_for(&loaded, type_id);
-                    if room > 0 {
-                        g.apply(Action::AddCargo(type_id, room), cx);
-                    }
-                });
-            }),
+            entry(IconName::Inbox, format!("Fill Cargo With {category}")).on_click(
+                move |_, _, cx| {
+                    Gyfa::app_update(&this, cx, |g, cx| {
+                        let Some(loaded) = g.loaded() else { return };
+                        let room = g.cargo_room_for(&loaded, type_id);
+                        if room > 0 {
+                            g.apply(Action::AddCargo(type_id, room), cx);
+                        }
+                    });
+                },
+            ),
         );
     }
     misc_entries(menu.separator(), this, loaded, kind, Some(i), cx)
@@ -504,7 +522,7 @@ fn misc_entries(
     if let Some(i) = clicked {
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
         menu = menu.item(
-            PopupMenuItem::new(format!("Copy Selected {noun}")).on_click(move |_, _, cx| {
+            entry(IconName::Copy, format!("Copy Selected {noun}")).on_click(move |_, _, cx| {
                 Gyfa::app_update(&this, cx, |g, cx| {
                     let Some(fit) = g.fit() else { return };
                     let rows = kind.rows(fit);
@@ -521,7 +539,7 @@ fn misc_entries(
     }
     if has_rows {
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
-        menu = menu.item(PopupMenuItem::new(format!("Copy All {noun}")).on_click(
+        menu = menu.item(entry(IconName::Copy, format!("Copy All {noun}")).on_click(
             move |_, _, cx| {
                 Gyfa::app_update(&this, cx, |g, cx| {
                     let Some(fit) = g.fit() else { return };
@@ -533,8 +551,8 @@ fn misc_entries(
     }
     if can_paste {
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
-        menu = menu.item(
-            PopupMenuItem::new(format!("Paste {noun}")).on_click(move |_, _, cx| {
+        menu = menu.item(entry(IconName::FileText, format!("Paste {noun}")).on_click(
+            move |_, _, cx| {
                 let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
                     return;
                 };
@@ -544,8 +562,8 @@ fn misc_entries(
                         g.apply(Action::AddAdditions(kind, items), cx);
                     });
                 }
-            }),
-        );
+            },
+        ));
     }
     menu
 }

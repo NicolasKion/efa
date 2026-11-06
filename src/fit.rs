@@ -58,6 +58,12 @@ pub struct Fit {
     pub cargo: Vec<(TypeId, u32)>,
     #[serde(default)]
     pub notes: String,
+    /// A tactical destroyer's mode.
+    #[serde(default)]
+    pub mode: Option<TypeId>,
+    /// Pilot security status; None uses the character's.
+    #[serde(default)]
+    pub sec_status: Option<f64>,
 }
 
 /// Drones a character can have in space at once, without skills or ship bonuses changing it.
@@ -104,6 +110,7 @@ impl Fit {
                     self.name.clone_from(&t.name);
                 }
                 self.ship = Some(type_id);
+                self.mode = catalog.modes_for(type_id).first().copied();
             }
             Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low)) => {
                 let state = if t.activatable {
@@ -153,6 +160,7 @@ impl Fit {
             }
             Kind::Implant => self.implants.push(type_id),
             Kind::Booster => self.boosters.push(type_id),
+            Kind::Mode => self.mode = Some(type_id),
             Kind::Skill | Kind::Other => return false,
         }
         true
@@ -221,7 +229,11 @@ impl Fit {
             self.mid.iter().map(module_line).collect(),
             self.high.iter().map(module_line).collect(),
             self.rigs.iter().map(|&r| catalog.name(r)).collect(),
-            self.subsystems.iter().map(|&s| catalog.name(s)).collect(),
+            self.subsystems
+                .iter()
+                .chain(&self.mode)
+                .map(|&s| catalog.name(s))
+                .collect(),
             self.drones
                 .iter()
                 .map(|d| format!("{} x{}", catalog.name(d.type_id), d.count))
@@ -263,6 +275,7 @@ impl Fit {
 
         let mut fit = Fit::new(fit_name.trim());
         fit.ship = Some(ship.id);
+        fit.mode = catalog.modes_for(ship.id).first().copied();
         let mut unknown = Vec::new();
         let mut in_cargo_section = false;
         let mut seen_stacks = false;

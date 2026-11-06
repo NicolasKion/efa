@@ -1,8 +1,8 @@
 //! The left side: market browser and saved fittings.
 
 use gpui_kit::component::{
-    ActiveTheme, h_flex,
-    menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
+    ActiveTheme, IconName, h_flex,
+    menu::{ContextMenuExt, PopupMenu},
     v_flex,
 };
 use gpui_kit::{
@@ -11,7 +11,10 @@ use gpui_kit::{
     prelude::FluentBuilder, px,
 };
 
-use super::{Action, BrowserTab, Gyfa, Loaded, widgets::icon_box};
+use super::{
+    Action, BrowserTab, Gyfa, Loaded,
+    widgets::{entry, icon_box},
+};
 use crate::{
     data::{Kind, Slot, TypeId},
     icons::Icon,
@@ -294,7 +297,7 @@ impl Gyfa {
                             let this = Self::weak(cx);
                             move |menu, _, _| {
                                 let (open, delete) = (this.clone(), this.clone());
-                                menu.item(PopupMenuItem::new("Open in new tab").on_click(
+                                menu.item(entry(IconName::FolderOpen, "Open in new tab").on_click(
                                     move |_, _, cx| {
                                         Self::app_update(&open, cx, |this, cx| {
                                             this.open_fit(i, cx);
@@ -303,7 +306,7 @@ impl Gyfa {
                                 ))
                                 .separator()
                                 .item(
-                                    PopupMenuItem::new("Delete").on_click(move |_, _, cx| {
+                                    entry(IconName::Delete, "Delete").on_click(move |_, _, cx| {
                                         Self::app_update(&delete, cx, |this, cx| {
                                             this.delete_fit(i, cx);
                                         });
@@ -377,13 +380,13 @@ fn market_menu(
     let mut menu = menu;
     if context == MarketContext::Search && t.market_group.is_some() {
         menu = menu.item(
-            PopupMenuItem::new(format!("{category} Market Group"))
+            entry(IconName::Search, format!("{category} Market Group"))
                 .on_click(on(super::Gyfa::jump_to_market)),
         );
     }
     if !has_fit {
         return menu.item(
-            PopupMenuItem::new(format!("Add {category} to Fit"))
+            entry(IconName::Plus, format!("Add {category} to Fit"))
                 .on_click(on(|g, id, _, cx| g.add_item(id, cx))),
         );
     }
@@ -391,7 +394,7 @@ fn market_menu(
         && slot != Slot::Subsystem
     {
         menu = menu.item(
-            PopupMenuItem::new("Fill With Module").on_click(apply(Action::FillRack(slot, id))),
+            entry(IconName::Plus, "Fill With Module").on_click(apply(Action::FillRack(slot, id))),
         );
     }
     if t.kind == Kind::Drone {
@@ -402,19 +405,19 @@ fn market_menu(
             } else {
                 format!("Add {} to Drone Bay (x{amount})", t.name)
             };
-            menu =
-                menu.item(PopupMenuItem::new(label).on_click(apply(Action::AddDrones(id, amount))));
+            menu = menu
+                .item(entry(IconName::Plus, label).on_click(apply(Action::AddDrones(id, amount))));
         }
     }
     menu = menu.item(
-        PopupMenuItem::new(format!("Add {category} to Cargo"))
+        entry(IconName::Inbox, format!("Add {category} to Cargo"))
             .on_click(apply(Action::AddCargo(id, 1))),
     );
     if t.kind == Kind::Charge {
         let room = g.cargo_room_for(&loaded, id);
         if room > 0 {
             menu = menu.item(
-                PopupMenuItem::new(format!("Fill Cargo With {category}"))
+                entry(IconName::Inbox, format!("Fill Cargo With {category}"))
                     .on_click(apply(Action::AddCargo(id, room))),
             );
         }
@@ -424,8 +427,11 @@ fn market_menu(
             .is_some_and(|m| m.name == "Scan Probes");
         let batch = if is_probe { PROBE_BATCH } else { AMMO_BATCH };
         menu = menu.item(
-            PopupMenuItem::new(format!("Add {category} to Cargo (x{batch})"))
-                .on_click(apply(Action::AddCargo(id, batch))),
+            entry(
+                IconName::Inbox,
+                format!("Add {category} to Cargo (x{batch})"),
+            )
+            .on_click(apply(Action::AddCargo(id, batch))),
         );
     }
     menu

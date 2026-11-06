@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::{
-    ActiveTheme, h_flex,
+    ActiveTheme, Icon as UiIcon, IconName, h_flex,
     menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
     v_flex,
 };
@@ -15,7 +15,7 @@ use gpui_kit::{
 
 use super::{
     Action, Gyfa, Loaded, RowRef, Scope,
-    widgets::{color, icon, icon_box, km, short},
+    widgets::{color, entry, icon, icon_box, item_entry, km, short},
 };
 use crate::{
     data::{Catalog, Hardpoint, ItemType, Slot, TypeId},
@@ -44,6 +44,8 @@ enum Row {
     },
     Item(RowRef),
     Empty(Slot),
+    /// A tactical destroyer's mode, shown under the racks like pyfa does.
+    Mode(TypeId),
 }
 
 impl Gyfa {
@@ -56,7 +58,7 @@ impl Gyfa {
             .into_iter()
             .filter_map(|row| match row {
                 Row::Item(r) => Some(r),
-                Row::Header { .. } | Row::Empty(_) => None,
+                Row::Header { .. } | Row::Empty(_) | Row::Mode(_) => None,
             })
             .collect()
     }
@@ -184,6 +186,12 @@ impl Gyfa {
                         .font_weight(FontWeight::SEMIBOLD)
                         .child(format!("— {total} {label} —")),
                 )
+                .context_menu(ship_menu_builder(Self::weak(cx), ship))
+                .into_any_element(),
+            Row::Mode(mode) => base
+                .child(div().w(px(STATE_W)).flex_none())
+                .child(icon_box(catalog, &loaded.icons, Icon::Type(mode), 22.))
+                .child(div().flex_1().truncate().child(catalog.name(mode)))
                 .context_menu(ship_menu_builder(Self::weak(cx), ship))
                 .into_any_element(),
             Row::Empty(slot) => base
@@ -422,14 +430,16 @@ fn item_menu(
         }
     }
     if t.market_group.is_some() {
-        menu = menu.item(PopupMenuItem::new("Module Market Group").on_click(handler(
-            this,
-            move |g, _, window, cx| {
-                g.jump_to_market(type_id, window, cx);
-            },
-        )));
+        menu = menu.item(
+            entry(IconName::Search, "Module Market Group").on_click(handler(
+                this,
+                move |g, _, window, cx| {
+                    g.jump_to_market(type_id, window, cx);
+                },
+            )),
+        );
     }
-    menu = menu.item(PopupMenuItem::new("Remove Module").on_click(scoped(
+    menu = menu.item(entry(IconName::Delete, "Remove Module").on_click(scoped(
         this,
         item,
         Scope::Selection,
@@ -437,7 +447,7 @@ fn item_menu(
     )));
     let variations = catalog.variations_of(type_id);
     if variations.len() > 1 {
-        menu = variations_submenu(menu, this, catalog, item, type_id, variations, window, cx);
+        menu = variations_submenu(menu, this, loaded, item, type_id, variations, window, cx);
     }
     let slot = match item {
         RowRef::Module(slot, _) => Some(slot),
@@ -446,7 +456,7 @@ fn item_menu(
     };
     if let Some(slot) = slot {
         menu = menu.item(
-            PopupMenuItem::new(format!("Fill With {}", t.name)).on_click(handler(
+            entry(IconName::Plus, format!("Fill With {}", t.name)).on_click(handler(
                 this,
                 move |g, _, _, cx| {
                     g.apply(Action::FillRack(slot, type_id), cx);
@@ -462,28 +472,137 @@ fn item_menu(
     {
         menu = menu
             .separator()
-            .item(PopupMenuItem::new("Charge Market Group").on_click(handler(
-                this,
-                move |g, _, window, cx| {
-                    g.jump_to_market(charge, window, cx);
-                },
-            )));
+            .item(
+                entry(IconName::Search, "Charge Market Group").on_click(handler(
+                    this,
+                    move |g, _, window, cx| {
+                        g.jump_to_market(charge, window, cx);
+                    },
+                )),
+            );
     }
 
-    ship_entries(menu.separator(), this, ship)
+    ship_entries(menu.separator(), this, ship, window, cx)
 }
 
 fn ship_menu_builder(
     this: WeakEntity<Gyfa>,
     ship: TypeId,
 ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
-    move |menu, _, _| ship_entries(menu, &this, ship)
+    move |menu, window, cx| ship_entries(menu, &this, ship, window, cx)
 }
 
+/// Ships whose bonuses scale with the pilot's security status.
+const SEC_STATUS_SHIPS: [&str; 6] = [
+    "Pacifier",
+    "Enforcer",
+    "Marshal",
+    "Sidewinder",
+    "Cobra",
+    "Python",
+];
+const SEC_STATUS_PRESETS: [f64; 11] = [-10., -8., -6., -4., -2., 0., 1., 2., 3., 4., 5.];
+
 /// pyfa's fittingShip menu.
-fn ship_entries(menu: PopupMenu, this: &WeakEntity<Gyfa>, ship: TypeId) -> PopupMenu {
+fn ship_entries(
+    menu: PopupMenu,
+    this: &WeakEntity<Gyfa>,
+    ship: TypeId,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let Some(g) = this.upgrade() else { return menu };
+    let (loaded, mode, sec_status) = {
+        let g = g.read(cx);
+        let fit = g.fit();
+        (
+            g.loaded(),
+            fit.and_then(|f| f.mode),
+            fit.and_then(|f| f.sec_status),
+        )
+    };
+    let Some(loaded) = loaded else { return menu };
+    let ship_name = loaded.catalog.name(ship);
+    let mut menu = menu;
+
+    let modes = loaded.catalog.modes_for(ship);
+    if !modes.is_empty() {
+        let (this, loaded, prefix) = (this.clone(), Rc::clone(&loaded), format!("{ship_name} "));
+        menu = menu.submenu_with_icon(
+            Some(UiIcon::new(IconName::Settings2)),
+            "Tactical Mode",
+            window,
+            cx,
+            move |menu, _, _| {
+                modes.iter().fold(menu, |menu, &id| {
+                    let name = loaded.catalog.name(id);
+                    let label = name
+                        .strip_prefix(&prefix)
+                        .unwrap_or(&name)
+                        .trim_end_matches(" Mode")
+                        .to_owned();
+                    menu.item(
+                        item_entry(&loaded, id, label)
+                            .checked(mode == Some(id))
+                            .on_click(handler(&this, move |g, _, _, cx| {
+                                g.apply(Action::SetMode(id), cx);
+                            })),
+                    )
+                })
+            },
+        );
+    }
+    if SEC_STATUS_SHIPS.contains(&ship_name.as_str()) {
+        let this = this.clone();
+        menu = menu.submenu_with_icon(
+            Some(UiIcon::new(IconName::CircleUser)),
+            "Pilot Security Status",
+            window,
+            cx,
+            move |menu, _, _| {
+                let set = |value: Option<f64>| {
+                    handler(&this, move |g, _, _, cx| {
+                        g.apply(Action::SetSecStatus(value), cx);
+                    })
+                };
+                let custom = sec_status.filter(|v| !SEC_STATUS_PRESETS.contains(v));
+                let custom_label = match custom {
+                    Some(v) => format!("Custom ({v})"),
+                    None => "Custom…".to_owned(),
+                };
+                let mut menu = menu
+                    .item(
+                        PopupMenuItem::new("Character")
+                            .checked(sec_status.is_none())
+                            .on_click(set(None)),
+                    )
+                    .item(
+                        PopupMenuItem::new(custom_label)
+                            .checked(custom.is_some())
+                            .on_click(handler(&this, move |_, _, window, cx| {
+                                Gyfa::open_value_dialog(
+                                    "Security Status (-10 to 5)",
+                                    custom.unwrap_or(0.0).to_string(),
+                                    window,
+                                    cx,
+                                    |v: f64| Action::SetSecStatus(Some(v.clamp(-10.0, 5.0))),
+                                );
+                            })),
+                    )
+                    .separator();
+                for preset in SEC_STATUS_PRESETS {
+                    menu = menu.item(
+                        PopupMenuItem::new(format!("{preset}"))
+                            .checked(sec_status == Some(preset))
+                            .on_click(set(Some(preset))),
+                    );
+                }
+                menu
+            },
+        );
+    }
     menu.item(
-        PopupMenuItem::new("Open in Fitting Browser").on_click(handler(
+        entry(IconName::FolderOpen, "Open in Fitting Browser").on_click(handler(
             this,
             move |g, _, _, cx| {
                 g.jump_to_fittings(ship, cx);
@@ -495,12 +614,12 @@ fn ship_entries(menu: PopupMenu, this: &WeakEntity<Gyfa>, ship: TypeId) -> Popup
 /// A charge entry: loads it into every similar module, or only the selection with Ctrl or Alt.
 fn charge_entry(
     this: &WeakEntity<Gyfa>,
-    catalog: &Catalog,
+    loaded: &Rc<Loaded>,
     item: RowRef,
     id: TypeId,
     loaded_charge: Option<TypeId>,
 ) -> PopupMenuItem {
-    PopupMenuItem::new(catalog.name(id))
+    item_entry(loaded, id, loaded.catalog.name(id))
         .checked(loaded_charge == Some(id))
         .on_click(scoped(this, item, Scope::Similar, move |rows| {
             Action::SetCharge(rows, Some(id))
@@ -528,7 +647,7 @@ fn damage_ladder(
         charges
             .iter()
             .fold(menu.label("─ Less Damage ─"), |menu, &c| {
-                menu.item(charge_entry(&this, &loaded.catalog, item, c, loaded_charge))
+                menu.item(charge_entry(&this, &loaded, item, c, loaded_charge))
             })
             .label("─ More Damage ─")
     })
@@ -549,60 +668,66 @@ fn charge_submenu(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let (this, loaded) = (this.clone(), Rc::clone(loaded));
-    menu.submenu("Charge", window, cx, move |menu, window, cx| {
-        let catalog = &loaded.catalog;
-        let mut menu = menu.scrollable(true).max_h(px(MENU_MAX_H));
-        match &structure {
-            ChargeMenu::Turret(families) => {
-                menu = menu.label("─ Long Range ─");
-                for family in families {
-                    menu = match family.as_slice() {
-                        [only] => {
-                            menu.item(charge_entry(&this, catalog, item, *only, loaded_charge))
-                        }
-                        _ => damage_ladder(
+    menu.submenu_with_icon(
+        Some(UiIcon::new(IconName::BatteryCharging)),
+        "Charge",
+        window,
+        cx,
+        move |menu, window, cx| {
+            let catalog = &loaded.catalog;
+            let mut menu = menu.scrollable(true).max_h(px(MENU_MAX_H));
+            match &structure {
+                ChargeMenu::Turret(families) => {
+                    menu = menu.label("─ Long Range ─");
+                    for family in families {
+                        menu = match family.as_slice() {
+                            [only] => {
+                                menu.item(charge_entry(&this, &loaded, item, *only, loaded_charge))
+                            }
+                            _ => damage_ladder(
+                                menu,
+                                catalog.name(family[0]),
+                                &this,
+                                &loaded,
+                                item,
+                                family.clone(),
+                                loaded_charge,
+                                window,
+                                cx,
+                            ),
+                        };
+                    }
+                    menu = menu.label("─ Short Range ─");
+                }
+                ChargeMenu::Missile(by_type) => {
+                    for (label, charges) in by_type {
+                        menu = damage_ladder(
                             menu,
-                            catalog.name(family[0]),
+                            (*label).to_owned(),
                             &this,
                             &loaded,
                             item,
-                            family.clone(),
+                            charges.clone(),
                             loaded_charge,
                             window,
                             cx,
-                        ),
-                    };
+                        );
+                    }
                 }
-                menu = menu.label("─ Short Range ─");
-            }
-            ChargeMenu::Missile(by_type) => {
-                for (label, charges) in by_type {
-                    menu = damage_ladder(
-                        menu,
-                        (*label).to_owned(),
-                        &this,
-                        &loaded,
-                        item,
-                        charges.clone(),
-                        loaded_charge,
-                        window,
-                        cx,
-                    );
+                ChargeMenu::Flat(list) => {
+                    for &c in list {
+                        menu = menu.item(charge_entry(&this, &loaded, item, c, loaded_charge));
+                    }
                 }
             }
-            ChargeMenu::Flat(list) => {
-                for &c in list {
-                    menu = menu.item(charge_entry(&this, catalog, item, c, loaded_charge));
-                }
-            }
-        }
-        menu.item(PopupMenuItem::new("Empty").on_click(scoped(
-            &this,
-            item,
-            Scope::Similar,
-            |rows| Action::SetCharge(rows, None),
-        )))
-    })
+            menu.item(entry(IconName::CircleX, "Empty").on_click(scoped(
+                &this,
+                item,
+                Scope::Similar,
+                |rows| Action::SetCharge(rows, None),
+            )))
+        },
+    )
 }
 
 fn spool_submenu(
@@ -615,32 +740,38 @@ fn spool_submenu(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let this = this.clone();
-    menu.submenu("Spoolup Cycles", window, cx, move |menu, _, _| {
-        let menu = (0..=max).fold(
-            menu.scrollable(true).max_h(px(MENU_MAX_H)),
-            |menu, cycles| {
-                let label = if cycles == max {
-                    format!("{cycles} (default)")
-                } else {
-                    cycles.to_string()
-                };
-                menu.item(
-                    PopupMenuItem::new(label)
-                        .checked(current.unwrap_or(max) == cycles)
-                        .on_click(scoped(&this, item, Scope::Selection, move |rows| {
-                            Action::SetSpool(rows, Some(cycles))
-                        })),
-                )
-            },
-        );
-        menu.separator()
-            .item(PopupMenuItem::new("Reset").on_click(scoped(
-                &this,
-                item,
-                Scope::Selection,
-                |rows| Action::SetSpool(rows, None),
-            )))
-    })
+    menu.submenu_with_icon(
+        Some(UiIcon::new(IconName::RefreshCw)),
+        "Spoolup Cycles",
+        window,
+        cx,
+        move |menu, _, _| {
+            let menu = (0..=max).fold(
+                menu.scrollable(true).max_h(px(MENU_MAX_H)),
+                |menu, cycles| {
+                    let label = if cycles == max {
+                        format!("{cycles} (default)")
+                    } else {
+                        cycles.to_string()
+                    };
+                    menu.item(
+                        PopupMenuItem::new(label)
+                            .checked(current.unwrap_or(max) == cycles)
+                            .on_click(scoped(&this, item, Scope::Selection, move |rows| {
+                                Action::SetSpool(rows, Some(cycles))
+                            })),
+                    )
+                },
+            );
+            menu.separator()
+                .item(entry(IconName::Undo2, "Reset").on_click(scoped(
+                    &this,
+                    item,
+                    Scope::Selection,
+                    |rows| Action::SetSpool(rows, None),
+                )))
+        },
+    )
 }
 
 #[expect(
@@ -650,13 +781,14 @@ fn spool_submenu(
 fn variations_submenu(
     menu: PopupMenu,
     this: &WeakEntity<Gyfa>,
-    catalog: &Catalog,
+    loaded: &Rc<Loaded>,
     item: RowRef,
     current: TypeId,
     variations: &[TypeId],
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
+    let catalog = &loaded.catalog;
     // Grouped under their meta group, groups in the order they first appear by meta level.
     let mut groups: Vec<(String, Vec<(TypeId, String)>)> = Vec::new();
     for &v in variations {
@@ -671,24 +803,30 @@ fn variations_submenu(
             None => groups.push((group, vec![(v, t.name.clone())])),
         }
     }
-    let this = this.clone();
-    menu.submenu("Variations", window, cx, move |menu, _, _| {
-        let mut menu = menu.scrollable(true).max_h(px(MENU_MAX_H));
-        for (group, members) in &groups {
-            menu = menu.label(group.clone());
-            for (id, name) in members {
-                let id = *id;
-                menu = menu.item(
-                    PopupMenuItem::new(name.clone())
-                        .checked(id == current)
-                        .on_click(scoped(&this, item, Scope::Selection, move |rows| {
-                            Action::SwapType(rows, id)
-                        })),
-                );
+    let (this, loaded) = (this.clone(), Rc::clone(loaded));
+    menu.submenu_with_icon(
+        Some(UiIcon::new(IconName::Replace)),
+        "Variations",
+        window,
+        cx,
+        move |menu, _, _| {
+            let mut menu = menu.scrollable(true).max_h(px(MENU_MAX_H));
+            for (group, members) in &groups {
+                menu = menu.label(group.clone());
+                for (id, name) in members {
+                    let id = *id;
+                    menu = menu.item(
+                        item_entry(&loaded, id, name.clone())
+                            .checked(id == current)
+                            .on_click(scoped(&this, item, Scope::Selection, move |rows| {
+                                Action::SwapType(rows, id)
+                            })),
+                    );
+                }
             }
-        }
-        menu
-    })
+            menu
+        },
+    )
 }
 
 /// A module's charges, structured the way pyfa's Charge menu shows them.
@@ -810,6 +948,9 @@ fn fitting_rows(fit: &Fit, stats: &Stats) -> Vec<Row> {
             })
         }));
         rows.extend((used..total as usize).map(|_| Row::Empty(slot)));
+    }
+    if let Some(mode) = fit.mode {
+        rows.push(Row::Mode(mode));
     }
     rows
 }

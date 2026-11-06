@@ -73,6 +73,8 @@ pub enum Action {
     SwapAdditions(AddKind, Vec<usize>, TypeId),
     /// Add pasted items to a tab.
     AddAdditions(AddKind, Vec<(TypeId, u32)>),
+    SetMode(TypeId),
+    SetSecStatus(Option<f64>),
 }
 
 /// The additions pane's tabs that list items.
@@ -360,6 +362,8 @@ impl Gyfa {
                     }
                 }
             }
+            Action::SetMode(mode) => fit.mode = Some(mode),
+            Action::SetSecStatus(sec) => fit.sec_status = sec,
             Action::AddAdditions(kind, items) => {
                 for (type_id, count) in items {
                     match kind {

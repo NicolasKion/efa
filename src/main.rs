@@ -13,16 +13,18 @@ fn main() {
         })
     });
 
-    gpui_kit::application().run(move |cx| {
-        gpui_kit::init(cx);
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(1500.), px(900.)), cx)),
-            app_id: Some("gyfa".into()),
-            ..Default::default()
-        };
-        gpui_kit::open_window(options, cx, move |window, cx| {
-            cx.new(|cx| gyfa::ui::Gyfa::new(data_dir, import, window, cx))
-        })
-        .expect("the main window opens");
-    });
+    gpui_kit::application()
+        .with_assets(gpui_kit::assets::Assets)
+        .run(move |cx| {
+            gpui_kit::init(cx);
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::centered(size(px(1500.), px(900.)), cx)),
+                app_id: Some("gyfa".into()),
+                ..Default::default()
+            };
+            gpui_kit::open_window(options, cx, move |window, cx| {
+                cx.new(|cx| gyfa::ui::Gyfa::new(data_dir, import, window, cx))
+            })
+            .expect("the main window opens");
+        });
 }

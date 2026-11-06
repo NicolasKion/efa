@@ -16,11 +16,11 @@ use std::{
 };
 
 use gpui_kit::component::{
-    ActiveTheme, Sizable, WindowExt,
+    ActiveTheme, IconName, Sizable, WindowExt,
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
-    menu::{DropdownMenu, PopupMenuItem},
+    menu::DropdownMenu,
     resizable::{h_resizable, resizable_panel, v_resizable},
     v_flex,
 };
@@ -301,6 +301,7 @@ impl Gyfa {
         if is_ship {
             let mut fit = Fit::new(catalog.name(id));
             fit.ship = Some(id);
+            fit.mode = catalog.modes_for(id).first().copied();
             self.status = None;
             self.add_fit(fit, cx);
             return;
@@ -382,7 +383,7 @@ impl Gyfa {
                         let this = this.clone();
                         move |menu, _, _| {
                             let (import, copy) = (this.clone(), this.clone());
-                            menu.item(PopupMenuItem::new("Import EFT…").on_click(
+                            menu.item(widgets::entry(IconName::FileText, "Import EFT…").on_click(
                                 move |_, window, cx| {
                                     let _ = import.update(cx, |_, cx| {
                                         Self::open_import_dialog(window, cx);
@@ -390,14 +391,17 @@ impl Gyfa {
                                 },
                             ))
                             .item(
-                                PopupMenuItem::new("Copy as EFT")
+                                widgets::entry(IconName::Copy, "Copy as EFT")
                                     .disabled(!has_fit)
                                     .on_click(move |_, _, cx| {
                                         let _ = copy.update(cx, Gyfa::copy_eft);
                                     }),
                             )
                             .separator()
-                            .item(PopupMenuItem::new("Quit").on_click(|_, _, cx| cx.quit()))
+                            .item(
+                                widgets::entry(IconName::WindowClose, "Quit")
+                                    .on_click(|_, _, cx| cx.quit()),
+                            )
                         }
                     }),
             )
@@ -411,25 +415,30 @@ impl Gyfa {
                         move |menu, _, _| {
                             let (new, duplicate, delete) =
                                 (this.clone(), this.clone(), this.clone());
-                            menu.item(PopupMenuItem::new("New fit").on_click(move |_, _, cx| {
-                                let _ = new
-                                    .update(cx, |this, cx| this.add_fit(Fit::new("New fit"), cx));
-                            }))
-                            .item(PopupMenuItem::new("Duplicate").disabled(!has_fit).on_click(
+                            menu.item(widgets::entry(IconName::Plus, "New fit").on_click(
                                 move |_, _, cx| {
-                                    let _ = duplicate.update(cx, Gyfa::duplicate_fit);
+                                    let _ = new.update(cx, |this, cx| {
+                                        this.add_fit(Fit::new("New fit"), cx);
+                                    });
                                 },
                             ))
                             .item(
-                                PopupMenuItem::new("Delete").disabled(!has_fit).on_click(
-                                    move |_, _, cx| {
+                                widgets::entry(IconName::Copy, "Duplicate")
+                                    .disabled(!has_fit)
+                                    .on_click(move |_, _, cx| {
+                                        let _ = duplicate.update(cx, Gyfa::duplicate_fit);
+                                    }),
+                            )
+                            .item(
+                                widgets::entry(IconName::Delete, "Delete")
+                                    .disabled(!has_fit)
+                                    .on_click(move |_, _, cx| {
                                         let _ = delete.update(cx, |this, cx| {
                                             if let Some(current) = this.saved.current {
                                                 this.delete_fit(current, cx);
                                             }
                                         });
-                                    },
-                                ),
+                                    }),
                             )
                         }
                     }),
@@ -441,7 +450,8 @@ impl Gyfa {
                     .label("Character")
                     .dropdown_menu(|menu, _, _| {
                         menu.item(
-                            PopupMenuItem::new("All 5 (the only character for now)").disabled(true),
+                            widgets::entry(IconName::User, "All 5 (the only character for now)")
+                                .disabled(true),
                         )
                     }),
             )

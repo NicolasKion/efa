@@ -182,6 +182,12 @@ impl Engine {
                 }
             }
         }
+        if let Some(mode) = fit.mode {
+            f.set_stance(ItemTypeId::from_i32(mode));
+        }
+        if let Some(sec) = fit.sec_status {
+            f.set_sec_status(rc::FitSecStatus::from_f64_clamped(sec));
+        }
         for &rig in &fit.rigs {
             f.add_rig(ItemTypeId::from_i32(rig));
         }

@@ -24,6 +24,9 @@ pub mod category {
 }
 
 const GROUP_BOOSTER: i32 = 303;
+/// Tactical destroyer modes.
+const GROUP_SHIP_MODIFIERS: i32 = 1306;
+const GROUP_TACTICAL_DESTROYER: i32 = 1305;
 
 mod effect {
     pub const LAUNCHER_FITTED: i32 = 40;
@@ -88,6 +91,8 @@ pub enum Kind {
     Implant,
     Booster,
     Skill,
+    /// A tactical destroyer's mode.
+    Mode,
     Other,
 }
 
@@ -144,6 +149,7 @@ impl ItemType {
             Kind::Implant => "Implant",
             Kind::Booster => "Booster",
             Kind::Skill => "Skill",
+            Kind::Mode => "Tactical Mode",
             Kind::Other => "Item",
         }
     }
@@ -260,6 +266,7 @@ impl Catalog {
                 category::FIGHTER => Kind::Fighter,
                 category::SKILL => Kind::Skill,
                 category::IMPLANT if t.group_id == GROUP_BOOSTER => Kind::Booster,
+                category::MODULE if t.group_id == GROUP_SHIP_MODIFIERS => Kind::Mode,
                 category::IMPLANT => Kind::Implant,
                 category::SUBSYSTEM => Kind::Module(Slot::Subsystem),
                 category::MODULE if has_effect(effect::HIGH) => Kind::Module(Slot::High),
@@ -366,7 +373,7 @@ impl Catalog {
             })
             .collect();
         for t in types.values() {
-            if !t.published || matches!(t.kind, Kind::Skill | Kind::Other) {
+            if !t.published || matches!(t.kind, Kind::Skill | Kind::Mode | Kind::Other) {
                 continue;
             }
             if let Some(group) = t.market_group.and_then(|g| market_groups.get_mut(&g)) {
@@ -432,6 +439,26 @@ impl Catalog {
         self.variations.get(&parent).map_or(&[], Vec::as_slice)
     }
 
+    /// A tactical destroyer's modes, found the way pyfa finds them: mode items named after the
+    /// ship. Empty for every other ship.
+    pub fn modes_for(&self, ship: TypeId) -> Vec<TypeId> {
+        let Some(ship) = self.get(ship) else {
+            return Vec::new();
+        };
+        if ship.group_id != GROUP_TACTICAL_DESTROYER && ship.name != "Anhinga" {
+            return Vec::new();
+        }
+        let prefix = format!("{} ", ship.name.to_lowercase());
+        let mut modes: Vec<TypeId> = self
+            .types
+            .values()
+            .filter(|t| t.kind == Kind::Mode && t.name.to_lowercase().starts_with(&prefix))
+            .map(|t| t.id)
+            .collect();
+        modes.sort_unstable();
+        modes
+    }
+
     /// The market group chain from the root down to the type's own group.
     pub fn market_path(&self, id: TypeId) -> Vec<i32> {
         let mut path = Vec::new();
@@ -467,7 +494,7 @@ impl Catalog {
             .filter(|t| {
                 t.published
                     && t.market_group.is_some()
-                    && !matches!(t.kind, Kind::Skill | Kind::Other)
+                    && !matches!(t.kind, Kind::Skill | Kind::Mode | Kind::Other)
             })
             .filter(|t| {
                 let name = t.name.to_lowercase();

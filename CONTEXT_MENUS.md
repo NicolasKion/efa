@@ -40,10 +40,10 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 - [ ] Tactical Mode Stats | right-click the mode row | stats window for the mode item | itemStats.py
 
 ### fittingShip
-- [ ] Tactical Mode | ship has modes (T3 destroyers) | radio submenu Defense/Propulsion/Sharpshooter (or Primary/Secondary/Tertiary). GuiChangeShipModeCommand | shipModeChange.py
+- [x] Tactical Mode | ship has modes (T3 destroyers) | radio submenu Defense/Propulsion/Sharpshooter (or Primary/Secondary/Tertiary). GuiChangeShipModeCommand | shipModeChange.py
 - [ ] Ship Stats / Citadel Stats | always | stats window for the ship | itemStats.py
 - [ ] Citadel System Security | fit is a structure | radio: High Security, Low Security, Null Security, W-Space. GuiChangeFitSystemSecurityCommand | fitSystemSecurity.py
-- [ ] Pilot Security Status | ship is Pacifier, Enforcer, Marshal, Sidewinder, Cobra or Python | radio: "Character (x.xx)", "Custom (x)" (dialog, -10..5), separator, presets -10,-8,-6,-4,-2,0,1,2,3,4,5. GuiChangeFitPilotSecurityCommand | fitPilotSecurity.py
+- [x] Pilot Security Status | ship is Pacifier, Enforcer, Marshal, Sidewinder, Cobra or Python | radio: "Character (x.xx)", "Custom (x)" (dialog, -10..5), separator, presets -10,-8,-6,-4,-2,0,1,2,3,4,5. GuiChangeFitPilotSecurityCommand | fitPilotSecurity.py
 - [x] Open in Fitting Browser | unless fitting browser already shows this ship's fit list | switches to fittings tab, stage 3 for the ship | shipJump.py
 - [ ] Change Ship Skills / Change Citadel Skills | skills affect ship attrs | skill level submenu as above | skillAffectors.py
 
