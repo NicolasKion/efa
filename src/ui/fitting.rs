@@ -15,7 +15,7 @@ use gpui_kit::{
 
 use super::{
     Action, Gyfa, Loaded, RowRef, Scope,
-    widgets::{color, entry, icon, icon_box, item_entry, km, short},
+    widgets::{color, entry, icon, icon_box, item_entry, item_label, km, short},
 };
 use crate::{
     data::{Catalog, Hardpoint, ItemType, Kind, Slot, TypeId},
@@ -773,14 +773,20 @@ fn damage_ladder(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let (this, loaded) = (this.clone(), Rc::clone(loaded));
-    menu.submenu(title, window, cx, move |menu, _, _| {
-        charges
-            .iter()
-            .fold(menu.label("─ Less Damage ─"), |menu, &c| {
-                menu.item(charge_entry(&this, &loaded, item, c, loaded_charge))
-            })
-            .label("─ More Damage ─")
-    })
+    menu.submenu_with_element(
+        title.clone(),
+        item_label(&loaded, charges.first().copied(), title),
+        window,
+        cx,
+        move |menu, _, _| {
+            charges
+                .iter()
+                .fold(menu.label("─ Less Damage ─"), |menu, &c| {
+                    menu.item(charge_entry(&this, &loaded, item, c, loaded_charge))
+                })
+                .label("─ More Damage ─")
+        },
+    )
 }
 
 #[expect(

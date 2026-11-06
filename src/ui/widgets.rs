@@ -2,7 +2,8 @@
 
 use gpui_kit::component::{ActiveTheme, Theme, ThemeMode, h_flex};
 use gpui_kit::{
-    App, Div, FontWeight, Hsla, ParentElement, SharedString, Styled, div, img, px, relative, rgb,
+    App, Div, FontWeight, Hsla, ParentElement, SharedString, Styled, div, img,
+    prelude::FluentBuilder, px, relative, rgb,
 };
 
 use std::rc::Rc;
@@ -205,6 +206,28 @@ pub fn item_entry(
             ))
             .child(label.clone())
     })
+}
+
+/// A submenu label showing an item's icon, for groups named after the item they start with.
+pub fn item_label(
+    loaded: &Rc<Loaded>,
+    id: Option<TypeId>,
+    label: impl Into<SharedString>,
+) -> impl Fn(&mut gpui_kit::Window, &mut App) -> Div + 'static {
+    let (loaded, label) = (Rc::clone(loaded), label.into());
+    move |_, _| {
+        h_flex()
+            .gap_2()
+            .when_some(id, |row, id| {
+                row.child(icon_box(
+                    &loaded.catalog,
+                    &loaded.icons,
+                    Icon::Type(id),
+                    18.,
+                ))
+            })
+            .child(label.clone())
+    }
 }
 
 /// A menu entry with one of the UI's own icons.

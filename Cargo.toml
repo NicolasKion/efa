@@ -38,3 +38,12 @@ must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 too_many_lines = "allow"
+
+# Submenu entries with a custom label (game icons next to ammo families) need a gpui-component
+# change that is not released yet; it lives on the submenu-element branch of a local checkout.
+[patch.crates-io]
+gpui-kit = { path = "../gpui-component/crates/kit" }
+gpui-component = { path = "../gpui-component/crates/component" }
+gpui-base = { path = "../gpui-component/crates/base" }
+gpui-component-macros = { path = "../gpui-component/crates/component-macros" }
+gpui-kit-assets = { path = "../gpui-component/crates/assets" }
