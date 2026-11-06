@@ -50,6 +50,9 @@ impl Gyfa {
     ) {
         let Some(loaded) = self.loaded() else { return };
         let gyfa = cx.entity();
+        // Worked out here: the editor is built while this view is being updated, so it cannot
+        // read the view itself yet.
+        let select = select.or_else(|| self.saved.implant_sets.first().map(|s| s.name.clone()));
         let editor = cx.new(|cx| ImplantSetEditor::new(&gyfa, loaded, select, window, cx));
         window.open_dialog(cx, move |dialog, _, _| {
             dialog
@@ -148,13 +151,7 @@ impl ImplantSetEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let selected = select.or_else(|| {
-            gyfa.read(cx)
-                .saved
-                .implant_sets
-                .first()
-                .map(|s| s.name.clone())
-        });
+        let selected = select;
         let name = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Set name")
