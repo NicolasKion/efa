@@ -71,6 +71,8 @@ struct Pane<'a> {
     /// A price fetch is out.
     prices_updating: bool,
     price_totals: PriceTotals,
+    /// Implants plugged into the fit's character.
+    character_implants: &'a [crate::data::TypeId],
 }
 
 impl Pane<'_> {
@@ -138,21 +140,8 @@ const TEXT_SIZE: f32 = 11.;
 
 impl Gyfa {
     pub(super) fn stats_panel(&self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
+        let character = self.character_bar(loaded, cx);
         let theme = cx.theme();
-        let character = h_flex()
-            .gap_2()
-            .p_2()
-            .border_b_1()
-            .border_color(theme.border)
-            .child("Character:")
-            .child(
-                div()
-                    .px_2()
-                    .py_0p5()
-                    .rounded(px(4.))
-                    .bg(theme.secondary)
-                    .child("All 5"),
-            );
         let (Some(stats), Some(fit)) = (&self.stats, self.fit()) else {
             return v_flex()
                 .size_full()
@@ -171,6 +160,7 @@ impl Gyfa {
             prices: &self.prices,
             prices_updating: self.prices_fetch.is_some(),
             price_totals: self.saved.price_totals,
+            character_implants: self.character_implants(),
         };
         let this = Self::weak(cx);
         let sections = [

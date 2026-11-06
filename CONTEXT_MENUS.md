@@ -29,12 +29,12 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 - [ ] Apply Mutaplasmid / Revert to {base} | item has mutaplasmids or is mutated | not mutated: submenu of mutaplasmids (Glorified sorted after base name); mutated: plain entry reverting to base item. GuiConvertMutatedLocalModuleCommand / GuiRevertMutatedLocalModuleCommand | itemMutations.py
 - [x] Fill With {Module} | always (pref moduleFill) | clones the module into all free slots of that rack. GuiFillWithClonedLocalModulesCommand | moduleFill.py
 - [ ] Copy Module to Clipboard | module is mutated | copies EFT mutant block (item, mutaplasmid, attrs) | moduleMutatedExport.py
-- [ ] Change {Module} Skills | some skill modifies a non-zero attr of the item (pref changeAffectingSkills) | submenu per affecting skill, each with "Not Learned", "Level 0".."Level 5" (checked current); changes character skill level and refreshes fit | skillAffectors.py
+- [x] Change {Module} Skills | some skill modifies a non-zero attr of the item (pref changeAffectingSkills) | submenu per affecting skill, each with "Not Learned", "Level 0".."Level 5" (checked current); changes character skill level and refreshes fit | skillAffectors.py. gyfa lists the skill's current level after its name and greys the levels out for All 0/All 5, which ignore changes in pyfa too; no visibility pref yet
 
 ### fittingCharge
 - [ ] {Charge} Stats | charge loaded | stats window for the charge | itemStats.py
 - [x] {Charge} Market Group | charge has market group | jump to charge in market | itemMarketJump.py
-- [ ] Change {Charge} Skills | skills affect charge attrs | as above, on chargeModifiedAttributes | skillAffectors.py
+- [x] Change {Charge} Skills | skills affect charge attrs | as above, on chargeModifiedAttributes | skillAffectors.py
 
 ### fittingMode
 - [ ] Tactical Mode Stats | right-click the mode row | stats window for the mode item | itemStats.py
@@ -45,7 +45,7 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 - [ ] Citadel System Security | fit is a structure | radio: High Security, Low Security, Null Security, W-Space. GuiChangeFitSystemSecurityCommand | fitSystemSecurity.py
 - [x] Pilot Security Status | ship is Pacifier, Enforcer, Marshal, Sidewinder, Cobra or Python | radio: "Character (x.xx)", "Custom (x)" (dialog, -10..5), separator, presets -10,-8,-6,-4,-2,0,1,2,3,4,5. GuiChangeFitPilotSecurityCommand | fitPilotSecurity.py
 - [x] Open in Fitting Browser | unless fitting browser already shows this ship's fit list | switches to fittings tab, stage 3 for the ship | shipJump.py
-- [ ] Change Ship Skills / Change Citadel Skills | skills affect ship attrs | skill level submenu as above | skillAffectors.py
+- [x] Change Ship Skills / Change Citadel Skills | skills affect ship attrs | skill level submenu as above | skillAffectors.py. Always "Ship": gyfa has no citadel fits
 
 ## Drones pane (gui/builtinAdditionPanes/droneView.py)
 
@@ -59,7 +59,7 @@ Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 - [x] Split Drone Stack | stack amount > 1 | dialog for amount, splits into a new stack. GuiSplitLocalDroneStackCommand | droneSplitStack.py
 - [x] Variations | 2+ variations | variation submenu, swaps selected drones with same variation set. GuiChangeLocalDroneMetasCommand | itemVariationChange.py
 - [ ] Apply Mutaplasmid / Revert to {base} | drone has mutaplasmids or is mutated | as modules. GuiConvertMutatedLocalDroneCommand / GuiRevertMutatedLocalDroneCommand | itemMutations.py. Not yet: needs mutaplasmid data in the catalog, mutated items in the fit model and EFT, and the stats window to edit rolls; best done with modules
-- [ ] Change Drone Skills | skills affect drone | skill level submenu | skillAffectors.py. Not yet: no characters, every skill is at V
+- [x] Change Drone Skills | skills affect drone | skill level submenu | skillAffectors.py
 
 ### droneItemMisc
 - [x] Copy Selected Drones | selection non-empty (pref additionsCopyPaste) | EFT-style export of selection to clipboard | additionsExportSelection.py
@@ -75,7 +75,7 @@ Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 - [ ] Remove Fighter | row clicked | removes selection, Ctrl/Alt all similar. GuiRemoveLocalFightersCommand | itemRemove.py
 - [ ] Change Fighter Quantity | row clicked | dialog, sets squadron size. GuiChangeLocalFighterAmountCommand | itemAmountChange.py
 - [ ] Variations | 2+ variations | variation swap, Ctrl/Alt similar. GuiChangeLocalFighterMetasCommand | itemVariationChange.py
-- [ ] Change Fighter Skills | skills affect fighter | skill level submenu | skillAffectors.py
+- [~] Change Fighter Skills | skills affect fighter | skill level submenu | skillAffectors.py. Shown for fighter stacks in the drones pane; the fighter pane itself is not built yet
 
 ### fighterItemMisc
 - [ ] Copy Selected Fighters | selection | clipboard export | additionsExportSelection.py
@@ -215,19 +215,19 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 - [ ] Add Command Booster | active fit exists | adds this fit as command fit | gui/builtinShipBrowser/fitItem.py
 
 ## Character selection, missing-skills icon (gui/characterSelection.py, hand-built)
-- [ ] Grant Missing Skills | fit needs skills | raises character skills to fit requirements | gui/characterSelection.py
-- [ ] Copy Missing Skills | same | clipboard, one skill per line | gui/characterSelection.py
-- [ ] Copy Missing Skills (condensed) | same | clipboard, condensed | gui/characterSelection.py
-- [ ] Copy Missing Skills (EVEMon) | same | clipboard, EVEMon plan XML | gui/characterSelection.py
+- [x] Grant Missing Skills | fit needs skills | raises character skills to fit requirements | gui/characterSelection.py. Pending until the character is saved, as in pyfa
+- [x] Copy Missing Skills | same | clipboard, one skill per line | gui/characterSelection.py
+- [x] Copy Missing Skills (condensed) | same | clipboard, condensed | gui/characterSelection.py
+- [x] Copy Missing Skills (EVEMon) | same | clipboard, "Name IV" lines with Roman numerals (not XML) | gui/characterSelection.py
 
 ## Character editor (gui/characterEditor.py)
 
 ### skillItem (skill tree leaf)
 - [ ] Skill Stats | always | stats window | itemStats.py
-- [ ] Unlearn, Level 0 .. Level 5 | character is not "All 0"/"All 5" (appended after separator) | sets skill level | gui/characterEditor.py
+- [x] Unlearn, Level 0 .. Level 5 | character is not "All 0"/"All 5" (appended after separator) | sets skill level | gui/characterEditor.py. Keys 0-5 too
 
 ### implantEditor (character implants list)
-- [ ] Apply Implant Set | any set exists | set submenu as above, adds to character | implantSetApply.py
+- [x] Apply Implant Set | any set exists | set submenu as above, adds to character | implantSetApply.py
 
 ## Item stats window (gui/builtinItemStatsViews)
 

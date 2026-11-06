@@ -7,7 +7,10 @@ use std::fmt::Write;
 
 use serde::{Deserialize, Serialize};
 
-use crate::data::{Catalog, Kind, Slot, TypeId};
+use crate::{
+    character::CharacterId,
+    data::{Catalog, Kind, Slot, TypeId},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModuleState {
@@ -140,6 +143,9 @@ pub struct Fit {
     pub inactive_implants: Vec<TypeId>,
     #[serde(default)]
     pub implant_source: ImplantSource,
+    /// Who flies the fit; fits from before characters existed fly All 5.
+    #[serde(default)]
+    pub character: CharacterId,
 }
 
 /// Incoming damage that effective HP, effective repair rates and the reactive armor hardener

@@ -3,6 +3,8 @@
 
 mod actions;
 mod additions;
+mod character_editor;
+mod characters;
 mod columns;
 mod fitting;
 mod hub;
@@ -86,8 +88,9 @@ impl Render for TabPreview {
 }
 
 use crate::{
+    character::{CharacterId, Characters},
     data::{Catalog, Kind, Slot, TypeId},
-    engine::{Engine, Stats},
+    engine::{Engine, Pilot, Stats},
     fit::Fit,
     icons::{Icon, Icons},
     prices::Prices,
@@ -189,6 +192,12 @@ pub struct Gyfa {
     prices_fetch: Option<Task<()>>,
     /// When a failed price fetch may be tried again.
     prices_retry: Option<Instant>,
+    /// The hub's characters as of its last change.
+    characters: Rc<Characters>,
+    /// The pilot last built, and from which characters and character.
+    pilot_cache: Option<(Rc<Characters>, CharacterId, Rc<Pilot>)>,
+    /// The character last picked, which new fits get, as in pyfa.
+    last_character: CharacterId,
     _subscriptions: Vec<Subscription>,
     _tasks: Vec<Task<()>>,
 }
@@ -243,9 +252,13 @@ impl Gyfa {
 
         let mut subscriptions = subscriptions;
         subscriptions.push(cx.observe(&hub, |g, _, cx| g.pull(cx)));
-        let (mut saved, synced) = {
+        let (mut saved, synced, characters) = {
             let hub = hub.read(cx);
-            (hub.saved.clone(), hub.generation)
+            (
+                hub.saved.clone(),
+                hub.generation,
+                Rc::clone(&hub.characters),
+            )
         };
         if let Role::Detached(fit) = role {
             saved.open = vec![fit];
@@ -291,6 +304,9 @@ impl Gyfa {
             prices: Rc::new(Prices::default()),
             prices_fetch: None,
             prices_retry: None,
+            characters,
+            pilot_cache: None,
+            last_character: CharacterId::default(),
             _subscriptions: subscriptions,
             _tasks: vec![poller],
         };
@@ -318,6 +334,10 @@ impl Gyfa {
         }
         if !Rc::ptr_eq(&self.prices, &hub.prices) {
             self.prices = Rc::clone(&hub.prices);
+            changed = true;
+        }
+        if !Rc::ptr_eq(&self.characters, &hub.characters) {
+            self.characters = Rc::clone(&hub.characters);
             changed = true;
         }
         if hub.generation != self.synced {
@@ -472,9 +492,10 @@ impl Gyfa {
         let options = crate::engine::CalcOptions {
             factor_reload: self.saved.factor_reload,
         };
+        let pilot = self.pilot(&loaded);
         self.stats = self
             .fit()
-            .map(|fit| loaded.engine.compute_with(fit, options));
+            .map(|fit| loaded.engine.compute_for(fit, &pilot, options));
     }
 
     /// Mark the fits as changed. The poll publishes them to the hub, which writes them out and
@@ -497,6 +518,14 @@ impl Gyfa {
         }
         self.saved.current = Some(index);
         self.changed(cx);
+    }
+
+    /// An empty fit flown by the character picked last.
+    fn new_fit(&self, name: impl Into<String>) -> Fit {
+        Fit {
+            character: self.last_character,
+            ..Fit::new(name)
+        }
     }
 
     fn add_fit(&mut self, fit: Fit, cx: &mut Context<Self>) {
@@ -539,9 +568,10 @@ impl Gyfa {
     fn import(&mut self, text: &str) {
         let Some(loaded) = self.loaded() else { return };
         match Fit::from_eft(&loaded.catalog, text) {
-            Ok((fit, unknown)) => {
+            Ok((mut fit, unknown)) => {
                 self.status = (!unknown.is_empty())
                     .then(|| format!("Skipped unknown items: {}", unknown.join(", ")).into());
+                fit.character = self.last_character;
                 self.saved.fits.push(fit);
                 let index = self.saved.fits.len() - 1;
                 self.saved.open.push(index);
@@ -558,7 +588,7 @@ impl Gyfa {
         let is_ship = catalog.get(id).is_some_and(|t| t.kind == Kind::Ship);
         // A ship starts a new fit rather than swapping the hull under an existing one.
         if is_ship {
-            let mut fit = Fit::new(catalog.name(id));
+            let mut fit = self.new_fit(catalog.name(id));
             fit.ship = Some(id);
             fit.mode = catalog.modes_for(id).first().copied();
             self.status = None;
@@ -729,7 +759,7 @@ impl Gyfa {
                             menu.item(widgets::entry(IconName::Plus, "New fit").on_click(
                                 move |_, _, cx| {
                                     let _ = new.update(cx, |this, cx| {
-                                        this.add_fit(Fit::new("New fit"), cx);
+                                        this.add_fit(this.new_fit("New fit"), cx);
                                     });
                                 },
                             ))
@@ -759,14 +789,9 @@ impl Gyfa {
                     .ghost()
                     .small()
                     .label("Character")
-                    .dropdown_menu(move |menu, _, _| {
+                    .dropdown_menu(move |menu, _, cx| {
                         let editor = this.clone();
-                        menu.item(
-                            widgets::entry(IconName::User, "All 5 (the only character for now)")
-                                .disabled(true),
-                        )
-                        .separator()
-                        .item(
+                        Self::character_menu(menu, &this, cx).separator().item(
                             widgets::entry(IconName::Settings2, "Implant Set Editor…").on_click(
                                 move |_, window, cx| {
                                     Self::app_update(&editor, cx, |g, cx| {
@@ -832,7 +857,9 @@ impl Gyfa {
                     .xsmall()
                     .icon(IconName::Plus)
                     .tooltip("New fit")
-                    .on_click(cx.listener(|this, _, _, cx| this.add_fit(Fit::new("New fit"), cx))),
+                    .on_click(
+                        cx.listener(|this, _, _, cx| this.add_fit(this.new_fit("New fit"), cx)),
+                    ),
             )
             .into_any_element()
     }

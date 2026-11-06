@@ -70,6 +70,15 @@ mod attr {
     /// Chance of a booster's first side effect, which pyfa ranks booster variations by.
     pub const BOOSTER_EFFECT_CHANCE1: i32 = 1089;
     pub const IMPLANTNESS: i32 = 331;
+    /// requiredSkill1..6 and the level attribute that goes with each.
+    pub const REQUIRED_SKILLS: [(i32, i32); 6] = [
+        (182, 277),
+        (183, 278),
+        (184, 279),
+        (1285, 1286),
+        (1289, 1287),
+        (1290, 1288),
+    ];
 }
 
 /// Which kind of hardpoint a module takes, if any.
@@ -212,7 +221,7 @@ pub struct MarketGroup {
     pub icon_id: Option<i32>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct Catalog {
     pub types: HashMap<TypeId, ItemType>,
     pub by_name: HashMap<String, TypeId>,
@@ -228,11 +237,14 @@ pub struct Catalog {
     pub group_names: HashMap<i32, String>,
     /// Cargo-only types the market search finds, the way pyfa limits its search.
     pub cargo_searchable: HashSet<TypeId>,
+    /// Skills each type needs and at what level, in the order the type lists them. Skills have
+    /// their prerequisites here too.
+    pub required_skills: HashMap<TypeId, Vec<(TypeId, u8)>>,
 }
 
 /// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
 /// instead of loaded.
-const CACHE_FORMAT: u32 = 1;
+const CACHE_FORMAT: u32 = 2;
 const CACHE_FILE: &str = "catalog.bin";
 
 /// The cache on disk: the key it was built for, then the catalog.
@@ -299,6 +311,7 @@ impl Catalog {
 
         let mut types = HashMap::with_capacity(sde_types.len());
         let mut skills = Vec::new();
+        let mut required_skills = HashMap::new();
         for (id, t) in sde_types {
             let Ok(id) = id.parse::<TypeId>() else {
                 continue;
@@ -372,6 +385,16 @@ impl Catalog {
             };
             if kind == Kind::Skill && t.published {
                 skills.push(id);
+            }
+            let required: Vec<(TypeId, u8)> = attr::REQUIRED_SKILLS
+                .iter()
+                .filter_map(|&(skill, level)| {
+                    let skill = attr(skill).filter(|&s| s > 0.0)? as TypeId;
+                    Some((skill, attr(level).unwrap_or(0.0) as u8))
+                })
+                .collect();
+            if !required.is_empty() {
+                required_skills.insert(id, required);
             }
 
             let charge_groups = attr::CHARGE_GROUPS
@@ -568,6 +591,7 @@ impl Catalog {
             meta_group_names,
             group_names,
             cargo_searchable,
+            required_skills,
         })
     }
 

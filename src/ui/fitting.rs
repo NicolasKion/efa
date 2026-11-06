@@ -17,12 +17,13 @@ use gpui_kit::{
 
 use super::{
     Action, Gyfa, Loaded, RowRef, Scope,
+    characters::skills_submenu,
     columns::{Col, ICON_W, STATE_W},
     widgets::{color, entry, icon, icon_box, icon_label, item_entry, item_label, short},
 };
 use crate::{
     data::{Catalog, Hardpoint, ItemType, Kind, Slot, TypeId},
-    engine::{ModuleInfo, Stats},
+    engine::{ModuleInfo, SkillTarget, Stats},
     fit::{Fit, Module, ModuleState},
     icons::Icon,
 };
@@ -605,11 +606,12 @@ fn item_menu(
     if variations.len() > 1 {
         menu = variations_submenu(menu, this, loaded, item, type_id, variations, window, cx);
     }
-    let slot = match item {
-        RowRef::Module(slot, _) => Some(slot),
-        RowRef::Rig(_) => Some(Slot::Rig),
-        RowRef::Subsystem(_) => None,
+    let rack = match item {
+        RowRef::Module(slot, _) => slot,
+        RowRef::Rig(_) => Slot::Rig,
+        RowRef::Subsystem(_) => Slot::Subsystem,
     };
+    let slot = (rack != Slot::Subsystem).then_some(rack);
     if let Some(slot) = slot {
         menu = menu.item(
             entry(IconName::Plus, format!("Fill With {}", t.category_label())).on_click(handler(
@@ -621,7 +623,17 @@ fn item_menu(
         );
     }
 
-    if let Some(charge) = snapshot.module.as_ref().and_then(|m| m.charge)
+    menu = skills_submenu(
+        menu,
+        this,
+        loaded,
+        SkillTarget::Module(rack, type_id),
+        window,
+        cx,
+    );
+
+    let charge = snapshot.module.as_ref().and_then(|m| m.charge);
+    if let Some(charge) = charge
         && catalog
             .get(charge)
             .is_some_and(|c| c.market_group.is_some())
@@ -636,6 +648,14 @@ fn item_menu(
                     },
                 )),
             );
+    }
+    if let Some(charge) = charge {
+        let target = SkillTarget::Charge {
+            slot: rack,
+            module: type_id,
+            charge,
+        };
+        menu = skills_submenu(menu, this, loaded, target, window, cx);
     }
 
     ship_entries(menu.separator(), this, ship, window, cx)
@@ -668,13 +688,14 @@ pub(super) fn ship_entries(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let Some(g) = this.upgrade() else { return menu };
-    let (loaded, mode, sec_status) = {
+    let (loaded, mode, sec_status, character_sec) = {
         let g = g.read(cx);
         let fit = g.fit();
         (
             g.loaded(),
             fit.and_then(|f| f.mode),
             fit.and_then(|f| f.sec_status),
+            g.characters.sec_status(g.fit_character()),
         )
     };
     let Some(loaded) = loaded else { return menu };
@@ -728,7 +749,7 @@ pub(super) fn ship_entries(
                 };
                 let mut menu = menu
                     .item(
-                        PopupMenuItem::new("Character")
+                        PopupMenuItem::new(format!("Character ({})", py_round(character_sec)))
                             .checked(sec_status.is_none())
                             .on_click(set(None)),
                     )
@@ -757,14 +778,25 @@ pub(super) fn ship_entries(
             },
         );
     }
-    menu.item(
+    let menu = menu.item(
         entry(IconName::FolderOpen, "Open in Fitting Browser").on_click(handler(
             this,
             move |g, _, _, cx| {
                 g.jump_to_fittings(ship, cx);
             },
         )),
-    )
+    );
+    skills_submenu(menu, this, &loaded, SkillTarget::Ship, window, cx)
+}
+
+/// A number as Python prints `round(x, 2)`, which pyfa shows the character's status as.
+fn py_round(value: f64) -> String {
+    let rounded = (value * 100.0).round() / 100.0;
+    if rounded.fract() == 0.0 {
+        format!("{rounded:.1}")
+    } else {
+        format!("{rounded}")
+    }
 }
 
 /// A charge entry: loads it into every similar module, or only the selection with Ctrl or Alt.
