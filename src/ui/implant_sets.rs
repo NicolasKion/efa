@@ -12,7 +12,8 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, App, AppContext, ClickEvent, ClipboardItem, Context, Entity, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, WeakEntity, Window, div, prelude::FluentBuilder, px,
+    Subscription, WeakEntity, Window, WindowBounds, WindowOptions, div, prelude::FluentBuilder, px,
+    size,
 };
 
 use super::{Gyfa, Loaded, widgets::icon_box};
@@ -27,6 +28,9 @@ use crate::{
 const SEARCH_LIMIT: usize = 200;
 const ROW_HEIGHT: f32 = 26.;
 const PANE_HEIGHT: f32 = 320.;
+/// The editor window's starting size.
+const EDITOR_W: f32 = 1000.;
+const EDITOR_H: f32 = 520.;
 
 impl Gyfa {
     /// Change the saved sets, keeping them sorted by name, and write them out.
@@ -45,7 +49,7 @@ impl Gyfa {
     pub(super) fn open_implant_set_editor(
         &mut self,
         select: Option<String>,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(loaded) = self.loaded() else { return };
@@ -53,13 +57,20 @@ impl Gyfa {
         // Worked out here: the editor is built while this view is being updated, so it cannot
         // read the view itself yet.
         let select = select.or_else(|| self.saved.implant_sets.first().map(|s| s.name.clone()));
-        let editor = cx.new(|cx| ImplantSetEditor::new(&gyfa, loaded, select, window, cx));
-        window.open_dialog(cx, move |dialog, _, _| {
-            dialog
-                .title("Implant Set Editor")
-                .w(px(960.))
-                .child(editor.clone())
+        // A window of its own, like pyfa's editors, so it can sit beside the fit.
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::centered(size(px(EDITOR_W), px(EDITOR_H)), cx)),
+            app_id: Some("gyfa".into()),
+            ..Default::default()
+        };
+        let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+            window.set_window_title("gyfa: Implant Set Editor");
+            cx.new(|cx| ImplantSetEditor::new(&gyfa, loaded, select, window, cx))
         });
+        if let Err(e) = opened {
+            self.status = Some(format!("Could not open the implant set editor: {e}").into());
+            cx.notify();
+        }
     }
 
     /// Ask for a name, save the fit's applied implants under it, then show the set in the
@@ -500,7 +511,12 @@ impl Render for ImplantSetEditor {
         let has_selection = selected.is_some();
         let notice = self.notice.clone();
         v_flex()
+            .size_full()
+            .p_3()
             .gap_3()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .text_sm()
             .child(
                 h_flex()
                     .gap_2()
