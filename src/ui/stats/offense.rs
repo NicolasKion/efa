@@ -145,7 +145,8 @@ pub(super) fn firepower(
         .gap_2()
         .child(
             h_flex()
-                .gap_4()
+                .w_full()
+                .justify_between()
                 .child(block(
                     p,
                     "weapon",
@@ -252,7 +253,8 @@ pub(super) fn mining(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
         .into_any_element()
     };
     let body = h_flex()
-        .gap_4()
+        .w_full()
+        .justify_between()
         .child(block(
             p,
             "miner",
@@ -319,6 +321,8 @@ pub(super) fn outgoing(p: &Pane<'_>) -> Section {
     let [shield, armor, hull] = o.reps;
     let [shield_spool, armor_spool, hull_spool] = o.reps_spool;
     let body = h_flex()
+        .w_full()
+        .justify_between()
         .child(column(
             "cap",
             ids::TRANSFER,

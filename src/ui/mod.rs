@@ -28,14 +28,25 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    App, AppContext, ClickEvent, ClipboardItem, Context, Entity, FocusHandle, InteractiveElement,
-    IntoElement, MouseUpEvent, ParentElement, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window, WindowBounds,
-    WindowOptions, div, prelude::FluentBuilder, px, size,
+    AnyElement, App, AppContext, ClickEvent, ClipboardItem, Context, Entity, FocusHandle,
+    InteractiveElement, IntoElement, MouseUpEvent, ParentElement, Render, ScrollHandle,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window,
+    WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, size,
 };
 
 pub use actions::{Action, AddKind, RowRef, Scope};
 pub use hub::Hub;
+
+/// How pyfa names a rack in messages.
+fn slot_label(slot: Slot) -> &'static str {
+    match slot {
+        Slot::High => "high",
+        Slot::Mid => "med",
+        Slot::Low => "low",
+        Slot::Rig => "rig",
+        Slot::Subsystem => "subsystem",
+    }
+}
 
 /// Which window this is: the main one, whose tabs are remembered, or one torn off for a fit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +54,11 @@ pub enum Role {
     Main,
     Detached(usize),
 }
+
+/// Size of a fit tab, and of the name field while renaming one.
+const TAB_H: f32 = 26.;
+const TAB_MAX_W: f32 = 300.;
+const TAB_RENAME_W: f32 = 200.;
 
 /// A fit tab being dragged: to reorder tabs, or onto the drop zone to open a new window.
 #[derive(Debug, Clone)]
@@ -70,7 +86,7 @@ impl Render for TabPreview {
 }
 
 use crate::{
-    data::{Catalog, Kind, TypeId},
+    data::{Catalog, Kind, Slot, TypeId},
     engine::{Engine, Stats},
     fit::Fit,
     icons::{Icon, Icons},
@@ -114,6 +130,10 @@ enum AdditionsTab {
     Notes,
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent view flags of one window, not a state machine"
+)]
 pub struct Gyfa {
     hub: Entity<Hub>,
     role: Role,
@@ -121,6 +141,8 @@ pub struct Gyfa {
     synced: u64,
     /// Fits this window deleted since it last published, for the other windows' tabs.
     pending_deletions: Vec<usize>,
+    /// The active tab shows the name field instead of the name.
+    renaming: bool,
     /// A tab is being dragged, so the tear-off drop zone shows.
     tab_dragging: bool,
     /// The title last given to the window, so it is only set when it changes.
@@ -186,6 +208,14 @@ impl Gyfa {
                     cx.notify();
                 }
             }),
+            cx.subscribe(&name_input, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur)
+                    && this.renaming
+                {
+                    this.renaming = false;
+                    cx.notify();
+                }
+            }),
             cx.subscribe(&name_input, |this, input, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change)
                     && let Some(i) = this.saved.current
@@ -226,6 +256,7 @@ impl Gyfa {
             role,
             synced,
             pending_deletions: Vec::new(),
+            renaming: false,
             tab_dragging: false,
             window_title: String::new(),
             loading: Loading::Pending,
@@ -539,6 +570,14 @@ impl Gyfa {
             cx.notify();
             return;
         };
+        // Like pyfa, a module only goes on when its rack has a free slot.
+        if let Some(Kind::Module(slot)) = catalog.get(id).map(|t| t.kind)
+            && self.free_slots(slot) == 0
+        {
+            self.status = Some(format!("No free {} slot", slot_label(slot)).into());
+            cx.notify();
+            return;
+        }
         let added = self.saved.fits[i].add(catalog, id);
         // pyfa brings the Boosters tab up even when the booster was already there.
         if catalog.get(id).is_some_and(|t| t.kind == Kind::Booster)
@@ -566,6 +605,27 @@ impl Gyfa {
         self.status =
             (!added).then(|| format!("Nothing on this fit takes {}", catalog.name(id)).into());
         self.changed(cx);
+    }
+
+    /// Empty slots left in a rack: the ship's total after bonuses, which subsystems change, less
+    /// what is fitted.
+    pub(super) fn free_slots(&self, slot: Slot) -> usize {
+        let (Some(fit), Some(stats)) = (self.fit(), &self.stats) else {
+            return 0;
+        };
+        let (total, used) = match slot {
+            Slot::High | Slot::Mid | Slot::Low => (
+                match slot {
+                    Slot::High => stats.high.total,
+                    Slot::Mid => stats.mid.total,
+                    _ => stats.low.total,
+                },
+                fit.rack(slot).iter().flatten().count(),
+            ),
+            Slot::Rig => (stats.rig.total, fit.rigs.iter().flatten().count()),
+            Slot::Subsystem => (stats.subsystem.total, fit.subsystems.len()),
+        };
+        (total.unwrap_or(0) as usize).saturating_sub(used)
     }
 
     fn open_import_dialog(window: &mut Window, cx: &mut Context<Self>) {
@@ -745,121 +805,205 @@ impl Gyfa {
         self.add_fit(copy, cx);
     }
 
-    fn fit_tabs(&self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The open fits as slim tabs: ship icon, fit name and hull on one line.
+    fn fit_tabs(&self, loaded: &Loaded, cx: &mut Context<Self>) -> AnyElement {
+        let tabs: Vec<AnyElement> = self
+            .saved
+            .open
+            .iter()
+            .map(|&i| self.fit_tab(loaded, i, cx))
+            .collect();
         let theme = cx.theme();
         h_flex()
-            .flex_wrap()
-            .gap_1()
-            .p_1()
+            .id("fit-tabs")
+            .flex_none()
+            .items_center()
+            .gap_0p5()
+            .px_1()
+            .py_1()
             .bg(theme.tab_bar)
             .border_b_1()
             .border_color(theme.border)
-            .children(self.saved.open.iter().map(|&i| {
-                let fit = &self.saved.fits[i];
-                let selected = self.saved.current == Some(i);
-                let label = match fit.ship {
-                    Some(ship) => format!("{}: {}", loaded.catalog.name(ship), fit.name),
-                    None => fit.name.clone(),
-                };
-                h_flex()
-                    .id(SharedString::from(format!("tab-{i}")))
-                    .gap_1()
-                    .px_2()
-                    .py_0p5()
-                    .rounded(px(4.))
-                    .bg(if selected {
-                        theme.tab_active
-                    } else {
-                        theme.tab
-                    })
-                    .text_color(if selected {
-                        theme.tab_active_foreground
-                    } else {
-                        theme.tab_foreground
-                    })
-                    .border_1()
-                    .border_color(if selected { theme.ring } else { theme.border })
-                    .when_some(fit.ship, |tab, ship| {
-                        tab.child(widgets::icon_box(
-                            &loaded.catalog,
-                            &loaded.icons,
-                            Icon::Type(ship),
-                            16.,
-                        ))
-                    })
-                    .child(div().text_sm().child(label.clone()))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.saved.current = Some(i);
-                        this.clear_selection();
-                        this.changed(cx);
-                    }))
-                    .on_drag(
-                        TabDrag {
-                            index: i,
-                            label: label.into(),
-                        },
-                        {
-                            let this = cx.entity().downgrade();
-                            move |drag, _, _, cx| {
-                                // The drop zone only shows while a tab is in flight.
-                                let _ = this.update(cx, |g, cx| {
-                                    g.tab_dragging = true;
-                                    cx.notify();
-                                });
-                                cx.new(|_| TabPreview(drag.label.clone()))
-                            }
-                        },
-                    )
-                    .drag_over::<TabDrag>(|style, _, _, cx| style.bg(cx.theme().drop_target))
-                    .on_drop(cx.listener(move |g, drag: &TabDrag, _, cx| {
-                        g.tab_dragging = false;
-                        g.move_tab(drag.index, i, cx);
-                    }))
-                    .context_menu({
-                        let this = cx.entity().downgrade();
-                        move |menu, _, _| {
-                            let on = |f: fn(&mut Gyfa, usize, &mut Context<Gyfa>)| {
-                                let this = this.clone();
-                                move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                                    let _ = this.update(cx, |g, cx| f(g, i, cx));
-                                }
-                            };
-                            menu.item(
-                                widgets::entry(IconName::ExternalLink, "Open in New Window")
-                                    .on_click(on(Gyfa::open_in_new_window)),
-                            )
-                            .separator()
-                            .item(
-                                widgets::entry(IconName::Close, "Close")
-                                    .on_click(on(Gyfa::close_fit)),
-                            )
-                            .item(
-                                widgets::entry(IconName::Close, "Close Others")
-                                    .on_click(on(Gyfa::close_other_fits)),
-                            )
-                        }
-                    })
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("tab-close-{i}")))
-                            .px_1()
-                            .rounded(px(3.))
-                            .hover(|s| s.bg(cx.theme().secondary_hover))
-                            .child("×")
-                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                cx.stop_propagation();
-                                this.close_fit(i, cx);
-                            })),
-                    )
-            }))
+            .overflow_x_scroll()
+            .children(tabs)
             .child(
                 Button::new("new-fit")
                     .ghost()
                     .xsmall()
-                    .label("+")
+                    .icon(IconName::Plus)
                     .tooltip("New fit")
                     .on_click(cx.listener(|this, _, _, cx| this.add_fit(Fit::new("New fit"), cx))),
             )
+            .into_any_element()
+    }
+
+    fn fit_tab(&self, loaded: &Loaded, i: usize, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let fit = &self.saved.fits[i];
+        let selected = self.saved.current == Some(i);
+        let renaming = selected && self.renaming;
+        let ship_name = fit.ship.map(|s| loaded.catalog.name(s));
+        let label = match &ship_name {
+            Some(ship) => format!("{ship}: {}", fit.name),
+            None => fit.name.clone(),
+        };
+        // The hull only adds something when the fit is not just named after it.
+        let hull = ship_name.filter(|ship| *ship != fit.name);
+        let group = SharedString::from(format!("tab-{i}"));
+        let name: AnyElement = if renaming {
+            div()
+                .w(px(TAB_RENAME_W))
+                .child(self.name_field())
+                .into_any_element()
+        } else {
+            h_flex()
+                .min_w_0()
+                .gap_1p5()
+                .child(div().truncate().child(fit.name.clone()))
+                .when_some(hull, |row, hull| {
+                    row.child(
+                        div()
+                            .flex_none()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(hull),
+                    )
+                })
+                .into_any_element()
+        };
+        h_flex()
+            .id(group.clone())
+            .group(group.clone())
+            .flex_none()
+            .max_w(px(TAB_MAX_W))
+            .h(px(TAB_H))
+            .items_center()
+            .gap_1p5()
+            .pl_2()
+            .pr_1()
+            .rounded(px(5.))
+            .text_sm()
+            .when(selected, |tab| {
+                tab.bg(theme.secondary).text_color(theme.foreground)
+            })
+            .when(!selected, |tab| {
+                tab.text_color(theme.tab_foreground)
+                    .hover(|s| s.bg(theme.secondary.opacity(0.5)))
+            })
+            .when_some(fit.ship, |tab, ship| {
+                tab.child(widgets::icon_box(
+                    &loaded.catalog,
+                    &loaded.icons,
+                    Icon::Type(ship),
+                    16.,
+                ))
+            })
+            .child(name)
+            .child(
+                div()
+                    // The close button stays out of the way until the tab is active or hovered.
+                    .when(!selected, |d| {
+                        d.opacity(0.).group_hover(group, |s| s.opacity(1.))
+                    })
+                    .child(
+                        Button::new(SharedString::from(format!("tab-close-{i}")))
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Close)
+                            .tooltip("Close tab")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.close_fit(i, cx);
+                            })),
+                    ),
+            )
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                if this.saved.current == Some(i) && event.click_count() >= 2 {
+                    this.start_rename(window, cx);
+                    return;
+                }
+                if this.saved.current != Some(i) {
+                    this.renaming = false;
+                    this.saved.current = Some(i);
+                    this.clear_selection();
+                    this.changed(cx);
+                }
+            }))
+            .on_drag(
+                TabDrag {
+                    index: i,
+                    label: label.into(),
+                },
+                {
+                    let this = cx.entity().downgrade();
+                    move |drag, _, _, cx| {
+                        // The drop zone only shows while a tab is in flight.
+                        let _ = this.update(cx, |g, cx| {
+                            g.tab_dragging = true;
+                            cx.notify();
+                        });
+                        cx.new(|_| TabPreview(drag.label.clone()))
+                    }
+                },
+            )
+            .drag_over::<TabDrag>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+            .on_drop(cx.listener(move |g, drag: &TabDrag, _, cx| {
+                g.tab_dragging = false;
+                g.move_tab(drag.index, i, cx);
+            }))
+            .context_menu({
+                let this = cx.entity().downgrade();
+                let ship = fit.ship.filter(|_| selected);
+                move |menu, window, cx| {
+                    let on = |f: fn(&mut Gyfa, usize, &mut Context<Gyfa>)| {
+                        let this = this.clone();
+                        move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                            let _ = this.update(cx, |g, cx| f(g, i, cx));
+                        }
+                    };
+                    let rename = this.clone();
+                    let menu = menu
+                        .item(widgets::entry(IconName::Replace, "Rename").on_click(
+                            move |_, window, cx| {
+                                let _ = rename.update(cx, |g, cx| {
+                                    g.saved.current = Some(i);
+                                    g.changed(cx);
+                                    g.start_rename(window, cx);
+                                });
+                            },
+                        ))
+                        .item(
+                            widgets::entry(IconName::ExternalLink, "Open in New Window")
+                                .on_click(on(Gyfa::open_in_new_window)),
+                        )
+                        .separator()
+                        .item(
+                            widgets::entry(IconName::Close, "Close").on_click(on(Gyfa::close_fit)),
+                        )
+                        .item(
+                            widgets::entry(IconName::Close, "Close Others")
+                                .on_click(on(Gyfa::close_other_fits)),
+                        );
+                    // The ship's own menu, which used to sit on the header, for the active fit.
+                    match ship {
+                        Some(ship) => {
+                            fitting::ship_entries(menu.separator(), &this, ship, window, cx)
+                        }
+                        None => menu,
+                    }
+                }
+            })
+            .into_any_element()
+    }
+
+    /// Swap the active tab's name for the name field, focused.
+    fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.renaming = true;
+        self.inputs_show = None;
+        self.sync_inputs(window, cx);
+        self.name_input
+            .update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
     }
 }
 
@@ -1017,14 +1161,18 @@ impl Render for Gyfa {
                 .flex_1()
                 .min_h_0()
                 .child(
-                    h_resizable("main")
-                        .child(
-                            resizable_panel()
-                                .size(px(280.))
-                                .size_range(px(200.)..px(520.))
-                                .child(self.browser(&loaded, cx)),
-                        )
-                        .child(resizable_panel().child(center)),
+                    // Only this part gives up room when the window narrows; the stats pane
+                    // keeps its width and the market keeps its own minimum.
+                    div().flex_1().min_w_0().h_full().child(
+                        h_resizable("main")
+                            .child(
+                                resizable_panel()
+                                    .size(px(280.))
+                                    .size_range(px(200.)..px(520.))
+                                    .child(self.browser(&loaded, cx)),
+                            )
+                            .child(resizable_panel().child(center)),
+                    ),
                 )
                 // pyfa's stats pane is as wide as its content and does not resize.
                 .child(

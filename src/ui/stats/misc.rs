@@ -95,7 +95,11 @@ pub(super) fn capacitor(p: &Pane<'_>) -> Section {
                     resist_hover,
                 )),
         );
-    let body = h_flex().gap_6().child(left).child(right).into_any_element();
+    let body = h_flex()
+        .w_full()
+        .child(left.flex_1())
+        .child(right.flex_1())
+        .into_any_element();
     Section {
         key: "Capacitor",
         title: title("Capacitor"),
@@ -258,6 +262,7 @@ pub(super) fn targeting(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
 
     let column = |lines: [Line; 5], cx: &App| {
         v_flex()
+            .flex_1()
             .gap_0p5()
             .children(lines.into_iter().map(|(name, value, hover)| {
                 h_flex()
@@ -267,6 +272,7 @@ pub(super) fn targeting(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
             }))
     };
     let body = h_flex()
+        .w_full()
         .gap_3()
         .child(column(targeting, cx))
         .child(div().w_px().h(px(90.)).bg(cx.theme().border))

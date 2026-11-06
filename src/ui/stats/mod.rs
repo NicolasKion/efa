@@ -239,7 +239,7 @@ impl Gyfa {
             });
         let body = div()
             .id(SharedString::from(format!("section-body-{key}")))
-            .pl_3()
+            .pl_1()
             .child(body);
         let body = match menu {
             Some(menu) => body

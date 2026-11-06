@@ -94,9 +94,15 @@ pub fn gauge(
             .text_color(color(shade))
             .child(text.clone())
     };
-    div()
+    // A width of zero or less stretches the gauge to the room its row gives it.
+    let track = if width > 0.0 {
+        div().w(px(width))
+    } else {
+        // Grow without a zero basis: in a column a zero basis would take the height away.
+        div().flex_grow(1.).min_w_0()
+    };
+    track
         .relative()
-        .w(px(width))
         .h(px(16.))
         .rounded(px(3.))
         .bg(color(GAUGE_TRACK))

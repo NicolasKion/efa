@@ -34,7 +34,6 @@ const DAMAGE_ICONS: [(i32, &str); 4] = [
 ];
 
 /// Width of one resist gauge; pyfa's are 48 px at its smaller font.
-const GAUGE: f32 = 52.;
 /// Width of the value column, which fits `WWWWk` in pyfa.
 const VALUE: f32 = 64.;
 
@@ -70,13 +69,14 @@ fn gauge_row(
     cx: &App,
 ) -> AnyElement {
     h_flex()
+        .w_full()
         .gap_1()
         .child(p.icon_tip(format!("resist-{key}"), icon_id, 20., text))
         .children(
             fractions
                 .into_iter()
                 .zip(DAMAGE_COLORS)
-                .map(|(f, fill)| gauge(f, fill, format!("{:.1}%", f * 100.0), GAUGE, cx)),
+                .map(|(f, fill)| gauge(f, fill, format!("{:.1}%", f * 100.0), 0., cx)),
         )
         .child(h_flex().w(px(VALUE)).justify_center().child(value))
         .into_any_element()
@@ -110,14 +110,15 @@ pub(super) fn resistances(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &Context<Gy
             cx.notify();
         }));
     let head = h_flex()
+        .w_full()
         .gap_1()
-        .child(div().w(px(20.)))
+        .child(div().flex_none().w(px(20.)))
         .children(
             DAMAGE_ICONS
                 .iter()
                 .enumerate()
                 .map(|(i, &(icon_id, text))| {
-                    h_flex().w(px(GAUGE)).justify_center().child(p.icon_tip(
+                    h_flex().flex_1().justify_center().child(p.icon_tip(
                         format!("resist-head-{i}"),
                         icon_id,
                         20.,
@@ -261,20 +262,23 @@ pub(super) fn recharge(p: &Pane<'_>) -> Section {
     let mult = |layer: Layer| if raw { 1.0 } else { layer.mult.unwrap_or(1.0) };
     let (shield, armor, hull) = (mult(s.shield), mult(s.armor), mult(s.hull));
 
-    let cell = |content: AnyElement| h_flex().w(px(74.)).justify_center().child(content);
-    let head = h_flex().child(div().w(px(28.))).children(
-        [
-            (icon::RECHARGE, "Passive shield recharge"),
-            (icon::SHIELD, "Active shield boost"),
-            (icon::ARMOR, "Armor repair amount"),
-            (icon::HULL, "Hull repair amount"),
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(i, (icon_id, text))| {
-            cell(p.icon_tip(format!("recharge-head-{i}"), icon_id, 24., text))
-        }),
-    );
+    let cell = |content: AnyElement| h_flex().flex_1().justify_center().child(content);
+    let head = h_flex()
+        .w_full()
+        .child(div().flex_none().w(px(28.)))
+        .children(
+            [
+                (icon::RECHARGE, "Passive shield recharge"),
+                (icon::SHIELD, "Active shield boost"),
+                (icon::ARMOR, "Armor repair amount"),
+                (icon::HULL, "Hull repair amount"),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(i, (icon_id, text))| {
+                cell(p.icon_tip(format!("recharge-head-{i}"), icon_id, 24., text))
+            }),
+        );
 
     let rate = |key: String, amount: f64, spool: Option<(f64, f64)>| {
         let spool = spool.filter(|&(pre, full)| differs(pre, full));
@@ -298,7 +302,8 @@ pub(super) fn recharge(p: &Pane<'_>) -> Section {
         };
         let spool = (tank.armor_spool.pre * armor, tank.armor_spool.full * armor);
         h_flex()
-            .child(h_flex().w(px(28.)).child(p.icon_tip(
+            .w_full()
+            .child(h_flex().flex_none().w(px(28.)).child(p.icon_tip(
                 format!("recharge-{name}"),
                 icon_id,
                 24.,
@@ -353,9 +358,10 @@ pub(super) fn bombing(p: &Pane<'_>) -> Section {
     });
     let ship_sig = s.sig_radius.unwrap_or(0.0);
     let catalog = &p.loaded.catalog;
-    let cell = |content: AnyElement| h_flex().w(px(64.)).justify_center().child(content);
+    let cell = |content: AnyElement| h_flex().flex_1().justify_center().child(content);
 
     let head = h_flex()
+        .w_full()
         .child(cell(p.icon_tip(
             "bomb-skill",
             ids::SKILL,
@@ -372,7 +378,7 @@ pub(super) fn bombing(p: &Pane<'_>) -> Section {
         );
     let mut body = v_flex().gap_0p5().child(head);
     for level in 0..=5u8 {
-        let mut row = h_flex().child(cell(
+        let mut row = h_flex().w_full().child(cell(
             tip(
                 format!("bomb-level-{level}"),
                 level.to_string(),

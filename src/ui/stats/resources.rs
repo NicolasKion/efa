@@ -39,7 +39,7 @@ pub(super) fn section(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
         used: s.calibration.used.round() as u32,
         total: s.calibration.output.map(|v| v.round() as u32),
     };
-    let top = h_flex().gap_3().children(
+    let top = h_flex().w_full().justify_between().children(
         counts
             .into_iter()
             .chain([("calibration", icon::CALIBRATION, calibration, "Calibration")])
@@ -93,10 +93,13 @@ pub(super) fn section(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
         let over = r.output.is_some_and(|out| r.used > out + 1e-6);
         let fill: Rgb = if over { p.palette.red } else { p.palette.green };
         h_flex()
+            .w_full()
             .gap_1()
             .child(p.icon_tip(format!("res-{key}"), icon_id, 24., text))
             .child(
                 v_flex()
+                    .flex_1()
+                    .min_w_0()
                     .child(tip(
                         format!("res-{key}-value"),
                         muted(
@@ -109,13 +112,11 @@ pub(super) fn section(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
                         ),
                         format!("{:.1}/{out:.1}", r.used),
                     ))
-                    .child(gauge(
-                        fraction,
-                        fill,
-                        format!("{:.2}%", fraction * 100.0),
-                        110.,
-                        cx,
-                    )),
+                    .child(
+                        gauge(fraction, fill, format!("{:.2}%", fraction * 100.0), 0., cx)
+                            // In a column, filling the room means full width rather than flex.
+                            .w_full(),
+                    ),
             )
     };
     let body = v_flex()
@@ -124,9 +125,11 @@ pub(super) fn section(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
         .child(div().h_px().w_full().bg(cx.theme().border))
         .child(
             h_flex()
-                .gap_4()
+                .w_full()
+                .gap_3()
                 .child(
                     v_flex()
+                        .flex_1()
                         .gap_1()
                         .child(bar("cpu", icon::CPU, s.cpu, "CPU", " tf", 4))
                         .child(bar(
@@ -140,6 +143,7 @@ pub(super) fn section(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
                 )
                 .child(
                     v_flex()
+                        .flex_1()
                         .gap_1()
                         .child(bar(bay.0, bay.1, bay.2, bay.3, " m³", 3))
                         .child(bar(

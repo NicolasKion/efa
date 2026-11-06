@@ -85,25 +85,6 @@ impl Gyfa {
         let stats = self.stats.as_ref().unwrap_or(&no_stats);
         let rows = fitting_rows(fit, stats);
 
-        let header = h_flex()
-            .id("fit-header")
-            .gap_2()
-            .p_2()
-            .child(icon_box(
-                &loaded.catalog,
-                &loaded.icons,
-                Icon::Type(ship),
-                32.,
-            ))
-            .child(
-                div()
-                    .text_lg()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(loaded.catalog.name(ship)),
-            )
-            .child(div().w(px(260.)).child(self.name_field()))
-            .context_menu(ship_menu_builder(Self::weak(cx), ship));
-
         let table_head = Self::column_header(loaded, layout, cx);
 
         let body: Vec<AnyElement> = rows
@@ -112,22 +93,27 @@ impl Gyfa {
             .map(|(n, &row)| self.fitting_row(loaded, fit, stats, ship, row, n, cx))
             .collect();
 
-        v_flex()
+        // When the center column is narrower than the columns need, the table scrolls sideways
+        // instead of squeezing them; rows scroll vertically under a header that stays put.
+        div()
+            .id("fitting-scroll-x")
             .size_full()
-            .child(header)
-            .child(table_head)
+            .overflow_x_scroll()
             .child(
                 v_flex()
-                    .id("fitting-rows")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .children(body)
-                    .children(
-                        stats
-                            .problems
-                            .iter()
-                            .map(|p| div().px_2().text_color(cx.theme().danger).child(p.clone())),
+                    .h_full()
+                    .min_w(px(layout.min_width()))
+                    .child(table_head)
+                    .child(
+                        v_flex()
+                            .id("fitting-rows")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .children(body)
+                            .children(stats.problems.iter().map(|p| {
+                                div().px_2().text_color(cx.theme().danger).child(p.clone())
+                            })),
                     ),
             )
             .into_any_element()
@@ -203,7 +189,23 @@ impl Gyfa {
                             return div().into_any_element();
                         };
                         let info = stats.modules.get(&(slot, i)).copied().unwrap_or_default();
-                        self.module_cells(base, loaded, (slot, i), m, info, cx)
+                        let total = match slot {
+                            Slot::High => stats.high.total,
+                            Slot::Mid => stats.mid.total,
+                            _ => stats.low.total,
+                        };
+                        let cells = self.module_cells(base, loaded, (slot, i), m, info, cx);
+                        // Fits from before slots were enforced can hold more than the ship has.
+                        if i >= total.unwrap_or(0) as usize {
+                            cells.text_color(cx.theme().danger).tooltip(|window, cx| {
+                                gpui_kit::component::tooltip::Tooltip::new(
+                                    "The ship has no slot for this module",
+                                )
+                                .build(window, cx)
+                            })
+                        } else {
+                            cells
+                        }
                     }
                     RowRef::Rig(i) | RowRef::Subsystem(i) => {
                         let id = match item {
@@ -658,7 +660,7 @@ const SEC_STATUS_SHIPS: [&str; 6] = [
 const SEC_STATUS_PRESETS: [f64; 11] = [-10., -8., -6., -4., -2., 0., 1., 2., 3., 4., 5.];
 
 /// pyfa's fittingShip menu.
-fn ship_entries(
+pub(super) fn ship_entries(
     menu: PopupMenu,
     this: &WeakEntity<Gyfa>,
     ship: TypeId,

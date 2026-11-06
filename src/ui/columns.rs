@@ -144,7 +144,28 @@ impl Default for Layout {
     }
 }
 
+/// Space between cells and around a row, as the rows lay them out.
+const CELL_GAP: f32 = 4.;
+const ROW_PADDING: f32 = 8.;
+
 impl Layout {
+    /// The narrowest the table can get before it has to scroll: every column at its width, the
+    /// name column at the least it shrinks to.
+    pub fn min_width(&self) -> f32 {
+        let columns: f32 = Col::ALL
+            .iter()
+            .map(|&col| {
+                if col == Col::Name && !self.name_fixed {
+                    NAME_MIN
+                } else {
+                    self.widths[col.index()]
+                }
+            })
+            .sum();
+        let gaps = CELL_GAP * (Col::ALL.len() + 2) as f32;
+        STATE_W + ICON_W + columns + gaps + ROW_PADDING
+    }
+
     /// An empty cell of the column's width, to put the cell's content in.
     pub fn cell(&self, col: Col) -> Div {
         let width = px(self.widths[col.index()]);

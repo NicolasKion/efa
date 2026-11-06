@@ -101,6 +101,7 @@ pub(super) fn section(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &App) -> Sectio
         .gap_1()
         .child(
             h_flex()
+                .w_full()
                 .child(cell("ship", ship_icon, "Ship", price.ship))
                 .child(cell(
                     "fittings",
@@ -117,6 +118,7 @@ pub(super) fn section(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &App) -> Sectio
         )
         .child(
             h_flex()
+                .w_full()
                 .child(cell(
                     "drones",
                     p.icon(icon::DRONE_BAY, 24.),
