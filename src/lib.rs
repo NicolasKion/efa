@@ -2,6 +2,7 @@ pub mod cdn;
 pub mod data;
 pub mod engine;
 pub mod fit;
+pub mod graphs;
 pub mod icons;
 pub mod implant_set;
 pub mod prices;

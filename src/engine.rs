@@ -1,6 +1,7 @@
 //! The bridge to refine. Each recalculation builds a fresh solar system from the [`Fit`], which
 //! keeps refine's state from ever drifting from what the UI shows.
 
+mod graph;
 mod pane;
 
 use std::path::Path;

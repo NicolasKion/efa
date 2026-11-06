@@ -29,6 +29,8 @@ pub struct Hub {
     pub prices: Rc<Prices>,
     /// EFT text from the command line, for the main window to import once data is loaded.
     pub import: Option<String>,
+    /// Fits other windows (the graphs) asked the main window to open as tabs.
+    pub open_requests: Vec<usize>,
 }
 
 impl Hub {
@@ -55,6 +57,7 @@ impl Hub {
             deletions: Vec::new(),
             prices: Rc::new(Prices::default()),
             import,
+            open_requests: Vec::new(),
         }
     }
 

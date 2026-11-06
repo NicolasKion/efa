@@ -5,6 +5,7 @@ mod actions;
 mod additions;
 mod columns;
 mod fitting;
+mod graphs;
 mod hub;
 mod implant_sets;
 mod side;
@@ -348,6 +349,16 @@ impl Gyfa {
         if changed {
             self.recompute();
             cx.notify();
+        }
+        // The graph window's "Open Fit in New Tab" lands here.
+        if self.role == Role::Main && !self.hub.read(cx).open_requests.is_empty() {
+            let requests = self
+                .hub
+                .update(cx, |hub, _| std::mem::take(&mut hub.open_requests));
+            let count = self.saved.fits.len();
+            for index in requests.into_iter().filter(|&i| i < count) {
+                self.open_fit(index, cx);
+            }
         }
     }
 
@@ -777,6 +788,7 @@ impl Gyfa {
                         )
                     }),
             )
+            .child(graphs::menu_button(self.hub.clone(), self.saved.current))
             .when_some(self.status.clone(), |bar, status| {
                 bar.child(
                     div()

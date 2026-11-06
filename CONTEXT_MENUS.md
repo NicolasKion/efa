@@ -253,29 +253,31 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 ## Graphs (graphs/gui)
 
 ### graphFitList (fits list) then graphFitListMisc
-- [ ] Add Fit... | always | fit browser, adds fits to graph | fitAddBrowse.py
-- [ ] Add Currently Open Fit | always | submenu of open tabs | fitAddCurrentlyOpen.py
+- [x] Add Fit... | always | submenu of every fit instead of pyfa's fit browser | fitAddBrowse.py
+- [x] Add Currently Open Fit | always | submenu of the main window's tabs | fitAddCurrentlyOpen.py
 - [ ] Plot with Different Ammo... | fit row, damage graph | dialog: per weapon group pick charges, drones, fighters to plot | graphFitAmmoPicker.py
-- [ ] Remove Fit | row clicked | removes selected from graph | itemRemove.py
-- [ ] Open Fit in New Tab | fit row, not active fit (graphFitListMisc) | open tab | fitOpenNewTab.py
+- [x] Remove Fit | row clicked | removes the row (also double-click) | itemRemove.py
+- [x] Open Fit in New Tab | fit row | opens a tab in the main window | fitOpenNewTab.py
+- [x] Line color | left-click the color swatch | pyfa's color picker popup | graphColor.py
 
 ### graphTgtList (targets list) then graphTgtListMisc
-- [ ] Add Fit... | always | fit browser, adds targets | fitAddBrowse.py
-- [ ] Add Currently Open Fit | always | open tabs submenu | fitAddCurrentlyOpen.py
-- [ ] Add Target Profile | always | submenu: Ideal profile, builtin + user profile tree | targetProfile/adder.py
-- [ ] Resist Mode | fit row and ignoreResists off | radio Auto/Shield/Armor/Hull/Weighted Average for selected target fits | resistMode.py
+- [x] Add Fit... | always | submenu of every fit | fitAddBrowse.py
+- [x] Add Currently Open Fit | always | open tabs submenu | fitAddCurrentlyOpen.py
+- [x] Add Target Profile | always | submenu: Ideal Target, builtin profile tree (user profiles once the profile editor lands) | targetProfile/adder.py
+- [x] Resist Mode | fit row and ignoreResists off | radio Auto/Shield/Armor/Hull/Weighted Average | resistMode.py
 - [ ] Edit Target Profile | user (non-builtin) profile row | opens target profile editor | targetProfile/editor.py
-- [ ] Remove Target | row clicked | removes selected | itemRemove.py
-- [ ] Open Fit in New Tab | fit row, not active fit (graphTgtListMisc) | open tab | fitOpenNewTab.py
+- [x] Remove Target | row clicked | removes the row (also double-click) | itemRemove.py
+- [x] Open Fit in New Tab | fit row | opens a tab in the main window | fitOpenNewTab.py
+- [x] Lightness and line style | left-click the line swatch | pyfa's picker popups | graphLightness.py, graphLineStyle.py
 
 ### graph control panel menu icon (ctrlPanel.py, context = graph internalName)
-- [ ] Apply Projected Items | dmgStatsGraph | checkbox | graphDmgApplyProjected.py
-- [ ] Ignore Target Resists | dmgStatsGraph | checkbox | graphDmgIgnoreResists.py
+- [x] Apply Projected Items | dmgStatsGraph | checkbox | graphDmgApplyProjected.py
+- [x] Ignore Target Resists | dmgStatsGraph | checkbox | graphDmgIgnoreResists.py
 - [ ] Ignore Target Resists | ammoOptimalDpsGraph | checkbox | graphAmmoOptimalIgnoreResists.py
 - [ ] Apply Projected Effects | ammoOptimalDpsGraph | checkbox | graphAmmoOptimalApplyProjected.py
-- [ ] Ignore Lock Range | dmgStatsGraph, remoteRepsGraph, ewarStatsGraph | checkbox | graphLockRange.py
-- [ ] Ignore Drone Control Range | dmgStatsGraph, remoteRepsGraph, ewarStatsGraph | checkbox | graphDroneControlRange.py
-- [ ] Drone Mode | dmgStatsGraph | radio Auto / Stick to Target / Stick to Attacker | graphDmgDroneMode.py
+- [x] Ignore Lock Range | dmgStatsGraph, remoteRepsGraph, ewarStatsGraph | checkbox | graphLockRange.py
+- [x] Ignore Drone Control Range | dmgStatsGraph, remoteRepsGraph, ewarStatsGraph | checkbox | graphDroneControlRange.py
+- [x] Drone Mode | dmgStatsGraph | radio Auto / Stick to Target / Stick to Attacker | graphDmgDroneMode.py
 
 ## gyfa-only today
 - Module row State submenu (offline/online/active/overheated): pyfa has no menu for this, it uses clicks on the state column.
@@ -421,9 +423,9 @@ refine API paths are under refine-core/src/api. "ui only" = no engine involvemen
 ## Graphs
 - Add Fit... / Add Currently Open Fit / Remove / Open in New Tab: ui only.
 - Plot with Different Ammo...: yes, Module::set_charge_type_id per sample (or scratch fit copies).
-- Add Target Profile / Edit Target Profile: partial, same projectee limitation as Target Resists.
+- Add Target Profile: no projectee for abstract profiles in refine, so application is pyfa's math graph-side on refine's attributes; Edit Target Profile waits for the profile editor.
 - Resist Mode: no engine (graph math choosing which layer's resists to apply).
-- Apply Projected Items / Apply Projected Effects: yes, include or omit projections when computing.
-- Ignore Target Resists: yes, use get_stat_dmg instead of get_stat_dmg_applied.
-- Ignore Lock Range / Ignore Drone Control Range: ui only (graph clipping; values from get_stat_lock_range / get_stat_drone_control_range).
-- Drone Mode: partial, Drone::set_movement / set_coordinates control drone position; mode logic is graph-side.
+- Apply Projected Items: graph-side, the attacker's webs and painters from refine's attributes.
+- Ignore Target Resists: graph-side, refine's applied damage has no resists in it either.
+- Ignore Lock Range / Ignore Drone Control Range: ui only (values from get_stat_lock_range / get_stat_drone_control_range).
+- Drone Mode: graph-side, pyfa's drone placement rules.

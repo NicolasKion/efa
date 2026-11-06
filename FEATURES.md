@@ -1,9 +1,9 @@
 # Feature parity with pyfa
 
 Rough coverage: the core loop works (pick ship, add modules/charges/drones/implants/boosters, see the main stats, EFT in/out), plus the pyfa layout with in-game icons and the main module columns, which is maybe 20-25% of pyfa's surface.
-Biggest gaps: characters and skills (everything is all V), target profiles and user damage patterns, projected/command/fleet effects, fighters, cargo editing, item stats window, graphs, prices, ESI/SSO, and most context menus.
+Biggest gaps: characters and skills (everything is all V), target profiles and user damage patterns, projected/command/fleet effects, fighters, cargo editing, item stats window, prices, ESI/SSO, and most context menus.
 Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, mutations, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
-Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time (needs looping over refine stats), lock/warp time formulas.
+Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time, abstract target profiles for applied damage, lock/warp time formulas (all done graph-side in src/graphs).
 
 Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API that likely covers the calculation.
 
@@ -192,9 +192,9 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Damage pattern editor with built-in NPC presets (gui/patternEditor.py, service/damagePattern.py), refine: set_default_incoming_dps
 - [ ] Damage pattern import/export (patternEditor.py)
 - [ ] Target profile editor: resists, sig, speed, radius (gui/targetProfileEditor.py, service/targetProfile.py)
-- [ ] Built-in target profiles (service/targetProfile.py)
+- [~] Built-in target profiles (service/targetProfile.py): in the graph window only
 - [ ] Global vs per-fit damage pattern pref (pyfaGeneralPreferences.py)
-- [ ] Target profile from a fit (graphs and applied DPS), refine: get_stat_dmg_applied against projectee
+- [~] Target profile from a fit (graphs and applied DPS), refine: get_stat_dmg_applied against projectee; fits are graph targets, applied DPS in the stats pane is missing
 
 ## Import and export
 
@@ -234,20 +234,25 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 
 ## Graphs
 
-- [ ] Graph window and fit/target lists (graphs/gui, graphs/data/base)
-- [ ] Damage stats: DPS/volley/damage vs distance, time, target speed/sig (graphs/data/fitDamageStats), refine: get_stat_dmg_applied, needs sampling loop
-- [ ] Application profile (graphs/data/fitApplicationProfile)
-- [ ] Capacitor over time (graphs/data/fitCapacitor), refine: get_stat_cap_sim
-- [ ] Shield regen vs amount (graphs/data/fitShieldRegen)
-- [ ] Mobility: speed/distance vs time (graphs/data/fitMobility), refine: get_stat_speed, get_stat_agility
-- [ ] Warp time vs distance (graphs/data/fitWarpTime), refine: get_stat_warp_speed
-- [ ] Lock time vs target sig (graphs/data/fitLockTime), refine: get_stat_scan_res
-- [ ] Remote reps vs distance (graphs/data/fitRemoteReps), refine: get_stat_outgoing_rps_applied
-- [ ] Ewar stats: webs, TPs, damps, neuts vs distance (graphs/data/fitEwarStats), refine: get_stat_outgoing_nps_applied
-- [ ] ECM/burst/scanres damp effect (graphs/data/fitEcmBurstScanresDamps), refine: get_stat_incoming_jam
-- [ ] Graph context options: ignore resists, apply projected, drone mode, ammo picker, lock/drone range markers (builtinContextMenus/graph*.py)
-- [ ] Line color, style, lightness per fit (builtinViewColumns/graphColor.py, graphLineStyle.py, graphLightness.py)
-- [ ] Optimal ammo graph (builtinContextMenus/graphAmmoOptimal*.py)
+The graph window (main menu Graphs) samples numbers read once per fit from refine (`Engine::graph_snapshot`: per-weapon damage and cycle timing, weapon/ewar/repair attributes, ship stats) with pyfa's application formulas (src/graphs). Turret and missile application are checked against refine's `get_stat_dmg_applied`, and damage over time against refine's simulation.
+
+- [x] Graph window and fit/target lists (graphs/gui): one window, fits and targets added from menus, removed with Delete, double-click or the menu, pyfa's extra columns per graph
+- [~] Damage stats: DPS/volley/damage inflicted vs distance, time, target speed (m/s, %), target sig (m, %), attacker and target vectors (graphs/data/fitDamageStats); turrets, launchers, vortons, smartbombs, bombs, guided bombs, doomsdays, drones. Breacher pods and fighters are not plotted (no fighters yet; breacher damage is HP-relative)
+- [ ] Application profile, best ammo per distance (graphs/data/fitApplicationProfile)
+- [x] Capacitor amount/regen vs time and cap amount, pyfa's cap simulator with stagger, injectors and reloads (graphs/data/fitCapacitor)
+- [x] Shield amount/regen vs time and shield amount, HP or EHP (graphs/data/fitShieldRegen); EHP is a checkbox in the graph window, where pyfa follows the stats pane
+- [x] Mobility: speed, distance, momentum, bump speed and distance vs time (graphs/data/fitMobility)
+- [x] Warp time vs distance in AU or km, from the speed with warp-incompatible modules off (graphs/data/fitWarpTime)
+- [x] Lock time vs target sig (graphs/data/fitLockTime)
+- [x] Remote reps: rate and total vs distance and time, ancillary reload option (graphs/data/fitRemoteReps)
+- [x] Ewar stats: neuts, webs, ECM, damps, TDs, GDs, TPs vs distance with target resistance (graphs/data/fitEwarStats)
+- [ ] ECM/burst/scanres damp effect (graphs/data/fitEcmBurstScanresDamps); hidden behind ctrl-alt-g in pyfa
+- [~] Graph options: ignore resists, apply projected (own webs and TPs), ignore lock range, ignore drone control range, drone mode, target resist mode (builtinContextMenus/graph*.py). Apply projected stacks the attacker's webs and paints among themselves only and leaves scrams out; options are not remembered between runs
+- [ ] Plot with different ammo (builtinContextMenus/graphFitAmmoPicker.py)
+- [x] Line color per fit, lightness and line style per target (builtinViewColumns/graphColor.py, graphLineStyle.py, graphLightness.py), from the theme's palette where it has the hue
+- [x] Legend, "Always show Y = 0", readout at the hovered or clicked X (right-click clears)
+- [x] Built-in target profiles and the ideal target (eos/saveddata/targetProfile.py)
+- [ ] Drag fits from the fittings browser into the graph lists
 
 ## Preferences
 
