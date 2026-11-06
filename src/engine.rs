@@ -448,9 +448,10 @@ fn fit_stats(f: &mut rc::Fit<'_>, stats: &mut Stats) {
         stats.hull.hp = hp.hull.buffer.into_f64();
     }
     if let Ok(ehp) = s.get_stat_ehp(None) {
-        stats.shield.ehp = ehp.shield.map(|l| l.buffer.into_f64() * l.mult.into_f64());
-        stats.armor.ehp = ehp.armor.map(|l| l.buffer.into_f64() * l.mult.into_f64());
-        stats.hull.ehp = ehp.hull.map(|l| l.buffer.into_f64() * l.mult.into_f64());
+        // refine's buffer already has the resists applied; multiplying again squared them.
+        stats.shield.ehp = ehp.shield.map(|l| l.buffer.into_f64());
+        stats.armor.ehp = ehp.armor.map(|l| l.buffer.into_f64());
+        stats.hull.ehp = ehp.hull.map(|l| l.buffer.into_f64());
     }
     if let Ok(r) = s.get_stat_resists() {
         for (layer, res) in [
