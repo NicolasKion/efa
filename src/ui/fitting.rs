@@ -18,11 +18,12 @@ use gpui_kit::{
 use super::{
     Action, Gyfa, Loaded, RowRef, Scope,
     columns::{Col, ICON_W, STATE_W},
+    item_stats::{StatsOf, stats_entry},
     widgets::{color, entry, icon, icon_box, icon_label, item_entry, item_label, short},
 };
 use crate::{
     data::{Catalog, Hardpoint, ItemType, Kind, Slot, TypeId},
-    engine::{ModuleInfo, Stats},
+    engine::{FitItem, ModuleInfo, Stats},
     fit::{Fit, Module, ModuleState},
     icons::Icon,
 };
@@ -170,7 +171,21 @@ impl Gyfa {
                         .truncate()
                         .child(catalog.name(mode)),
                 )
-                .context_menu(ship_menu_builder(Self::weak(cx), ship))
+                .context_menu({
+                    // pyfa's fittingMode entries come before the ship's.
+                    let ship_menu = ship_menu_builder(Self::weak(cx), ship);
+                    let this = Self::weak(cx);
+                    move |menu, window, cx| {
+                        let menu = menu
+                            .item(stats_entry(
+                                &this,
+                                "Tactical Mode",
+                                StatsOf::Fitted(FitItem::Mode),
+                            ))
+                            .separator();
+                        ship_menu(menu, window, cx)
+                    }
+                })
                 .into_any_element(),
             Row::Empty(slot, pos) => {
                 let row = base.child(div().w(px(STATE_W + ICON_W)).flex_none()).child(
@@ -585,6 +600,16 @@ fn item_menu(
             menu = spool_submenu(menu, this, item, m.spool, max, window, cx);
         }
     }
+    let fitted = match item {
+        RowRef::Module(slot, i) => FitItem::Module(slot, i),
+        RowRef::Rig(i) => FitItem::Rig(i),
+        RowRef::Subsystem(i) => FitItem::Subsystem(i),
+    };
+    menu = menu.item(stats_entry(
+        this,
+        t.category_label(),
+        StatsOf::Fitted(fitted),
+    ));
     if t.market_group.is_some() {
         menu = menu.item(
             entry(IconName::Search, "Module Market Group").on_click(handler(
@@ -621,21 +646,28 @@ fn item_menu(
         );
     }
 
+    if snapshot.module.as_ref().is_some_and(|m| m.charge.is_some())
+        && let RowRef::Module(slot, i) = item
+    {
+        menu = menu.separator().item(stats_entry(
+            this,
+            "Charge",
+            StatsOf::Fitted(FitItem::Charge(slot, i)),
+        ));
+    }
     if let Some(charge) = snapshot.module.as_ref().and_then(|m| m.charge)
         && catalog
             .get(charge)
             .is_some_and(|c| c.market_group.is_some())
     {
-        menu = menu
-            .separator()
-            .item(
-                entry(IconName::Search, "Charge Market Group").on_click(handler(
-                    this,
-                    move |g, _, window, cx| {
-                        g.jump_to_market(charge, window, cx);
-                    },
-                )),
-            );
+        menu = menu.item(
+            entry(IconName::Search, "Charge Market Group").on_click(handler(
+                this,
+                move |g, _, window, cx| {
+                    g.jump_to_market(charge, window, cx);
+                },
+            )),
+        );
     }
 
     ship_entries(menu.separator(), this, ship, window, cx)
@@ -708,6 +740,7 @@ pub(super) fn ship_entries(
             },
         );
     }
+    menu = menu.item(stats_entry(this, "Ship", StatsOf::Fitted(FitItem::Ship)));
     if SEC_STATUS_SHIPS.contains(&ship_name.as_str()) {
         let this = this.clone();
         menu = menu.submenu_with_element(

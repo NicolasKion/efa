@@ -689,7 +689,7 @@ fn prune_and_link(groups: &mut BTreeMap<i32, MarketGroup>) {
 /// What a cache must have been built from: the cache format, gyfa's version, the dump's release
 /// and types.json's size and time, so hand-replaced data is noticed too. None if there is no
 /// data to describe.
-fn cache_key(dir: &Path) -> Option<String> {
+pub fn cache_key(dir: &Path) -> Option<String> {
     let release = std::fs::read_to_string(dir.join("VERSION"))
         .or_else(|_| std::fs::read_to_string(dir.join("phobos/metadata.json")))
         .ok()?;
