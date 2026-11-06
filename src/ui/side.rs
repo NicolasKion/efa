@@ -252,6 +252,17 @@ impl Gyfa {
                     20.,
                 ))
                 .child(div().flex_1().child(loaded.catalog.name(ship)))
+                // pyfa's baseShip menu, on the ship the list is narrowed to.
+                .context_menu({
+                    let this = Self::weak(cx);
+                    move |menu, _, _| {
+                        menu.item(super::item_stats::stats_entry(
+                            &this,
+                            "Ship Basic",
+                            super::item_stats::StatsOf::Type(ship),
+                        ))
+                    }
+                })
                 .child(
                     div()
                         .id("fittings-show-all")
@@ -393,7 +404,11 @@ fn market_menu(
         }
     };
 
-    let mut menu = menu;
+    let mut menu = menu.item(super::item_stats::stats_entry(
+        this,
+        category,
+        super::item_stats::StatsOf::Type(id),
+    ));
     // Ice products are found by search but sit outside the market tree, so there is no group.
     let listed = t
         .market_group

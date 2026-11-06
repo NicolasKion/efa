@@ -6,6 +6,7 @@ pub mod engine;
 pub mod fit;
 pub mod icons;
 pub mod implant_set;
+pub mod item_data;
 pub mod prices;
 pub mod profile;
 pub mod store;

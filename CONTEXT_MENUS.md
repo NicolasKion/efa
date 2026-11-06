@@ -22,7 +22,7 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 - [x] Charge | module has loadable charges (fitting or projected module) | submenu by module kind: turrets "Long Range" list with per-family submenus ("Less Damage"/"More Damage"), missiles by damage type (EM/Thermal/Explosive/Kinetic/Mixed), mining crystals by ore class, else flat list; last item "Empty" unloads. Applies to all similar modules by default (pref ammoChangeAll), Ctrl/Alt inverts to selection only. GuiChangeLocalModuleChargesCommand | moduleAmmoChange.py
 - [x] Spoolup Cycles | module group "Precursor Weapon" or "Mutadaptive Remote Armor Repairer" (pref spoolup) | checkable list of cycle counts (default marked "(default)", min..max, current) + "Reset". GuiChangeLocalModuleSpoolCommand | moduleSpool.py
 - [ ] RAH Damage Pattern | module group "Armor Resistance Shift Hardener" | checkable: "Fit Pattern", "Do Not Adapt", separator, damage profiles tree (builtin + user, categories as submenus). sFit.setRahPattern | moduleRahPattern.py, shared/patterns.py
-- [ ] {Module} Stats | always | opens item stats window (Shift reuses last window) | itemStats.py
+- [x] {Module} Stats | always | opens item stats window (Shift reuses last window) | itemStats.py
 - [x] {Module} Market Group | item has a market group (mutated: base item's) | jumps market browser to the item | itemMarketJump.py
 - [x] Remove {Module} | always | removes selection (multi); Ctrl/Alt removes all similar. GuiRemoveLocalModuleCommand | itemRemove.py
 - [x] Variations | item has 2+ variations, not hidden (pref metaSwap) | submenu of meta variants grouped by meta group (disabled header rows), sorted by meta level; unfittable ones disabled. Swaps selection modules with identical variation set; Ctrl/Alt all similar. GuiChangeLocalModuleMetasCommand | itemVariationChange.py
@@ -32,16 +32,16 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 - [x] Change {Module} Skills | some skill modifies a non-zero attr of the item (pref changeAffectingSkills) | submenu per affecting skill, each with "Not Learned", "Level 0".."Level 5" (checked current); changes character skill level and refreshes fit | skillAffectors.py. gyfa lists the skill's current level after its name and greys the levels out for All 0/All 5, which ignore changes in pyfa too; no visibility pref yet
 
 ### fittingCharge
-- [ ] {Charge} Stats | charge loaded | stats window for the charge | itemStats.py
+- [x] {Charge} Stats | charge loaded | stats window for the charge | itemStats.py
 - [x] {Charge} Market Group | charge has market group | jump to charge in market | itemMarketJump.py
 - [x] Change {Charge} Skills | skills affect charge attrs | as above, on chargeModifiedAttributes | skillAffectors.py
 
 ### fittingMode
-- [ ] Tactical Mode Stats | right-click the mode row | stats window for the mode item | itemStats.py
+- [x] Tactical Mode Stats | right-click the mode row | stats window for the mode item | itemStats.py
 
 ### fittingShip
 - [x] Tactical Mode | ship has modes (T3 destroyers) | radio submenu Defense/Propulsion/Sharpshooter (or Primary/Secondary/Tertiary). GuiChangeShipModeCommand | shipModeChange.py
-- [ ] Ship Stats / Citadel Stats | always | stats window for the ship | itemStats.py
+- [x] Ship Stats / Citadel Stats | always | stats window for the ship | itemStats.py (no citadels in gyfa yet)
 - [ ] Citadel System Security | fit is a structure | radio: High Security, Low Security, Null Security, W-Space. GuiChangeFitSystemSecurityCommand | fitSystemSecurity.py
 - [x] Pilot Security Status | ship is Pacifier, Enforcer, Marshal, Sidewinder, Cobra or Python | radio: "Character (x.xx)", "Custom (x)" (dialog, -10..5), separator, presets -10,-8,-6,-4,-2,0,1,2,3,4,5. GuiChangeFitPilotSecurityCommand | fitPilotSecurity.py
 - [x] Open in Fitting Browser | unless fitting browser already shows this ship's fit list | switches to fittings tab, stage 3 for the ship | shipJump.py
@@ -52,7 +52,7 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 
 ### droneItem
-- [ ] Drone Stats | row clicked | stats window | itemStats.py. Not yet: no item stats window
+- [x] Drone Stats | row clicked | stats window | itemStats.py
 - [x] Drone Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Drone Stack | row clicked | removes whole stacks of selection (multi). GuiRemoveLocalDronesCommand | itemRemove.py
 - [x] Change Drone Quantity | row clicked | dialog "New Amount", sets stack size. GuiChangeLocalDroneAmountCommand | itemAmountChange.py
@@ -85,7 +85,7 @@ Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 ## Cargo pane (gui/builtinAdditionPanes/cargoView.py)
 
 ### cargoItem
-- [ ] {Category} Stats | row clicked | stats window (needs the item stats window) | itemStats.py
+- [x] {Category} Stats | row clicked | stats window | itemStats.py
 - [x] {Category} Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove {Category} Stack | row clicked | removes selected cargo stacks (multi). GuiRemoveCargosCommand | itemRemove.py
 - [x] Change Selection Quantity | row clicked | dialog, sets amount on all selected stacks; 0 removes them. GuiChangeCargosAmountCommand | itemAmountChange.py
@@ -102,13 +102,13 @@ Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 Context depends on implant source: fit implants use implantItem/implantItemMisc, character implants use implantItemChar/implantItemMiscChar.
 
 ### implantItem
-- [ ] Implant Stats | row clicked | stats window | itemStats.py
+- [x] Implant Stats | row clicked | stats window | itemStats.py
 - [x] Implant Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Implant | row clicked | removes selection (multi). GuiRemoveImplantsCommand | itemRemove.py
 - [x] Variations | 2+ variations | variation submenu (unsorted by meta), swaps clicked implant. GuiChangeImplantMetaCommand | itemVariationChange.py
 
 ### implantItemChar
-- [ ] Implant Stats | row clicked | stats window | itemStats.py
+- [x] Implant Stats | row clicked | stats window | itemStats.py
 - [x] Implant Market Group | has market group | market jump | itemMarketJump.py
 
 ### implantItemMisc / implantItemMiscChar
@@ -122,7 +122,7 @@ Context depends on implant source: fit implants use implantItem/implantItemMisc,
 
 ### boosterItem
 - [x] Side Effects | booster has an implemented side effect | checkable list of side effects; toggles one. GuiToggleBoosterSideEffectStateCommand | boosterSideEffects.py
-- [ ] Booster Stats | row clicked | stats window | itemStats.py
+- [x] Booster Stats | row clicked | stats window | itemStats.py
 - [x] Booster Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Booster | row clicked | removes selection (multi). GuiRemoveBoostersCommand | itemRemove.py
 - [x] Variations | 2+ variations | boosters of the same slot in the same market group (or none), sorted by side effect chance (or name if > 7); swaps the clicked booster only, keeping state and side effects. GuiChangeBoosterMetaCommand | itemVariationChange.py
@@ -194,7 +194,7 @@ Contexts: commandFit (row is a fit, not a generic link), separator, commandView 
 ## Market browser item list (gui/builtinMarketBrowser/itemView.py)
 
 Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
-- [ ] {Category} Stats | always | stats window | itemStats.py
+- [x] {Category} Stats | always | stats window | itemStats.py
 - [x] {Category} Market Group | marketItemMisc only | jumps to the item's group | itemMarketJump.py
 - [x] Fill With Module | active fit, category Module (pref moduleFill) | adds the module to every free slot. GuiFillWithNewLocalModulesCommand | itemFill.py
 - [x] Add {Drone} to Drone Bay (xN) | active fit, category Drone, room for >= 1 | adds stack sized to bay/bandwidth limit. GuiAddLocalDroneCommand | droneAddStack.py
@@ -207,7 +207,7 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 ## Fitting browser (gui/builtinShipBrowser)
 
 ### baseShip (ship row, shipItem.py)
-- [ ] Ship Basic Stats | always | stats window for the ship type | itemStats.py
+- [~] Ship Basic Stats | always | stats window for the ship type | itemStats.py. gyfa has no ship list stage, so it sits on the ship header of a narrowed fit list
 
 ### fit row (fitItem.py, hand-built wx.Menu, only when a fit is active)
 - [x] Open in new tab | active fit exists | opens the fit in a new tab | gui/builtinShipBrowser/fitItem.py
@@ -232,9 +232,9 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 ## Item stats window (gui/builtinItemStatsViews)
 
 ### itemStats (Affected By tree node)
-- [ ] {Type} Stats | node is an item/container | opens stats window for that afflictor | itemStats.py, itemAffectedBy.py
+- [x] {Type} Stats | node is an item/container | opens stats window for that afflictor | itemStats.py, itemAffectedBy.py
 ### description / traits text (hand-built)
-- [ ] Copy | always | copies text | itemDescription.py, itemTraits.py
+- [x] Copy | always | copies text | itemDescription.py, itemTraits.py (copies the whole text; selecting and Ctrl+C copies a part)
 
 ## Stats pane panels (gui/statsPane.py, menu icon on panel header)
 

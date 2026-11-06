@@ -1,6 +1,7 @@
 //! The bridge to refine. Each recalculation builds a fresh solar system from the [`Fit`], which
 //! keeps refine's state from ever drifting from what the UI shows.
 
+mod inspect;
 mod pane;
 mod pilot;
 
@@ -22,6 +23,7 @@ use crate::{
     fit::{Fit, ModuleState},
 };
 
+pub use inspect::{AttrValue, FitItem, Inspection, ModOp, Modifier, Source, SourceKind};
 pub use pane::{
     CalcOptions, CapDetail, FirepowerDetail, Mining, MiningRate, Misc, Outgoing, SpoolRange, Tank,
 };

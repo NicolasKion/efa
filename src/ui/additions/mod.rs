@@ -27,10 +27,12 @@ use gpui_kit::{
 
 use super::{
     Action, AddKind, AdditionsTab, Gyfa, Loaded,
+    item_stats::{StatsOf, stats_entry},
     widgets::{entry, icon_label, item_entry},
 };
 use crate::{
     data::{Catalog, Kind, TypeId},
+    engine::FitItem,
     fit::{Fit, split_count},
 };
 
@@ -260,7 +262,13 @@ fn addition_menu(
         }
     };
 
-    let mut menu = menu;
+    let stats_of = match kind {
+        AddKind::Drones => StatsOf::Fitted(FitItem::Drone(i)),
+        AddKind::Implants => StatsOf::Fitted(FitItem::Implant(type_id)),
+        AddKind::Boosters => StatsOf::Fitted(FitItem::Booster(type_id)),
+        AddKind::Cargo => StatsOf::Type(type_id),
+    };
+    let mut menu = menu.item(stats_entry(this, category, stats_of));
     if t.market_group
         .is_some_and(|g| catalog.market_groups.contains_key(&g))
     {

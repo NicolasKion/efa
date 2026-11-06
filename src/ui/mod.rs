@@ -9,6 +9,7 @@ mod columns;
 mod fitting;
 mod hub;
 mod implant_sets;
+mod item_stats;
 pub mod profile_editor;
 pub mod profile_menus;
 mod side;
@@ -112,6 +113,8 @@ pub struct Loaded {
     pub icons: Icons,
     /// Where downloads and derived data are kept: icons, prices, the catalog cache.
     pub cache_dir: PathBuf,
+    /// The dump the data came from, for what is only read when first needed.
+    pub data_dir: PathBuf,
 }
 
 enum Loading {
@@ -1110,6 +1113,7 @@ fn load(data_dir: &Path) -> Result<Loaded, String> {
         engine,
         icons,
         cache_dir,
+        data_dir: data_dir.to_owned(),
     })
 }
 

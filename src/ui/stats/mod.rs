@@ -2,7 +2,7 @@
 //! with the menus pyfa puts on a section header.
 
 mod defense;
-mod format;
+pub(super) mod format;
 mod misc;
 mod offense;
 mod price;

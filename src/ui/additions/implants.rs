@@ -240,6 +240,11 @@ fn implant_menu(
     if let Some((i, type_id)) = clicked_type
         && let Some(t) = loaded.catalog.get(type_id)
     {
+        menu = menu.item(super::super::item_stats::stats_entry(
+            this,
+            "Implant",
+            super::super::item_stats::StatsOf::Fitted(crate::engine::FitItem::Implant(type_id)),
+        ));
         if t.market_group.is_some() {
             let this = this.clone();
             menu = menu.item(entry(IconName::Search, "Implant Market Group").on_click(

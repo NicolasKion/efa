@@ -1,7 +1,7 @@
 # Feature parity with pyfa
 
 Rough coverage: the core loop works (pick ship, add modules/charges/drones/implants/boosters, see the main stats, EFT in/out), plus the pyfa layout with in-game icons and the main module columns, which is maybe 20-25% of pyfa's surface.
-Biggest gaps: projected/command/fleet effects, fighters, item stats window, graphs, ESI/SSO, and most context menus.
+Biggest gaps: projected/command/fleet effects, fighters, graphs, ESI/SSO, and most context menus.
 Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, mutations, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
 Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time (needs looping over refine stats), lock/warp time formulas.
 
@@ -103,7 +103,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Fill all slots with module (builtinContextMenus/moduleFill.py)
 - [ ] Fill rack / item fill (builtinContextMenus/itemFill.py)
 - [~] Change item amount (drones, cargo, charges) (builtinContextMenus/itemAmountChange.py), cargo done
-- [ ] Show item stats (builtinContextMenus/itemStats.py)
+- [x] Show item stats (builtinContextMenus/itemStats.py)
 - [ ] Jump to market group (itemMarketJump.py)
 - [ ] Project item onto fit (builtinContextMenus/itemProject.py), refine: add_proj
 - [ ] Projection range (builtinContextMenus/itemProjectionRange.py), refine: proj set_range
@@ -215,23 +215,23 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Ship stats export (service/port/shipstats.py)
 - [ ] Mutated item (muta) format (service/port/muta.py)
 - [ ] HTML export of all fits (pyfaHTMLExportPreferences.py)
-- [ ] Export item stats to CSV (gui/itemStats.py)
+- [x] Export item stats to CSV (gui/itemStats.py)
 - [ ] Export implants/boosters/charges lists (builtinContextMenus/additionsExportAll.py)
 
 ## Item stats window
 
-- [ ] Item stats window with tabs (gui/itemStats.py)
-- [ ] Description (builtinItemStatsViews/itemDescription.py)
-- [ ] Traits (builtinItemStatsViews/itemTraits.py)
-- [ ] Attributes with base vs modified values, raw toggle, grouping (builtinItemStatsViews/itemAttributes.py, attributeGrouping.py), refine: iter_attrs, get_attr
-- [ ] Requirements tree (builtinItemStatsViews/itemRequirements.py)
-- [ ] Dependents: what a skill unlocks (builtinItemStatsViews/itemDependants.py)
-- [ ] Effects list (builtinItemStatsViews/itemEffects.py), refine: iter_effects, set_effect_mode
-- [ ] Affected by tree (builtinItemStatsViews/itemAffectedBy.py), refine: iter_modifiers (Modification, Affector)
-- [ ] Properties (builtinItemStatsViews/itemProperties.py)
-- [ ] Compare variations side by side (builtinItemStatsViews/itemCompare.py)
-- [ ] Mutations with roll sliders (builtinItemStatsViews/itemMutator.py, attributeSlider.py), refine: get_mutation, set_roll, mutate_raw
-- [ ] Price in item stats (gui/itemStats.py)
+- [x] Item stats window with tabs, one OS window per item, cascaded, Shift replaces the last one used, Escape closes, values follow fit edits live instead of a Refresh button (gui/itemStats.py)
+- [x] Description (builtinItemStatsViews/itemDescription.py)
+- [x] Traits (builtinItemStatsViews/itemTraits.py)
+- [x] Attributes with base vs modified values, raw toggle, grouping (builtinItemStatsViews/itemAttributes.py, attributeGrouping.py), refine: iter_attrs, get_attr
+- [x] Requirements tree (builtinItemStatsViews/itemRequirements.py)
+- [x] Dependents: what a skill unlocks (builtinItemStatsViews/itemDependants.py)
+- [~] Effects list (builtinItemStatsViews/itemEffects.py), refine: iter_effects, set_effect_mode. Active shows whether the effect runs on the fitted item; pyfa's debug-only toggle by double-click is left out
+- [x] Affected by tree with item and attribute views, real names toggle, expand all (builtinItemStatsViews/itemAffectedBy.py), refine: iter_modifiers (Modification, Affector)
+- [x] Properties: the type's raw facts, shown always where pyfa needs debug mode (builtinItemStatsViews/itemProperties.py)
+- [x] Compare variations side by side, sortable, raw toggle, highlight on double-click (builtinItemStatsViews/itemCompare.py)
+- [ ] Mutations with roll sliders (builtinItemStatsViews/itemMutator.py, attributeSlider.py), refine: get_mutation, set_roll, mutate_raw. Not yet: gyfa has no mutated items
+- [x] Price in item stats: in the Compare tab, and in the window header (gui/itemStats.py)
 
 ## Graphs
 
