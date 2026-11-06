@@ -106,8 +106,7 @@ pub(super) fn section(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
                                 format::amount(out, prec, 0, 9)
                             ),
                             cx,
-                        )
-                        .text_xs(),
+                        ),
                         format!("{:.1}/{out:.1}", r.used),
                     ))
                     .child(gauge(

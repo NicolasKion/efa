@@ -77,11 +77,7 @@ fn block(p: &Pane<'_>, key: &str, icon_id: i32, caption: &str, value: AnyElement
     h_flex()
         .gap_1()
         .child(p.icon(icon_id, 24.))
-        .child(
-            v_flex()
-                .child(div().text_xs().child(caption.to_owned()))
-                .child(value),
-        )
+        .child(v_flex().child(div().child(caption.to_owned())).child(value))
         .id(format!("block-{key}"))
         .into_any_element()
 }

@@ -20,6 +20,8 @@ fn format(val: f64, prec: i32, lowest: i32, highest: i32, force_sign: bool) -> S
     if val.is_infinite() && val > 0.0 {
         return "∞".to_owned();
     }
+    // A sum of nothing can come out as -0.0, which would print as "-0".
+    let val = if val == 0.0 { 0.0 } else { val };
     let (mut mantissa, mut suffix) = (val, "");
     let magnitude = val.abs();
     if magnitude > 1.0 && highest >= 3 {
@@ -120,6 +122,12 @@ pub fn minutes_seconds(secs: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn negative_zero_prints_as_zero() {
+        assert_eq!(amount(-0.0, 3, 3, 9), amount(0.0, 3, 3, 9));
+        assert!(!amount(-0.0, 3, 3, 9).starts_with('-'));
+    }
 
     #[test]
     fn matches_pyfa_format_amount() {

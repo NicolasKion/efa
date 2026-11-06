@@ -86,13 +86,11 @@ pub(super) fn section(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &App) -> Sectio
     let price = FitPrice::new(p.fit, |id| p.prices.get(id));
     let cell = |key: &str, icon_el: Div, label: &str, value: f64| {
         h_flex().flex_1().gap_1().child(icon_el).child(
-            v_flex()
-                .child(div().text_xs().child(label.to_owned()))
-                .child(tip(
-                    format!("price-{key}"),
-                    isk(value),
-                    format!("{} ISK", format::grouped(value, 2)),
-                )),
+            v_flex().child(div().child(label.to_owned())).child(tip(
+                format!("price-{key}"),
+                isk(value),
+                format!("{} ISK", format::grouped(value, 2)),
+            )),
         )
     };
     let ship_icon = match p.fit.ship {

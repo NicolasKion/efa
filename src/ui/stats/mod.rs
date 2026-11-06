@@ -129,6 +129,11 @@ struct Section {
     menu: Option<MenuFn>,
 }
 
+/// Width of the stats pane. pyfa sizes its pane to the content and keeps it there.
+pub const PANE_WIDTH: f32 = 300.;
+/// pyfa draws its stats pane in 8 point text on Linux, about 11 pixels.
+const TEXT_SIZE: f32 = 11.;
+
 impl Gyfa {
     pub(super) fn stats_panel(&self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
@@ -150,6 +155,7 @@ impl Gyfa {
             return v_flex()
                 .size_full()
                 .bg(theme.sidebar)
+                .text_size(px(TEXT_SIZE))
                 .child(character)
                 .into_any_element();
         };
@@ -183,6 +189,7 @@ impl Gyfa {
         v_flex()
             .size_full()
             .bg(theme.sidebar)
+            .text_size(px(TEXT_SIZE))
             .child(character)
             .child(
                 v_flex()
@@ -212,12 +219,7 @@ impl Gyfa {
                     .id(SharedString::from(format!("section-{key}")))
                     .flex_1()
                     .gap_1()
-                    .child(
-                        div()
-                            .w(px(10.))
-                            .text_xs()
-                            .child(if collapsed { "▸" } else { "▾" }),
-                    )
+                    .child(div().w(px(10.)).child(if collapsed { "▸" } else { "▾" }))
                     .child(title)
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         if !this.collapsed_sections.remove(key) {

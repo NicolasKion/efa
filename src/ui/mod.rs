@@ -1013,18 +1013,27 @@ impl Render for Gyfa {
         }))
         .child(self.menu_bar(cx))
         .child(
-            h_resizable("main")
+            h_flex()
+                .flex_1()
+                .min_h_0()
                 .child(
-                    resizable_panel()
-                        .size(px(280.))
-                        .size_range(px(200.)..px(520.))
-                        .child(self.browser(&loaded, cx)),
+                    h_resizable("main")
+                        .child(
+                            resizable_panel()
+                                .size(px(280.))
+                                .size_range(px(200.)..px(520.))
+                                .child(self.browser(&loaded, cx)),
+                        )
+                        .child(resizable_panel().child(center)),
                 )
-                .child(resizable_panel().child(center))
+                // pyfa's stats pane is as wide as its content and does not resize.
                 .child(
-                    resizable_panel()
-                        .size(px(340.))
-                        .size_range(px(260.)..px(560.))
+                    div()
+                        .flex_none()
+                        .w(px(stats::PANE_WIDTH))
+                        .h_full()
+                        .border_l_1()
+                        .border_color(cx.theme().border)
                         .child(self.stats_panel(&loaded, cx)),
                 ),
         )

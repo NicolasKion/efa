@@ -60,15 +60,46 @@ pub fn icon_box(catalog: &Catalog, icons: &Icons, icon: Icon, size: f32) -> Div 
     }
 }
 
-/// A filled bar with its text centered on top, like pyfa's resource and resist gauges.
-pub fn gauge(fraction: f64, fill: Rgb, text: impl Into<SharedString>, width: f32, cx: &App) -> Div {
+/// Track behind every gauge, pyfa's constant dark grey, so the white label always reads.
+const GAUGE_TRACK: Rgb = 0x0033_3333;
+/// The label's drop shadow, as pyfa draws it.
+const GAUGE_SHADOW: Rgb = 0x0050_5050;
+/// How far the fill darkens towards its right end; pyfa's gradient effect of -35%.
+const GAUGE_DARKEN: f32 = 0.35;
+
+/// A filled bar with its text centered on top, drawn like pyfa's gauges: a dark track, a fill
+/// that darkens along its length, and white text with a drop shadow, so the label stays legible
+/// over both the fill and the track in any theme.
+pub fn gauge(
+    fraction: f64,
+    fill: Rgb,
+    text: impl Into<SharedString>,
+    width: f32,
+    _cx: &App,
+) -> Div {
     let fraction = fraction.clamp(0.0, 1.0) as f32;
+    let text: SharedString = text.into();
+    let start = color(fill);
+    let end = Hsla {
+        l: start.l * (1.0 - GAUGE_DARKEN),
+        ..start
+    };
+    let label = |shade: Rgb, offset: f32| {
+        h_flex()
+            .absolute()
+            .top(px(offset))
+            .left(px(offset))
+            .size_full()
+            .justify_center()
+            .text_color(color(shade))
+            .child(text.clone())
+    };
     div()
         .relative()
         .w(px(width))
         .h(px(16.))
         .rounded(px(3.))
-        .bg(cx.theme().muted)
+        .bg(color(GAUGE_TRACK))
         .overflow_hidden()
         .child(
             div()
@@ -77,19 +108,14 @@ pub fn gauge(fraction: f64, fill: Rgb, text: impl Into<SharedString>, width: f32
                 .left_0()
                 .h_full()
                 .w(relative(fraction))
-                .bg(color(fill)),
+                .bg(gpui_kit::linear_gradient(
+                    90.,
+                    gpui_kit::linear_color_stop(start, 0.),
+                    gpui_kit::linear_color_stop(end, 1.),
+                )),
         )
-        .child(
-            h_flex()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .justify_center()
-                .text_xs()
-                .text_color(cx.theme().foreground)
-                .child(text.into()),
-        )
+        .child(label(GAUGE_SHADOW, 1.))
+        .child(label(0x00ff_ffff, 0.))
 }
 
 pub fn section_title(text: impl Into<SharedString>) -> Div {
