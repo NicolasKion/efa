@@ -13,6 +13,7 @@ use gpui_kit::{
 
 use super::{
     Action, BrowserTab, Gyfa, Loaded,
+    additions::goes_to_cargo,
     fitting::{DragPreview, DragSource, Dragged},
     widgets::{entry, icon_box},
 };
@@ -199,7 +200,7 @@ impl Gyfa {
             .child(div().truncate().child(name))
             .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                 if event.click_count() >= 2 {
-                    this.add_item(id, cx);
+                    this.market_double_click(id, event.modifiers(), cx);
                 }
             }))
             .when_some(
@@ -387,7 +388,11 @@ fn market_menu(
     };
 
     let mut menu = menu;
-    if context == MarketContext::Search && t.market_group.is_some() {
+    // Ice products are found by search but sit outside the market tree, so there is no group.
+    let listed = t
+        .market_group
+        .is_some_and(|g| loaded.catalog.market_groups.contains_key(&g));
+    if context == MarketContext::Search && listed {
         menu = menu.item(
             entry(IconName::Search, format!("{category} Market Group"))
                 .on_click(on(super::Gyfa::jump_to_market)),
@@ -418,18 +423,21 @@ fn market_menu(
                 .item(entry(IconName::Plus, label).on_click(apply(Action::AddDrones(id, amount))));
         }
     }
-    menu = menu.item(
-        entry(IconName::Inbox, format!("Add {category} to Cargo"))
-            .on_click(apply(Action::AddCargo(id, 1))),
-    );
-    if t.kind == Kind::Charge {
-        let room = g.cargo_room_for(&loaded, id);
-        if room > 0 {
-            menu = menu.item(
-                entry(IconName::Inbox, format!("Fill Cargo With {category}"))
-                    .on_click(apply(Action::AddCargo(id, room))),
-            );
+    let to_cargo = |count: u32| {
+        let this = this.clone();
+        move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+            Gyfa::app_update(&this, cx, |g, cx| g.add_to_cargo(id, count, cx));
         }
+    };
+    menu =
+        menu.item(entry(IconName::Inbox, format!("Add {category} to Cargo")).on_click(to_cargo(1)));
+    if goes_to_cargo(t.kind) {
+        menu = menu.item(
+            entry(IconName::Inbox, format!("Fill Cargo With {category}"))
+                .on_click(on(|g, id, _, cx| g.fill_cargo_with(id, cx))),
+        );
+    }
+    if t.kind == Kind::Charge {
         let is_probe = t
             .market_group
             .and_then(|m| loaded.catalog.market_groups.get(&m))
@@ -440,7 +448,7 @@ fn market_menu(
                 IconName::Inbox,
                 format!("Add {category} to Cargo (x{batch})"),
             )
-            .on_click(apply(Action::AddCargo(id, batch))),
+            .on_click(to_cargo(batch)),
         );
     }
     menu

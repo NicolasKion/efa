@@ -7,6 +7,8 @@ mod drones;
 mod implants;
 mod notes;
 
+pub(super) use cargo::{drop_transfer, goes_to_cargo};
+
 use std::rc::Rc;
 
 use gpui_kit::component::{
@@ -380,7 +382,9 @@ fn addition_menu(
     };
 
     let mut menu = menu;
-    if t.market_group.is_some() {
+    if t.market_group
+        .is_some_and(|g| catalog.market_groups.contains_key(&g))
+    {
         let this = this.clone();
         menu = menu.item(
             entry(IconName::Search, format!("{category} Market Group")).on_click(

@@ -72,7 +72,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Color rows by slot type (pyfaGeneralPreferences.py)
 - [ ] Highlight modules with unmet skills or invalid fitting in red (fittingView.py), refine: validate_verbose skill_reqs
 - [ ] Drag and drop modules between slots, swap/rearrange (fittingView.py, fitCommands/gui/localModule)
-- [ ] Shift/ctrl drag to copy module, drag module to cargo (fitCommands/gui/localModuleCargo)
+- [~] Shift/ctrl drag to copy module, drag module to cargo (fitCommands/gui/localModuleCargo), module/charge to and from cargo done with Ctrl to copy, copying between slots missing
 - [ ] Multi-select and bulk state change (fittingView.py)
 - [ ] Delete key removes selection (fittingView.py)
 - [x] Column: ship/item icon and charge icon (baseIcon.py, ammoIcon.py)
@@ -102,7 +102,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Item variations: swap to T2/faction/deadspace variant (builtinContextMenus/itemVariationChange.py)
 - [ ] Fill all slots with module (builtinContextMenus/moduleFill.py)
 - [ ] Fill rack / item fill (builtinContextMenus/itemFill.py)
-- [ ] Change item amount (drones, cargo, charges) (builtinContextMenus/itemAmountChange.py)
+- [~] Change item amount (drones, cargo, charges) (builtinContextMenus/itemAmountChange.py), cargo done
 - [ ] Show item stats (builtinContextMenus/itemStats.py)
 - [ ] Jump to market group (itemMarketJump.py)
 - [ ] Project item onto fit (builtinContextMenus/itemProject.py), refine: add_proj
@@ -116,7 +116,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Set damage pattern from loaded ammo (builtinContextMenus/ammoToDmgPattern.py)
 - [ ] Damage pattern switcher (builtinContextMenus/damagePatternChange.py)
 - [ ] Target profile switcher/adder/editor (builtinContextMenus/targetProfile/)
-- [ ] Add charge/ammo to cargo, fill cargo (builtinContextMenus/cargoAdd.py, cargoAddAmmo.py, cargoFill.py)
+- [x] Add charge/ammo to cargo, fill cargo (builtinContextMenus/cargoAdd.py, cargoAddAmmo.py, cargoFill.py)
 - [ ] Split/merge drone stacks (builtinContextMenus/droneSplitStack.py, droneAddStack.py)
 - [ ] Fighter ability toggles (builtinContextMenus/fighterAbilities.py), refine: get_ability / set state
 - [ ] Booster side effects toggles (builtinContextMenus/boosterSideEffects.py), refine: get_side_effect, set_state
@@ -133,12 +133,13 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 
 - [x] Drones list with active count (builtinAdditionPanes/droneView.py), refine: add_drone, set_state
 - [x] Implants and boosters list (builtinAdditionPanes/implantView.py, boosterView.py), refine: add_implant, add_booster
-- [~] Cargo: parsed from EFT and exported, listed in the additions pane, no adding or editing (builtinAdditionPanes/cargoView.py)
+- [x] Cargo: parsed from EFT and exported, added from the market (double-click with Ctrl/Alt batches, drag, menus), edited, dragged to and from the fit (builtinAdditionPanes/cargoView.py)
 - [~] Tabbed additions pane, in progress (gui/additionsPane.py)
 - [ ] Tab names with counts (pyfaGeneralPreferences.py "Extra info in Additions panel tab names")
 - [ ] Drone stack amount editing, separate stacks (droneView.py)
 - [ ] Fighters tab: squadrons, light/heavy/support tubes, abilities (builtinAdditionPanes/fighterView.py), refine: add_fighter, get_stat_launched_*_fighters, get_stat_fighter_bay_volume
-- [ ] Cargo tab with amounts and volume (cargoView.py)
+- [x] Cargo tab with amounts and volume, sorted like pyfa, Delete/Ctrl+A/Escape keys (cargoView.py); price column waits for a price source
+- [x] Commodities, materials, deployables and containers in the catalog for cargo; market tree shows pyfa's Deployable Structures and Filaments roots, search adds ice products (service/market.py)
 - [ ] Implants: use character implants vs fit implants switch (implantView.py)
 - [ ] Implant slot conflict handling (implantView.py), refine: ValOptions implant_slot_index
 - [ ] Booster slot conflict and side effects (boosterView.py), refine: ValOptions booster_slot_index, iter_side_effects

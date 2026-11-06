@@ -2,7 +2,7 @@
 //! charges go where. refine works on type IDs only, so all of this comes from the dump directly.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fs::File,
     io::BufReader,
     path::{Path, PathBuf},
@@ -21,12 +21,23 @@ pub mod category {
     pub const IMPLANT: i32 = 20;
     pub const SUBSYSTEM: i32 = 32;
     pub const FIGHTER: i32 = 87;
+    pub const CELESTIAL: i32 = 2;
+    pub const MATERIAL: i32 = 4;
+    pub const COMMODITY: i32 = 17;
+    pub const DEPLOYABLE: i32 = 22;
 }
 
 const GROUP_BOOSTER: i32 = 303;
 /// Tactical destroyer modes.
 const GROUP_SHIP_MODIFIERS: i32 = 1306;
 const GROUP_TACTICAL_DESTROYER: i32 = 1305;
+/// Cargo, secure, audit log and freight containers: the only celestials a ship can carry.
+pub const CONTAINER_GROUPS: [i32; 4] = [12, 340, 448, 649];
+/// Strontium, heavy water and the like, which pyfa's market search finds outside its tree.
+const GROUP_ICE_PRODUCT: i32 = 423;
+/// Market groups pyfa shows as roots for things that only go in cargo: Deployable Structures and
+/// Filaments. In the SDE they hang under Structures and Trade Goods, which pyfa leaves out.
+const CARGO_MARKET_ROOTS: [i32; 2] = [404, 2456];
 
 mod effect {
     pub const LAUNCHER_FITTED: i32 = 40;
@@ -93,6 +104,8 @@ pub enum Kind {
     Skill,
     /// A tactical destroyer's mode.
     Mode,
+    /// Something a ship only carries: commodities, materials, deployables, containers.
+    Cargo,
     Other,
 }
 
@@ -134,6 +147,8 @@ pub struct ItemType {
     pub spools: bool,
     /// Bandwidth a drone takes while in space, in Mbit/s.
     pub drone_bandwidth: f64,
+    /// What the item holds, in m³: charges for a module, contents for a container.
+    pub capacity: f64,
 }
 
 impl ItemType {
@@ -150,6 +165,12 @@ impl ItemType {
             Kind::Booster => "Booster",
             Kind::Skill => "Skill",
             Kind::Mode => "Tactical Mode",
+            Kind::Cargo => match self.category_id {
+                category::COMMODITY => "Commodity",
+                category::MATERIAL => "Material",
+                category::DEPLOYABLE => "Deployable",
+                _ => "Celestial",
+            },
             Kind::Other => "Item",
         }
     }
@@ -187,6 +208,9 @@ pub struct Catalog {
     /// Every published type sharing a variation parent, keyed by that parent.
     pub variations: HashMap<TypeId, Vec<TypeId>>,
     pub meta_group_names: HashMap<i32, String>,
+    pub group_names: HashMap<i32, String>,
+    /// Cargo-only types the market search finds, the way pyfa limits its search.
+    pub cargo_searchable: HashSet<TypeId>,
 }
 
 impl Catalog {
@@ -220,17 +244,26 @@ impl Catalog {
                 continue;
             };
             let category_id = group_category.get(&t.group_id).copied().unwrap_or(0);
-            if !matches!(
+            // Cargo can hold anything, but these are what pyfa's market offers or EFT cargo lines
+            // usually name (fuel blocks, ice products); loading every category would mostly add
+            // NPC and map junk.
+            let cargo_only = matches!(
                 category_id,
-                category::SHIP
-                    | category::MODULE
-                    | category::CHARGE
-                    | category::DRONE
-                    | category::IMPLANT
-                    | category::SUBSYSTEM
-                    | category::FIGHTER
-                    | category::SKILL
-            ) {
+                category::COMMODITY | category::MATERIAL | category::DEPLOYABLE
+            ) || CONTAINER_GROUPS.contains(&t.group_id);
+            if !cargo_only
+                && !matches!(
+                    category_id,
+                    category::SHIP
+                        | category::MODULE
+                        | category::CHARGE
+                        | category::DRONE
+                        | category::IMPLANT
+                        | category::SUBSYSTEM
+                        | category::FIGHTER
+                        | category::SKILL
+                )
+            {
                 continue;
             }
 
@@ -274,6 +307,7 @@ impl Catalog {
                 category::MODULE if has_effect(effect::LOW) => Kind::Module(Slot::Low),
                 category::MODULE if has_effect(effect::RIG) => Kind::Module(Slot::Rig),
                 category::MODULE if has_effect(effect::SUBSYSTEM) => Kind::Module(Slot::Subsystem),
+                _ if cargo_only => Kind::Cargo,
                 _ => Kind::Other,
             };
             if kind == Kind::Skill && t.published {
@@ -339,6 +373,7 @@ impl Catalog {
                         .iter()
                         .any(|&a| attr(a).is_some_and(|v| v > 0.0)),
                     drone_bandwidth: attr(attr::DRONE_BANDWIDTH_USED).unwrap_or(0.0),
+                    capacity: t.capacity.unwrap_or(0.0),
                 },
             );
         }
@@ -372,8 +407,37 @@ impl Catalog {
                 ))
             })
             .collect();
+        for root in CARGO_MARKET_ROOTS {
+            if let Some(group) = market_groups.get_mut(&root) {
+                group.parent = None;
+            }
+        }
+        let under_cargo_roots: HashSet<TypeId> = types
+            .values()
+            .filter(|t| t.kind == Kind::Cargo && t.published)
+            .filter(|t| {
+                let mut group = t.market_group;
+                while let Some(g) = group {
+                    if CARGO_MARKET_ROOTS.contains(&g) {
+                        return true;
+                    }
+                    group = market_groups.get(&g).and_then(|g| g.parent);
+                }
+                false
+            })
+            .map(|t| t.id)
+            .collect();
+        let cargo_searchable: HashSet<TypeId> = types
+            .values()
+            .filter(|t| t.published && t.group_id == GROUP_ICE_PRODUCT)
+            .map(|t| t.id)
+            .chain(under_cargo_roots.iter().copied())
+            .collect();
         for t in types.values() {
             if !t.published || matches!(t.kind, Kind::Skill | Kind::Mode | Kind::Other) {
+                continue;
+            }
+            if t.kind == Kind::Cargo && !under_cargo_roots.contains(&t.id) {
                 continue;
             }
             if let Some(group) = t.market_group.and_then(|g| market_groups.get_mut(&g)) {
@@ -415,6 +479,10 @@ impl Catalog {
             .into_iter()
             .filter_map(|(id, g)| Some((id.parse().ok()?, g.name.en)))
             .collect();
+        let group_names = groups
+            .into_iter()
+            .filter_map(|(id, g)| Some((id.parse().ok()?, g.name.en)))
+            .collect();
 
         Ok(Self {
             types,
@@ -425,6 +493,8 @@ impl Catalog {
             icon_files,
             variations,
             meta_group_names,
+            group_names,
+            cargo_searchable,
         })
     }
 
@@ -495,6 +565,7 @@ impl Catalog {
                 t.published
                     && t.market_group.is_some()
                     && !matches!(t.kind, Kind::Skill | Kind::Mode | Kind::Other)
+                    && (t.kind != Kind::Cargo || self.cargo_searchable.contains(&t.id))
             })
             .filter(|t| {
                 let name = t.name.to_lowercase();
@@ -559,6 +630,7 @@ struct Localized {
 struct SdeGroup {
     #[serde(rename = "categoryID")]
     category_id: i32,
+    name: Localized,
 }
 
 #[derive(Deserialize)]
@@ -604,6 +676,7 @@ struct SdeType {
     volume: Option<f64>,
     #[serde(rename = "packagedVolume")]
     packaged_volume: Option<f64>,
+    capacity: Option<f64>,
 }
 
 #[derive(Deserialize)]

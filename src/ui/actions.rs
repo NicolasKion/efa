@@ -11,7 +11,7 @@ use gpui_kit::{ClickEvent, Context, Modifiers};
 use super::Gyfa;
 use crate::{
     data::{Slot, TypeId},
-    fit::{Module, ModuleState, trim_rack},
+    fit::{Module, ModuleState, cargo::Transfer, trim_rack},
 };
 
 /// A row of the fitting view that holds something.
@@ -79,6 +79,10 @@ pub enum Action {
     AddAdditions(AddKind, Vec<(TypeId, u32)>),
     SetMode(TypeId),
     SetSecStatus(Option<f64>),
+    /// A fitted item dragged into cargo, optionally onto a cargo stack of this type.
+    ModuleToCargo((Slot, usize), Option<TypeId>, Transfer),
+    /// A cargo stack dragged onto a slot position.
+    CargoToModule(TypeId, (Slot, usize), Transfer),
 }
 
 /// The additions pane's tabs that list items.
@@ -382,11 +386,16 @@ impl Gyfa {
                         }
                         AddKind::Cargo => {
                             if let Some(stack) = fit.cargo.get_mut(i) {
-                                stack.1 = amount.max(1);
+                                stack.1 = amount;
                             }
                         }
                         AddKind::Implants | AddKind::Boosters => {}
                     }
+                }
+                // pyfa removes cargo stacks set to zero.
+                if kind == AddKind::Cargo && amount == 0 {
+                    fit.cargo.retain(|&(_, n)| n > 0);
+                    structural = true;
                 }
             }
             Action::SplitDrones(i, amount) => {
@@ -430,9 +439,19 @@ impl Gyfa {
                         }
                     }
                 }
+                if kind == AddKind::Cargo {
+                    fit.merge_cargo();
+                    structural = true;
+                }
             }
             Action::SetMode(mode) => fit.mode = Some(mode),
             Action::SetSecStatus(sec) => fit.sec_status = sec,
+            Action::ModuleToCargo(from, onto, transfer) => {
+                structural = fit.module_to_cargo(&loaded.catalog, from, onto, transfer);
+            }
+            Action::CargoToModule(type_id, onto, transfer) => {
+                structural = fit.cargo_to_module(&loaded.catalog, type_id, onto, transfer);
+            }
             Action::AddAdditions(kind, items) => {
                 for (type_id, count) in items {
                     match kind {
