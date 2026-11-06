@@ -2,8 +2,8 @@
 
 use gpui_kit::component::{ActiveTheme, Theme, ThemeMode, h_flex};
 use gpui_kit::{
-    App, Div, FontWeight, Hsla, ParentElement, SharedString, Styled, div, img,
-    prelude::FluentBuilder, px, relative, rgb,
+    App, Div, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled, div, img, px,
+    relative, rgb,
 };
 
 use std::rc::Rc;
@@ -188,24 +188,47 @@ pub fn apply_palette(palette: &Palette, cx: &mut App) {
     cx.refresh_windows();
 }
 
+/// Gap between a menu entry's icon and its label.
+const MENU_ICON_GAP: f32 = 10.;
+/// Extra room above and below each menu entry.
+const MENU_ROW_PADDING: f32 = 3.;
+const MENU_ICON_SIZE: f32 = 20.;
+
+/// The row every menu entry is drawn as, so plain, item and submenu entries line up.
+fn menu_row(icon: impl IntoElement, label: SharedString) -> Div {
+    h_flex()
+        .gap(px(MENU_ICON_GAP))
+        .py(px(MENU_ROW_PADDING))
+        .child(
+            div()
+                .flex_none()
+                .size(px(MENU_ICON_SIZE))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon),
+        )
+        .child(label)
+}
+
+fn ui_icon(icon: IconName, cx: &App) -> impl IntoElement {
+    gpui_kit::component::Icon::new(icon)
+        .size(px(16.))
+        .text_color(cx.theme().muted_foreground)
+}
+
 /// A menu entry showing an item's own icon next to its label.
 pub fn item_entry(
     loaded: &Rc<Loaded>,
     id: TypeId,
     label: impl Into<SharedString>,
 ) -> PopupMenuItem {
-    let (loaded, label) = (Rc::clone(loaded), label.into());
-    PopupMenuItem::element(move |_, _| {
-        h_flex()
-            .gap_2()
-            .child(icon_box(
-                &loaded.catalog,
-                &loaded.icons,
-                Icon::Type(id),
-                18.,
-            ))
-            .child(label.clone())
-    })
+    PopupMenuItem::element(item_label(loaded, Some(id), label))
+}
+
+/// A menu entry with one of the UI's own icons.
+pub fn entry(icon: IconName, label: impl Into<SharedString>) -> PopupMenuItem {
+    PopupMenuItem::element(icon_label(icon, label))
 }
 
 /// A submenu label showing an item's icon, for groups named after the item they start with.
@@ -216,23 +239,25 @@ pub fn item_label(
 ) -> impl Fn(&mut gpui_kit::Window, &mut App) -> Div + 'static {
     let (loaded, label) = (Rc::clone(loaded), label.into());
     move |_, _| {
-        h_flex()
-            .gap_2()
-            .when_some(id, |row, id| {
-                row.child(icon_box(
-                    &loaded.catalog,
-                    &loaded.icons,
-                    Icon::Type(id),
-                    18.,
-                ))
-            })
-            .child(label.clone())
+        let icon = id.map(|id| {
+            icon_box(
+                &loaded.catalog,
+                &loaded.icons,
+                Icon::Type(id),
+                MENU_ICON_SIZE,
+            )
+        });
+        menu_row(div().children(icon), label.clone())
     }
 }
 
-/// A menu entry with one of the UI's own icons.
-pub fn entry(icon: IconName, label: impl Into<SharedString>) -> PopupMenuItem {
-    PopupMenuItem::new(label).icon(icon)
+/// A submenu label with one of the UI's own icons.
+pub fn icon_label(
+    icon: IconName,
+    label: impl Into<SharedString>,
+) -> impl Fn(&mut gpui_kit::Window, &mut App) -> Div + 'static {
+    let label = label.into();
+    move |_, cx| menu_row(ui_icon(icon.clone(), cx), label.clone())
 }
 
 /// Short numbers the way pyfa writes them: 1.38k, 16.6k, 2.25M.

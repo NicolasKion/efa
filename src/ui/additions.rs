@@ -4,7 +4,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon as UiIcon, IconName, Sizable, WindowExt,
+    ActiveTheme, Disableable, IconName, Sizable, WindowExt,
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputState},
@@ -19,7 +19,7 @@ use gpui_kit::{
 
 use super::{
     Action, AddKind, AdditionsTab, Gyfa, Loaded,
-    widgets::{entry, icon_box, item_entry, short},
+    widgets::{entry, icon_box, icon_label, item_entry, short},
 };
 use crate::{
     data::{Catalog, Kind, TypeId},
@@ -456,9 +456,9 @@ fn addition_menu(
         let entries: Vec<(TypeId, String)> =
             variations.iter().map(|&v| (v, catalog.name(v))).collect();
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
-        menu = menu.submenu_with_icon(
-            Some(UiIcon::new(IconName::Replace)),
+        menu = menu.submenu_with_element(
             "Variations",
+            icon_label(IconName::Replace, "Variations"),
             window,
             cx,
             move |menu, _, _| {

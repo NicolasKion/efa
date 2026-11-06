@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::{
-    ActiveTheme, Icon as UiIcon, IconName, h_flex,
+    ActiveTheme, IconName, h_flex,
     menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
     v_flex,
 };
@@ -15,7 +15,7 @@ use gpui_kit::{
 
 use super::{
     Action, Gyfa, Loaded, RowRef, Scope,
-    widgets::{color, entry, icon, icon_box, item_entry, item_label, km, short},
+    widgets::{color, entry, icon, icon_box, icon_label, item_entry, item_label, km, short},
 };
 use crate::{
     data::{Catalog, Hardpoint, ItemType, Kind, Slot, TypeId},
@@ -586,7 +586,7 @@ fn item_menu(
     };
     if let Some(slot) = slot {
         menu = menu.item(
-            entry(IconName::Plus, format!("Fill With {}", t.name)).on_click(handler(
+            entry(IconName::Plus, format!("Fill With {}", t.category_label())).on_click(handler(
                 this,
                 move |g, _, _, cx| {
                     g.apply(Action::FillRack(slot, type_id), cx);
@@ -658,9 +658,9 @@ fn ship_entries(
     let modes = loaded.catalog.modes_for(ship);
     if !modes.is_empty() {
         let (this, loaded, prefix) = (this.clone(), Rc::clone(&loaded), format!("{ship_name} "));
-        menu = menu.submenu_with_icon(
-            Some(UiIcon::new(IconName::Settings2)),
+        menu = menu.submenu_with_element(
             "Tactical Mode",
+            icon_label(IconName::Settings2, "Tactical Mode"),
             window,
             cx,
             move |menu, _, _| {
@@ -684,9 +684,9 @@ fn ship_entries(
     }
     if SEC_STATUS_SHIPS.contains(&ship_name.as_str()) {
         let this = this.clone();
-        menu = menu.submenu_with_icon(
-            Some(UiIcon::new(IconName::CircleUser)),
+        menu = menu.submenu_with_element(
             "Pilot Security Status",
+            icon_label(IconName::CircleUser, "Pilot Security Status"),
             window,
             cx,
             move |menu, _, _| {
@@ -804,9 +804,9 @@ fn charge_submenu(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let (this, loaded) = (this.clone(), Rc::clone(loaded));
-    menu.submenu_with_icon(
-        Some(UiIcon::new(IconName::BatteryCharging)),
+    menu.submenu_with_element(
         "Charge",
+        icon_label(IconName::BatteryCharging, "Charge"),
         window,
         cx,
         move |menu, window, cx| {
@@ -876,9 +876,9 @@ fn spool_submenu(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let this = this.clone();
-    menu.submenu_with_icon(
-        Some(UiIcon::new(IconName::RefreshCw)),
+    menu.submenu_with_element(
         "Spoolup Cycles",
+        icon_label(IconName::RefreshCw, "Spoolup Cycles"),
         window,
         cx,
         move |menu, _, _| {
@@ -940,9 +940,9 @@ fn variations_submenu(
         }
     }
     let (this, loaded) = (this.clone(), Rc::clone(loaded));
-    menu.submenu_with_icon(
-        Some(UiIcon::new(IconName::Replace)),
+    menu.submenu_with_element(
         "Variations",
+        icon_label(IconName::Replace, "Variations"),
         window,
         cx,
         move |menu, _, _| {
