@@ -104,6 +104,8 @@ pub struct Gyfa {
     additions_anchor: Option<usize>,
     /// Keyboard focus of the additions list, for Delete, Ctrl+A and Escape.
     additions_focus: FocusHandle,
+    /// Takes the drones pane's keys: Delete, Escape, Ctrl+A.
+    drones_focus: FocusHandle,
     collapsed_sections: HashSet<&'static str>,
     status: Option<SharedString>,
     palette: Palette,
@@ -194,6 +196,7 @@ impl Gyfa {
             additions_selection: Vec::new(),
             additions_anchor: None,
             additions_focus: cx.focus_handle(),
+            drones_focus: cx.focus_handle(),
             collapsed_sections: HashSet::new(),
             status: None,
             palette,
@@ -336,6 +339,15 @@ impl Gyfa {
         {
             self.additions_tab = AdditionsTab::Implants;
             self.clear_selection();
+        }
+        // pyfa brings the drones pane forward when a drone goes in.
+        if added
+            && self.additions_tab != AdditionsTab::Drones
+            && catalog.get(id).is_some_and(|t| t.kind == Kind::Drone)
+        {
+            self.additions_tab = AdditionsTab::Drones;
+            self.additions_selection.clear();
+            self.additions_anchor = None;
         }
         self.status =
             (!added).then(|| format!("Nothing on this fit takes {}", catalog.name(id)).into());
@@ -673,7 +685,7 @@ impl Render for Gyfa {
                         resizable_panel()
                             .size(px(200.))
                             .size_range(px(80.)..px(600.))
-                            .child(self.additions(&loaded, cx)),
+                            .child(self.additions(&loaded, window, cx)),
                     )
                     .into_any_element()
             } else {

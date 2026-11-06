@@ -83,7 +83,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Column: heat damage / overload info (heat.py)
 - [ ] Column: price (price.py)
 - [~] Column: charge name and remaining charges/reload (ammo.py), name and icon only, refine: get_charge_count, get_charged_cycle_count
-- [ ] Column: drone EHP and drone regen (droneEhp.py, droneRegen.py), refine: drone stats get_stat_ehp, get_stat_rps
+- [x] Column: drone EHP and drone regen (droneEhp.py, droneRegen.py), refine: item stats get_stat_ehp, get_stat_erps
 - [ ] Column: fighter abilities (abilities.py), refine: iter_abilities
 - [x] Column: booster side effects (sideEffects.py), refine: iter_side_effects
 - [ ] Column: projection range (projectionRange.py), refine: proj get_range
@@ -117,7 +117,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Damage pattern switcher (builtinContextMenus/damagePatternChange.py)
 - [ ] Target profile switcher/adder/editor (builtinContextMenus/targetProfile/)
 - [x] Add charge/ammo to cargo, fill cargo (builtinContextMenus/cargoAdd.py, cargoAddAmmo.py, cargoFill.py)
-- [ ] Split/merge drone stacks (builtinContextMenus/droneSplitStack.py, droneAddStack.py)
+- [x] Split/merge drone stacks (builtinContextMenus/droneSplitStack.py, droneAddStack.py), merge by dragging a stack onto another
 - [ ] Fighter ability toggles (builtinContextMenus/fighterAbilities.py), refine: get_ability / set state
 - [x] Booster side effects toggles (builtinContextMenus/boosterSideEffects.py), refine: get_side_effect, set_state
 - [x] Apply/save implant set (builtinContextMenus/implantSetApply.py, implantSetSave.py)
@@ -131,12 +131,12 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 
 ## Additions pane
 
-- [x] Drones list with active count (builtinAdditionPanes/droneView.py), refine: add_drone, set_state
+- [x] Drones pane: pyfa's columns (state, name, max range, misc, speed, EHP, regen) from per-drone engine stats, sorted by drone class, state click launches/recalls the selection, double-click removes one drone (Alt: stack), Delete/Escape/Ctrl+A, market drops (Alt: full stack), drag a stack onto another to merge, Ctrl to copy (builtinAdditionPanes/droneView.py), refine: add_drone, item stats. No price column yet
 - [x] Implants and boosters list (builtinAdditionPanes/implantView.py, boosterView.py), refine: add_implant, add_booster
 - [x] Cargo: parsed from EFT and exported, added from the market (double-click with Ctrl/Alt batches, drag, menus), edited, dragged to and from the fit (builtinAdditionPanes/cargoView.py)
 - [~] Tabbed additions pane, in progress (gui/additionsPane.py)
 - [ ] Tab names with counts (pyfaGeneralPreferences.py "Extra info in Additions panel tab names")
-- [ ] Drone stack amount editing, separate stacks (droneView.py)
+- [x] Drone stack amount editing, separate stacks (droneView.py)
 - [ ] Fighters tab: squadrons, light/heavy/support tubes, abilities (builtinAdditionPanes/fighterView.py), refine: add_fighter, get_stat_launched_*_fighters, get_stat_fighter_bay_volume
 - [x] Cargo tab with amounts and volume, sorted like pyfa, Delete/Ctrl+A/Escape keys (cargoView.py); price column waits for a price source
 - [x] Commodities, materials, deployables and containers in the catalog for cargo; market tree shows pyfa's Deployable Structures and Filaments roots, search adds ice products (service/market.py)

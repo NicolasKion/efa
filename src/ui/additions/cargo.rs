@@ -373,7 +373,8 @@ impl Gyfa {
                 self.apply(Action::ModuleToCargo(row_position(row), onto, transfer), cx);
             }
             DragSource::Market => self.add_to_cargo(dragged.type_id, 1, cx),
-            DragSource::Cargo => {}
+            // Drones dragged off the drones pane stay drones; pyfa does not move them to cargo.
+            DragSource::Cargo | DragSource::Drone(_) => {}
         }
     }
 

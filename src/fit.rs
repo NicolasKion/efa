@@ -415,6 +415,54 @@ impl Fit {
         self.drones.iter().map(|d| d.active).sum()
     }
 
+    /// pyfa's drone state toggle: if the clicked stack has drones out, recall every stack in
+    /// `stacks`, otherwise launch all of them in full. Stacks are all-or-nothing, so a partly
+    /// launched stack counts as launched.
+    pub fn toggle_drones(&mut self, clicked: usize, stacks: &[usize]) {
+        let Some(launch) = self.drones.get(clicked).map(|d| d.active == 0) else {
+            return;
+        };
+        for &i in stacks.iter().chain([&clicked]) {
+            if let Some(stack) = self.drones.get_mut(i) {
+                stack.active = if launch { stack.count } else { 0 };
+            }
+        }
+    }
+
+    /// Take one drone out of a stack, dropping the stack once it is empty.
+    pub fn remove_drone(&mut self, i: usize) {
+        let Some(stack) = self.drones.get_mut(i) else {
+            return;
+        };
+        stack.count = stack.count.saturating_sub(1);
+        stack.active = stack.active.min(stack.count);
+        if stack.count == 0 {
+            self.drones.remove(i);
+        }
+    }
+
+    /// Fold stack `from` into stack `to`. Only stacks of the same drone merge; `to` keeps its
+    /// launched count. Returns whether anything changed.
+    pub fn merge_drones(&mut self, from: usize, to: usize) -> bool {
+        let (Some(src), Some(dst)) = (self.drones.get(from), self.drones.get(to)) else {
+            return false;
+        };
+        if from == to || src.type_id != dst.type_id {
+            return false;
+        }
+        let moved = src.count;
+        self.drones[to].count += moved;
+        self.drones.remove(from);
+        true
+    }
+
+    /// Add a copy of a stack as a stack of its own, launched state included.
+    pub fn clone_drones(&mut self, i: usize) {
+        if let Some(stack) = self.drones.get(i).cloned() {
+            self.drones.push(stack);
+        }
+    }
+
     pub fn to_eft(&self, catalog: &Catalog) -> String {
         let mut out = String::new();
         let ship = self
@@ -648,5 +696,84 @@ mod tests {
         let json = serde_json::to_string(&booster).expect("booster serializes");
         let again: Booster = serde_json::from_str(&json).expect("booster parses");
         assert_eq!(again, booster);
+    }
+}
+
+#[cfg(test)]
+mod drone_stack_tests {
+    use super::*;
+
+    fn stack(type_id: TypeId, count: u32, active: u32) -> DroneStack {
+        DroneStack {
+            type_id,
+            count,
+            active,
+        }
+    }
+
+    fn fit_with(drones: Vec<DroneStack>) -> Fit {
+        Fit {
+            drones,
+            ..Fit::default()
+        }
+    }
+
+    fn counts(fit: &Fit) -> Vec<(TypeId, u32, u32)> {
+        fit.drones
+            .iter()
+            .map(|d| (d.type_id, d.count, d.active))
+            .collect()
+    }
+
+    #[test]
+    fn toggle_follows_the_clicked_stack() {
+        let mut fit = fit_with(vec![stack(1, 5, 2), stack(2, 3, 0)]);
+        // The clicked stack is out, so everything targeted is recalled.
+        fit.toggle_drones(0, &[0, 1]);
+        assert_eq!(counts(&fit), [(1, 5, 0), (2, 3, 0)]);
+        // Now it is in, so everything targeted launches in full.
+        fit.toggle_drones(1, &[0, 1]);
+        assert_eq!(counts(&fit), [(1, 5, 5), (2, 3, 3)]);
+    }
+
+    #[test]
+    fn toggle_includes_the_clicked_stack_outside_the_selection() {
+        let mut fit = fit_with(vec![stack(1, 2, 0), stack(2, 2, 0)]);
+        fit.toggle_drones(1, &[0]);
+        assert_eq!(counts(&fit), [(1, 2, 2), (2, 2, 2)]);
+    }
+
+    #[test]
+    fn removing_one_drone_shrinks_then_drops_the_stack() {
+        let mut fit = fit_with(vec![stack(1, 2, 2), stack(2, 1, 0)]);
+        fit.remove_drone(0);
+        assert_eq!(counts(&fit), [(1, 1, 1), (2, 1, 0)]);
+        fit.remove_drone(1);
+        assert_eq!(counts(&fit), [(1, 1, 1)]);
+        fit.remove_drone(7);
+        assert_eq!(counts(&fit), [(1, 1, 1)]);
+    }
+
+    #[test]
+    fn merge_only_joins_the_same_drone() {
+        let mut fit = fit_with(vec![stack(1, 2, 2), stack(2, 3, 0), stack(1, 4, 0)]);
+        assert!(!fit.merge_drones(0, 1), "different drones");
+        assert!(!fit.merge_drones(0, 0), "same stack");
+        assert!(fit.merge_drones(2, 0));
+        assert_eq!(counts(&fit), [(1, 6, 2), (2, 3, 0)]);
+    }
+
+    #[test]
+    fn merge_into_a_later_stack_keeps_indices_straight() {
+        let mut fit = fit_with(vec![stack(1, 2, 0), stack(2, 1, 0), stack(1, 3, 1)]);
+        assert!(fit.merge_drones(0, 2));
+        assert_eq!(counts(&fit), [(2, 1, 0), (1, 5, 1)]);
+    }
+
+    #[test]
+    fn clone_adds_a_separate_stack() {
+        let mut fit = fit_with(vec![stack(1, 3, 1)]);
+        fit.clone_drones(0);
+        assert_eq!(counts(&fit), [(1, 3, 1), (1, 3, 1)]);
     }
 }

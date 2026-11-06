@@ -12,27 +12,26 @@ pub(super) use cargo::{drop_transfer, goes_to_cargo};
 use std::rc::Rc;
 
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName, Sizable, WindowExt,
+    ActiveTheme, IconName, WindowExt,
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputState},
-    menu::{ContextMenuExt, PopupMenu},
+    menu::PopupMenu,
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext, ClickEvent, ClipboardItem, Context, Div, InteractiveElement,
-    IntoElement, Modifiers, MouseButton, MouseDownEvent, ParentElement, SharedString, Stateful,
-    StatefulInteractiveElement, Styled, WeakEntity, Window, div, prelude::FluentBuilder, px,
+    App, AppContext, ClickEvent, ClipboardItem, Context, InteractiveElement, IntoElement,
+    Modifiers, ParentElement, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
+    prelude::FluentBuilder, px,
 };
 
 use super::{
     Action, AddKind, AdditionsTab, Gyfa, Loaded,
-    widgets::{entry, icon_box, icon_label, item_entry},
+    widgets::{entry, icon_label, item_entry},
 };
 use crate::{
     data::{Catalog, Kind, TypeId},
     fit::{Fit, split_count},
-    icons::Icon,
 };
 
 const ROW_HEIGHT: f32 = 28.;
@@ -99,6 +98,7 @@ impl Gyfa {
     pub(super) fn additions(
         &mut self,
         loaded: &Rc<Loaded>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let Some(current) = self.saved.current else {
@@ -154,7 +154,7 @@ impl Gyfa {
             }));
 
         let content = match self.additions_tab {
-            AdditionsTab::Drones => self.drones_tab(loaded, cx),
+            AdditionsTab::Drones => self.drones_tab(loaded, window, cx),
             AdditionsTab::Implants => self.implants_tab(loaded, cx),
             AdditionsTab::Boosters => self.boosters_tab(loaded, cx),
             AdditionsTab::Cargo => self.cargo_tab(loaded, cx),
@@ -164,133 +164,6 @@ impl Gyfa {
             .size_full()
             .child(tab_bar)
             .child(content)
-            .into_any_element()
-    }
-
-    /// A tab's rows as a scrolling list, with `before` above them. The shared layout the item
-    /// tabs start from.
-    pub(super) fn item_list(
-        &mut self,
-        loaded: &Rc<Loaded>,
-        kind: AddKind,
-        before: Vec<AnyElement>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(current) = self.saved.current else {
-            return div().into_any_element();
-        };
-        let fit = &self.saved.fits[current];
-        let theme = cx.theme();
-        let rows = kind.rows(fit);
-        let mut content = before;
-        if rows.is_empty() {
-            content.push(
-                div()
-                    .id("additions-empty")
-                    .p_2()
-                    .text_color(theme.muted_foreground)
-                    .child(match kind {
-                        AddKind::Drones => "Double-click drones in the market to add them.",
-                        AddKind::Implants => "Double-click implants in the market to add them.",
-                        AddKind::Boosters => "Double-click boosters in the market to add them.",
-                        AddKind::Cargo => "Right-click items in the market to put them in cargo.",
-                    })
-                    .context_menu({
-                        let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
-                        move |menu, _, cx| misc_entries(menu, &this, &loaded, kind, None, cx)
-                    })
-                    .into_any_element(),
-            );
-        }
-        for (i, &(type_id, amount)) in rows.iter().enumerate() {
-            let row = self.addition_row(loaded, fit, kind, i, type_id, amount, cx);
-            content.push(row);
-        }
-        v_flex()
-            .id("additions-list")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .children(content)
-            .into_any_element()
-    }
-
-    #[expect(clippy::too_many_arguments, reason = "one row needs all of these")]
-    fn addition_row(
-        &self,
-        loaded: &Rc<Loaded>,
-        fit: &Fit,
-        kind: AddKind,
-        i: usize,
-        type_id: TypeId,
-        amount: u32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let catalog = &loaded.catalog;
-        let theme = cx.theme();
-        let selected = self.additions_selection.contains(&i);
-        let mut row: Stateful<Div> = h_flex()
-            .id(SharedString::from(format!("addition-{i}")))
-            .gap_2()
-            .h(px(ROW_HEIGHT))
-            .px_2()
-            .when(i % 2 == 1, |r| r.bg(theme.table_even))
-            .when(selected, |r| r.bg(theme.table_active))
-            .hover(|s| s.bg(theme.table_hover));
-        if kind == AddKind::Drones {
-            let (active, count) = (fit.drones[i].active, fit.drones[i].count);
-            row = row
-                .child(
-                    Button::new(SharedString::from(format!("drone-less-{i}")))
-                        .ghost()
-                        .xsmall()
-                        .label("−")
-                        .disabled(active == 0)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            cx.stop_propagation();
-                            this.apply(Action::SetDronesActive(i, active.saturating_sub(1)), cx);
-                        })),
-                )
-                .child(div().w(px(36.)).child(format!("{active}/{count}")))
-                .child(
-                    Button::new(SharedString::from(format!("drone-more-{i}")))
-                        .ghost()
-                        .xsmall()
-                        .label("+")
-                        .disabled(active >= count)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            cx.stop_propagation();
-                            this.apply(Action::SetDronesActive(i, active + 1), cx);
-                        })),
-                );
-        }
-        let label = match kind {
-            AddKind::Cargo => format!("{} x{amount}", catalog.name(type_id)),
-            AddKind::Drones | AddKind::Implants | AddKind::Boosters => catalog.name(type_id),
-        };
-        row.child(icon_box(catalog, &loaded.icons, Icon::Type(type_id), 22.))
-            .child(div().flex_1().truncate().child(label))
-            .on_click(cx.listener(move |g, event: &ClickEvent, _, cx| {
-                if event.click_count() >= 2 {
-                    g.apply(Action::RemoveAdditions(kind, vec![i]), cx);
-                } else {
-                    g.select_addition(i, event.modifiers(), cx);
-                }
-            }))
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |g, _: &MouseDownEvent, _, cx| {
-                    if !g.additions_selection.contains(&i) {
-                        g.additions_selection = vec![i];
-                        g.additions_anchor = Some(i);
-                        cx.notify();
-                    }
-                }),
-            )
-            .context_menu({
-                let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
-                move |menu, window, cx| addition_menu(menu, &this, &loaded, kind, i, window, cx)
-            })
             .into_any_element()
     }
 

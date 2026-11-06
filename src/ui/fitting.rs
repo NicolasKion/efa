@@ -333,6 +333,8 @@ pub enum DragSource {
     Row(RowRef),
     /// A stack in the cargo tab.
     Cargo,
+    /// A stack of the drones pane, by its index in the fit.
+    Drone(usize),
 }
 
 /// An item being dragged: from the market onto a slot, or between slots.
@@ -437,6 +439,8 @@ impl Gyfa {
                     self.apply(Action::Swap(from, to), cx);
                 }
             }
+            // Drone stacks only move within the drones pane.
+            DragSource::Drone(_) => {}
             DragSource::Market => match (t.kind, on.position()) {
                 (Kind::Module(slot), Some((target, pos))) if slot == target => {
                     self.apply(Action::Place(slot, pos, t.id), cx);
