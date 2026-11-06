@@ -1,7 +1,7 @@
 # Feature parity with pyfa
 
 Rough coverage: the core loop works (pick ship, add modules/charges/drones/implants/boosters, see the main stats, EFT in/out), plus the pyfa layout with in-game icons and the main module columns, which is maybe 20-25% of pyfa's surface.
-Biggest gaps: characters and skills (everything is all V), target profiles and user damage patterns, projected/command/fleet effects, fighters, cargo editing, item stats window, graphs, prices, ESI/SSO, and most context menus.
+Biggest gaps: characters and skills (everything is all V), projected/command/fleet effects, fighters, cargo editing, item stats window, graphs, prices, ESI/SSO, and most context menus.
 Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, mutations, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
 Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time (needs looping over refine stats), lock/warp time formulas.
 
@@ -25,7 +25,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] System security zone per fit (builtinContextMenus/fitSystemSecurity.py), refine: set_sec_zone
 - [ ] Pilot security status per fit (builtinContextMenus/fitPilotSecurity.py), refine: set_sec_status
 - [ ] Per-fit character selection (gui/characterSelection.py)
-- [~] Per-fit damage pattern and target profile (gui/builtinStatsViews, contextMenus/damagePatternChange.py), damage pattern done, no target profile
+- [x] Per-fit damage pattern and target profile (gui/builtinStatsViews, contextMenus/damagePatternChange.py, targetProfile/switcher.py)
 - [x] Fit notes, carried by duplicates, shown in the fittings browser tooltip cut to 200 characters (builtinAdditionPanes/notesView.py, builtinShipBrowser/fitItem.py); EFT text has no notes in pyfa either
 - [ ] Mark fit as fleet booster / command fit (builtinAdditionPanes/commandView.py)
 - [ ] Backup all fits to XML (mainMenuBar.py backupFits)
@@ -113,9 +113,9 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Reactive armor hardener pattern (builtinContextMenus/moduleRahPattern.py), refine: set_rah_incoming_dps
 - [x] Factor in reload time toggle (builtinContextMenus/factorReload.py), refine: StatTimeOptions reload
 - [ ] Resist mode for EHP display (builtinContextMenus/resistMode.py)
-- [ ] Set damage pattern from loaded ammo (builtinContextMenus/ammoToDmgPattern.py)
-- [ ] Damage pattern switcher (builtinContextMenus/damagePatternChange.py)
-- [ ] Target profile switcher/adder/editor (builtinContextMenus/targetProfile/)
+- [x] Set damage pattern from a market charge (builtinContextMenus/ammoToDmgPattern.py)
+- [x] Damage pattern switcher with user patterns (builtinContextMenus/damagePatternChange.py)
+- [~] Target profile switcher/adder/editor (builtinContextMenus/targetProfile/): switcher and editor done; the adder and "Edit Target Profile" belong to the graphs window (ui::profile_menus::target_profile_menu and open_target_profile_editor are ready for it)
 - [x] Add charge/ammo to cargo, fill cargo (builtinContextMenus/cargoAdd.py, cargoAddAmmo.py, cargoFill.py)
 - [x] Split/merge drone stacks (builtinContextMenus/droneSplitStack.py, droneAddStack.py), merge by dragging a stack onto another
 - [ ] Fighter ability toggles (builtinContextMenus/fighterAbilities.py), refine: get_ability / set state
@@ -153,11 +153,11 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 
 - [x] Resources: hardpoints, launched drones or fighter squadrons, calibration, CPU and PG gauges, drone bay or fighter bay (cargo bay while the cargo tab is open), bandwidth, with pyfa's tooltips (builtinStatsViews/resourcesViewFull.py), refine: get_stat_launched_fighters, get_stat_fighter_bay_volume
 - [x] Resistances: gauges per layer, EHP or raw HP per layer and in the header (EHP/HP button), resist multiplier tooltips, incoming damage pattern row (builtinStatsViews/resistancesViewFull.py), refine: get_stat_ehp(Some(DpsProfile)), set_rah_incoming_dps
-- [x] Damage pattern per fit: Uniform, Selected Ammo and pyfa's builtin patterns from the header menu; user patterns not yet (damagePatternChange.py)
+- [x] Damage pattern per fit: Uniform, Selected Ammo and pyfa's builtin and the user's patterns from the header menu (damagePatternChange.py)
 - [x] Recharge rates: passive shield, reinforced and sustained shield/armor/hull in EHP/s or HP/s, armor spool range tooltip (builtinStatsViews/rechargeViewFull.py), refine: get_stat_rps
 - [x] Firepower: weapon and drone DPS (sentries count as drones), volley, total, spool and damage type tooltips, damage type bar, swap to mining yield (builtinStatsViews/firepowerViewFull.py), refine: get_stat_dmg
 - [x] Factor in Reload Time from the firepower menu, also used by the capacitor simulation (factorReload.py), refine: StatTimeOptions::Sim
-- [ ] Applied DPS vs target resists (firepowerViewFull.py "Effective" and targetProfile/switcher.py): refine's get_stat_dmg_applied needs a projectee item, there are no abstract target profiles yet
+- [x] Applied DPS vs target resists (firepowerViewFull.py "Effective" and targetProfile/switcher.py): like pyfa, only the profile's resists are applied, per damage type on refine's get_stat_dmg; breacher damage is not shown yet
 - [x] Mining yield: miner, drone, total with yield, drain and efficiency tooltips (builtinStatsViews/miningyieldViewFull.py), refine: get_stat_mps
 - [x] Remote reps: capacitor, shield, armor, hull with spool tooltips, plus neutralization when the fit neuts (builtinStatsViews/outgoingViewFull.py), refine: get_stat_outgoing_rps, get_stat_outgoing_cps, get_stat_outgoing_nps
 - [x] Capacitor: capacity, stable or lasts, delta with recharge/use tooltip, neutralizer resistance with effective capacity (builtinStatsViews/capacitorViewFull.py), refine: get_stat_cap_sim, get_stat_cap_balance, get_stat_neut_resist
@@ -189,10 +189,10 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 
 ## Damage and target profiles
 
-- [ ] Damage pattern editor with built-in NPC presets (gui/patternEditor.py, service/damagePattern.py), refine: set_default_incoming_dps
-- [ ] Damage pattern import/export (patternEditor.py)
-- [ ] Target profile editor: resists, sig, speed, radius (gui/targetProfileEditor.py, service/targetProfile.py)
-- [ ] Built-in target profiles (service/targetProfile.py)
+- [x] Damage pattern editor with built-in NPC presets (gui/patternEditor.py, service/damagePattern.py), refine: set_default_incoming_dps
+- [x] Damage pattern import/export (patternEditor.py)
+- [x] Target profile editor: resists, sig, speed, radius, HP (gui/targetProfileEditor.py, service/targetProfile.py)
+- [x] Built-in target profiles (service/targetProfile.py)
 - [ ] Global vs per-fit damage pattern pref (pyfaGeneralPreferences.py)
 - [ ] Target profile from a fit (graphs and applied DPS), refine: get_stat_dmg_applied against projectee
 

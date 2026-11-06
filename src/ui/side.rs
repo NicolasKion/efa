@@ -457,5 +457,18 @@ fn market_menu(
             .on_click(to_cargo(batch)),
         );
     }
+    if t.damage.iter().any(|&d| d > 0.0) {
+        let profile = crate::fit::DamageProfile::Pattern {
+            name: crate::damage_pattern::SELECTED_AMMO.to_owned(),
+            amounts: t.damage,
+        };
+        menu = menu.item(
+            entry(
+                IconName::ChartPie,
+                format!("Set {category} as Damage Pattern"),
+            )
+            .on_click(apply(Action::SetDamageProfile(profile))),
+        );
+    }
     menu
 }

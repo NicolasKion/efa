@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{fit::Fit, implant_set::ImplantSet};
+use crate::{
+    damage_pattern::DamagePattern, fit::Fit, implant_set::ImplantSet, target_profile::TargetProfile,
+};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -22,6 +24,12 @@ pub struct Saved {
     pub implant_sets: Vec<ImplantSet>,
     /// Which groups the price total counts, pyfa's price view menu.
     pub price_totals: PriceTotals,
+    /// The user's damage patterns, pyfa's Damage Pattern Editor.
+    #[serde(default)]
+    pub damage_patterns: Vec<DamagePattern>,
+    /// The user's target profiles, pyfa's Target Profile Editor.
+    #[serde(default)]
+    pub target_profiles: Vec<TargetProfile>,
 }
 
 /// What besides ship and fittings the price total includes, with pyfa's defaults.

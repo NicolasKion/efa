@@ -11,9 +11,12 @@ use gpui_kit::{
 
 use super::{Pane, Section, format, ids, muted, tip, title};
 use crate::{
-    engine::{Damage, MiningRate, SpoolRange},
+    engine::{Damage, FirepowerDetail, MiningRate, SpoolRange},
+    target_profile::applied,
     ui::{
         Gyfa,
+        actions::Action,
+        profile_menus::{FirstProfile, PickProfile, target_profile_menu},
         widgets::{DAMAGE_COLORS, color, icon},
     },
 };
@@ -61,6 +64,19 @@ fn dps_tooltip(normal: Damage, spool: SpoolRange) -> String {
         }
     }
     lines.join("\n")
+}
+
+/// A spool range scaled the way the current value changed from `raw` to `applied`.
+fn scaled(range: SpoolRange, applied: Damage, raw: Damage) -> SpoolRange {
+    let factor = if raw.total() > 0.0 {
+        applied.total() / raw.total()
+    } else {
+        1.0
+    };
+    SpoolRange {
+        pre: range.pre * factor,
+        full: range.full * factor,
+    }
 }
 
 fn minus(a: Damage, b: Damage) -> Damage {
@@ -111,9 +127,19 @@ pub(super) fn firepower(
     cx: &Context<Gyfa>,
 ) -> Section {
     let s = p.stats;
-    let f = s.firepower;
-    let drone = f.drone_dps;
-    let weapon = minus(s.dps, drone);
+    let target = p.fit.target_profile.as_ref();
+    // pyfa's "Effective" numbers only take the target's resists off. Spool-up scales every
+    // damage type alike, so the spool ranges scale by the same factor as the current value.
+    let (raw_weapon, raw_volley, raw_dps) = (minus(s.dps, s.firepower.drone_dps), s.volley, s.dps);
+    let (dps, volley) = (applied(raw_dps, target), applied(raw_volley, target));
+    let drone = applied(s.firepower.drone_dps, target);
+    let weapon = minus(dps, drone);
+    let f = FirepowerDetail {
+        drone_dps: drone,
+        weapon_dps: scaled(s.firepower.weapon_dps, weapon, raw_weapon),
+        volley: scaled(s.firepower.volley, volley, raw_volley),
+        dps: scaled(s.firepower.dps, dps, raw_dps),
+    };
     let no_spool = SpoolRange {
         pre: drone.total(),
         full: drone.total(),
@@ -131,7 +157,7 @@ pub(super) fn firepower(
         .into_any_element()
     };
 
-    let parts = [s.dps.em, s.dps.thermal, s.dps.kinetic, s.dps.explosive];
+    let parts = [dps.em, dps.thermal, dps.kinetic, dps.explosive];
     let total: f64 = parts.iter().sum();
     // Labels right-aligned in one column and numbers in the next, so the numbers line up.
     let totals = h_flex()
@@ -144,8 +170,8 @@ pub(super) fn firepower(
         )
         .child(
             v_flex()
-                .child(value("volley", s.volley, f.volley, ""))
-                .child(value("dps", s.dps, f.dps, "")),
+                .child(value("volley", volley, f.volley, ""))
+                .child(value("dps", dps, f.dps, "")),
         );
     let body = v_flex()
         .gap_2()
@@ -193,7 +219,30 @@ pub(super) fn firepower(
         })
         .into_any_element();
 
+    // pyfa marks numbers taken against a target profile "( Effective )" in the header.
+    let header = match target {
+        Some(target) => h_flex()
+            .gap_1()
+            .child(title("Firepower"))
+            .child(tip(
+                "fp-effective",
+                muted("( Effective )", cx),
+                format!("Against target profile {}", target.name),
+            ))
+            .into_any_element(),
+        None => title("Firepower"),
+    };
     let this = this.clone();
+    let current = target.map(|t| t.name.clone());
+    let user = Rc::clone(&p.target_profiles);
+    let pick: PickProfile = {
+        let this = this.clone();
+        Rc::new(move |profile, _, cx| {
+            Gyfa::app_update(&this, cx, |g, cx| {
+                g.apply(Action::SetTargetProfile(profile), cx);
+            });
+        })
+    };
     Section {
         action: Some(swap_button(
             p,
@@ -203,10 +252,11 @@ pub(super) fn firepower(
             cx,
         )),
         key: "Firepower",
-        title: title("Firepower"),
+        title: header,
         body,
-        menu: Some(Rc::new(move |menu, _, _| {
+        menu: Some(Rc::new(move |menu, window, cx| {
             let this = this.clone();
+            let (user, current, pick) = (Rc::clone(&user), current.clone(), Rc::clone(&pick));
             menu.item(
                 PopupMenuItem::new("Factor in Reload Time")
                     .checked(factor_reload)
@@ -217,6 +267,17 @@ pub(super) fn firepower(
                         });
                     }),
             )
+            .submenu("Target Resists", window, cx, move |menu, window, cx| {
+                target_profile_menu(
+                    menu,
+                    &user,
+                    current.as_deref(),
+                    FirstProfile::NoProfile,
+                    &pick,
+                    window,
+                    cx,
+                )
+            })
         })),
     }
 }
