@@ -11,7 +11,7 @@ use gpui_kit::{ClickEvent, Context, Modifiers};
 use super::Gyfa;
 use crate::{
     data::{Slot, TypeId},
-    fit::{Module, ModuleState},
+    fit::{Module, ModuleState, trim_rack},
 };
 
 /// A row of the fitting view that holds something.
@@ -61,6 +61,10 @@ pub enum Action {
     SwapType(Vec<RowRef>, TypeId),
     /// Put copies of a module into every free slot of its rack.
     FillRack(Slot, TypeId),
+    /// Put an item at a rack position, replacing what is there.
+    Place(Slot, usize, TypeId),
+    /// Swap two positions of the same rack; either may be empty.
+    Swap(RowRef, RowRef),
     SetDronesActive(usize, u32),
     AddCargo(TypeId, u32),
     AddDrones(TypeId, u32),
@@ -106,12 +110,12 @@ impl Gyfa {
                             fit.rack(slot)
                                 .iter()
                                 .enumerate()
-                                .filter(|(_, m)| m.type_id == type_id)
+                                .filter(|(_, m)| m.as_ref().is_some_and(|m| m.type_id == type_id))
                                 .map(move |(i, _)| RowRef::Module(slot, i))
                         })
                         .collect(),
                     RowRef::Rig(_) => (0..fit.rigs.len())
-                        .filter(|&i| fit.rigs[i] == type_id)
+                        .filter(|&i| fit.rigs[i] == Some(type_id))
                         .map(RowRef::Rig)
                         .collect(),
                     RowRef::Subsystem(_) => vec![clicked],
@@ -123,8 +127,8 @@ impl Gyfa {
     pub(super) fn row_type(&self, row: RowRef) -> Option<TypeId> {
         let fit = self.fit()?;
         match row {
-            RowRef::Module(slot, i) => fit.rack(slot).get(i).map(|m| m.type_id),
-            RowRef::Rig(i) => fit.rigs.get(i).copied(),
+            RowRef::Module(slot, i) => fit.rack(slot).get(i)?.as_ref().map(|m| m.type_id),
+            RowRef::Rig(i) => fit.rigs.get(i).copied().flatten(),
             RowRef::Subsystem(i) => fit.subsystems.get(i).copied(),
         }
     }
@@ -187,7 +191,9 @@ impl Gyfa {
         let mut structural = false;
         match action {
             Action::CycleState(slot, i) => {
-                let m = &mut fit.rack_mut(slot)[i];
+                let Some(Some(m)) = fit.rack_mut(slot).get_mut(i) else {
+                    return;
+                };
                 let t = loaded.catalog.get(m.type_id);
                 let activatable = t.is_some_and(|t| t.activatable);
                 let overloadable = t.is_some_and(|t| t.overloadable);
@@ -220,21 +226,84 @@ impl Gyfa {
                 }
             }
             Action::Remove(rows) => {
-                // Highest index first, so earlier removals do not shift later ones.
+                // Modules and rigs leave their position empty; subsystems have no positions, so
+                // remove from the end first to keep earlier indices valid.
                 let rows: BTreeSet<RowRef> = rows.into_iter().collect();
                 for row in rows.into_iter().rev() {
                     match row {
-                        RowRef::Module(slot, i) if i < fit.rack(slot).len() => {
-                            fit.rack_mut(slot).remove(i);
+                        RowRef::Module(slot, i) => {
+                            if let Some(position) = fit.rack_mut(slot).get_mut(i) {
+                                *position = None;
+                            }
                         }
-                        RowRef::Rig(i) if i < fit.rigs.len() => {
-                            fit.rigs.remove(i);
+                        RowRef::Rig(i) => {
+                            if let Some(position) = fit.rigs.get_mut(i) {
+                                *position = None;
+                            }
                         }
                         RowRef::Subsystem(i) if i < fit.subsystems.len() => {
                             fit.subsystems.remove(i);
                         }
-                        _ => {}
+                        RowRef::Subsystem(_) => {}
                     }
+                }
+                for slot in [Slot::High, Slot::Mid, Slot::Low] {
+                    trim_rack(fit.rack_mut(slot));
+                }
+                trim_rack(&mut fit.rigs);
+                structural = true;
+            }
+            Action::Place(slot, i, type_id) => {
+                let Some(t) = loaded.catalog.get(type_id) else {
+                    return;
+                };
+                match slot {
+                    Slot::High | Slot::Mid | Slot::Low => {
+                        let rack = fit.rack_mut(slot);
+                        if rack.len() <= i {
+                            rack.resize_with(i + 1, || None);
+                        }
+                        let initial = if t.activatable {
+                            ModuleState::Active
+                        } else {
+                            ModuleState::Online
+                        };
+                        rack[i] = Some(Module {
+                            type_id,
+                            state: initial,
+                            charge: None,
+                            spool: None,
+                        });
+                    }
+                    Slot::Rig => {
+                        if fit.rigs.len() <= i {
+                            fit.rigs.resize(i + 1, None);
+                        }
+                        fit.rigs[i] = Some(type_id);
+                    }
+                    Slot::Subsystem => {
+                        fit.add(&loaded.catalog, type_id);
+                    }
+                }
+            }
+            Action::Swap(a, b) => {
+                match (a, b) {
+                    (RowRef::Module(slot_a, i), RowRef::Module(slot_b, j)) if slot_a == slot_b => {
+                        let rack = fit.rack_mut(slot_a);
+                        if rack.len() <= i.max(j) {
+                            rack.resize_with(i.max(j) + 1, || None);
+                        }
+                        rack.swap(i, j);
+                        trim_rack(rack);
+                    }
+                    (RowRef::Rig(i), RowRef::Rig(j)) => {
+                        if fit.rigs.len() <= i.max(j) {
+                            fit.rigs.resize(i.max(j) + 1, None);
+                        }
+                        fit.rigs.swap(i, j);
+                        trim_rack(&mut fit.rigs);
+                    }
+                    _ => return,
                 }
                 structural = true;
             }
@@ -242,7 +311,7 @@ impl Gyfa {
                 for row in rows {
                     match row {
                         RowRef::Module(slot, i) => {
-                            if let Some(m) = fit.rack_mut(slot).get_mut(i) {
+                            if let Some(Some(m)) = fit.rack_mut(slot).get_mut(i) {
                                 m.type_id = type_id;
                                 // The new variation may not take the old charge.
                                 let keeps = m.charge.is_some_and(|c| {
@@ -256,8 +325,8 @@ impl Gyfa {
                             }
                         }
                         RowRef::Rig(i) => {
-                            if let Some(r) = fit.rigs.get_mut(i) {
-                                *r = type_id;
+                            if let Some(r) = fit.rigs.get_mut(i).filter(|r| r.is_some()) {
+                                *r = Some(type_id);
                             }
                         }
                         RowRef::Subsystem(i) => {
@@ -270,9 +339,9 @@ impl Gyfa {
             }
             Action::FillRack(slot, type_id) => {
                 let used = match slot {
-                    Slot::Rig => fit.rigs.len(),
+                    Slot::Rig => fit.rigs.iter().flatten().count(),
                     Slot::Subsystem => fit.subsystems.len(),
-                    Slot::High | Slot::Mid | Slot::Low => fit.rack(slot).len(),
+                    Slot::High | Slot::Mid | Slot::Low => fit.rack(slot).iter().flatten().count(),
                 };
                 for _ in 0..free(slot, used, stats) {
                     fit.add(&loaded.catalog, type_id);
@@ -397,7 +466,7 @@ fn modules_mut<'f>(fit: &'f mut crate::fit::Fit, rows: &[RowRef]) -> Vec<&'f mut
             rack.iter_mut()
                 .enumerate()
                 .filter(|(i, _)| wanted.contains(&(slot, *i)))
-                .map(|(_, m)| m)
+                .filter_map(|(_, m)| m.as_mut())
                 .collect::<Vec<_>>()
         })
         .collect()

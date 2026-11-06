@@ -6,13 +6,14 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Context, InteractiveElement, IntoElement, ParentElement,
-    SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
+    AnyElement, App, AppContext, ClickEvent, Context, InteractiveElement, IntoElement,
+    ParentElement, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
     prelude::FluentBuilder, px,
 };
 
 use super::{
     Action, BrowserTab, Gyfa, Loaded,
+    fitting::{DragPreview, DragSource, Dragged},
     widgets::{entry, icon_box},
 };
 use crate::{
@@ -201,6 +202,14 @@ impl Gyfa {
                     this.add_item(id, cx);
                 }
             }))
+            .when_some(
+                Dragged::of(loaded, DragSource::Market, Some(id)),
+                |row, dragged| {
+                    row.on_drag(dragged, |dragged, _, _, cx| {
+                        cx.new(|_| DragPreview(dragged.clone()))
+                    })
+                },
+            )
             .context_menu({
                 let this = Self::weak(cx);
                 move |menu, _, cx| market_menu(menu, &this, id, context, cx)

@@ -161,9 +161,11 @@ impl Engine {
             (Slot::Low, ModRack::Low, &fit.low),
         ] {
             for (i, m) in modules.iter().enumerate() {
+                let Some(m) = m else { continue };
+                // Each module goes to its own position; heat spreads by position.
                 match f.add_module(
                     rack,
-                    AddMode::Append,
+                    AddMode::Replace(rc::RackPos::from_usize_clamped(i)),
                     ItemTypeId::from_i32(m.type_id),
                     module_state(m.state),
                 ) {
@@ -188,7 +190,7 @@ impl Engine {
         if let Some(sec) = fit.sec_status {
             f.set_sec_status(rc::FitSecStatus::from_f64_clamped(sec));
         }
-        for &rig in &fit.rigs {
+        for &rig in fit.rigs.iter().flatten() {
             f.add_rig(ItemTypeId::from_i32(rig));
         }
         for &subsystem in &fit.subsystems {

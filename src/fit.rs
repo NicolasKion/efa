@@ -47,10 +47,12 @@ pub struct DroneStack {
 pub struct Fit {
     pub name: String,
     pub ship: Option<TypeId>,
-    pub high: Vec<Module>,
-    pub mid: Vec<Module>,
-    pub low: Vec<Module>,
-    pub rigs: Vec<TypeId>,
+    /// Racks by position; None is an empty slot. Position matters for heat, which spreads to
+    /// neighbouring slots, so modules keep their place when others are removed.
+    pub high: Vec<Option<Module>>,
+    pub mid: Vec<Option<Module>>,
+    pub low: Vec<Option<Module>>,
+    pub rigs: Vec<Option<TypeId>>,
     pub subsystems: Vec<TypeId>,
     pub drones: Vec<DroneStack>,
     pub implants: Vec<TypeId>,
@@ -77,7 +79,7 @@ impl Fit {
         }
     }
 
-    pub fn rack(&self, slot: Slot) -> &Vec<Module> {
+    pub fn rack(&self, slot: Slot) -> &Vec<Option<Module>> {
         match slot {
             Slot::High => &self.high,
             Slot::Mid => &self.mid,
@@ -85,7 +87,7 @@ impl Fit {
         }
     }
 
-    pub fn rack_mut(&mut self, slot: Slot) -> &mut Vec<Module> {
+    pub fn rack_mut(&mut self, slot: Slot) -> &mut Vec<Option<Module>> {
         match slot {
             Slot::High => &mut self.high,
             Slot::Mid => &mut self.mid,
@@ -118,14 +120,17 @@ impl Fit {
                 } else {
                     ModuleState::Online
                 };
-                self.rack_mut(slot).push(Module {
-                    type_id,
-                    state,
-                    charge: None,
-                    spool: None,
-                });
+                place_first_free(
+                    self.rack_mut(slot),
+                    Module {
+                        type_id,
+                        state,
+                        charge: None,
+                        spool: None,
+                    },
+                );
             }
-            Kind::Module(Slot::Rig) => self.rigs.push(type_id),
+            Kind::Module(Slot::Rig) => place_first_free(&mut self.rigs, type_id),
             Kind::Module(Slot::Subsystem) => self.subsystems.push(type_id),
             Kind::Charge => {
                 let mut loaded = false;
@@ -134,6 +139,7 @@ impl Fit {
                     .iter_mut()
                     .chain(&mut self.mid)
                     .chain(&mut self.low)
+                    .flatten()
                 {
                     if catalog.get(module.type_id).is_some_and(|m| t.fits_in(m)) {
                         module.charge = Some(type_id);
@@ -200,7 +206,7 @@ impl Fit {
 
     /// High, mid and low modules, in that order.
     pub fn modules(&self) -> impl Iterator<Item = &Module> {
-        self.high.iter().chain(&self.mid).chain(&self.low)
+        self.high.iter().chain(&self.mid).chain(&self.low).flatten()
     }
 
     pub fn launched(&self) -> u32 {
@@ -214,7 +220,10 @@ impl Fit {
             .map_or_else(|| "No ship".to_owned(), |s| catalog.name(s));
         let _ = writeln!(out, "[{ship}, {}]", self.name);
 
-        let module_line = |m: &Module| {
+        let module_line = |empty: &'static str, m: &Option<Module>| {
+            let Some(m) = m else {
+                return format!("[Empty {empty} slot]");
+            };
             let mut line = catalog.name(m.type_id);
             if let Some(charge) = m.charge {
                 let _ = write!(line, ", {}", catalog.name(charge));
@@ -225,10 +234,13 @@ impl Fit {
             line
         };
         let mut sections: Vec<Vec<String>> = vec![
-            self.low.iter().map(module_line).collect(),
-            self.mid.iter().map(module_line).collect(),
-            self.high.iter().map(module_line).collect(),
-            self.rigs.iter().map(|&r| catalog.name(r)).collect(),
+            self.low.iter().map(|m| module_line("Low", m)).collect(),
+            self.mid.iter().map(|m| module_line("Med", m)).collect(),
+            self.high.iter().map(|m| module_line("High", m)).collect(),
+            self.rigs
+                .iter()
+                .map(|r| r.map_or_else(|| "[Empty Rig slot]".to_owned(), |r| catalog.name(r)))
+                .collect(),
             self.subsystems
                 .iter()
                 .chain(&self.mode)
@@ -286,7 +298,17 @@ impl Fit {
                 in_cargo_section = seen_stacks;
                 continue;
             }
-            if line.starts_with("[Empty ") {
+            if let Some(empty) = line
+                .strip_prefix("[Empty ")
+                .and_then(|l| l.strip_suffix(" slot]"))
+            {
+                match empty {
+                    "High" => fit.high.push(None),
+                    "Med" => fit.mid.push(None),
+                    "Low" => fit.low.push(None),
+                    "Rig" => fit.rigs.push(None),
+                    _ => {}
+                }
                 continue;
             }
             let (line, offline) = match line.strip_suffix("/OFFLINE") {
@@ -332,13 +354,15 @@ impl Fit {
                         }
                         found
                     });
-                    fit.rack_mut(slot).push(Module {
+                    fit.rack_mut(slot).push(Some(Module {
                         type_id: t.id,
                         state,
                         charge,
                         spool: None,
-                    });
+                    }));
                 }
+                // EFT lists rigs in position, empty slots included.
+                (Kind::Module(Slot::Rig), None) => fit.rigs.push(Some(t.id)),
                 _ => {
                     fit.add(catalog, t.id);
                 }
@@ -351,6 +375,21 @@ impl Fit {
             room -= stack.active;
         }
         Ok((fit, unknown))
+    }
+}
+
+/// Put an item into the first empty position, or after the last one.
+fn place_first_free<T>(rack: &mut Vec<Option<T>>, item: T) {
+    match rack.iter_mut().find(|slot| slot.is_none()) {
+        Some(slot) => *slot = Some(item),
+        None => rack.push(Some(item)),
+    }
+}
+
+/// Drop trailing empty positions; they mean nothing past the last module.
+pub fn trim_rack<T>(rack: &mut Vec<Option<T>>) {
+    while rack.last().is_some_and(Option::is_none) {
+        rack.pop();
     }
 }
 

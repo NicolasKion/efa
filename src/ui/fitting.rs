@@ -8,9 +8,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Context, Div, FontWeight, InteractiveElement, IntoElement,
-    MouseButton, MouseDownEvent, ParentElement, SharedString, Stateful, StatefulInteractiveElement,
-    Styled, WeakEntity, Window, div, prelude::FluentBuilder, px,
+    AnyElement, App, AppContext, ClickEvent, Context, Div, FontWeight, InteractiveElement,
+    IntoElement, MouseButton, MouseDownEvent, ParentElement, Render, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, WeakEntity, Window, div, img, prelude::FluentBuilder, px,
 };
 
 use super::{
@@ -18,7 +18,7 @@ use super::{
     widgets::{color, entry, icon, icon_box, item_entry, km, short},
 };
 use crate::{
-    data::{Catalog, Hardpoint, ItemType, Slot, TypeId},
+    data::{Catalog, Hardpoint, ItemType, Kind, Slot, TypeId},
     engine::{ModuleInfo, Stats},
     fit::{Fit, Module, ModuleState},
     icons::Icon,
@@ -43,7 +43,7 @@ enum Row {
         total: u32,
     },
     Item(RowRef),
-    Empty(Slot),
+    Empty(Slot, usize),
     /// A tactical destroyer's mode, shown under the racks like pyfa does.
     Mode(TypeId),
 }
@@ -58,7 +58,7 @@ impl Gyfa {
             .into_iter()
             .filter_map(|row| match row {
                 Row::Item(r) => Some(r),
-                Row::Header { .. } | Row::Empty(_) | Row::Mode(_) => None,
+                Row::Header { .. } | Row::Empty(..) | Row::Mode(_) => None,
             })
             .collect()
     }
@@ -194,31 +194,42 @@ impl Gyfa {
                 .child(div().flex_1().truncate().child(catalog.name(mode)))
                 .context_menu(ship_menu_builder(Self::weak(cx), ship))
                 .into_any_element(),
-            Row::Empty(slot) => base
-                .child(div().w(px(STATE_W + ICON_W)).flex_none())
-                .child(
+            Row::Empty(slot, pos) => {
+                let row = base.child(div().w(px(STATE_W + ICON_W)).flex_none()).child(
                     div()
                         .text_color(theme.muted_foreground)
                         .child(format!("[Empty {} slot]", slot_name(slot))),
-                )
-                .context_menu(ship_menu_builder(Self::weak(cx), ship))
-                .into_any_element(),
+                );
+                drop_target(row, DropOn::Empty(slot, pos), cx)
+                    .context_menu(ship_menu_builder(Self::weak(cx), ship))
+                    .into_any_element()
+            }
             Row::Item(item) => {
                 let base = match item {
                     RowRef::Module(slot, i) => {
-                        let m = &fit.rack(slot)[i];
+                        let Some(m) = &fit.rack(slot)[i] else {
+                            return div().into_any_element();
+                        };
                         let info = stats.modules.get(&(slot, i)).copied().unwrap_or_default();
                         self.module_cells(base, loaded, (slot, i), m, info, cx)
                     }
                     RowRef::Rig(i) | RowRef::Subsystem(i) => {
                         let id = match item {
-                            RowRef::Rig(_) => fit.rigs[i],
+                            RowRef::Rig(_) => fit.rigs[i].unwrap_or_default(),
                             _ => fit.subsystems[i],
                         };
                         base.child(div().w(px(STATE_W)).flex_none())
                             .child(icon_box(catalog, &loaded.icons, Icon::Type(id), 22.))
                             .child(div().flex_1().truncate().child(catalog.name(id)))
                     }
+                };
+                let dragged = Dragged::of(loaded, DragSource::Row(item), self.row_type(item));
+                let base = drop_target(base, DropOn::Item(item), cx);
+                let base = match dragged {
+                    Some(dragged) => base.on_drag(dragged, |dragged, _, _, cx| {
+                        cx.new(|_| DragPreview(dragged.clone()))
+                    }),
+                    None => base,
                 };
                 item_row_behaviour(base, loaded, item, ship, cx)
             }
@@ -340,6 +351,125 @@ fn item_row_behaviour(
     .into_any_element()
 }
 
+/// Where a dragged item came from.
+#[derive(Debug, Clone, Copy)]
+pub enum DragSource {
+    Market,
+    Row(RowRef),
+}
+
+/// An item being dragged: from the market onto a slot, or between slots.
+#[derive(Debug, Clone)]
+pub struct Dragged {
+    pub source: DragSource,
+    pub type_id: TypeId,
+    label: SharedString,
+    icon: Option<std::path::PathBuf>,
+}
+
+impl Dragged {
+    pub fn of(loaded: &Loaded, source: DragSource, type_id: Option<TypeId>) -> Option<Self> {
+        let type_id = type_id?;
+        Some(Self {
+            source,
+            type_id,
+            label: loaded.catalog.name(type_id).into(),
+            icon: loaded.icons.path(&loaded.catalog, Icon::Type(type_id)),
+        })
+    }
+}
+
+/// What follows the pointer while dragging: the item's icon and name.
+pub struct DragPreview(pub Dragged);
+
+impl Render for DragPreview {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        h_flex()
+            .gap_2()
+            .px_2()
+            .py_1()
+            .rounded(px(4.))
+            .bg(theme.popover)
+            .text_color(theme.popover_foreground)
+            .border_1()
+            .border_color(theme.ring)
+            .shadow_md()
+            .opacity(0.9)
+            .when_some(self.0.icon.clone(), |row, path| {
+                row.child(img(path).size(px(22.)))
+            })
+            .child(self.0.label.clone())
+    }
+}
+
+/// A fitting row a drag can end on.
+#[derive(Debug, Clone, Copy)]
+enum DropOn {
+    Item(RowRef),
+    Empty(Slot, usize),
+}
+
+impl DropOn {
+    fn position(self) -> Option<(Slot, usize)> {
+        match self {
+            Self::Item(RowRef::Module(slot, i)) | Self::Empty(slot, i) => Some((slot, i)),
+            Self::Item(RowRef::Rig(i)) => Some((Slot::Rig, i)),
+            Self::Item(RowRef::Subsystem(_)) => None,
+        }
+    }
+
+    fn row(self) -> Option<RowRef> {
+        match self {
+            Self::Item(row) => Some(row),
+            Self::Empty(Slot::Rig, i) => Some(RowRef::Rig(i)),
+            Self::Empty(slot @ (Slot::High | Slot::Mid | Slot::Low), i) => {
+                Some(RowRef::Module(slot, i))
+            }
+            Self::Empty(Slot::Subsystem, _) => None,
+        }
+    }
+}
+
+/// Highlight a row while something is dragged over it, and handle the drop.
+fn drop_target(row: Stateful<Div>, on: DropOn, cx: &mut Context<Gyfa>) -> Stateful<Div> {
+    row.drag_over::<Dragged>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+        .on_drop(cx.listener(move |g, dragged: &Dragged, _, cx| {
+            cx.stop_propagation();
+            g.drop_on(on, dragged, cx);
+        }))
+}
+
+impl Gyfa {
+    /// pyfa's drop rules: a module onto its own rack goes to that position, a charge onto a
+    /// module loads it, a module dragged within its rack swaps places, anything else is added.
+    fn drop_on(&mut self, on: DropOn, dragged: &Dragged, cx: &mut Context<Self>) {
+        let Some(loaded) = self.loaded() else { return };
+        let Some(t) = loaded.catalog.get(dragged.type_id) else {
+            return;
+        };
+        match dragged.source {
+            DragSource::Row(from) => {
+                if let Some(to) = on.row() {
+                    self.apply(Action::Swap(from, to), cx);
+                }
+            }
+            DragSource::Market => match (t.kind, on.position()) {
+                (Kind::Module(slot), Some((target, pos))) if slot == target => {
+                    self.apply(Action::Place(slot, pos, t.id), cx);
+                }
+                (Kind::Charge, Some(_)) => match on {
+                    DropOn::Item(row @ RowRef::Module(..)) => {
+                        self.apply(Action::SetCharge(vec![row], Some(t.id)), cx);
+                    }
+                    _ => self.add_item(t.id, cx),
+                },
+                _ => self.add_item(t.id, cx),
+            },
+        }
+    }
+}
+
 /// What a row's menu needs to know, read when the menu opens.
 struct MenuSnapshot {
     item: RowRef,
@@ -355,10 +485,10 @@ impl MenuSnapshot {
         let fit = g.fit()?;
         let (type_id, module) = match item {
             RowRef::Module(slot, i) => {
-                let m = fit.rack(slot).get(i)?.clone();
+                let m = fit.rack(slot).get(i)?.clone()?;
                 (m.type_id, Some(m))
             }
-            RowRef::Rig(i) => (*fit.rigs.get(i)?, None),
+            RowRef::Rig(i) => ((*fit.rigs.get(i)?)?, None),
             RowRef::Subsystem(i) => (*fit.subsystems.get(i)?, None),
         };
         let info = match item {
@@ -910,45 +1040,61 @@ fn structure_charges(catalog: &Catalog, module: &ItemType, charges: &[TypeId]) -
 /// The fitting view's rows: each rack under its header, padded with empty slots to what the ship
 /// has.
 fn fitting_rows(fit: &Fit, stats: &Stats) -> Vec<Row> {
-    let racks = [
-        (
-            Slot::High,
-            "High Slots",
-            icon::HIGH,
-            stats.high,
-            fit.high.len(),
-        ),
-        (Slot::Mid, "Med Slots", icon::MID, stats.mid, fit.mid.len()),
-        (Slot::Low, "Low Slots", icon::LOW, stats.low, fit.low.len()),
-        (Slot::Rig, "Rig Slots", icon::RIG, stats.rig, fit.rigs.len()),
-        (
-            Slot::Subsystem,
-            "Subsystem Slots",
-            icon::SUBSYSTEM,
-            stats.subsystem,
-            fit.subsystems.len(),
-        ),
-    ];
     let mut rows = Vec::new();
-    for (slot, label, icon_id, slots, used) in racks {
+    let mut rack = |slot: Slot,
+                    label: &'static str,
+                    icon_id: i32,
+                    slots: crate::engine::Slots,
+                    filled: Vec<bool>| {
         let total = slots.total.unwrap_or(0);
-        if total == 0 && used == 0 {
-            continue;
+        if total == 0 && !filled.contains(&true) {
+            return;
         }
         rows.push(Row::Header {
             label,
             icon_id,
             total,
         });
-        rows.extend((0..used).map(|i| {
-            Row::Item(match slot {
-                Slot::Rig => RowRef::Rig(i),
-                Slot::Subsystem => RowRef::Subsystem(i),
-                Slot::High | Slot::Mid | Slot::Low => RowRef::Module(slot, i),
-            })
-        }));
-        rows.extend((used..total as usize).map(|_| Row::Empty(slot)));
+        let positions = filled.len().max(total as usize);
+        for pos in 0..positions {
+            if filled.get(pos).copied().unwrap_or(false) {
+                rows.push(Row::Item(match slot {
+                    Slot::Rig => RowRef::Rig(pos),
+                    Slot::Subsystem => RowRef::Subsystem(pos),
+                    Slot::High | Slot::Mid | Slot::Low => RowRef::Module(slot, pos),
+                }));
+            } else {
+                rows.push(Row::Empty(slot, pos));
+            }
+        }
+    };
+    for (slot, label, icon_id, slots) in [
+        (Slot::High, "High Slots", icon::HIGH, stats.high),
+        (Slot::Mid, "Med Slots", icon::MID, stats.mid),
+        (Slot::Low, "Low Slots", icon::LOW, stats.low),
+    ] {
+        rack(
+            slot,
+            label,
+            icon_id,
+            slots,
+            fit.rack(slot).iter().map(Option::is_some).collect(),
+        );
     }
+    rack(
+        Slot::Rig,
+        "Rig Slots",
+        icon::RIG,
+        stats.rig,
+        fit.rigs.iter().map(Option::is_some).collect(),
+    );
+    rack(
+        Slot::Subsystem,
+        "Subsystem Slots",
+        icon::SUBSYSTEM,
+        stats.subsystem,
+        vec![true; fit.subsystems.len()],
+    );
     if let Some(mode) = fit.mode {
         rows.push(Row::Mode(mode));
     }
