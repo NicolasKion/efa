@@ -11,7 +11,7 @@ use gpui_kit::{ClickEvent, Context, Modifiers};
 use super::Gyfa;
 use crate::{
     data::{Slot, TypeId},
-    fit::{ImplantSource, Module, ModuleState, cargo::Transfer, trim_rack},
+    fit::{DamageProfile, ImplantSource, Module, ModuleState, cargo::Transfer, trim_rack},
 };
 
 /// A row of the fitting view that holds something.
@@ -103,6 +103,7 @@ pub enum Action {
     ModuleToCargo((Slot, usize), Option<TypeId>, Transfer),
     /// A cargo stack dragged onto a slot position.
     CargoToModule(TypeId, (Slot, usize), Transfer),
+    SetDamageProfile(DamageProfile),
 }
 
 /// The additions pane's tabs that list items.
@@ -470,6 +471,7 @@ impl Gyfa {
             }
             Action::SetMode(mode) => fit.mode = Some(mode),
             Action::SetSecStatus(sec) => fit.sec_status = sec,
+            Action::SetDamageProfile(profile) => fit.damage_profile = profile,
             Action::ToggleBoosters(main, rows) => {
                 let Some(on) = fit.boosters.get(main).map(|b| !b.active) else {
                     return;

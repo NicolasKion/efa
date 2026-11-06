@@ -1,7 +1,7 @@
 # Feature parity with pyfa
 
 Rough coverage: the core loop works (pick ship, add modules/charges/drones/implants/boosters, see the main stats, EFT in/out), plus the pyfa layout with in-game icons and the main module columns, which is maybe 20-25% of pyfa's surface.
-Biggest gaps: characters and skills (everything is all V), damage/target profiles, projected/command/fleet effects, fighters, cargo editing, item stats window, graphs, prices, ESI/SSO, and most context menus.
+Biggest gaps: characters and skills (everything is all V), target profiles and user damage patterns, projected/command/fleet effects, fighters, cargo editing, item stats window, graphs, prices, ESI/SSO, and most context menus.
 Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, mutations, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
 Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time (needs looping over refine stats), lock/warp time formulas.
 
@@ -25,7 +25,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] System security zone per fit (builtinContextMenus/fitSystemSecurity.py), refine: set_sec_zone
 - [ ] Pilot security status per fit (builtinContextMenus/fitPilotSecurity.py), refine: set_sec_status
 - [ ] Per-fit character selection (gui/characterSelection.py)
-- [ ] Per-fit damage pattern and target profile (gui/builtinStatsViews, contextMenus/damagePatternChange.py)
+- [~] Per-fit damage pattern and target profile (gui/builtinStatsViews, contextMenus/damagePatternChange.py), damage pattern done, no target profile
 - [x] Fit notes, carried by duplicates, shown in the fittings browser tooltip cut to 200 characters (builtinAdditionPanes/notesView.py, builtinShipBrowser/fitItem.py); EFT text has no notes in pyfa either
 - [ ] Mark fit as fleet booster / command fit (builtinAdditionPanes/commandView.py)
 - [ ] Backup all fits to XML (mainMenuBar.py backupFits)
@@ -111,7 +111,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Export mutated module (builtinContextMenus/moduleMutatedExport.py)
 - [ ] Spool-up percentage for spooling modules (builtinContextMenus/moduleSpool.py), refine: set_spool_override, set_default_spool
 - [ ] Reactive armor hardener pattern (builtinContextMenus/moduleRahPattern.py), refine: set_rah_incoming_dps
-- [ ] Factor in reload time toggle (builtinContextMenus/factorReload.py), refine: StatTimeOptions reload
+- [x] Factor in reload time toggle (builtinContextMenus/factorReload.py), refine: StatTimeOptions reload
 - [ ] Resist mode for EHP display (builtinContextMenus/resistMode.py)
 - [ ] Set damage pattern from loaded ammo (builtinContextMenus/ammoToDmgPattern.py)
 - [ ] Damage pattern switcher (builtinContextMenus/damagePatternChange.py)
@@ -151,33 +151,20 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 
 ## Stats panes
 
-- [x] Resources: CPU, PG, calibration, drone bandwidth, drone bay, hardpoints, launched drones (builtinStatsViews/resourcesViewFull.py)
-- [ ] Resources: fighter bay, fighter tubes, cargo capacity (resourcesViewFull.py), refine: get_stat_fighter_bay_volume, get_stat_launched_fighters
-- [ ] Resource gauges (pyfa_gauge.py, attribute_gauge.py)
-- [x] Resists per layer and HP (builtinStatsViews/resistancesViewFull.py), refine: get_stat_resists, get_stat_hp
-- [~] EHP total (resistancesViewFull.py), shown without damage pattern choice, refine: get_stat_ehp
-- [~] EHP per layer, toggle EHP vs raw HP (resistancesViewFull.py), per layer shown, no toggle, refine: get_stat_ehp, get_stat_wc_ehp
-- [ ] Damage pattern affecting EHP (resistancesViewFull.py), refine: incoming dps options on get_stat_ehp
-- [ ] Recharge/tank: active and sustained shield/armor/hull rep, passive recharge (builtinStatsViews/rechargeViewFull.py), refine: get_stat_rps, get_stat_erps
-- [x] Firepower: total DPS and volley with damage type bar (builtinStatsViews/firepowerViewFull.py), refine: get_stat_dmg
-- [~] Firepower: weapon vs drone split, with/without reload (firepowerViewFull.py), split done, no reload toggle, refine: get_stat_dmg item kinds, StatTimeOptions
-- [ ] Applied DPS vs target profile (firepowerViewFull.py), refine: get_stat_dmg_applied
-- [ ] Mining yield, waste (builtinStatsViews/miningyieldViewFull.py), refine: get_stat_mps
-- [x] Capacitor capacity, balance, stability (builtinStatsViews/capacitorViewFull.py), refine: get_stat_cap_amount, get_stat_cap_balance, get_stat_cap_sim
-- [ ] Capacitor: recharge time, peak recharge, GJ/s used vs regen detail (capacitorViewFull.py)
-- [x] Navigation: speed, align, signature, warp speed (builtinStatsViews/targetingMiscViewMinimal.py), refine: get_stat_speed, get_stat_align_time, get_stat_sig_radius, get_stat_warp_speed
-- [ ] Mass and agility (targetingMiscViewMinimal.py), refine: get_stat_mass, get_stat_agility
-- [ ] Max warp distance (targetingMiscViewMinimal.py), refine: get_stat_max_warp_range
-- [x] Targeting: lock range, scan res, sensor strength, max locks (targetingMiscViewMinimal.py), refine: get_stat_lock_range, get_stat_scan_res, get_stat_sensors, get_stat_locks
-- [ ] Lock time per ship class tooltip (targetingMiscViewMinimal.py)
-- [ ] ECM jam chance (targetingMiscViewMinimal.py), refine: get_stat_incoming_jam
-- [ ] Drone control range (targetingMiscViewMinimal.py), refine: get_stat_drone_control_range
-- [ ] Probe size, warp core strength (targetingMiscViewMinimal.py), refine: get_stat_probing_size
-- [ ] Cargo and special holds capacity (targetingMiscViewMinimal.py)
-- [ ] Remote reps outgoing (shield/armor/hull/cap) (builtinStatsViews/outgoingViewFull.py, outgoingViewMinimal.py), refine: get_stat_outgoing_rps, get_stat_outgoing_cps, get_stat_outgoing_nps
-- [ ] Bombing: bombs needed to kill per ship class (builtinStatsViews/bombingViewFull.py)
-- [ ] Price: ship, fittings, drones, cargo, character implants, total (builtinStatsViews/priceViewFull.py, priceViewMinimal.py)
-- [ ] Collapsible stat sections, in progress (gui/toggle_panel.py, statsPane.py)
+- [x] Resources: hardpoints, launched drones or fighter squadrons, calibration, CPU and PG gauges, drone bay or fighter bay (cargo bay while the cargo tab is open), bandwidth, with pyfa's tooltips (builtinStatsViews/resourcesViewFull.py), refine: get_stat_launched_fighters, get_stat_fighter_bay_volume
+- [x] Resistances: gauges per layer, EHP or raw HP per layer and in the header (EHP/HP button), resist multiplier tooltips, incoming damage pattern row (builtinStatsViews/resistancesViewFull.py), refine: get_stat_ehp(Some(DpsProfile)), set_rah_incoming_dps
+- [x] Damage pattern per fit: Uniform, Selected Ammo and pyfa's builtin patterns from the header menu; user patterns not yet (damagePatternChange.py)
+- [x] Recharge rates: passive shield, reinforced and sustained shield/armor/hull in EHP/s or HP/s, armor spool range tooltip (builtinStatsViews/rechargeViewFull.py), refine: get_stat_rps
+- [x] Firepower: weapon and drone DPS (sentries count as drones), volley, total, spool and damage type tooltips, damage type bar, swap to mining yield (builtinStatsViews/firepowerViewFull.py), refine: get_stat_dmg
+- [x] Factor in Reload Time from the firepower menu, also used by the capacitor simulation (factorReload.py), refine: StatTimeOptions::Sim
+- [ ] Applied DPS vs target resists (firepowerViewFull.py "Effective" and targetProfile/switcher.py): refine's get_stat_dmg_applied needs a projectee item, there are no abstract target profiles yet
+- [x] Mining yield: miner, drone, total with yield, drain and efficiency tooltips (builtinStatsViews/miningyieldViewFull.py), refine: get_stat_mps
+- [x] Remote reps: capacitor, shield, armor, hull with spool tooltips, plus neutralization when the fit neuts (builtinStatsViews/outgoingViewFull.py), refine: get_stat_outgoing_rps, get_stat_outgoing_cps, get_stat_outgoing_nps
+- [x] Capacitor: capacity, stable or lasts, delta with recharge/use tooltip, neutralizer resistance with effective capacity (builtinStatsViews/capacitorViewFull.py), refine: get_stat_cap_sim, get_stat_cap_balance, get_stat_neut_resist
+- [x] Targeting and misc: targets, range, scan res with lock times, sensor strength with type and jam chance, drone range, speed, align with mass and agility, signature with probe size, warp speed with max warp distance and core strength, cargo with special holds (builtinStatsViews/targetingMiscViewMinimal.py), refine: get_stat_* sensors, mobility, drone control range, incoming jam
+- [x] Bombing: bombs to kill per damage type and Covert Ops level, collapsed by default as pyfa hides it (builtinStatsViews/bombingViewFull.py); wormhole bomb damage effects not applied
+- [x] Price: ship, fittings, character, drones, cargo, total from ESI prices, with the Drones/Cargo/Implants && Boosters total toggles (builtinStatsViews/priceViewFull.py, priceOptions.py)
+- [x] Collapsible stat sections with header menus, also on right-click (gui/toggle_panel.py, statsPane.py)
 - [ ] Per-view full/minimal/hidden preference (pyfaStatViewPreferences.py)
 - [ ] Capability flags: can warp/jump/dock/tether (no pyfa view), refine: get_stat_can_* (gyfa-only extra)
 - [ ] Neut resist, breach resist, d-scan range (no pyfa view), refine: get_stat_neut_resist, get_stat_breach_resist, get_stat_dscan_range

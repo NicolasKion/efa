@@ -132,11 +132,26 @@ pub struct Fit {
     /// Pilot security status; None uses the character's.
     #[serde(default)]
     pub sec_status: Option<f64>,
+    /// Incoming damage the tank numbers assume.
+    #[serde(default)]
+    pub damage_profile: DamageProfile,
     /// Implants switched off: they stay on the fit but do nothing, like pyfa's unchecked ones.
     #[serde(default)]
     pub inactive_implants: Vec<TypeId>,
     #[serde(default)]
     pub implant_source: ImplantSource,
+}
+
+/// Incoming damage that effective HP, effective repair rates and the reactive armor hardener
+/// assume, like pyfa's per-fit damage pattern.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub enum DamageProfile {
+    #[default]
+    Uniform,
+    /// The mix the fit's own weapons deal with the charges loaded now.
+    SelectedAmmo,
+    /// A named EM, thermal, kinetic, explosive mix; only the ratios matter.
+    Pattern { name: String, amounts: [f64; 4] },
 }
 
 /// Drones a character can have in space at once, without skills or ship bonuses changing it.

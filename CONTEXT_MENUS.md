@@ -239,16 +239,16 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 ## Stats pane panels (gui/statsPane.py, menu icon on panel header)
 
 ### priceViewFull / priceViewMinimal
-- [ ] Drones | always | checkbox: include drones in price total | priceOptions.py
-- [ ] Cargo | always | checkbox: include cargo | priceOptions.py
-- [ ] Implants && Boosters | always | checkbox: include implants/boosters | priceOptions.py
+- [x] Drones | always | checkbox: include drones in price total | priceOptions.py
+- [x] Cargo | always | checkbox: include cargo | priceOptions.py
+- [x] Implants && Boosters | always | checkbox: include implants/boosters | priceOptions.py
 
 ### resistancesViewFull
-- [ ] {damage pattern names} | always (disabled with no fit) | top-level checkable entries for root patterns (Uniform, Selected Ammo, ...) plus category submenus; sets fit damage pattern (EHP) | damagePatternChange.py
+- [~] {damage pattern names} | always (disabled with no fit) | top-level checkable entries for root patterns (Uniform, Selected Ammo, ...) plus category submenus; sets fit damage pattern (EHP) | damagePatternChange.py; builtin patterns only, no user patterns yet
 
 ### firepowerViewFull
-- [ ] Factor in Reload Time | always (disabled with no fit) | checkbox, global setting, reload included in DPS | factorReload.py
-- [ ] Target Resists | active fit | checkable "No Profile", separator, target profile tree; sets fit target profile for applied DPS | targetProfile/switcher.py
+- [x] Factor in Reload Time | always (disabled with no fit) | checkbox, global setting, reload included in DPS | factorReload.py
+- [ ] Target Resists | active fit | checkable "No Profile", separator, target profile tree; sets fit target profile for applied DPS | targetProfile/switcher.py; left out until refine can apply damage to a profile instead of a projectee item
 
 ## Graphs (graphs/gui)
 

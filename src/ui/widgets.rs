@@ -290,20 +290,6 @@ pub fn km(meters: f64) -> String {
     }
 }
 
-pub fn duration(secs: f64) -> String {
-    let secs = secs.round() as u64;
-    match secs {
-        0..60 => format!("{secs}s"),
-        60..3600 => format!("{}m {}s", secs / 60, secs % 60),
-        _ => format!("{}h {}m", secs / 3600, (secs % 3600) / 60),
-    }
-}
-
-/// Dash for a missing value.
-pub fn or_dash(value: Option<f64>, fmt: impl Fn(f64) -> String) -> String {
-    value.map_or_else(|| "–".to_owned(), fmt)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

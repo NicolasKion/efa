@@ -62,6 +62,7 @@ mod attr {
     pub const FALLOFF: i32 = 158;
     pub const MINING_AMOUNT: i32 = 77;
     pub const DRONE_BANDWIDTH_USED: i32 = 1272;
+    pub const SIGNATURE_RADIUS: i32 = 552;
     /// Maximum spool bonus, on Precursor weapons and mutadaptive repairers.
     pub const SPOOL_MAX: [i32; 2] = [2734, 2797];
     /// The booster slot, which pyfa calls boosterness.
@@ -152,6 +153,8 @@ pub struct ItemType {
     pub spools: bool,
     /// Bandwidth a drone takes while in space, in Mbit/s.
     pub drone_bandwidth: f64,
+    /// Unmodified signature radius, which a bomb's explosion is sized by.
+    pub signature_radius: Option<f64>,
     /// Slot a booster goes into; a fit holds one booster per slot.
     pub booster_slot: Option<u32>,
     /// Chance of a booster's first side effect, missing on boosters without one.
@@ -430,6 +433,7 @@ impl Catalog {
                         .iter()
                         .any(|&a| attr(a).is_some_and(|v| v > 0.0)),
                     drone_bandwidth: attr(attr::DRONE_BANDWIDTH_USED).unwrap_or(0.0),
+                    signature_radius: attr(attr::SIGNATURE_RADIUS),
                     booster_slot: attr(attr::BOOSTERNESS)
                         .filter(|_| kind == Kind::Booster)
                         .map(|s| s as u32),

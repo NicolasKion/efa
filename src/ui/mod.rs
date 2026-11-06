@@ -113,6 +113,7 @@ pub struct Gyfa {
     /// Takes the drones pane's keys: Delete, Escape, Ctrl+A.
     drones_focus: FocusHandle,
     collapsed_sections: HashSet<&'static str>,
+    stats_view: stats::View,
     status: Option<SharedString>,
     palette: Palette,
     theme_generation: Option<String>,
@@ -212,7 +213,9 @@ impl Gyfa {
             additions_anchor: None,
             additions_focus: cx.focus_handle(),
             drones_focus: cx.focus_handle(),
-            collapsed_sections: HashSet::new(),
+            // pyfa hides the bombing view unless turned on in its preferences.
+            collapsed_sections: HashSet::from(["Bombing"]),
+            stats_view: stats::View::default(),
             status: None,
             palette,
             theme_generation: theme::generation(),
@@ -287,7 +290,12 @@ impl Gyfa {
 
     fn recompute(&mut self) {
         let Some(loaded) = self.loaded() else { return };
-        self.stats = self.fit().map(|fit| loaded.engine.compute(fit));
+        let options = crate::engine::CalcOptions {
+            factor_reload: self.saved.factor_reload,
+        };
+        self.stats = self
+            .fit()
+            .map(|fit| loaded.engine.compute_with(fit, options));
     }
 
     fn save(&self) {

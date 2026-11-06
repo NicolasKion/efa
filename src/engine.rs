@@ -1,6 +1,8 @@
 //! The bridge to refine. Each recalculation builds a fresh solar system from the [`Fit`], which
 //! keeps refine's state from ever drifting from what the UI shows.
 
+mod pane;
+
 use std::path::Path;
 
 use std::collections::{HashMap, HashSet};
@@ -17,6 +19,10 @@ use rc::{
 use crate::{
     data::{Slot, TypeId},
     fit::{Fit, ModuleState},
+};
+
+pub use pane::{
+    CalcOptions, CapDetail, FirepowerDetail, Mining, MiningRate, Misc, Outgoing, SpoolRange, Tank,
 };
 
 /// Type ID of the character item. EVE uses this one for everyone.
@@ -60,6 +66,8 @@ impl Damage {
 pub struct Layer {
     pub hp: f64,
     pub ehp: Option<f64>,
+    /// EHP per HP under the fit's damage profile.
+    pub mult: Option<f64>,
     /// EM, thermal, kinetic, explosive, as fractions resisted.
     pub resists: [f64; 4],
 }
@@ -249,6 +257,19 @@ pub struct Stats {
     pub scan_res: Option<f64>,
     pub locks: Option<u32>,
     pub sensor_strength: Option<f64>,
+    pub fighter_tubes: Slots,
+    pub fighter_bay: Resource,
+    /// Damage mix the tank numbers assume: EM, thermal, kinetic, explosive.
+    pub incoming: [f64; 4],
+    pub firepower: FirepowerDetail,
+    /// Repair rates with every repairer cycling.
+    pub tank: Tank,
+    /// Repair rates the capacitor can keep up.
+    pub sustained: Tank,
+    pub outgoing: Outgoing,
+    pub mining: Mining,
+    pub cap_detail: CapDetail,
+    pub misc: Misc,
     /// Per booster, in the fit's order.
     pub boosters: Vec<BoosterInfo>,
     /// Items refine refused, e.g. a module the ship has no rack position for.
@@ -266,6 +287,10 @@ impl Engine {
     }
 
     pub fn compute(&self, fit: &Fit) -> Stats {
+        self.compute_with(fit, CalcOptions::default())
+    }
+
+    pub fn compute_with(&self, fit: &Fit, options: CalcOptions) -> Stats {
         let mut stats = Stats::default();
         let mut sol = SolOwned::new(&self.src);
         let mut f = sol.add_fit();
@@ -360,7 +385,13 @@ impl Engine {
             booster_ids.push(item.get_item_id());
         }
 
-        fit_stats(&mut f, &mut stats);
+        stats.incoming = pane::incoming_mix(&mut f, &fit.damage_profile);
+        let incoming = pane::dps_profile(stats.incoming);
+        f.set_rah_incoming_dps(Some(incoming));
+        let fit_id = f.get_fit_id();
+
+        fit_stats(&mut f, &mut stats, incoming, options);
+        stats.firepower = pane::firepower_detail(&mut f, options.time());
 
         stats.cargo_capacity = sol.get_item(&ship_id).ok().and_then(|mut ship| {
             ship.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr::CAPACITY)))
@@ -377,7 +408,7 @@ impl Engine {
             .map(|id| id.map_or_default(|id| drone_info(&mut sol, id)))
             .collect();
 
-        for (slot, i, id) in module_ids {
+        for &(slot, i, id) in &module_ids {
             let spool_max = sol
                 .get_module(&id)
                 .ok()
@@ -407,11 +438,35 @@ impl Engine {
             };
             stats.modules.insert((slot, i), info);
         }
+
+        let cap_users: Vec<(ItemId, f64)> = module_ids
+            .iter()
+            .filter(|&&(slot, i, _)| {
+                let m = match slot {
+                    Slot::High => &fit.high,
+                    Slot::Mid => &fit.mid,
+                    _ => &fit.low,
+                };
+                m.get(i)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|m| matches!(m.state, ModuleState::Active | ModuleState::Overload))
+            })
+            .filter_map(|&(slot, i, id)| {
+                let cap = stats.modules.get(&(slot, i))?.cap_per_sec?;
+                Some((id, cap))
+            })
+            .collect();
+        pane::pane_stats(&mut sol, fit_id, ship_id, &cap_users, options, &mut stats);
         stats
     }
 }
 
-fn fit_stats(f: &mut rc::Fit<'_>, stats: &mut Stats) {
+fn fit_stats(
+    f: &mut rc::Fit<'_>,
+    stats: &mut Stats,
+    incoming: rc::DpsProfile,
+    options: CalcOptions,
+) {
     let mut s = f.stats();
     stats.high = slots(s.get_stat_high_slots());
     stats.mid = slots(s.get_stat_mid_slots());
@@ -429,16 +484,13 @@ fn fit_stats(f: &mut rc::Fit<'_>, stats: &mut Stats) {
 
     let dmg = s.get_stat_dmg(
         StatDmgItemKinds::default(),
-        StatTimeOptions::default(),
+        options.time(),
         StatCritOptions::default(),
     );
     stats.dps = damage(&dmg.dps);
     stats.volley = damage(&dmg.volley);
-    let drones = s.get_stat_dmg(
-        StatDmgItemKinds::new(false).with_minion_mobile(true),
-        StatTimeOptions::default(),
-        StatCritOptions::default(),
-    );
+    // Sentries are static minions; they count as drones too.
+    let drones = s.get_stat_dmg(pane::minions(), options.time(), StatCritOptions::default());
     stats.drone_dps = damage(&drones.dps).total();
     stats.weapon_dps = stats.dps.total() - stats.drone_dps;
 
@@ -447,11 +499,17 @@ fn fit_stats(f: &mut rc::Fit<'_>, stats: &mut Stats) {
         stats.armor.hp = hp.armor.buffer.into_f64();
         stats.hull.hp = hp.hull.buffer.into_f64();
     }
-    if let Ok(ehp) = s.get_stat_ehp(None) {
-        // refine's buffer already has the resists applied; multiplying again squared them.
-        stats.shield.ehp = ehp.shield.map(|l| l.buffer.into_f64());
-        stats.armor.ehp = ehp.armor.map(|l| l.buffer.into_f64());
-        stats.hull.ehp = ehp.hull.map(|l| l.buffer.into_f64());
+    // The buffer already has the resist multiplier applied. Ancillary repairer charges stay out,
+    // like pyfa's EHP.
+    if let Ok(ehp) = s.get_stat_ehp(Some(incoming)) {
+        for (layer, ehp) in [
+            (&mut stats.shield, ehp.shield),
+            (&mut stats.armor, ehp.armor),
+            (&mut stats.hull, ehp.hull),
+        ] {
+            layer.ehp = ehp.map(|l| l.buffer.into_f64());
+            layer.mult = ehp.map(|l| l.mult.into_f64());
+        }
     }
     if let Ok(r) = s.get_stat_resists() {
         for (layer, res) in [
@@ -476,7 +534,7 @@ fn fit_stats(f: &mut rc::Fit<'_>, stats: &mut Stats) {
     stats.cap = s
         .get_stat_cap_sim(
             rc::UnitInterval::from_f64_clamped(1.0),
-            None,
+            options.optional_reloads(),
             &rc::stats::StatCapSimStagger::default(),
             None,
         )

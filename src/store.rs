@@ -15,9 +15,33 @@ pub struct Saved {
     pub current: Option<usize>,
     /// Fitting view column widths the user set by dragging, by column.
     pub columns: std::collections::BTreeMap<String, f32>,
+    /// Count reload time into DPS and the capacitor simulation, pyfa's global "Factor in Reload Time".
+    pub factor_reload: bool,
     /// The user's implant sets, by name.
     #[serde(default)]
     pub implant_sets: Vec<ImplantSet>,
+    /// Which groups the price total counts, pyfa's price view menu.
+    pub price_totals: PriceTotals,
+}
+
+/// What besides ship and fittings the price total includes, with pyfa's defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PriceTotals {
+    pub drones: bool,
+    pub cargo: bool,
+    /// Implants and boosters.
+    pub character: bool,
+}
+
+impl Default for PriceTotals {
+    fn default() -> Self {
+        Self {
+            drones: true,
+            cargo: true,
+            character: false,
+        }
+    }
 }
 
 impl Saved {
