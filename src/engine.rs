@@ -70,6 +70,8 @@ pub struct ModuleInfo {
     pub cap_per_sec: Option<f64>,
     pub optimal: Option<f64>,
     pub falloff: Option<f64>,
+    /// Cycles to full spool, for modules that spool up.
+    pub spool_max: Option<u32>,
 }
 
 mod attr {
@@ -80,6 +82,7 @@ mod attr {
     pub const RATE_OF_FIRE: i32 = 51;
     pub const OPTIMAL: i32 = 54;
     pub const FALLOFF: i32 = 158;
+    pub const CAPACITY: i32 = 38;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -108,6 +111,8 @@ pub struct Stats {
     pub weapon_dps: f64,
     pub drone_dps: f64,
     pub modules: HashMap<(Slot, usize), ModuleInfo>,
+    /// Cargo hold size after bonuses, in m³.
+    pub cargo_capacity: Option<f64>,
     pub shield: Layer,
     pub armor: Layer,
     pub hull: Layer,
@@ -145,7 +150,9 @@ impl Engine {
             let _ = f.add_skill(ItemTypeId::from_i32(skill), SkillLevel::from_i32_clamped(5));
         }
         let Some(ship) = fit.ship else { return stats };
-        f.set_ship(ItemTypeId::from_i32(ship), None, None);
+        let ship_id = f
+            .set_ship(ItemTypeId::from_i32(ship), None, None)
+            .get_item_id();
 
         let mut module_ids: Vec<(Slot, usize, ItemId)> = Vec::new();
         for (slot, rack, modules) in [
@@ -162,6 +169,11 @@ impl Engine {
                 ) {
                     Ok(mut module) => {
                         module_ids.push((slot, i, module.get_item_id()));
+                        if let Some(cycles) = m.spool {
+                            module.set_spool_override(Some(rc::Spool::Cycles(
+                                rc::Count::from_u32(cycles),
+                            )));
+                        }
                         if let Some(charge) = m.charge {
                             module.set_charge_type_id(ItemTypeId::from_i32(charge));
                         }
@@ -200,7 +212,18 @@ impl Engine {
 
         fit_stats(&mut f, &mut stats);
 
+        stats.cargo_capacity = sol.get_item(&ship_id).ok().and_then(|mut ship| {
+            ship.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr::CAPACITY)))
+                .ok()
+                .map(|v| v.modified.into_f64())
+        });
+
         for (slot, i, id) in module_ids {
+            let spool_max = sol
+                .get_module(&id)
+                .ok()
+                .and_then(|mut m| m.get_spool_cycle_count())
+                .map(|info| info.max.into_u32());
             let Ok(mut item) = sol.get_item(&id) else {
                 continue;
             };
@@ -221,6 +244,7 @@ impl Engine {
                 cap_per_sec: cap_need.zip(cycle).map(|(need, ms)| need / (ms / 1000.0)),
                 optimal: get(attr::OPTIMAL).filter(|&v| v > 0.0),
                 falloff: get(attr::FALLOFF).filter(|&v| v > 0.0),
+                spool_max,
             };
             stats.modules.insert((slot, i), info);
         }

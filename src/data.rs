@@ -26,6 +26,8 @@ pub mod category {
 const GROUP_BOOSTER: i32 = 303;
 
 mod effect {
+    pub const LAUNCHER_FITTED: i32 = 40;
+    pub const TURRET_FITTED: i32 = 42;
     pub const LOW: i32 = 11;
     pub const HIGH: i32 = 12;
     pub const MID: i32 = 13;
@@ -38,6 +40,24 @@ mod effect {
 mod attr {
     pub const CHARGE_SIZE: i32 = 128;
     pub const CHARGE_GROUPS: [i32; 5] = [604, 605, 606, 609, 610];
+    /// EM, thermal, kinetic, explosive damage on a charge.
+    pub const DAMAGE: [i32; 4] = [114, 118, 117, 116];
+    pub const RANGE_MULTIPLIER: i32 = 120;
+    pub const FALLOFF_MULTIPLIER: i32 = 517;
+    pub const OPTIMAL: i32 = 54;
+    pub const FALLOFF: i32 = 158;
+    pub const MINING_AMOUNT: i32 = 77;
+    pub const DRONE_BANDWIDTH_USED: i32 = 1272;
+    /// Maximum spool bonus, on Precursor weapons and mutadaptive repairers.
+    pub const SPOOL_MAX: [i32; 2] = [2734, 2797];
+}
+
+/// Which kind of hardpoint a module takes, if any.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hardpoint {
+    None,
+    Turret,
+    Launcher,
 }
 
 /// Effect categories in dogmaeffects.
@@ -47,7 +67,9 @@ mod effect_category {
     pub const OVERLOAD: i32 = 5;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum Slot {
     High,
     Mid,
@@ -70,6 +92,10 @@ pub enum Kind {
 }
 
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent facts read from the data, not a state machine"
+)]
 pub struct ItemType {
     pub id: TypeId,
     pub name: String,
@@ -84,9 +110,44 @@ pub struct ItemType {
     pub charge_size: Option<f64>,
     /// Client path of the icon art, a `res:/` path on CCP's CDN.
     pub icon: Option<String>,
+    /// The type this one is a variation of (the T1 base), if any.
+    pub variation_parent: Option<TypeId>,
+    pub meta_group: Option<i32>,
+    pub meta_level: i32,
+    /// Packaged volume where there is one, in m³.
+    pub volume: f64,
+    pub hardpoint: Hardpoint,
+    /// EM, thermal, kinetic, explosive damage, for charges.
+    pub damage: [f64; 4],
+    pub range_multiplier: Option<f64>,
+    pub falloff_multiplier: Option<f64>,
+    /// Unmodified optimal and falloff, for sorting a turret's charges by range.
+    pub optimal: Option<f64>,
+    pub falloff: Option<f64>,
+    pub mining: bool,
+    /// Whether this module spools up over cycles.
+    pub spools: bool,
+    /// Bandwidth a drone takes while in space, in Mbit/s.
+    pub drone_bandwidth: f64,
 }
 
 impl ItemType {
+    /// The word pyfa puts into menu labels for this kind of item.
+    pub fn category_label(&self) -> &'static str {
+        match self.kind {
+            Kind::Ship => "Ship",
+            Kind::Module(Slot::Subsystem) => "Subsystem",
+            Kind::Module(_) => "Module",
+            Kind::Charge => "Charge",
+            Kind::Drone => "Drone",
+            Kind::Fighter => "Fighter",
+            Kind::Implant => "Implant",
+            Kind::Booster => "Booster",
+            Kind::Skill => "Skill",
+            Kind::Other => "Item",
+        }
+    }
+
     /// Whether this charge fits in a module.
     pub fn fits_in(&self, module: &ItemType) -> bool {
         self.kind == Kind::Charge
@@ -117,6 +178,9 @@ pub struct Catalog {
     pub skills: Vec<TypeId>,
     /// Icon ID to `res:/` path, for attribute and market group icons.
     pub icon_files: HashMap<i32, String>,
+    /// Every published type sharing a variation parent, keyed by that parent.
+    pub variations: HashMap<TypeId, Vec<TypeId>>,
+    pub meta_group_names: HashMap<i32, String>,
 }
 
 impl Catalog {
@@ -127,6 +191,7 @@ impl Catalog {
         let effects: HashMap<String, PhbEffect> = read(dir, "fsd_built/dogmaeffects.json")?;
         let dogma: HashMap<String, PhbTypeDogma> = read(dir, "fsd_built/typedogma.json")?;
         let icons: HashMap<String, SdeIcon> = read(dir, "sde/icons.json")?;
+        let meta_groups: HashMap<String, SdeMetaGroup> = read(dir, "sde/metagroups.json")?;
         let graphics: HashMap<String, SdeGraphic> = read(dir, "sde/graphics.json")?;
         let icon_files: HashMap<i32, String> = icons
             .into_iter()
@@ -246,6 +311,27 @@ impl Catalog {
                     charge_groups,
                     charge_size: attr(attr::CHARGE_SIZE),
                     icon,
+                    variation_parent: t.variation_parent_type_id,
+                    meta_group: t.meta_group_id,
+                    meta_level: t.meta_level.unwrap_or(0),
+                    volume: t.packaged_volume.or(t.volume).unwrap_or(0.0),
+                    hardpoint: if has_effect(effect::TURRET_FITTED) {
+                        Hardpoint::Turret
+                    } else if has_effect(effect::LAUNCHER_FITTED) {
+                        Hardpoint::Launcher
+                    } else {
+                        Hardpoint::None
+                    },
+                    damage: attr::DAMAGE.map(|a| attr(a).unwrap_or(0.0)),
+                    range_multiplier: attr(attr::RANGE_MULTIPLIER),
+                    falloff_multiplier: attr(attr::FALLOFF_MULTIPLIER),
+                    optimal: attr(attr::OPTIMAL),
+                    falloff: attr(attr::FALLOFF),
+                    mining: attr(attr::MINING_AMOUNT).is_some_and(|a| a > 0.0),
+                    spools: attr::SPOOL_MAX
+                        .iter()
+                        .any(|&a| attr(a).is_some_and(|v| v > 0.0)),
+                    drone_bandwidth: attr(attr::DRONE_BANDWIDTH_USED).unwrap_or(0.0),
                 },
             );
         }
@@ -301,6 +387,28 @@ impl Catalog {
         market_roots.sort_by(|a, b| market_groups[a].name.cmp(&market_groups[b].name));
         skills.sort_unstable();
 
+        let mut variations: HashMap<TypeId, Vec<TypeId>> = HashMap::new();
+        for t in types.values().filter(|t| t.published) {
+            if let Some(parent) = t.variation_parent {
+                variations.entry(parent).or_default().push(t.id);
+            }
+        }
+        for (parent, members) in &mut variations {
+            if types.get(parent).is_some_and(|p| p.published) && !members.contains(parent) {
+                members.push(*parent);
+            }
+            members.sort_by(|a, b| {
+                let (a, b) = (&types[a], &types[b]);
+                a.meta_level
+                    .cmp(&b.meta_level)
+                    .then_with(|| a.name.cmp(&b.name))
+            });
+        }
+        let meta_group_names = meta_groups
+            .into_iter()
+            .filter_map(|(id, g)| Some((id.parse().ok()?, g.name.en)))
+            .collect();
+
         Ok(Self {
             types,
             by_name,
@@ -308,11 +416,32 @@ impl Catalog {
             market_roots,
             skills,
             icon_files,
+            variations,
+            meta_group_names,
         })
     }
 
     pub fn get(&self, id: TypeId) -> Option<&ItemType> {
         self.types.get(&id)
+    }
+
+    /// The type's variations, itself included, by meta level. Empty when it has none.
+    pub fn variations_of(&self, id: TypeId) -> &[TypeId] {
+        let Some(t) = self.get(id) else { return &[] };
+        let parent = t.variation_parent.unwrap_or(id);
+        self.variations.get(&parent).map_or(&[], Vec::as_slice)
+    }
+
+    /// The market group chain from the root down to the type's own group.
+    pub fn market_path(&self, id: TypeId) -> Vec<i32> {
+        let mut path = Vec::new();
+        let mut group = self.get(id).and_then(|t| t.market_group);
+        while let Some(g) = group.and_then(|g| self.market_groups.get(&g)) {
+            path.push(g.id);
+            group = g.parent;
+        }
+        path.reverse();
+        path
     }
 
     pub fn name(&self, id: TypeId) -> String {
@@ -439,6 +568,20 @@ struct SdeType {
     icon_id: Option<i32>,
     #[serde(rename = "graphicID")]
     graphic_id: Option<i32>,
+    #[serde(rename = "variationParentTypeID")]
+    variation_parent_type_id: Option<i32>,
+    #[serde(rename = "metaGroupID")]
+    meta_group_id: Option<i32>,
+    #[serde(rename = "metaLevel")]
+    meta_level: Option<i32>,
+    volume: Option<f64>,
+    #[serde(rename = "packagedVolume")]
+    packaged_volume: Option<f64>,
+}
+
+#[derive(Deserialize)]
+struct SdeMetaGroup {
+    name: Localized,
 }
 
 #[derive(Deserialize)]

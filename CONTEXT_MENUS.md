@@ -1,7 +1,7 @@
 # pyfa context menus
 
 152 menu entries in 35 right-click contexts (pyfa ContextMenu registry plus 4 hand-built menus).
-gyfa has 6 ([x]: remove module/drone/implant/booster/cargo, open fit) and 1 partial ([~]: module Charge); 145 missing.
+gyfa progress is tracked per line below; fitting rows have Shift/Ctrl selection and Ctrl/Alt "all similar" now.
 Biggest gaps: projected pane (29 incl. env effects), market item actions (9), module extras (variations, mutaplasmids, spool, RAH, fill, skills), drone/fighter quantity and abilities, command fits and generic links, ship menu (tactical mode, sec status), additions copy/paste, stats-pane and graph options.
 
 Legend: `[x]` in gyfa, `[~]` partial, `[ ]` missing. Line format: label | when it shows | what it does | pyfa file (in gui/builtinContextMenus/ unless a path is given).
@@ -19,21 +19,21 @@ Legend: `[x]` in gyfa, `[~]` partial, `[ ]` missing. Line format: label | when i
 Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fittingCharge (if module has a charge loaded), fittingMode (T3D tactical mode row), then always fittingShip. Separator between each. Right-click on an empty slot gives only fittingShip.
 
 ### fittingModule
-- [~] Charge | module has loadable charges (fitting or projected module) | submenu by module kind: turrets "Long Range" list with per-family submenus ("Less Damage"/"More Damage"), missiles by damage type (EM/Thermal/Explosive/Kinetic/Mixed), mining crystals by ore class, else flat list; last item "Empty" unloads. Applies to all similar modules by default (pref ammoChangeAll), Ctrl/Alt inverts to selection only. GuiChangeLocalModuleChargesCommand | moduleAmmoChange.py
-- [ ] Spoolup Cycles | module group "Precursor Weapon" or "Mutadaptive Remote Armor Repairer" (pref spoolup) | checkable list of cycle counts (default marked "(default)", min..max, current) + "Reset". GuiChangeLocalModuleSpoolCommand | moduleSpool.py
+- [x] Charge | module has loadable charges (fitting or projected module) | submenu by module kind: turrets "Long Range" list with per-family submenus ("Less Damage"/"More Damage"), missiles by damage type (EM/Thermal/Explosive/Kinetic/Mixed), mining crystals by ore class, else flat list; last item "Empty" unloads. Applies to all similar modules by default (pref ammoChangeAll), Ctrl/Alt inverts to selection only. GuiChangeLocalModuleChargesCommand | moduleAmmoChange.py
+- [x] Spoolup Cycles | module group "Precursor Weapon" or "Mutadaptive Remote Armor Repairer" (pref spoolup) | checkable list of cycle counts (default marked "(default)", min..max, current) + "Reset". GuiChangeLocalModuleSpoolCommand | moduleSpool.py
 - [ ] RAH Damage Pattern | module group "Armor Resistance Shift Hardener" | checkable: "Fit Pattern", "Do Not Adapt", separator, damage profiles tree (builtin + user, categories as submenus). sFit.setRahPattern | moduleRahPattern.py, shared/patterns.py
 - [ ] {Module} Stats | always | opens item stats window (Shift reuses last window) | itemStats.py
-- [ ] {Module} Market Group | item has a market group (mutated: base item's) | jumps market browser to the item | itemMarketJump.py
+- [x] {Module} Market Group | item has a market group (mutated: base item's) | jumps market browser to the item | itemMarketJump.py
 - [x] Remove {Module} | always | removes selection (multi); Ctrl/Alt removes all similar. GuiRemoveLocalModuleCommand | itemRemove.py
-- [ ] Variations | item has 2+ variations, not hidden (pref metaSwap) | submenu of meta variants grouped by meta group (disabled header rows), sorted by meta level; unfittable ones disabled. Swaps selection modules with identical variation set; Ctrl/Alt all similar. GuiChangeLocalModuleMetasCommand | itemVariationChange.py
+- [x] Variations | item has 2+ variations, not hidden (pref metaSwap) | submenu of meta variants grouped by meta group (disabled header rows), sorted by meta level; unfittable ones disabled. Swaps selection modules with identical variation set; Ctrl/Alt all similar. GuiChangeLocalModuleMetasCommand | itemVariationChange.py
 - [ ] Apply Mutaplasmid / Revert to {base} | item has mutaplasmids or is mutated | not mutated: submenu of mutaplasmids (Glorified sorted after base name); mutated: plain entry reverting to base item. GuiConvertMutatedLocalModuleCommand / GuiRevertMutatedLocalModuleCommand | itemMutations.py
-- [ ] Fill With {Module} | always (pref moduleFill) | clones the module into all free slots of that rack. GuiFillWithClonedLocalModulesCommand | moduleFill.py
+- [x] Fill With {Module} | always (pref moduleFill) | clones the module into all free slots of that rack. GuiFillWithClonedLocalModulesCommand | moduleFill.py
 - [ ] Copy Module to Clipboard | module is mutated | copies EFT mutant block (item, mutaplasmid, attrs) | moduleMutatedExport.py
 - [ ] Change {Module} Skills | some skill modifies a non-zero attr of the item (pref changeAffectingSkills) | submenu per affecting skill, each with "Not Learned", "Level 0".."Level 5" (checked current); changes character skill level and refreshes fit | skillAffectors.py
 
 ### fittingCharge
 - [ ] {Charge} Stats | charge loaded | stats window for the charge | itemStats.py
-- [ ] {Charge} Market Group | charge has market group | jump to charge in market | itemMarketJump.py
+- [x] {Charge} Market Group | charge has market group | jump to charge in market | itemMarketJump.py
 - [ ] Change {Charge} Skills | skills affect charge attrs | as above, on chargeModifiedAttributes | skillAffectors.py
 
 ### fittingMode
@@ -44,7 +44,7 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 - [ ] Ship Stats / Citadel Stats | always | stats window for the ship | itemStats.py
 - [ ] Citadel System Security | fit is a structure | radio: High Security, Low Security, Null Security, W-Space. GuiChangeFitSystemSecurityCommand | fitSystemSecurity.py
 - [ ] Pilot Security Status | ship is Pacifier, Enforcer, Marshal, Sidewinder, Cobra or Python | radio: "Character (x.xx)", "Custom (x)" (dialog, -10..5), separator, presets -10,-8,-6,-4,-2,0,1,2,3,4,5. GuiChangeFitPilotSecurityCommand | fitPilotSecurity.py
-- [ ] Open in Fitting Browser | unless fitting browser already shows this ship's fit list | switches to fittings tab, stage 3 for the ship | shipJump.py
+- [x] Open in Fitting Browser | unless fitting browser already shows this ship's fit list | switches to fittings tab, stage 3 for the ship | shipJump.py
 - [ ] Change Ship Skills / Change Citadel Skills | skills affect ship attrs | skill level submenu as above | skillAffectors.py
 
 ## Drones pane (gui/builtinAdditionPanes/droneView.py)
@@ -195,12 +195,12 @@ Contexts: commandFit (row is a fit, not a generic link), separator, commandView 
 
 Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 - [ ] {Category} Stats | always | stats window | itemStats.py
-- [ ] {Category} Market Group | marketItemMisc only | jumps to the item's group | itemMarketJump.py
-- [ ] Fill With Module | active fit, category Module (pref moduleFill) | adds the module to every free slot. GuiFillWithNewLocalModulesCommand | itemFill.py
-- [ ] Add {Drone} to Drone Bay (xN) | active fit, category Drone, room for >= 1 | adds stack sized to bay/bandwidth limit. GuiAddLocalDroneCommand | droneAddStack.py
-- [ ] Add {Category} to Cargo | active fit (structures: charges only) | adds 1 to cargo. GuiAddCargoCommand | cargoAdd.py
-- [ ] Fill Cargo With {Category} | active fit, item is charge or commodity | adds max units that fit. GuiAddCargoCommand | cargoFill.py
-- [ ] Add {Charge} to Cargo (x1000) / (x8) for Scan Probes | active fit, category Charge | adds 1000 (or 8). GuiAddCargoCommand | cargoAddAmmo.py
+- [x] {Category} Market Group | marketItemMisc only | jumps to the item's group | itemMarketJump.py
+- [x] Fill With Module | active fit, category Module (pref moduleFill) | adds the module to every free slot. GuiFillWithNewLocalModulesCommand | itemFill.py
+- [x] Add {Drone} to Drone Bay (xN) | active fit, category Drone, room for >= 1 | adds stack sized to bay/bandwidth limit. GuiAddLocalDroneCommand | droneAddStack.py
+- [x] Add {Category} to Cargo | active fit (structures: charges only) | adds 1 to cargo. GuiAddCargoCommand | cargoAdd.py
+- [~] Fill Cargo With {Category} | active fit, item is charge or commodity | adds max units that fit. GuiAddCargoCommand | cargoFill.py
+- [x] Add {Charge} to Cargo (x1000) / (x8) for Scan Probes | active fit, category Charge | adds 1000 (or 8). GuiAddCargoCommand | cargoAddAmmo.py
 - [ ] Project {Category} onto Fit | active non-structure fit, item has a projected effect (pref project) | adds as projected module/drone/fighter. GuiAddProjectedModule/Drone/FighterCommand | itemProject.py
 - [ ] Set {Category} as Damage Pattern | active fit, item has em/therm/kin/exp damage attrs (pref ammoPattern) | sets fit damage pattern to the item's damage ratio | ammoToDmgPattern.py
 

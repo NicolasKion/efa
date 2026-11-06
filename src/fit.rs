@@ -31,6 +31,9 @@ pub struct Module {
     pub type_id: TypeId,
     pub state: ModuleState,
     pub charge: Option<TypeId>,
+    /// Spool cycles to assume, for modules that spool up. None means fully spooled.
+    #[serde(default)]
+    pub spool: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +115,7 @@ impl Fit {
                     type_id,
                     state,
                     charge: None,
+                    spool: None,
                 });
             }
             Kind::Module(Slot::Rig) => self.rigs.push(type_id),
@@ -152,6 +156,38 @@ impl Fit {
             Kind::Skill | Kind::Other => return false,
         }
         true
+    }
+
+    /// Put `count` of an item into the cargo hold, on top of any stack already there.
+    pub fn add_cargo(&mut self, type_id: TypeId, count: u32) {
+        match self.cargo.iter_mut().find(|(t, _)| *t == type_id) {
+            Some((_, n)) => *n += count,
+            None => self.cargo.push((type_id, count)),
+        }
+    }
+
+    /// Volume the cargo takes, in m³.
+    pub fn cargo_volume(&self, catalog: &Catalog) -> f64 {
+        self.cargo
+            .iter()
+            .map(|&(t, n)| catalog.get(t).map_or(0.0, |t| t.volume) * f64::from(n))
+            .sum()
+    }
+
+    /// Add `count` drones of a type, launching as many as there is room for in space.
+    pub fn add_drones(&mut self, type_id: TypeId, count: u32) {
+        let launch = MAX_LAUNCHED.saturating_sub(self.launched()).min(count);
+        match self.drones.iter_mut().find(|d| d.type_id == type_id) {
+            Some(stack) => {
+                stack.count += count;
+                stack.active += launch;
+            }
+            None => self.drones.push(DroneStack {
+                type_id,
+                count,
+                active: launch,
+            }),
+        }
     }
 
     /// High, mid and low modules, in that order.
@@ -287,6 +323,7 @@ impl Fit {
                         type_id: t.id,
                         state,
                         charge,
+                        spool: None,
                     });
                 }
                 _ => {

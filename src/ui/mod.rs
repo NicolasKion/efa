@@ -1,13 +1,14 @@
 //! The main window, laid out like pyfa: browsers on the left, the fit in the middle with its
 //! additions underneath, stats on the right.
 
+mod actions;
 mod fitting;
 mod side;
 mod stats;
 mod widgets;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     path::{Path, PathBuf},
     rc::Rc,
     time::Duration,
@@ -24,14 +25,16 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     App, AppContext, ClickEvent, ClipboardItem, Context, Entity, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Task,
-    WeakEntity, Window, div, prelude::FluentBuilder, px,
+    ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Task, WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
+pub use actions::{Action, RowRef, Scope};
+
 use crate::{
-    data::{Catalog, Kind, Slot, TypeId},
+    data::{Catalog, Kind, TypeId},
     engine::{Engine, Stats},
-    fit::{Fit, ModuleState},
+    fit::Fit,
     icons::{Icon, Icons},
     store::Saved,
     theme::{self, Palette},
@@ -67,22 +70,6 @@ enum AdditionsTab {
     Notes,
 }
 
-/// A change to the current fit, from a click or a menu.
-#[derive(Debug, Clone, Copy)]
-pub enum Action {
-    CycleState(Slot, usize),
-    SetState(Slot, usize, ModuleState),
-    SetCharge(Slot, usize, Option<TypeId>),
-    RemoveModule(Slot, usize),
-    RemoveRig(usize),
-    RemoveSubsystem(usize),
-    SetDronesActive(usize, u32),
-    RemoveDrones(usize),
-    RemoveImplant(usize),
-    RemoveBooster(usize),
-    RemoveCargo(usize),
-}
-
 pub struct Gyfa {
     loading: Loading,
     saved: Saved,
@@ -96,8 +83,16 @@ pub struct Gyfa {
     /// The fit whose name and notes the inputs currently show.
     inputs_show: Option<usize>,
     expanded_groups: HashSet<i32>,
+    /// Item to scroll the market to and highlight, after a market group jump.
+    market_highlight: Option<TypeId>,
+    market_scroll_pending: bool,
+    market_scroll: ScrollHandle,
+    /// Ship whose fits the fittings browser is narrowed to.
+    fittings_ship: Option<TypeId>,
+    selection: Vec<RowRef>,
+    /// Where a Shift-click selection range starts.
+    anchor: Option<RowRef>,
     collapsed_sections: HashSet<&'static str>,
-    charges_for: HashMap<TypeId, Vec<TypeId>>,
     status: Option<SharedString>,
     palette: Palette,
     theme_generation: Option<String>,
@@ -179,8 +174,13 @@ impl Gyfa {
             notes_input,
             inputs_show: None,
             expanded_groups: HashSet::new(),
+            market_highlight: None,
+            market_scroll_pending: false,
+            market_scroll: ScrollHandle::new(),
+            fittings_ship: None,
+            selection: Vec::new(),
+            anchor: None,
             collapsed_sections: HashSet::new(),
-            charges_for: HashMap::new(),
             status: None,
             palette,
             theme_generation: theme::generation(),
@@ -234,6 +234,7 @@ impl Gyfa {
     }
 
     fn open_fit(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.clear_selection();
         if !self.saved.open.contains(&index) {
             self.saved.open.push(index);
         }
@@ -247,6 +248,7 @@ impl Gyfa {
     }
 
     fn close_fit(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.clear_selection();
         self.saved.open.retain(|&i| i != index);
         if self.saved.current == Some(index) {
             self.saved.current = self.saved.open.last().copied();
@@ -255,6 +257,7 @@ impl Gyfa {
     }
 
     fn delete_fit(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.clear_selection();
         self.saved.open.retain(|&i| i != index);
         if self.saved.current == Some(index) {
             self.saved.current = self.saved.open.last().copied();
@@ -304,53 +307,6 @@ impl Gyfa {
         let added = self.saved.fits[i].add(catalog, id);
         self.status =
             (!added).then(|| format!("Nothing on this fit takes {}", catalog.name(id)).into());
-        self.changed(cx);
-    }
-
-    pub fn apply(&mut self, action: Action, cx: &mut Context<Self>) {
-        let Some(loaded) = self.loaded() else { return };
-        let Some(current) = self.saved.current else {
-            return;
-        };
-        let fit = &mut self.saved.fits[current];
-        match action {
-            Action::CycleState(slot, i) => {
-                let m = &mut fit.rack_mut(slot)[i];
-                let t = loaded.catalog.get(m.type_id);
-                let activatable = t.is_some_and(|t| t.activatable);
-                let overloadable = t.is_some_and(|t| t.overloadable);
-                m.state = match m.state {
-                    ModuleState::Offline => ModuleState::Online,
-                    ModuleState::Online if activatable => ModuleState::Active,
-                    ModuleState::Active if overloadable => ModuleState::Overload,
-                    _ => ModuleState::Offline,
-                };
-            }
-            Action::SetState(slot, i, state) => fit.rack_mut(slot)[i].state = state,
-            Action::SetCharge(slot, i, charge) => fit.rack_mut(slot)[i].charge = charge,
-            Action::RemoveModule(slot, i) => {
-                fit.rack_mut(slot).remove(i);
-            }
-            Action::RemoveRig(i) => {
-                fit.rigs.remove(i);
-            }
-            Action::RemoveSubsystem(i) => {
-                fit.subsystems.remove(i);
-            }
-            Action::SetDronesActive(i, n) => fit.drones[i].active = n.min(fit.drones[i].count),
-            Action::RemoveDrones(i) => {
-                fit.drones.remove(i);
-            }
-            Action::RemoveImplant(i) => {
-                fit.implants.remove(i);
-            }
-            Action::RemoveBooster(i) => {
-                fit.boosters.remove(i);
-            }
-            Action::RemoveCargo(i) => {
-                fit.cargo.remove(i);
-            }
-        }
         self.changed(cx);
     }
 
@@ -556,6 +512,7 @@ impl Gyfa {
                     .child(div().text_sm().child(label))
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.saved.current = Some(i);
+                        this.clear_selection();
                         this.changed(cx);
                     }))
                     .child(
@@ -579,6 +536,33 @@ impl Gyfa {
                     .tooltip("New fit")
                     .on_click(cx.listener(|this, _, _, cx| this.add_fit(Fit::new("New fit"), cx))),
             )
+    }
+}
+
+impl Gyfa {
+    /// Show an item in the market browser: clear the search, open its groups, scroll to it.
+    pub(super) fn jump_to_market(
+        &mut self,
+        id: TypeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(loaded) = self.loaded() else { return };
+        self.browser_tab = BrowserTab::Market;
+        self.search_text.clear();
+        self.search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.expanded_groups.extend(loaded.catalog.market_path(id));
+        self.market_highlight = Some(id);
+        self.market_scroll_pending = true;
+        cx.notify();
+    }
+
+    /// Show the fittings browser narrowed to one ship's fits.
+    pub(super) fn jump_to_fittings(&mut self, ship: TypeId, cx: &mut Context<Self>) {
+        self.browser_tab = BrowserTab::Fittings;
+        self.fittings_ship = Some(ship);
+        cx.notify();
     }
 }
 

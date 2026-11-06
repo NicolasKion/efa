@@ -1,0 +1,305 @@
+//! Changes to the current fit, and which rows they apply to.
+//!
+//! Menus follow pyfa: an action applies to the selection when the clicked row is part of it, and
+//! to just the clicked row otherwise. Some actions instead default to every similar module (same
+//! type), with Ctrl or Alt swapping the two.
+
+use std::collections::BTreeSet;
+
+use gpui_kit::{ClickEvent, Context, Modifiers};
+
+use super::Gyfa;
+use crate::{
+    data::{Slot, TypeId},
+    fit::{Module, ModuleState},
+};
+
+/// A row of the fitting view that holds something.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RowRef {
+    Module(Slot, usize),
+    Rig(usize),
+    Subsystem(usize),
+}
+
+/// Which modules a menu entry acts on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// The selection, or the clicked row if it is not selected.
+    Selection,
+    /// Every module of the clicked row's type.
+    Similar,
+}
+
+impl Scope {
+    /// The scope a click gives: `default`, or the other one while Ctrl or Alt is held.
+    pub fn from_click(default: Self, event: &ClickEvent) -> Self {
+        Self::from_modifiers(default, event.modifiers())
+    }
+
+    fn from_modifiers(default: Self, modifiers: Modifiers) -> Self {
+        if modifiers.control || modifiers.alt {
+            match default {
+                Self::Selection => Self::Similar,
+                Self::Similar => Self::Selection,
+            }
+        } else {
+            default
+        }
+    }
+}
+
+/// A change to the current fit, from a click or a menu.
+#[derive(Debug, Clone)]
+pub enum Action {
+    CycleState(Slot, usize),
+    SetState(Vec<RowRef>, ModuleState),
+    SetCharge(Vec<RowRef>, Option<TypeId>),
+    SetSpool(Vec<RowRef>, Option<u32>),
+    Remove(Vec<RowRef>),
+    /// Swap items for another type, keeping their state and charge.
+    SwapType(Vec<RowRef>, TypeId),
+    /// Put copies of a module into every free slot of its rack.
+    FillRack(Slot, TypeId),
+    SetDronesActive(usize, u32),
+    RemoveDrones(usize),
+    RemoveImplant(usize),
+    RemoveBooster(usize),
+    RemoveCargo(usize),
+    AddCargo(TypeId, u32),
+    AddDrones(TypeId, u32),
+}
+
+impl Gyfa {
+    /// The rows an action on `clicked` should touch.
+    pub(super) fn targets(&self, clicked: RowRef, scope: Scope) -> Vec<RowRef> {
+        let Some(fit) = self.fit() else {
+            return Vec::new();
+        };
+        match scope {
+            Scope::Selection if self.selection.contains(&clicked) => self.selection.clone(),
+            Scope::Selection => vec![clicked],
+            Scope::Similar => {
+                let Some(type_id) = self.row_type(clicked) else {
+                    return vec![clicked];
+                };
+                match clicked {
+                    RowRef::Module(..) => [Slot::High, Slot::Mid, Slot::Low]
+                        .into_iter()
+                        .flat_map(|slot| {
+                            fit.rack(slot)
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, m)| m.type_id == type_id)
+                                .map(move |(i, _)| RowRef::Module(slot, i))
+                        })
+                        .collect(),
+                    RowRef::Rig(_) => (0..fit.rigs.len())
+                        .filter(|&i| fit.rigs[i] == type_id)
+                        .map(RowRef::Rig)
+                        .collect(),
+                    RowRef::Subsystem(_) => vec![clicked],
+                }
+            }
+        }
+    }
+
+    pub(super) fn row_type(&self, row: RowRef) -> Option<TypeId> {
+        let fit = self.fit()?;
+        match row {
+            RowRef::Module(slot, i) => fit.rack(slot).get(i).map(|m| m.type_id),
+            RowRef::Rig(i) => fit.rigs.get(i).copied(),
+            RowRef::Subsystem(i) => fit.subsystems.get(i).copied(),
+        }
+    }
+
+    /// Click selection the way list views do it: plain click selects one row, Ctrl toggles,
+    /// Shift extends from the last clicked row.
+    pub(super) fn select(
+        &mut self,
+        row: RowRef,
+        modifiers: Modifiers,
+        order: &[RowRef],
+        cx: &mut Context<Self>,
+    ) {
+        if modifiers.shift
+            && let Some(anchor) = self.anchor
+        {
+            let position = |r: RowRef| order.iter().position(|&o| o == r);
+            if let (Some(a), Some(b)) = (position(anchor), position(row)) {
+                let (from, to) = (a.min(b), a.max(b));
+                self.selection = order[from..=to].to_vec();
+            }
+        } else if modifiers.control {
+            if let Some(at) = self.selection.iter().position(|&r| r == row) {
+                self.selection.remove(at);
+            } else {
+                self.selection.push(row);
+            }
+            self.anchor = Some(row);
+        } else {
+            self.selection = vec![row];
+            self.anchor = Some(row);
+        }
+        cx.notify();
+    }
+
+    pub(super) fn clear_selection(&mut self) {
+        self.selection.clear();
+        self.anchor = None;
+    }
+
+    pub fn apply(&mut self, action: Action, cx: &mut Context<Self>) {
+        let Some(loaded) = self.loaded() else { return };
+        let Some(current) = self.saved.current else {
+            return;
+        };
+        let free = |slot: Slot, used: usize, stats: Option<&crate::engine::Stats>| {
+            let total = stats.map_or(0, |s| match slot {
+                Slot::High => s.high.total.unwrap_or(0),
+                Slot::Mid => s.mid.total.unwrap_or(0),
+                Slot::Low => s.low.total.unwrap_or(0),
+                Slot::Rig => s.rig.total.unwrap_or(0),
+                Slot::Subsystem => s.subsystem.total.unwrap_or(0),
+            }) as usize;
+            total.saturating_sub(used)
+        };
+        let stats = self.stats.as_ref();
+        let fit = &mut self.saved.fits[current];
+        let mut structural = false;
+        match action {
+            Action::CycleState(slot, i) => {
+                let m = &mut fit.rack_mut(slot)[i];
+                let t = loaded.catalog.get(m.type_id);
+                let activatable = t.is_some_and(|t| t.activatable);
+                let overloadable = t.is_some_and(|t| t.overloadable);
+                m.state = match m.state {
+                    ModuleState::Offline => ModuleState::Online,
+                    ModuleState::Online if activatable => ModuleState::Active,
+                    ModuleState::Active if overloadable => ModuleState::Overload,
+                    _ => ModuleState::Offline,
+                };
+            }
+            Action::SetState(rows, new_state) => {
+                for m in modules_mut(fit, &rows) {
+                    m.state = new_state;
+                }
+            }
+            Action::SetCharge(rows, charge) => {
+                for m in modules_mut(fit, &rows) {
+                    let fits = charge.is_none_or(|c| {
+                        let (c, m) = (loaded.catalog.get(c), loaded.catalog.get(m.type_id));
+                        c.zip(m).is_some_and(|(c, m)| c.fits_in(m))
+                    });
+                    if fits {
+                        m.charge = charge;
+                    }
+                }
+            }
+            Action::SetSpool(rows, cycles) => {
+                for m in modules_mut(fit, &rows) {
+                    m.spool = cycles;
+                }
+            }
+            Action::Remove(rows) => {
+                // Highest index first, so earlier removals do not shift later ones.
+                let rows: BTreeSet<RowRef> = rows.into_iter().collect();
+                for row in rows.into_iter().rev() {
+                    match row {
+                        RowRef::Module(slot, i) if i < fit.rack(slot).len() => {
+                            fit.rack_mut(slot).remove(i);
+                        }
+                        RowRef::Rig(i) if i < fit.rigs.len() => {
+                            fit.rigs.remove(i);
+                        }
+                        RowRef::Subsystem(i) if i < fit.subsystems.len() => {
+                            fit.subsystems.remove(i);
+                        }
+                        _ => {}
+                    }
+                }
+                structural = true;
+            }
+            Action::SwapType(rows, type_id) => {
+                for row in rows {
+                    match row {
+                        RowRef::Module(slot, i) => {
+                            if let Some(m) = fit.rack_mut(slot).get_mut(i) {
+                                m.type_id = type_id;
+                                // The new variation may not take the old charge.
+                                let keeps = m.charge.is_some_and(|c| {
+                                    let (c, t) =
+                                        (loaded.catalog.get(c), loaded.catalog.get(type_id));
+                                    c.zip(t).is_some_and(|(c, t)| c.fits_in(t))
+                                });
+                                if !keeps {
+                                    m.charge = None;
+                                }
+                            }
+                        }
+                        RowRef::Rig(i) => {
+                            if let Some(r) = fit.rigs.get_mut(i) {
+                                *r = type_id;
+                            }
+                        }
+                        RowRef::Subsystem(i) => {
+                            if let Some(s) = fit.subsystems.get_mut(i) {
+                                *s = type_id;
+                            }
+                        }
+                    }
+                }
+            }
+            Action::FillRack(slot, type_id) => {
+                let used = match slot {
+                    Slot::Rig => fit.rigs.len(),
+                    Slot::Subsystem => fit.subsystems.len(),
+                    Slot::High | Slot::Mid | Slot::Low => fit.rack(slot).len(),
+                };
+                for _ in 0..free(slot, used, stats) {
+                    fit.add(&loaded.catalog, type_id);
+                }
+            }
+            Action::SetDronesActive(i, n) => fit.drones[i].active = n.min(fit.drones[i].count),
+            Action::RemoveDrones(i) => {
+                fit.drones.remove(i);
+            }
+            Action::RemoveImplant(i) => {
+                fit.implants.remove(i);
+            }
+            Action::RemoveBooster(i) => {
+                fit.boosters.remove(i);
+            }
+            Action::RemoveCargo(i) => {
+                fit.cargo.remove(i);
+            }
+            Action::AddCargo(type_id, count) => fit.add_cargo(type_id, count),
+            Action::AddDrones(type_id, count) => fit.add_drones(type_id, count),
+        }
+        if structural {
+            self.clear_selection();
+        }
+        self.changed(cx);
+    }
+}
+
+fn modules_mut<'f>(fit: &'f mut crate::fit::Fit, rows: &[RowRef]) -> Vec<&'f mut Module> {
+    let wanted: BTreeSet<(Slot, usize)> = rows
+        .iter()
+        .filter_map(|r| match *r {
+            RowRef::Module(slot, i) => Some((slot, i)),
+            RowRef::Rig(_) | RowRef::Subsystem(_) => None,
+        })
+        .collect();
+    let crate::fit::Fit { high, mid, low, .. } = fit;
+    [(Slot::High, high), (Slot::Mid, mid), (Slot::Low, low)]
+        .into_iter()
+        .flat_map(|(slot, rack)| {
+            rack.iter_mut()
+                .enumerate()
+                .filter(|(i, _)| wanted.contains(&(slot, *i)))
+                .map(|(_, m)| m)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
