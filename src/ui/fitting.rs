@@ -2,8 +2,9 @@
 
 use std::rc::Rc;
 
+use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
-    ActiveTheme, IconName, h_flex,
+    ActiveTheme, Icon as UiIcon, IconName, h_flex,
     menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
     v_flex,
 };
@@ -244,11 +245,12 @@ impl Gyfa {
         let catalog = &loaded.catalog;
         let theme = cx.theme();
         let palette = &self.palette;
+        // pyfa's state icons: a flame marks an overheated module.
         let (mark, mark_color) = match m.state {
-            ModuleState::Offline => ("○", palette.muted),
-            ModuleState::Online => ("○", palette.yellow),
-            ModuleState::Active => ("✓", palette.green),
-            ModuleState::Overload => ("●", palette.orange),
+            ModuleState::Offline => (AssetIcon::Power, palette.muted),
+            ModuleState::Online => (AssetIcon::Circle, palette.yellow),
+            ModuleState::Active => (AssetIcon::CircleCheck, palette.green),
+            ModuleState::Overload => (AssetIcon::Flame, palette.orange),
         };
         let layout = self.column_layout;
         let text = |col: Col| col.text(catalog, m, &info);
@@ -257,8 +259,13 @@ impl Gyfa {
                 .id(SharedString::from(format!("state-{slot:?}-{i}")))
                 .w(px(STATE_W))
                 .flex_none()
-                .text_color(color(mark_color))
-                .child(mark)
+                .flex()
+                .items_center()
+                .child(UiIcon::new(mark).size(px(15.)).text_color(color(mark_color)))
+                .tooltip({
+                    let label = m.state.label();
+                    move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label).build(window, cx)
+                })
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     cx.stop_propagation();
                     this.apply(Action::CycleState(slot, i), cx);
