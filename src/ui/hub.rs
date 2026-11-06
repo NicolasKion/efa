@@ -6,10 +6,10 @@
 
 use std::{path::PathBuf, rc::Rc};
 
-use gpui_kit::{AppContext, Context, SharedString, WeakEntity};
+use gpui_kit::{AnyWindowHandle, AppContext, Context, SharedString, WeakEntity};
 
-use super::{Loaded, load};
-use crate::{prices::Prices, store::Saved};
+use super::{Loaded, character_editor::CharacterEditor, load};
+use crate::{character::Characters, prices::Prices, store::Saved};
 
 pub enum HubLoading {
     Pending,
@@ -29,6 +29,11 @@ pub struct Hub {
     pub prices: Rc<Prices>,
     /// EFT text from the command line, for the main window to import once data is loaded.
     pub import: Option<String>,
+    /// The characters. Replaced, never changed in place, so a window can tell it has the
+    /// latest by pointer.
+    pub characters: Rc<Characters>,
+    /// The open character editor, which is brought forward instead of opening a second one.
+    pub character_editor: Option<(AnyWindowHandle, WeakEntity<CharacterEditor>)>,
 }
 
 impl Hub {
@@ -55,7 +60,27 @@ impl Hub {
             deletions: Vec::new(),
             prices: Rc::new(Prices::default()),
             import,
+            characters: Rc::new(Characters::load()),
+            character_editor: None,
         }
+    }
+
+    /// Change the characters, write them out if that changed anything, and tell every window.
+    pub fn edit_characters<R>(
+        &mut self,
+        cx: &mut Context<Self>,
+        edit: impl FnOnce(&mut Characters) -> R,
+    ) -> R {
+        let mut characters = (*self.characters).clone();
+        let result = edit(&mut characters);
+        if characters != *self.characters {
+            if let Err(e) = characters.save() {
+                eprintln!("saving characters: {e}");
+            }
+            self.characters = Rc::new(characters);
+            cx.notify();
+        }
+        result
     }
 
     /// Take a window's fits and settings as the new truth, write them out, and tell every

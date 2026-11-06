@@ -1,7 +1,7 @@
 # Feature parity with pyfa
 
 Rough coverage: the core loop works (pick ship, add modules/charges/drones/implants/boosters, see the main stats, EFT in/out), plus the pyfa layout with in-game icons and the main module columns, which is maybe 20-25% of pyfa's surface.
-Biggest gaps: characters and skills (everything is all V), projected/command/fleet effects, fighters, cargo editing, item stats window, graphs, prices, ESI/SSO, and most context menus.
+Biggest gaps: projected/command/fleet effects, fighters, item stats window, graphs, ESI/SSO, and most context menus.
 Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, mutations, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
 Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time (needs looping over refine stats), lock/warp time formulas.
 
@@ -24,7 +24,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Fit validation messages (over CPU/PG/slots/skills/max group fitted/rig size etc.) (eos/saveddata/fit.py), refine: validate_verbose
 - [ ] System security zone per fit (builtinContextMenus/fitSystemSecurity.py), refine: set_sec_zone
 - [ ] Pilot security status per fit (builtinContextMenus/fitPilotSecurity.py), refine: set_sec_status
-- [ ] Per-fit character selection (gui/characterSelection.py)
+- [x] Per-fit character selection, stored on the fit; old fits fly All 5 and new fits get the character picked last (gui/characterSelection.py)
 - [x] Per-fit damage pattern and target profile (gui/builtinStatsViews, contextMenus/damagePatternChange.py, targetProfile/switcher.py)
 - [x] Fit notes, carried by duplicates, shown in the fittings browser tooltip cut to 200 characters (builtinAdditionPanes/notesView.py, builtinShipBrowser/fitItem.py); EFT text has no notes in pyfa either
 - [ ] Mark fit as fleet booster / command fit (builtinAdditionPanes/commandView.py)
@@ -171,17 +171,18 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 
 ## Characters and skills
 
-- [~] Character with all skills V (service/character.py), fixed, no choice
-- [ ] All 0 / All 5 built-in characters (service/character.py)
-- [ ] Character editor: skill tree, set levels, unlearn (gui/characterEditor.py), refine: add_skill, set_level
-- [ ] Create, rename, copy, delete, save/revert characters (characterEditor.py, mainMenuBar.py)
-- [ ] Character implants tab (characterEditor.py)
-- [ ] Character security status (characterEditor.py), refine: set_sec_status
+- [x] User characters with per-skill levels, calculated by the engine (service/character.py), kept in characters.json
+- [x] All 0 / All 5 built-in characters, read-only (service/character.py)
+- [x] Character editor in its own window: skill tree by group with search, levels from the menu or keys 0-5, unlearn, pending levels marked (gui/characterEditor.py); setting a level trains its prerequisites and unlearns skills that need it higher (strict skill levels)
+- [x] Create, rename, copy, delete, save, save as, revert characters (characterEditor.py, mainMenuBar.py)
+- [ ] Alpha clone skill caps (characterEditor.py clone choice): needs pyfa's alpha clone data, which the dump does not have
+- [x] Character implants tab, with Apply Implant Set (characterEditor.py)
+- [x] Character security status, used where the fit does not set its own (characterEditor.py), refine: set_sec_status
 - [ ] Import skills from ESI (characterEditor.py "Get Skills"), needs SSO
-- [ ] Import/export skills to clipboard (characterEditor.py)
-- [ ] Import character file (EVEMon XML) (mainMenuBar.py importCharacter)
-- [ ] Export skills needed for fit (mainMenuBar.py exportSkillsNeeded), refine: validate_verbose skill_reqs
-- [ ] Missing skills tooltip on fit (gui/characterSelection.py)
+- [x] Import/export skills to clipboard, levels in digits or Roman numerals (characterEditor.py)
+- [x] Import character file (EVEMon XML) (mainMenuBar.py importCharacter)
+- [x] Export skills needed for fit as EVEMon .emp/.xml or text, by file extension (mainMenuBar.py exportSkillsNeeded)
+- [x] Missing skills icon with tooltip and menu (gui/characterSelection.py); the condensed tooltip, pyfa's default
 - [ ] Global character vs per-fit character pref (pyfaGeneralPreferences.py)
 - [ ] Enforce strict skill requirements pref (pyfaEnginePreferences.py), refine: ValOptions skill_reqs
 - [x] Implant set editor: new, rename, copy, delete, add from search, remove, clipboard import/export (gui/setEditor.py, builtinViews/implantEditor.py, service/implantSet.py)

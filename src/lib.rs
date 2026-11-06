@@ -1,4 +1,5 @@
 pub mod cdn;
+pub mod character;
 pub mod damage_pattern;
 pub mod data;
 pub mod engine;

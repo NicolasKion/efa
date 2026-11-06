@@ -10,7 +10,6 @@ use gpui_kit::{
 use super::{Pane, Section, format, ids, muted, tip, title};
 use crate::{
     data::TypeId,
-    engine::CHARACTER_IMPLANTS,
     fit::Fit,
     icons::Icon,
     store::PriceTotals,
@@ -34,7 +33,12 @@ pub struct FitPrice {
 }
 
 impl FitPrice {
-    pub fn new(fit: &Fit, price: impl Fn(TypeId) -> Option<f64>) -> Self {
+    /// The price with `implants` as the character's, for fits that use them.
+    pub fn with_character_implants(
+        fit: &Fit,
+        implants: &[TypeId],
+        price: impl Fn(TypeId) -> Option<f64>,
+    ) -> Self {
         let each = |id: TypeId| price(id).unwrap_or(0.0);
         let stacks = |items: &mut dyn Iterator<Item = (TypeId, u32)>| -> f64 {
             items.map(|(id, n)| each(id) * f64::from(n)).sum()
@@ -47,7 +51,7 @@ impl FitPrice {
             .map(each)
             .sum();
         let character = fit
-            .applied_implants(CHARACTER_IMPLANTS)
+            .applied_implants(implants)
             .map(|(id, _)| id)
             .chain(fit.boosters.iter().map(|b| b.type_id))
             .map(each)
@@ -83,7 +87,8 @@ fn isk(v: f64) -> String {
 
 pub(super) fn section(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &App) -> Section {
     let totals = p.price_totals;
-    let price = FitPrice::new(p.fit, |id| p.prices.get(id));
+    let price =
+        FitPrice::with_character_implants(p.fit, p.character_implants, |id| p.prices.get(id));
     let cell = |key: &str, icon_el: Div, label: &str, value: f64| {
         h_flex().flex_1().gap_1().child(icon_el).child(
             v_flex().child(div().child(label.to_owned())).child(tip(
@@ -208,7 +213,7 @@ mod tests {
             ..Fit::default()
         };
         let prices = |id: TypeId| (id != 9).then_some(f64::from(id) * 100.0);
-        let p = FitPrice::new(&fit, prices);
+        let p = FitPrice::with_character_implants(&fit, &[], prices);
         assert_eq!(
             p,
             FitPrice {

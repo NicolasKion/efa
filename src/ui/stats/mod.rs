@@ -73,6 +73,8 @@ struct Pane<'a> {
     /// The user's patterns and profiles, for the header menus.
     damage_patterns: Rc<Vec<crate::damage_pattern::DamagePattern>>,
     target_profiles: Rc<Vec<crate::target_profile::TargetProfile>>,
+    /// Implants plugged into the fit's character.
+    character_implants: &'a [crate::data::TypeId],
 }
 
 impl Pane<'_> {
@@ -140,21 +142,8 @@ const TEXT_SIZE: f32 = 11.;
 
 impl Gyfa {
     pub(super) fn stats_panel(&self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
+        let character = self.character_bar(loaded, cx);
         let theme = cx.theme();
-        let character = h_flex()
-            .gap_2()
-            .p_2()
-            .border_b_1()
-            .border_color(theme.border)
-            .child("Character:")
-            .child(
-                div()
-                    .px_2()
-                    .py_0p5()
-                    .rounded(px(4.))
-                    .bg(theme.secondary)
-                    .child("All 5"),
-            );
         let (Some(stats), Some(fit)) = (&self.stats, self.fit()) else {
             return v_flex()
                 .size_full()
@@ -175,6 +164,7 @@ impl Gyfa {
             price_totals: self.saved.price_totals,
             damage_patterns: Rc::new(self.saved.damage_patterns.clone()),
             target_profiles: Rc::new(self.saved.target_profiles.clone()),
+            character_implants: self.character_implants(),
         };
         let this = Self::weak(cx);
         let sections = [

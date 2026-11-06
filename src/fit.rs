@@ -7,7 +7,10 @@ use std::fmt::Write;
 
 use serde::{Deserialize, Serialize};
 
-use crate::data::{Catalog, Kind, Slot, TypeId};
+use crate::{
+    character::CharacterId,
+    data::{Catalog, Kind, Slot, TypeId},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModuleState {
@@ -143,6 +146,9 @@ pub struct Fit {
     /// What the firepower view applies damage to; none shows raw damage.
     #[serde(default)]
     pub target_profile: Option<crate::target_profile::TargetProfile>,
+    /// Who flies the fit; fits from before characters existed fly All 5.
+    #[serde(default)]
+    pub character: CharacterId,
 }
 
 /// Incoming damage that effective HP, effective repair rates and the reactive armor hardener

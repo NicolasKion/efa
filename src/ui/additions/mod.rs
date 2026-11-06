@@ -111,8 +111,7 @@ impl Gyfa {
             (
                 AdditionsTab::Implants,
                 "Implants",
-                fit.applied_implants(crate::engine::CHARACTER_IMPLANTS)
-                    .count(),
+                fit.applied_implants(self.character_implants()).count(),
             ),
             (AdditionsTab::Boosters, "Boosters", fit.boosters.len()),
             (AdditionsTab::Cargo, "Cargo", fit.cargo.len()),
@@ -352,6 +351,11 @@ fn addition_menu(
                 )
             },
         );
+    }
+    if kind == AddKind::Drones
+        && let Some(target) = super::characters::stack_target(loaded, type_id)
+    {
+        menu = super::characters::skills_submenu(menu, this, loaded, target, window, cx);
     }
     if kind == AddKind::Cargo {
         let this = this.clone();

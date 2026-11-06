@@ -16,7 +16,6 @@ use gpui_kit::{
 use super::{MENU_MAX_H, ROW_HEIGHT, export_lines, parse_lines};
 use crate::{
     data::{Kind, TypeId},
-    engine::CHARACTER_IMPLANTS,
     fit::ImplantSource,
     icons::Icon,
     implant_set::{self, PrecalcSet},
@@ -37,11 +36,12 @@ struct Snapshot {
 impl Snapshot {
     fn take(this: &WeakEntity<Gyfa>, cx: &App) -> Option<Self> {
         let g = this.upgrade()?;
-        let fit = g.read(cx).fit()?;
+        let g = g.read(cx);
+        let fit = g.fit()?;
         Some(Self {
             source: fit.implant_source,
             rows: fit
-                .applied_implants(CHARACTER_IMPLANTS)
+                .applied_implants(g.character_implants())
                 .map(|(t, _)| t)
                 .collect(),
         })
@@ -65,7 +65,7 @@ impl Gyfa {
         }
         let fit = &self.saved.fits[current];
         let source = fit.implant_source;
-        let rows: Vec<(TypeId, bool)> = fit.applied_implants(CHARACTER_IMPLANTS).collect();
+        let rows: Vec<(TypeId, bool)> = fit.applied_implants(self.character_implants()).collect();
 
         let empty_text = match source {
             ImplantSource::Fit => "Double-click or drag implants from the market to add them.",
