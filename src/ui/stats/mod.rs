@@ -127,6 +127,8 @@ struct Section {
     title: AnyElement,
     body: AnyElement,
     menu: Option<MenuFn>,
+    /// A control for the header's right end, before the menu, e.g. the firepower/mining swap.
+    action: Option<AnyElement>,
 }
 
 /// Width of the stats pane. pyfa sizes its pane to the content and keeps it there.
@@ -210,6 +212,7 @@ impl Gyfa {
             title,
             body,
             menu,
+            action,
         } = section;
         let collapsed = self.collapsed_sections.contains(key);
         let header = h_flex()
@@ -228,6 +231,7 @@ impl Gyfa {
                         cx.notify();
                     })),
             )
+            .children(action)
             .when_some(menu.clone(), |h, menu| {
                 h.child(
                     Button::new(SharedString::from(format!("section-menu-{key}")))

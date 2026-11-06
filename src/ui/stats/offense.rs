@@ -73,8 +73,11 @@ fn minus(a: Damage, b: Damage) -> Damage {
 }
 
 /// An icon with a caption over a value, the block pyfa's firepower and mining views are built of.
+/// Blocks share their row equally, so they line up with the columns of the other sections.
 fn block(p: &Pane<'_>, key: &str, icon_id: i32, caption: &str, value: AnyElement) -> AnyElement {
     h_flex()
+        .flex_1()
+        .min_w_0()
         .gap_1()
         .child(p.icon(icon_id, 24.))
         .child(v_flex().child(div().child(caption.to_owned())).child(value))
@@ -91,6 +94,8 @@ fn swap_button(
     cx: &Context<Gyfa>,
 ) -> AnyElement {
     tip(key, p.icon(icon_id, 16.), text)
+        .flex_none()
+        .self_start()
         .cursor_pointer()
         .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
             this.stats_view.mining = !this.stats_view.mining;
@@ -128,17 +133,18 @@ pub(super) fn firepower(
 
     let parts = [s.dps.em, s.dps.thermal, s.dps.kinetic, s.dps.explosive];
     let total: f64 = parts.iter().sum();
-    let totals = v_flex()
+    // Labels right-aligned in one column and numbers in the next, so the numbers line up.
+    let totals = h_flex()
+        .gap_1()
         .child(
-            h_flex()
-                .gap_1()
+            v_flex()
+                .items_end()
                 .child(muted("Volley:", cx))
-                .child(value("volley", s.volley, f.volley, "")),
+                .child(muted("DPS:", cx)),
         )
         .child(
-            h_flex()
-                .gap_1()
-                .child(muted("DPS:", cx))
+            v_flex()
+                .child(value("volley", s.volley, f.volley, ""))
                 .child(value("dps", s.dps, f.dps, "")),
         );
     let body = v_flex()
@@ -146,7 +152,6 @@ pub(super) fn firepower(
         .child(
             h_flex()
                 .w_full()
-                .justify_between()
                 .child(block(
                     p,
                     "weapon",
@@ -163,17 +168,12 @@ pub(super) fn firepower(
                 ))
                 .child(
                     h_flex()
+                        .flex_1()
+                        .min_w_0()
                         .gap_1()
                         .child(p.icon(icon::DAMAGE, 24.))
                         .child(totals),
-                )
-                .child(swap_button(
-                    p,
-                    "fp-to-mining",
-                    ids::MINING,
-                    "Click to toggle to Mining Yield",
-                    cx,
-                )),
+                ),
         )
         // The damage type bar is gyfa's own: the mix at a glance, which pyfa leaves to tooltips.
         .when(total > 0.0, |col| {
@@ -195,6 +195,13 @@ pub(super) fn firepower(
 
     let this = this.clone();
     Section {
+        action: Some(swap_button(
+            p,
+            "fp-to-mining",
+            ids::MINING,
+            "Click to toggle to Mining Yield",
+            cx,
+        )),
         key: "Firepower",
         title: title("Firepower"),
         body,
@@ -254,7 +261,6 @@ pub(super) fn mining(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
     };
     let body = h_flex()
         .w_full()
-        .justify_between()
         .child(block(
             p,
             "miner",
@@ -276,19 +282,19 @@ pub(super) fn mining(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
             "Total",
             value("total", total),
         ))
-        .child(swap_button(
-            p,
-            "mining-to-fp",
-            icon::TURRET,
-            "Click to toggle to Firepower View",
-            cx,
-        ))
         .into_any_element();
     Section {
         key: "Firepower",
         title: title("Mining Yield"),
         body,
         menu: None,
+        action: Some(swap_button(
+            p,
+            "mining-to-fp",
+            icon::TURRET,
+            "Click to toggle to Firepower View",
+            cx,
+        )),
     }
 }
 
@@ -372,5 +378,6 @@ pub(super) fn outgoing(p: &Pane<'_>) -> Section {
         title: title("Remote Reps"),
         body,
         menu: None,
+        action: None,
     }
 }

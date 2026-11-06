@@ -151,6 +151,7 @@ pub(super) fn section(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &App) -> Sectio
 
     let this = this.clone();
     Section {
+        action: None,
         key: "Price",
         title: header,
         body,

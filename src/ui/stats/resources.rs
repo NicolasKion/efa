@@ -162,5 +162,6 @@ pub(super) fn section(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
         title: title("Resources"),
         body,
         menu: None,
+        action: None,
     }
 }

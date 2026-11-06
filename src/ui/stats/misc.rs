@@ -105,6 +105,7 @@ pub(super) fn capacitor(p: &Pane<'_>) -> Section {
         title: title("Capacitor"),
         body,
         menu: None,
+        action: None,
     }
 }
 
@@ -283,6 +284,7 @@ pub(super) fn targeting(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
         title: title("Targeting & Misc"),
         body,
         menu: None,
+        action: None,
     }
 }
 

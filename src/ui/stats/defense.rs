@@ -168,6 +168,7 @@ pub(super) fn resistances(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &Context<Gy
 
     let (this, current) = (this.clone(), p.fit.damage_profile.clone());
     Section {
+        action: None,
         key: "Resistances",
         title: header,
         body: body.into_any_element(),
@@ -333,6 +334,7 @@ pub(super) fn recharge(p: &Pane<'_>) -> Section {
         title: title("Recharge rates"),
         body,
         menu: None,
+        action: None,
     }
 }
 
@@ -423,5 +425,6 @@ pub(super) fn bombing(p: &Pane<'_>) -> Section {
         title: title("Bombing"),
         body: body.into_any_element(),
         menu: None,
+        action: None,
     }
 }
