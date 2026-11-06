@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use gpui_kit::{AppContext, WindowBounds, WindowOptions, px, size};
+use gyfa::ui::{Gyfa, Hub, Role};
 
 fn main() {
     let data_dir =
@@ -23,8 +24,10 @@ fn main() {
                 app_id: Some("gyfa".into()),
                 ..Default::default()
             };
+            // Loading and the fits live in the hub, which every window shares.
+            let hub = cx.new(|cx| Hub::new(data_dir, import, cx));
             gpui_kit::open_window(options, cx, move |window, cx| {
-                cx.new(|cx| gyfa::ui::Gyfa::new(data_dir, import, window, cx))
+                cx.new(|cx| Gyfa::new(hub, Role::Main, window, cx))
             })
             .expect("the main window opens");
         });

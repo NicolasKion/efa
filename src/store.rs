@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{fit::Fit, implant_set::ImplantSet};
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Saved {
     pub fits: Vec<Fit>,

@@ -5,6 +5,7 @@ mod actions;
 mod additions;
 mod columns;
 mod fitting;
+mod hub;
 mod implant_sets;
 mod side;
 mod stats;
@@ -22,17 +23,51 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
-    menu::DropdownMenu,
+    menu::{ContextMenuExt, DropdownMenu},
     resizable::{h_resizable, resizable_panel, v_resizable},
     v_flex,
 };
 use gpui_kit::{
     App, AppContext, ClickEvent, ClipboardItem, Context, Entity, FocusHandle, InteractiveElement,
-    IntoElement, ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement,
-    Styled, Subscription, Task, WeakEntity, Window, div, prelude::FluentBuilder, px,
+    IntoElement, MouseUpEvent, ParentElement, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window, WindowBounds,
+    WindowOptions, div, prelude::FluentBuilder, px, size,
 };
 
 pub use actions::{Action, AddKind, RowRef, Scope};
+pub use hub::Hub;
+
+/// Which window this is: the main one, whose tabs are remembered, or one torn off for a fit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Main,
+    Detached(usize),
+}
+
+/// A fit tab being dragged: to reorder tabs, or onto the drop zone to open a new window.
+#[derive(Debug, Clone)]
+struct TabDrag {
+    index: usize,
+    label: SharedString,
+}
+
+/// What follows the pointer while a tab is dragged.
+struct TabPreview(SharedString);
+
+impl Render for TabPreview {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_2()
+            .py_0p5()
+            .rounded(px(4.))
+            .bg(cx.theme().tab_active)
+            .border_1()
+            .border_color(cx.theme().ring)
+            .shadow_md()
+            .text_sm()
+            .child(self.0.clone())
+    }
+}
 
 use crate::{
     data::{Catalog, Kind, TypeId},
@@ -80,6 +115,16 @@ enum AdditionsTab {
 }
 
 pub struct Gyfa {
+    hub: Entity<Hub>,
+    role: Role,
+    /// The hub generation this window's fits match.
+    synced: u64,
+    /// Fits this window deleted since it last published, for the other windows' tabs.
+    pending_deletions: Vec<usize>,
+    /// A tab is being dragged, so the tear-off drop zone shows.
+    tab_dragging: bool,
+    /// The title last given to the window, so it is only set when it changes.
+    window_title: String,
     loading: Loading,
     saved: Saved,
     stats: Option<Stats>,
@@ -127,12 +172,7 @@ pub struct Gyfa {
 }
 
 impl Gyfa {
-    pub fn new(
-        data_dir: PathBuf,
-        import: Option<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(hub: Entity<Hub>, role: Role, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let palette = Palette::current().unwrap_or_default();
         widgets::apply_palette(&palette, cx);
 
@@ -162,24 +202,6 @@ impl Gyfa {
             }),
         ];
 
-        let loader = cx.spawn(async move |this: WeakEntity<Self>, cx| {
-            let result = cx.background_spawn(async move { load(&data_dir) }).await;
-            let _ = this.update(cx, |this, cx| {
-                this.loading = match result {
-                    Ok(loaded) => {
-                        // Last session's prices show right away; a refresh follows if stale.
-                        this.prices = Rc::new(Prices::cached(&loaded.cache_dir));
-                        Loading::Ready(Rc::new(loaded))
-                    }
-                    Err(e) => Loading::Failed(e.into()),
-                };
-                if let Some(text) = import {
-                    this.import(&text);
-                }
-                this.recompute();
-                cx.notify();
-            });
-        });
         let poller = cx.spawn(async move |this: WeakEntity<Self>, cx| {
             loop {
                 cx.background_executor().timer(POLL).await;
@@ -189,9 +211,25 @@ impl Gyfa {
             }
         });
 
-        Self {
+        let mut subscriptions = subscriptions;
+        subscriptions.push(cx.observe(&hub, |g, _, cx| g.pull(cx)));
+        let (mut saved, synced) = {
+            let hub = hub.read(cx);
+            (hub.saved.clone(), hub.generation)
+        };
+        if let Role::Detached(fit) = role {
+            saved.open = vec![fit];
+            saved.current = Some(fit);
+        }
+        let mut this = Self {
+            hub,
+            role,
+            synced,
+            pending_deletions: Vec::new(),
+            tab_dragging: false,
+            window_title: String::new(),
             loading: Loading::Pending,
-            saved: Saved::load(),
+            saved,
             stats: None,
             browser_tab: BrowserTab::Market,
             additions_tab: AdditionsTab::Drones,
@@ -223,8 +261,113 @@ impl Gyfa {
             prices_fetch: None,
             prices_retry: None,
             _subscriptions: subscriptions,
-            _tasks: vec![loader, poller],
+            _tasks: vec![poller],
+        };
+        this.pull(cx);
+        this
+    }
+
+    /// Take in what changed in the hub: data finishing loading, new prices, and fits other
+    /// windows changed.
+    fn pull(&mut self, cx: &mut Context<Self>) {
+        let hub = self.hub.read(cx);
+        let mut changed = false;
+        if matches!(self.loading, Loading::Pending) {
+            match &hub.loading {
+                hub::HubLoading::Ready(loaded) => {
+                    self.loading = Loading::Ready(Rc::clone(loaded));
+                    changed = true;
+                }
+                hub::HubLoading::Failed(e) => {
+                    self.loading = Loading::Failed(e.clone());
+                    changed = true;
+                }
+                hub::HubLoading::Pending => {}
+            }
         }
+        if !Rc::ptr_eq(&self.prices, &hub.prices) {
+            self.prices = Rc::clone(&hub.prices);
+            changed = true;
+        }
+        if hub.generation != self.synced {
+            let deleted: Vec<usize> = hub
+                .deletions
+                .iter()
+                .filter(|(generation, _)| *generation > self.synced)
+                .map(|&(_, index)| index)
+                .collect();
+            let (open, current) = (self.saved.open.clone(), self.saved.current);
+            self.saved = hub.saved.clone();
+            self.saved.open = open;
+            self.saved.current = current;
+            for index in deleted {
+                hub::shift_tabs(&mut self.saved.open, &mut self.saved.current, index);
+            }
+            self.synced = hub.generation;
+            self.inputs_show = None;
+            changed = true;
+        }
+        let import = (self.role == Role::Main && self.loaded().is_some())
+            .then(|| self.hub.update(cx, |hub, _| hub.import.take()))
+            .flatten();
+        if let Some(text) = import {
+            self.import(&text);
+            self.save();
+        }
+        if changed {
+            self.recompute();
+            cx.notify();
+        }
+    }
+
+    /// Hand this window's fits to the hub, which writes them out and updates the other windows.
+    fn publish(&mut self, cx: &mut Context<Self>) {
+        let saved = self.saved.clone();
+        let deleted = std::mem::take(&mut self.pending_deletions);
+        let main = self.role == Role::Main;
+        self.hub
+            .update(cx, |hub, cx| hub.publish(&saved, main, &deleted, cx));
+        self.synced = self.hub.read(cx).generation;
+    }
+
+    /// Open a fit in a window of its own and close its tab here, the way tearing a tab off works.
+    fn open_in_new_window(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index >= self.saved.fits.len() {
+            return;
+        }
+        // The new window starts from the hub, so it has to have this window's latest.
+        self.publish(cx);
+        let hub = self.hub.clone();
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::centered(size(px(1400.), px(860.)), cx)),
+            app_id: Some("gyfa".into()),
+            ..Default::default()
+        };
+        let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+            cx.new(|cx| Gyfa::new(hub, Role::Detached(index), window, cx))
+        });
+        match opened {
+            Ok(_) => self.close_fit(index, cx),
+            Err(e) => {
+                self.status = Some(format!("Could not open a window: {e}").into());
+                cx.notify();
+            }
+        }
+    }
+
+    /// Move a tab to where another one is.
+    fn move_tab(&mut self, from: usize, onto: usize, cx: &mut Context<Self>) {
+        let open = &mut self.saved.open;
+        let (Some(a), Some(b)) = (
+            open.iter().position(|&i| i == from),
+            open.iter().position(|&i| i == onto),
+        ) else {
+            return;
+        };
+        let tab = open.remove(a);
+        open.insert(b, tab);
+        self.save();
+        cx.notify();
     }
 
     fn loaded(&self) -> Option<Rc<Loaded>> {
@@ -253,8 +396,10 @@ impl Gyfa {
                 g.prices_fetch = None;
                 match result {
                     Ok(prices) => {
-                        g.prices = Rc::new(prices);
+                        let prices = Rc::new(prices);
+                        g.prices = Rc::clone(&prices);
                         g.prices_retry = None;
+                        g.hub.update(cx, |hub, cx| hub.set_prices(prices, cx));
                         cx.notify();
                     }
                     Err(e) => {
@@ -267,9 +412,12 @@ impl Gyfa {
     }
 
     fn poll(&mut self, cx: &mut Context<Self>) {
-        self.refresh_prices(cx);
+        // One window fetching prices is enough; the hub hands them to the rest.
+        if self.role == Role::Main {
+            self.refresh_prices(cx);
+        }
         if std::mem::take(&mut self.unsaved) {
-            self.save();
+            self.publish(cx);
         }
         if self.loaded().is_some_and(|l| l.icons.take_updated()) {
             cx.notify();
@@ -298,10 +446,10 @@ impl Gyfa {
             .map(|fit| loaded.engine.compute_with(fit, options));
     }
 
-    fn save(&self) {
-        if let Err(e) = self.saved.save() {
-            eprintln!("saving fits: {e}");
-        }
+    /// Mark the fits as changed. The poll publishes them to the hub, which writes them out and
+    /// passes them on to the other windows.
+    fn save(&mut self) {
+        self.unsaved = true;
     }
 
     /// Recalculate, save and redraw after the fits changed.
@@ -334,6 +482,13 @@ impl Gyfa {
         self.changed(cx);
     }
 
+    fn close_other_fits(&mut self, keep: usize, cx: &mut Context<Self>) {
+        self.clear_selection();
+        self.saved.open.retain(|&i| i == keep);
+        self.saved.current = Some(keep);
+        self.changed(cx);
+    }
+
     fn delete_fit(&mut self, index: usize, cx: &mut Context<Self>) {
         self.clear_selection();
         self.saved.open.retain(|&i| i != index);
@@ -341,6 +496,7 @@ impl Gyfa {
             self.saved.current = self.saved.open.last().copied();
         }
         self.saved.fits.remove(index);
+        self.pending_deletions.push(index);
         let shift = |i: usize| if i > index { i - 1 } else { i };
         self.saved.open = self.saved.open.iter().map(|&i| shift(i)).collect();
         self.saved.current = self.saved.current.map(shift);
@@ -631,12 +787,58 @@ impl Gyfa {
                             16.,
                         ))
                     })
-                    .child(div().text_sm().child(label))
+                    .child(div().text_sm().child(label.clone()))
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.saved.current = Some(i);
                         this.clear_selection();
                         this.changed(cx);
                     }))
+                    .on_drag(
+                        TabDrag {
+                            index: i,
+                            label: label.into(),
+                        },
+                        {
+                            let this = cx.entity().downgrade();
+                            move |drag, _, _, cx| {
+                                // The drop zone only shows while a tab is in flight.
+                                let _ = this.update(cx, |g, cx| {
+                                    g.tab_dragging = true;
+                                    cx.notify();
+                                });
+                                cx.new(|_| TabPreview(drag.label.clone()))
+                            }
+                        },
+                    )
+                    .drag_over::<TabDrag>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+                    .on_drop(cx.listener(move |g, drag: &TabDrag, _, cx| {
+                        g.tab_dragging = false;
+                        g.move_tab(drag.index, i, cx);
+                    }))
+                    .context_menu({
+                        let this = cx.entity().downgrade();
+                        move |menu, _, _| {
+                            let on = |f: fn(&mut Gyfa, usize, &mut Context<Gyfa>)| {
+                                let this = this.clone();
+                                move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                                    let _ = this.update(cx, |g, cx| f(g, i, cx));
+                                }
+                            };
+                            menu.item(
+                                widgets::entry(IconName::ExternalLink, "Open in New Window")
+                                    .on_click(on(Gyfa::open_in_new_window)),
+                            )
+                            .separator()
+                            .item(
+                                widgets::entry(IconName::Close, "Close")
+                                    .on_click(on(Gyfa::close_fit)),
+                            )
+                            .item(
+                                widgets::entry(IconName::Close, "Close Others")
+                                    .on_click(on(Gyfa::close_other_fits)),
+                            )
+                        }
+                    })
                     .child(
                         div()
                             .id(SharedString::from(format!("tab-close-{i}")))
@@ -662,6 +864,36 @@ impl Gyfa {
 }
 
 impl Gyfa {
+    /// Where a dragged tab is dropped to get a window of its own. Wayland does not tell a window
+    /// where a drag outside it ends, so tearing off happens onto this zone instead.
+    fn tear_off_zone(cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        div()
+            .id("tear-off-zone")
+            .absolute()
+            .left_4()
+            .right_4()
+            .bottom_4()
+            .h(px(120.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .rounded(px(8.))
+            .border_2()
+            .border_dashed()
+            .border_color(theme.ring)
+            .bg(theme.popover.opacity(0.92))
+            .text_color(theme.foreground)
+            .child(gpui_kit::component::Icon::new(IconName::ExternalLink).size(px(18.)))
+            .child("Drop here to open this fit in a new window")
+            .drag_over::<TabDrag>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+            .on_drop(cx.listener(|g, drag: &TabDrag, _, cx| {
+                g.tab_dragging = false;
+                g.open_in_new_window(drag.index, cx);
+            }))
+    }
+
     /// Show an item in the market browser: clear the search, open its groups, scroll to it.
     pub(super) fn jump_to_market(
         &mut self,
@@ -756,26 +988,47 @@ impl Render for Gyfa {
                     .text_color(cx.theme().muted_foreground)
                     .child("Double-click a ship in the market to start a fit, or import one from the File menu.")
                     .into_any_element()
-            });
+            })
+            .relative()
+            .when(self.tab_dragging, |center| center.child(Self::tear_off_zone(cx)));
 
-        root.child(self.menu_bar(cx))
-            .child(
-                h_resizable("main")
-                    .child(
-                        resizable_panel()
-                            .size(px(280.))
-                            .size_range(px(200.)..px(520.))
-                            .child(self.browser(&loaded, cx)),
-                    )
-                    .child(resizable_panel().child(center))
-                    .child(
-                        resizable_panel()
-                            .size(px(340.))
-                            .size_range(px(260.)..px(560.))
-                            .child(self.stats_panel(&loaded, cx)),
-                    ),
-            )
-            .into_any_element()
+        let title = match self.fit() {
+            Some(fit) => match fit.ship {
+                Some(ship) => format!("gyfa: {} ({})", fit.name, loaded.catalog.name(ship)),
+                None => format!("gyfa: {}", fit.name),
+            },
+            None => "gyfa".to_owned(),
+        };
+        if title != self.window_title {
+            window.set_window_title(&title);
+            self.window_title = title;
+        }
+
+        root.capture_any_mouse_up(cx.listener(|g, _: &MouseUpEvent, _, cx| {
+            // A tab let go anywhere, dropped or not, ends the drag; the zone goes away.
+            if g.tab_dragging {
+                g.tab_dragging = false;
+                cx.notify();
+            }
+        }))
+        .child(self.menu_bar(cx))
+        .child(
+            h_resizable("main")
+                .child(
+                    resizable_panel()
+                        .size(px(280.))
+                        .size_range(px(200.)..px(520.))
+                        .child(self.browser(&loaded, cx)),
+                )
+                .child(resizable_panel().child(center))
+                .child(
+                    resizable_panel()
+                        .size(px(340.))
+                        .size_range(px(260.)..px(560.))
+                        .child(self.stats_panel(&loaded, cx)),
+                ),
+        )
+        .into_any_element()
     }
 }
 
