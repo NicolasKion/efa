@@ -161,7 +161,7 @@ impl Render for NoPreview {
     }
 }
 
-fn text_width(window: &Window, text: &str) -> f32 {
+pub(super) fn text_width(window: &Window, text: &str) -> f32 {
     if text.is_empty() {
         return 0.0;
     }

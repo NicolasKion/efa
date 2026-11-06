@@ -74,6 +74,17 @@ pub enum Action {
     SetAmount(AddKind, Vec<usize>, u32),
     /// Move this many drones out of a stack into a new one.
     SplitDrones(usize, u32),
+    /// pyfa's drone state click: the clicked stack and the stacks it applies to.
+    ToggleDrones(usize, Vec<usize>),
+    /// Take a single drone out of a stack.
+    RemoveDrone(usize),
+    /// Fold one drone stack into another of the same drone.
+    MergeDrones {
+        from: usize,
+        to: usize,
+    },
+    /// Copy a drone stack into a new stack.
+    CloneDrones(usize),
     SwapAdditions(AddKind, Vec<usize>, TypeId),
     /// Add pasted items to a tab.
     AddAdditions(AddKind, Vec<(TypeId, u32)>),
@@ -405,6 +416,18 @@ impl Gyfa {
                     fit.drones.insert(i + 1, split);
                 }
             }
+            Action::ToggleDrones(clicked, stacks) => fit.toggle_drones(clicked, &stacks),
+            Action::RemoveDrone(i) => {
+                fit.remove_drone(i);
+                structural = true;
+            }
+            Action::MergeDrones { from, to } => {
+                if !fit.merge_drones(from, to) {
+                    return;
+                }
+                structural = true;
+            }
+            Action::CloneDrones(i) => fit.clone_drones(i),
             Action::SwapAdditions(kind, rows, type_id) => {
                 for i in rows {
                     match kind {

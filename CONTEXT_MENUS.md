@@ -52,14 +52,14 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 
 ### droneItem
-- [ ] Drone Stats | row clicked | stats window | itemStats.py
+- [ ] Drone Stats | row clicked | stats window | itemStats.py. Not yet: no item stats window
 - [x] Drone Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Drone Stack | row clicked | removes whole stacks of selection (multi). GuiRemoveLocalDronesCommand | itemRemove.py
 - [x] Change Drone Quantity | row clicked | dialog "New Amount", sets stack size. GuiChangeLocalDroneAmountCommand | itemAmountChange.py
 - [x] Split Drone Stack | stack amount > 1 | dialog for amount, splits into a new stack. GuiSplitLocalDroneStackCommand | droneSplitStack.py
 - [x] Variations | 2+ variations | variation submenu, swaps selected drones with same variation set. GuiChangeLocalDroneMetasCommand | itemVariationChange.py
-- [ ] Apply Mutaplasmid / Revert to {base} | drone has mutaplasmids or is mutated | as modules. GuiConvertMutatedLocalDroneCommand / GuiRevertMutatedLocalDroneCommand | itemMutations.py
-- [ ] Change Drone Skills | skills affect drone | skill level submenu | skillAffectors.py
+- [ ] Apply Mutaplasmid / Revert to {base} | drone has mutaplasmids or is mutated | as modules. GuiConvertMutatedLocalDroneCommand / GuiRevertMutatedLocalDroneCommand | itemMutations.py. Not yet: needs mutaplasmid data in the catalog, mutated items in the fit model and EFT, and the stats window to edit rolls; best done with modules
+- [ ] Change Drone Skills | skills affect drone | skill level submenu | skillAffectors.py. Not yet: no characters, every skill is at V
 
 ### droneItemMisc
 - [x] Copy Selected Drones | selection non-empty (pref additionsCopyPaste) | EFT-style export of selection to clipboard | additionsExportSelection.py

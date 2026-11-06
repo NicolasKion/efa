@@ -97,6 +97,7 @@ impl Gyfa {
     pub(super) fn additions(
         &mut self,
         loaded: &Rc<Loaded>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let Some(current) = self.saved.current else {
@@ -145,7 +146,7 @@ impl Gyfa {
             }));
 
         let content = match self.additions_tab {
-            AdditionsTab::Drones => self.drones_tab(loaded, cx),
+            AdditionsTab::Drones => self.drones_tab(loaded, window, cx),
             AdditionsTab::Implants => self.implants_tab(loaded, cx),
             AdditionsTab::Boosters => self.boosters_tab(loaded, cx),
             AdditionsTab::Cargo => self.cargo_tab(loaded, cx),

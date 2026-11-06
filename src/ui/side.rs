@@ -329,7 +329,7 @@ impl Gyfa {
 
     /// How many of a drone one "Add to Drone Bay" adds, as pyfa sizes it: no more than can be in
     /// space at once, and no more than the bandwidth can run.
-    fn drone_stack_size(&self, loaded: &Loaded, drone: TypeId) -> u32 {
+    pub(super) fn drone_stack_size(&self, loaded: &Loaded, drone: TypeId) -> u32 {
         let Some(stats) = &self.stats else { return 0 };
         let hard_limit = BASE_ACTIVE_DRONES.max(stats.drones_launched.total.unwrap_or(0));
         let bandwidth = stats.drone_bandwidth.output.unwrap_or(0.0);
