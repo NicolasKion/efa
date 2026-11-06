@@ -5,6 +5,7 @@ mod actions;
 mod additions;
 mod columns;
 mod fitting;
+mod implant_sets;
 mod side;
 mod stats;
 mod widgets;
@@ -327,6 +328,12 @@ impl Gyfa {
             self.additions_selection.clear();
             self.additions_anchor = None;
         }
+        if catalog.get(id).is_some_and(|t| t.kind == Kind::Implant)
+            && self.additions_tab != AdditionsTab::Implants
+        {
+            self.additions_tab = AdditionsTab::Implants;
+            self.clear_selection();
+        }
         self.status =
             (!added).then(|| format!("Nothing on this fit takes {}", catalog.name(id)).into());
         self.changed(cx);
@@ -463,10 +470,21 @@ impl Gyfa {
                     .ghost()
                     .small()
                     .label("Character")
-                    .dropdown_menu(|menu, _, _| {
+                    .dropdown_menu(move |menu, _, _| {
+                        let editor = this.clone();
                         menu.item(
                             widgets::entry(IconName::User, "All 5 (the only character for now)")
                                 .disabled(true),
+                        )
+                        .separator()
+                        .item(
+                            widgets::entry(IconName::Settings2, "Implant Set Editor…").on_click(
+                                move |_, window, cx| {
+                                    Self::app_update(&editor, cx, |g, cx| {
+                                        g.open_implant_set_editor(None, window, cx);
+                                    });
+                                },
+                            ),
                         )
                     }),
             )

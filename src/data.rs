@@ -57,6 +57,7 @@ mod attr {
     pub const BOOSTERNESS: i32 = 1087;
     /// Chance of a booster's first side effect, which pyfa ranks booster variations by.
     pub const BOOSTER_EFFECT_CHANCE1: i32 = 1089;
+    pub const IMPLANTNESS: i32 = 331;
 }
 
 /// Which kind of hardpoint a module takes, if any.
@@ -144,6 +145,8 @@ pub struct ItemType {
     pub booster_chance: Option<f64>,
     /// Effects that may come with a booster, by effect ID: the ones with a usage chance.
     pub side_effects: Vec<i32>,
+    /// Which implant slot an implant plugs into; a character takes one implant per slot.
+    pub implant_slot: Option<u8>,
 }
 
 impl ItemType {
@@ -365,6 +368,7 @@ impl Catalog {
                             .filter(|id| chance_effects.contains(id))
                             .collect()
                     }),
+                    implant_slot: attr(attr::IMPLANTNESS).map(|v| v as u8),
                 },
             );
         }

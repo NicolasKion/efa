@@ -120,7 +120,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Split/merge drone stacks (builtinContextMenus/droneSplitStack.py, droneAddStack.py)
 - [ ] Fighter ability toggles (builtinContextMenus/fighterAbilities.py), refine: get_ability / set state
 - [x] Booster side effects toggles (builtinContextMenus/boosterSideEffects.py), refine: get_side_effect, set_state
-- [ ] Apply/save implant set (builtinContextMenus/implantSetApply.py, implantSetSave.py)
+- [x] Apply/save implant set (builtinContextMenus/implantSetApply.py, implantSetSave.py)
 - [ ] Add fit from browser / currently open fits as projected or command (builtinContextMenus/fitAddBrowse.py, fitAddCurrentlyOpen.py, commandFitAdd.py)
 - [ ] Add command link bursts directly (builtinContextMenus/commandLinkAdd.py)
 - [ ] Add environment effect (wormhole, incursion, abyssal weather, etc.) (builtinContextMenus/envEffectAdd.py), refine: add_sw_effect, add_proj_effect
@@ -139,8 +139,9 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Drone stack amount editing, separate stacks (droneView.py)
 - [ ] Fighters tab: squadrons, light/heavy/support tubes, abilities (builtinAdditionPanes/fighterView.py), refine: add_fighter, get_stat_launched_*_fighters, get_stat_fighter_bay_volume
 - [ ] Cargo tab with amounts and volume (cargoView.py)
-- [ ] Implants: use character implants vs fit implants switch (implantView.py)
-- [ ] Implant slot conflict handling (implantView.py), refine: ValOptions implant_slot_index
+- [x] Implants: use character implants vs fit implants switch (implantView.py); the All 5 character has no implants until characters exist
+- [x] Implant slot conflict handling: one implant per slot, the new one replaces the old, listed in slot order (implantView.py, eos HandledImplantList)
+- [x] Implants pane columns: state checkbox (multi-select toggle), slot, icon, name; drag from the market onto the pane (implantView.py). No price column until prices exist, no Delete/Ctrl+A/Esc keys yet
 - [x] Booster slot conflict and side effects (boosterView.py): one booster per slot, listed by slot, on/off state, side effect and duration columns, drop from the market; no price column or keyboard shortcuts yet, refine: set_state, iter_side_effects
 - [ ] Projected tab: fits, modules, drones, fighters, environment effects (builtinAdditionPanes/projectedView.py), refine: add_proj, add_proj_effect, add_sw_effect
 - [ ] Projected item states and amounts (fitCommands/gui/projectedChangeStates.py)
@@ -195,8 +196,8 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Missing skills tooltip on fit (gui/characterSelection.py)
 - [ ] Global character vs per-fit character pref (pyfaGeneralPreferences.py)
 - [ ] Enforce strict skill requirements pref (pyfaEnginePreferences.py), refine: ValOptions skill_reqs
-- [ ] Implant set editor (gui/setEditor.py, builtinViews/implantEditor.py, service/implantSet.py)
-- [ ] Precalculated implant sets (service/precalcImplantSet.py)
+- [x] Implant set editor: new, rename, copy, delete, add from search, remove, clipboard import/export (gui/setEditor.py, builtinViews/implantEditor.py, service/implantSet.py)
+- [x] Precalculated implant sets (service/precalcImplantSet.py, db_update.py processImplantSets)
 
 ## Damage and target profiles
 

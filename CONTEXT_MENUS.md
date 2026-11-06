@@ -109,11 +109,11 @@ Context depends on implant source: fit implants use implantItem/implantItemMisc,
 
 ### implantItemChar
 - [ ] Implant Stats | row clicked | stats window | itemStats.py
-- [ ] Implant Market Group | has market group | market jump | itemMarketJump.py
+- [x] Implant Market Group | has market group | market jump | itemMarketJump.py
 
 ### implantItemMisc / implantItemMiscChar
-- [ ] Apply Implant Set | implantItemMisc only, any user or precalculated set exists | submenu: precalculated sets (pirate sets etc., grade submenus Low/Mid/High-grade), separator, "Saved Sets" submenu of user sets; adds all implants of the set | implantSetApply.py
-- [ ] Save as New Implant Set | fit has applied implants | name dialog, opens implant set editor with them | implantSetSave.py
+- [x] Apply Implant Set | implantItemMisc only, any user or precalculated set exists | submenu: precalculated sets (pirate sets etc., grade submenus Low/Mid/High-grade), separator, "Saved Sets" submenu of user sets; adds all implants of the set (gyfa adds an Implant Set Editor entry at the end) | implantSetApply.py
+- [x] Save as New Implant Set | fit has applied implants | name dialog, opens implant set editor with them | implantSetSave.py
 - [x] Copy Selected Implants | selection | clipboard export | additionsExportSelection.py
 - [x] Copy All Implants | implants non-empty | clipboard export | additionsExportAll.py
 - [x] Paste Implants | clipboard non-empty | import. GuiImportImplantsCommand | additionsImport.py

@@ -98,6 +98,14 @@ impl From<BoosterSave> for Booster {
     }
 }
 
+/// Whose implants a fit is calculated with: its own, or the ones plugged into the character.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ImplantSource {
+    #[default]
+    Fit,
+    Character,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Fit {
     pub name: String,
@@ -122,6 +130,11 @@ pub struct Fit {
     /// Pilot security status; None uses the character's.
     #[serde(default)]
     pub sec_status: Option<f64>,
+    /// Implants switched off: they stay on the fit but do nothing, like pyfa's unchecked ones.
+    #[serde(default)]
+    pub inactive_implants: Vec<TypeId>,
+    #[serde(default)]
+    pub implant_source: ImplantSource,
 }
 
 /// Drones a character can have in space at once, without skills or ship bonuses changing it.
@@ -220,7 +233,9 @@ impl Fit {
                     }),
                 }
             }
-            Kind::Implant => self.implants.push(type_id),
+            Kind::Implant => {
+                self.add_implant(catalog, type_id);
+            }
             Kind::Booster => {
                 self.add_booster(catalog, Booster::new(type_id));
             }
@@ -303,6 +318,89 @@ impl Fit {
         };
         self.boosters.remove(index);
         self.add_booster(catalog, new)
+    }
+
+    /// Plug in an implant the way pyfa does: the fit switches to its own implants, an implant
+    /// already in that slot makes way, and the list stays in slot order. Returns false when
+    /// nothing changed.
+    pub fn add_implant(&mut self, catalog: &Catalog, type_id: TypeId) -> bool {
+        let switched = self.implant_source != ImplantSource::Fit;
+        self.implant_source = ImplantSource::Fit;
+        let plugged = plug_implant(&mut self.implants, catalog, type_id);
+        self.inactive_implants.retain(|t| self.implants.contains(t));
+        switched || plugged
+    }
+
+    pub fn remove_implant(&mut self, i: usize) {
+        if i < self.implants.len() {
+            let gone = self.implants.remove(i);
+            self.inactive_implants.retain(|&t| t != gone);
+        }
+    }
+
+    /// Swap an implant for another type, keeping whether it is switched on.
+    pub fn swap_implant(&mut self, catalog: &Catalog, i: usize, type_id: TypeId) {
+        let Some(&old) = self.implants.get(i) else {
+            return;
+        };
+        if old == type_id {
+            return;
+        }
+        let active = self.implant_active(old);
+        self.remove_implant(i);
+        self.add_implant(catalog, type_id);
+        if !active && self.implants.contains(&type_id) {
+            self.inactive_implants.push(type_id);
+        }
+    }
+
+    pub fn implant_active(&self, type_id: TypeId) -> bool {
+        !self.inactive_implants.contains(&type_id)
+    }
+
+    /// pyfa's state toggle: if the clicked implant is on, switch every target off, otherwise
+    /// switch them all on.
+    pub fn toggle_implants(&mut self, clicked: usize, rows: &[usize]) {
+        let Some(&main) = self.implants.get(clicked) else {
+            return;
+        };
+        let turn_on = !self.implant_active(main);
+        let targets: Vec<TypeId> = rows
+            .iter()
+            .chain([&clicked])
+            .filter_map(|&r| self.implants.get(r).copied())
+            .collect();
+        self.inactive_implants.retain(|t| !targets.contains(t));
+        if !turn_on {
+            self.inactive_implants.extend(targets);
+            self.inactive_implants.sort_unstable();
+            self.inactive_implants.dedup();
+        }
+    }
+
+    /// Put the implants in slot order, which older saves did not keep. Returns whether any moved.
+    pub fn sort_implants(&mut self, catalog: &Catalog) -> bool {
+        let slot = |&t: &TypeId| implant_slot(catalog, t);
+        if self.implants.is_sorted_by_key(slot) {
+            return false;
+        }
+        self.implants.sort_by_key(slot);
+        true
+    }
+
+    /// Implants the fit is calculated with, as (type, switched on): its own, or `character`'s
+    /// when the fit uses the character's implants.
+    pub fn applied_implants<'a>(
+        &'a self,
+        character: &'a [TypeId],
+    ) -> impl Iterator<Item = (TypeId, bool)> + 'a {
+        let (implants, own) = match self.implant_source {
+            ImplantSource::Fit => (self.implants.as_slice(), true),
+            ImplantSource::Character => (character, false),
+        };
+        implants
+            .iter()
+            .map(move |&t| (t, !own || self.implant_active(t)))
     }
 
     /// High, mid and low modules, in that order.
@@ -480,6 +578,29 @@ impl Fit {
         }
         Ok((fit, unknown))
     }
+}
+
+/// The slot an implant takes; implants without one sort last.
+pub fn implant_slot(catalog: &Catalog, type_id: TypeId) -> u8 {
+    catalog
+        .get(type_id)
+        .and_then(|t| t.implant_slot)
+        .unwrap_or(u8::MAX)
+}
+
+/// Add an implant to a slot-ordered list, replacing whatever is in its slot. Returns false when
+/// it is already there or is not an implant.
+pub fn plug_implant(implants: &mut Vec<TypeId>, catalog: &Catalog, type_id: TypeId) -> bool {
+    let Some(slot) = catalog.get(type_id).and_then(|t| t.implant_slot) else {
+        return false;
+    };
+    if implants.contains(&type_id) {
+        return false;
+    }
+    implants.retain(|&t| implant_slot(catalog, t) != slot);
+    let at = implants.partition_point(|&t| implant_slot(catalog, t) <= slot);
+    implants.insert(at, type_id);
+    true
 }
 
 /// Put an item into the first empty position, or after the last one.

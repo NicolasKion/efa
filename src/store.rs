@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::fit::Fit;
+use crate::{fit::Fit, implant_set::ImplantSet};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -15,6 +15,9 @@ pub struct Saved {
     pub current: Option<usize>,
     /// Fitting view column widths the user set by dragging, by column.
     pub columns: std::collections::BTreeMap<String, f32>,
+    /// The user's implant sets, by name.
+    #[serde(default)]
+    pub implant_sets: Vec<ImplantSet>,
 }
 
 impl Saved {

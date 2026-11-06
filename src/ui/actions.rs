@@ -11,7 +11,7 @@ use gpui_kit::{ClickEvent, Context, Modifiers};
 use super::Gyfa;
 use crate::{
     data::{Slot, TypeId},
-    fit::{Module, ModuleState, trim_rack},
+    fit::{ImplantSource, Module, ModuleState, trim_rack},
 };
 
 /// A row of the fitting view that holds something.
@@ -83,6 +83,11 @@ pub enum Action {
     ToggleBoosters(usize, Vec<usize>),
     /// Switch one side effect of a booster, by effect ID.
     ToggleBoosterSideEffect(usize, i32),
+    /// Switch implants on or off the way pyfa's state column does: the clicked row decides.
+    ToggleImplants(usize, Vec<usize>),
+    SetImplantSource(ImplantSource),
+    /// Plug in a set of implants, each replacing what is in its slot.
+    AddImplants(Vec<TypeId>),
 }
 
 /// The additions pane's tabs that list items.
@@ -361,9 +366,7 @@ impl Gyfa {
                         AddKind::Drones if i < fit.drones.len() => {
                             fit.drones.remove(i);
                         }
-                        AddKind::Implants if i < fit.implants.len() => {
-                            fit.implants.remove(i);
-                        }
+                        AddKind::Implants => fit.remove_implant(i),
                         AddKind::Boosters if i < fit.boosters.len() => {
                             fit.boosters.remove(i);
                         }
@@ -417,11 +420,7 @@ impl Gyfa {
                                 stack.type_id = type_id;
                             }
                         }
-                        AddKind::Implants => {
-                            if let Some(t) = fit.implants.get_mut(i) {
-                                *t = type_id;
-                            }
-                        }
+                        AddKind::Implants => fit.swap_implant(&loaded.catalog, i, type_id),
                         AddKind::Boosters => {
                             fit.swap_booster(&loaded.catalog, i, type_id);
                         }
@@ -456,11 +455,24 @@ impl Gyfa {
                     None => b.side_effects.push(effect),
                 }
             }
+            Action::ToggleImplants(clicked, rows) => fit.toggle_implants(clicked, &rows),
+            Action::SetImplantSource(source) => {
+                fit.implant_source = source;
+                structural = true;
+            }
+            Action::AddImplants(implants) => {
+                for type_id in implants {
+                    fit.add_implant(&loaded.catalog, type_id);
+                }
+                structural = true;
+            }
             Action::AddAdditions(kind, items) => {
                 for (type_id, count) in items {
                     match kind {
                         AddKind::Drones => fit.add_drones(type_id, count),
-                        AddKind::Implants => fit.implants.push(type_id),
+                        AddKind::Implants => {
+                            fit.add_implant(&loaded.catalog, type_id);
+                        }
                         AddKind::Boosters => {
                             fit.add_booster(&loaded.catalog, crate::fit::Booster::new(type_id));
                         }
