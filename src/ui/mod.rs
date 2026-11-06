@@ -139,11 +139,8 @@ impl Gyfa {
                 }
             }),
             cx.subscribe(&notes_input, |this, input, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change)
-                    && let Some(i) = this.saved.current
-                {
-                    this.saved.fits[i].notes = input.read(cx).value().to_string();
-                    this.save();
+                if matches!(event, InputEvent::Change) {
+                    this.edit_notes(input.read(cx).value().to_string(), cx);
                 }
             }),
         ];

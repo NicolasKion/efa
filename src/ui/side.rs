@@ -3,6 +3,7 @@
 use gpui_kit::component::{
     ActiveTheme, IconName, h_flex,
     menu::{ContextMenuExt, PopupMenu},
+    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
@@ -283,6 +284,11 @@ impl Gyfa {
                         .gap_2()
                         .p_1()
                         .hover(|s| s.bg(cx.theme().list_hover))
+                        .when_some(Self::fitting_tooltip(fit, &ship_name), |row, tip| {
+                            row.tooltip(move |window, cx| {
+                                Tooltip::new(tip.clone()).build(window, cx)
+                            })
+                        })
                         .when_some(fit.ship, |row, ship| {
                             row.child(icon_box(
                                 &loaded.catalog,

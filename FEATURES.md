@@ -26,7 +26,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Pilot security status per fit (builtinContextMenus/fitPilotSecurity.py), refine: set_sec_status
 - [ ] Per-fit character selection (gui/characterSelection.py)
 - [ ] Per-fit damage pattern and target profile (gui/builtinStatsViews, contextMenus/damagePatternChange.py)
-- [x] Fit notes (builtinAdditionPanes/notesView.py)
+- [x] Fit notes, carried by duplicates, shown in the fittings browser tooltip cut to 200 characters (builtinAdditionPanes/notesView.py, builtinShipBrowser/fitItem.py); EFT text has no notes in pyfa either
 - [ ] Mark fit as fleet booster / command fit (builtinAdditionPanes/commandView.py)
 - [ ] Backup all fits to XML (mainMenuBar.py backupFits)
 - [ ] Fit browser lite dialog for picking fits (gui/fitBrowserLite.py)
@@ -145,7 +145,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Projected tab: fits, modules, drones, fighters, environment effects (builtinAdditionPanes/projectedView.py), refine: add_proj, add_proj_effect, add_sw_effect
 - [ ] Projected item states and amounts (fitCommands/gui/projectedChangeStates.py)
 - [ ] Command tab: fleet booster fits (builtinAdditionPanes/commandView.py), refine: add_fleet, set_fleet
-- [x] Notes tab (builtinAdditionPanes/notesView.py)
+- [x] Notes tab: edits kept with the fit right away and written out shortly after, character count in the tab title, Ctrl+Backspace and undo from the text field (builtinAdditionPanes/notesView.py)
 
 ## Stats panes
 
@@ -216,10 +216,10 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] EFT export options: implants, boosters, cargo, mutations, loaded charges (eft.py, gui/copySelectDialog.py)
 - [ ] Import from clipboard with format autodetect (port.py importAuto)
 - [ ] Import from file dialog, multiple files (port.py importFitsThreaded)
-- [ ] EFT .cfg legacy format (port.py importEftCfg)
+- [ ] EFT .cfg legacy format (port.py importEftCfg); notes come from Description= lines, with | as line breaks
 - [ ] DNA import/export (service/port/dna.py)
-- [ ] XML import/export (EVE client format) (service/port/xml.py)
-- [ ] ESI JSON import/export (service/port/esi.py)
+- [ ] XML import/export (EVE client format) (service/port/xml.py); notes are the description, exported cut to 400 characters with line breaks as <br>
+- [ ] ESI JSON import/export (service/port/esi.py); notes are the description, exported cut to 400 characters
 - [ ] Multibuy export (service/port/multibuy.py)
 - [ ] EFS stats JSON export (service/port/efs.py)
 - [ ] Ship stats export (service/port/shipstats.py)

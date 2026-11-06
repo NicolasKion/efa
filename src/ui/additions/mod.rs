@@ -120,7 +120,9 @@ impl Gyfa {
             .border_color(theme.border)
             .children(tabs.into_iter().map(|(tab, label, count)| {
                 let selected = self.additions_tab == tab;
-                let text = if count > 0 {
+                let text = if tab == AdditionsTab::Notes {
+                    notes::tab_title(fit)
+                } else if count > 0 {
                     format!("{label} ({count})")
                 } else {
                     label.to_owned()
