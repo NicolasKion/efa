@@ -1,5 +1,11 @@
 //! The additions pane under the fit: drones, implants, boosters, cargo and notes, with pyfa's
-//! per-tab context menus.
+//! per-tab context menus. Shared pieces live here; each tab has its own module.
+
+mod boosters;
+mod cargo;
+mod drones;
+mod implants;
+mod notes;
 
 use std::rc::Rc;
 
@@ -19,7 +25,7 @@ use gpui_kit::{
 
 use super::{
     Action, AddKind, AdditionsTab, Gyfa, Loaded,
-    widgets::{entry, icon_box, icon_label, item_entry, short},
+    widgets::{entry, icon_box, icon_label, item_entry},
 };
 use crate::{
     data::{Catalog, Kind, TypeId},
@@ -32,16 +38,6 @@ const ROW_HEIGHT: f32 = 28.;
 const MENU_MAX_H: f32 = 480.;
 
 impl AddKind {
-    fn of(tab: AdditionsTab) -> Option<Self> {
-        match tab {
-            AdditionsTab::Drones => Some(Self::Drones),
-            AdditionsTab::Implants => Some(Self::Implants),
-            AdditionsTab::Boosters => Some(Self::Boosters),
-            AdditionsTab::Cargo => Some(Self::Cargo),
-            AdditionsTab::Notes => None,
-        }
-    }
-
     /// The word pyfa uses for the tab's items in menu labels.
     fn noun(self) -> &'static str {
         match self {
@@ -148,38 +144,36 @@ impl Gyfa {
                     }))
             }));
 
-        let Some(kind) = AddKind::of(self.additions_tab) else {
-            return v_flex()
-                .size_full()
-                .child(tab_bar)
-                .child(div().p_2().size_full().child(self.notes_field()))
-                .into_any_element();
+        let content = match self.additions_tab {
+            AdditionsTab::Drones => self.drones_tab(loaded, cx),
+            AdditionsTab::Implants => self.implants_tab(loaded, cx),
+            AdditionsTab::Boosters => self.boosters_tab(loaded, cx),
+            AdditionsTab::Cargo => self.cargo_tab(loaded, cx),
+            AdditionsTab::Notes => self.notes_tab(loaded, cx),
         };
+        v_flex()
+            .size_full()
+            .child(tab_bar)
+            .child(content)
+            .into_any_element()
+    }
 
+    /// A tab's rows as a scrolling list, with `before` above them. The shared layout the item
+    /// tabs start from.
+    pub(super) fn item_list(
+        &mut self,
+        loaded: &Rc<Loaded>,
+        kind: AddKind,
+        before: Vec<AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(current) = self.saved.current else {
+            return div().into_any_element();
+        };
+        let fit = &self.saved.fits[current];
+        let theme = cx.theme();
         let rows = kind.rows(fit);
-        let mut content: Vec<AnyElement> = Vec::new();
-        if kind == AddKind::Cargo {
-            let used = fit.cargo_volume(&loaded.catalog);
-            let capacity = self
-                .stats
-                .as_ref()
-                .and_then(|s| s.cargo_capacity)
-                .unwrap_or(0.0);
-            let over = used > capacity + 1e-6;
-            content.push(
-                div()
-                    .px_2()
-                    .py_1()
-                    .text_xs()
-                    .text_color(if over {
-                        theme.danger
-                    } else {
-                        theme.muted_foreground
-                    })
-                    .child(format!("{} / {} m³", short(used), short(capacity)))
-                    .into_any_element(),
-            );
-        }
+        let mut content = before;
         if rows.is_empty() {
             content.push(
                 div()
@@ -203,18 +197,12 @@ impl Gyfa {
             let row = self.addition_row(loaded, fit, kind, i, type_id, amount, cx);
             content.push(row);
         }
-
         v_flex()
-            .size_full()
-            .child(tab_bar)
-            .child(
-                v_flex()
-                    .id("additions-list")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .children(content),
-            )
+            .id("additions-list")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .children(content)
             .into_any_element()
     }
 
