@@ -292,11 +292,21 @@ pub struct Catalog {
     pub ship_groups: Vec<(i32, Vec<TypeId>)>,
     /// What each mutaplasmid takes, gives and rolls.
     pub mutaplasmids: muta::Mutaplasmids,
+    /// The Alpha clone grades, by name.
+    pub alpha_clones: Vec<AlphaClone>,
+}
+
+/// An Alpha clone grade: the skills it can use and the highest level of each.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AlphaClone {
+    pub id: i32,
+    pub name: String,
+    pub caps: HashMap<TypeId, u8>,
 }
 
 /// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
 /// instead of loaded.
-const CACHE_FORMAT: u32 = 6;
+const CACHE_FORMAT: u32 = 7;
 const CACHE_FILE: &str = "catalog.bin";
 
 /// The cache on disk: the key it was built for, then the catalog.
@@ -574,7 +584,18 @@ impl Catalog {
             );
         }
 
-        let alpha = alpha_skill_caps(clone_grades.into_values());
+        let mut alpha_clones: Vec<AlphaClone> = clone_grades
+            .into_iter()
+            .filter_map(|(id, grade)| {
+                Some(AlphaClone {
+                    id: id.parse().ok()?,
+                    name: grade.name,
+                    caps: grade.skills.iter().map(|s| (s.type_id, s.level)).collect(),
+                })
+            })
+            .collect();
+        alpha_clones.sort_by(|a, b| a.name.cmp(&b.name));
+        let alpha = alpha_skill_caps(&alpha_clones);
         let mut omega = HashMap::new();
         for t in types.values_mut() {
             t.omega = needs_omega(t.id, &required_skills, &alpha, &mut omega);
@@ -711,6 +732,7 @@ impl Catalog {
             projection,
             ship_groups,
             mutaplasmids,
+            alpha_clones,
         })
     }
 
@@ -762,10 +784,19 @@ impl Catalog {
             .map_or_else(|| format!("#{id}"), |t| t.name.clone())
     }
 
+    /// The type by name. Names pyfa knows as renamed are looked up under their current name
+    /// first, as pyfa's `getItem` does, so old fits still import.
     pub fn find(&self, name: &str) -> Option<&ItemType> {
-        self.by_name
-            .get(&name.trim().to_lowercase())
+        let key = name.trim().to_lowercase();
+        crate::port::renames::current_name(&key)
+            .and_then(|current| self.by_name.get(current))
+            .or_else(|| self.by_name.get(&key))
             .and_then(|id| self.types.get(id))
+    }
+
+    /// An Alpha clone grade by ID.
+    pub fn alpha_clone(&self, id: i32) -> Option<&AlphaClone> {
+        self.alpha_clones.iter().find(|c| c.id == id)
     }
 
     /// Published, fittable types matching a market search the way pyfa runs it: every word
@@ -827,11 +858,11 @@ fn ship_groups(
 }
 
 /// The highest level any Alpha clone can train each skill to.
-fn alpha_skill_caps(grades: impl Iterator<Item = SdeCloneGrade>) -> HashMap<TypeId, u8> {
+fn alpha_skill_caps(grades: &[AlphaClone]) -> HashMap<TypeId, u8> {
     let mut caps: HashMap<TypeId, u8> = HashMap::new();
-    for skill in grades.flat_map(|g| g.skills) {
-        let cap = caps.entry(skill.type_id).or_default();
-        *cap = (*cap).max(skill.level);
+    for (&skill, &level) in grades.iter().flat_map(|g| &g.caps) {
+        let cap = caps.entry(skill).or_default();
+        *cap = (*cap).max(level);
     }
     caps
 }
@@ -1004,6 +1035,8 @@ struct SdeType {
 
 #[derive(Deserialize)]
 struct SdeCloneGrade {
+    #[serde(default)]
+    name: String,
     #[serde(default)]
     skills: Vec<SdeCloneSkill>,
 }

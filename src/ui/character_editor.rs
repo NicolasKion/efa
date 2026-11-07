@@ -38,6 +38,8 @@ const SEARCH_LIMIT: usize = 200;
 const MENU_MAX_H: f32 = 480.;
 /// What pyfa says before importing skills.
 const IMPORT_NOTICE: &str = "Imported skills are pending: click Save to keep them.";
+/// The clone choice's label for no Alpha clone.
+const OMEGA: &str = "Omega Clone";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -483,12 +485,66 @@ impl CharacterEditor {
             )
     }
 
-    /// The level column's text, pyfa's "Level N" or "Not learned".
-    fn level_text(&self, skill: TypeId) -> String {
-        match self.characters.level(self.selected, skill) {
-            Some(level) => format!("Level {level}"),
-            None => "Not learned".to_owned(),
+    /// The level column's text, pyfa's "Level N" or "Not learned", with the trained level
+    /// after it when an Alpha clone caps the skill.
+    fn level_text(&self, skill: TypeId) -> (String, bool) {
+        let id = self.selected;
+        let trained = self.characters.level(id, skill);
+        let flown = self.characters.flown_level(id, skill, &self.loaded.catalog);
+        match (trained, flown) {
+            (Some(trained), Some(flown)) if flown < trained => {
+                (format!("Level {flown} (of {trained})"), true)
+            }
+            (Some(level), _) => (format!("Level {level}"), false),
+            (None, _) => ("Not learned".to_owned(), false),
         }
+    }
+
+    fn set_alpha_clone(&mut self, clone: Option<i32>, cx: &mut Context<Self>) {
+        let id = self.selected;
+        if id.is_builtin() {
+            return;
+        }
+        self.edit(cx, |c, _| c.set_alpha_clone(id, clone));
+    }
+
+    /// pyfa's clone choice: Omega, or an Alpha clone that caps the skills.
+    fn clone_picker(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let current = self.characters.alpha_clone(self.selected);
+        let catalog = &self.loaded.catalog;
+        let label = current
+            .and_then(|c| catalog.alpha_clone(c))
+            .map_or_else(|| OMEGA.to_owned(), |c| c.name.clone());
+        let choices: Vec<(Option<i32>, String)> = std::iter::once((None, OMEGA.to_owned()))
+            .chain(
+                catalog
+                    .alpha_clones
+                    .iter()
+                    .map(|c| (Some(c.id), c.name.clone())),
+            )
+            .collect();
+        let this = cx.entity().downgrade();
+        Button::new("alpha-clone")
+            .small()
+            .outline()
+            .label(label)
+            .tooltip(
+                "Setting an Alpha clone does not replace the character's skills, \
+                 but rather caps them to Alpha levels.",
+            )
+            .disabled(self.selected.is_builtin())
+            .dropdown_menu(move |menu, _, _| {
+                choices.iter().fold(menu, |menu, (clone, name)| {
+                    let (this, clone) = (this.clone(), *clone);
+                    menu.item(
+                        PopupMenuItem::new(name.clone())
+                            .checked(clone == current)
+                            .on_click(move |_, _, cx| {
+                                let _ = this.update(cx, |e, cx| e.set_alpha_clone(clone, cx));
+                            }),
+                    )
+                })
+            })
     }
 
     fn skill_row(
@@ -520,16 +576,19 @@ impl CharacterEditor {
                     }),
             )
             .child(div().flex_1().truncate().child(name.to_owned()))
-            .child(
+            .child({
+                let (text, capped) = self.level_text(skill);
                 div()
-                    .w(px(90.))
+                    .w(px(130.))
                     .text_color(if dirty {
                         theme.danger
+                    } else if capped {
+                        theme.warning
                     } else {
                         theme.foreground
                     })
-                    .child(self.level_text(skill)),
-            )
+                    .child(text)
+            })
             .on_click(cx.listener(move |e, _: &ClickEvent, window, cx| {
                 e.skill = Some(skill);
                 window.focus(&e.tree_focus, cx);
@@ -542,18 +601,38 @@ impl CharacterEditor {
                     cx.notify();
                 }),
             );
-        if builtin {
-            return row.into_any_element();
-        }
         let this = cx.entity().downgrade();
         row.context_menu(move |menu, _, _| {
+            let stats = {
+                let this = this.clone();
+                entry(IconName::Info, "Skill Stats").on_click(move |event, window, cx| {
+                    if let Some(e) = this.upgrade() {
+                        let (loaded, hub) = {
+                            let e = e.read(cx);
+                            (Rc::clone(&e.loaded), e.hub.clone())
+                        };
+                        let request = super::item_stats::Request {
+                            target: super::item_stats::Target::Type(skill),
+                            fit: None,
+                        };
+                        let reuse = event.modifiers().shift;
+                        super::item_stats::open(&loaded, &hub, request, reuse, window, cx);
+                    }
+                })
+            };
+            let menu = menu.item(stats);
+            if builtin {
+                return menu;
+            }
             let set = |level: Option<u8>| {
                 let this = this.clone();
                 move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
                     let _ = this.update(cx, |e, cx| e.set_level(skill, level, cx));
                 }
             };
-            let menu = menu.item(PopupMenuItem::new("Unlearn").on_click(set(None)));
+            let menu = menu
+                .separator()
+                .item(PopupMenuItem::new("Unlearn").on_click(set(None)));
             (0..=MAX_LEVEL).fold(menu, |menu, level| {
                 menu.item(PopupMenuItem::new(format!("Level {level}")).on_click(set(Some(level))))
             })
@@ -649,6 +728,7 @@ impl CharacterEditor {
                                 cx.listener(|e, _, window, cx| e.sec_status_dialog(window, cx)),
                             ),
                     )
+                    .child(self.clone_picker(cx))
                     .child(div().flex_1())
                     .child(
                         Button::new("skills-import")
