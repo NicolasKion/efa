@@ -51,6 +51,9 @@ use crate::{
     },
 };
 
+/// Something read from a fit, with the fit it was read from to tell when it is stale.
+type Cached<T> = (String, Rc<T>);
+
 /// The open graph window, so a second "Graphs" only brings it forward, as in pyfa.
 #[derive(Default)]
 struct OpenGraphs(Option<(AnyWindowHandle, WeakEntity<GraphsWindow>)>);
@@ -118,9 +121,9 @@ pub struct GraphsWindow {
     characters: Option<Rc<crate::character::Characters>>,
     /// Snapshots by fit and ammo override, with the fit they were read from, so only fits that
     /// changed are read again.
-    snapshots: HashMap<(usize, Option<AmmoChoice>), (String, Rc<FitSnapshot>)>,
+    snapshots: HashMap<(usize, Option<AmmoChoice>), Cached<FitSnapshot>>,
     /// The Application Profile graph's weapon groups with every charge loaded, likewise.
-    ammo_groups: HashMap<(usize, AmmoQuality), (String, Rc<Vec<WeaponGroup>>)>,
+    ammo_groups: HashMap<(usize, AmmoQuality), Cached<Vec<WeaponGroup>>>,
     graph: Graph,
     x: usize,
     y: usize,

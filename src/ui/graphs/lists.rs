@@ -34,6 +34,9 @@ use crate::ui::{
     profile_menus::{FirstProfile, PickProfile, target_profile_menu},
 };
 
+/// A weapon type with its name and the charges it takes, each with its name.
+type WeaponCharges = (TypeId, String, Vec<(TypeId, String)>);
+
 /// A fit plotted, in its color.
 #[derive(Debug, Clone)]
 pub struct Source {
@@ -125,7 +128,7 @@ fn ship_column(col: Column, ship: &Ship) -> String {
     }
 }
 
-/// How much the fit's dampeners cut scan resolution, pyfa's "Damp ScanRes" column.
+/// How much the fit's dampeners cut scan resolution, pyfa's "Damp `ScanRes`" column.
 fn damp_scan_res(snap: &FitSnapshot) -> String {
     let mults: Vec<f64> = snap
         .ewar
@@ -325,7 +328,7 @@ fn ammo_menu(
                 types.push(m.type_id);
             }
         }
-        let groups: Vec<(TypeId, String, Vec<(TypeId, String)>)> = types
+        let groups: Vec<WeaponCharges> = types
             .into_iter()
             .map(|t| {
                 let charges = ammo::charges_for(catalog, t, AmmoQuality::All)
