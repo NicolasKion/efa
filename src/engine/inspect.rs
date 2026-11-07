@@ -143,7 +143,7 @@ impl Engine {
     /// The item at `item` in `fit`, after all bonuses. None when nothing is there.
     pub fn inspect(&self, fit: &Fit, pilot: &Pilot, item: FitItem) -> Option<Inspection> {
         let type_id = item.type_in(fit, &pilot.implants)?;
-        let mut sol = SolOwned::new(&self.src);
+        let mut sol = self.sol();
         let (fit_id, places) = Self::build(&mut sol, fit, pilot)?;
         let target = places
             .iter()

@@ -124,6 +124,20 @@ pub fn hover_data(loaded: &Rc<Loaded>, cx: &mut App) -> Option<Rc<ItemData>> {
     }
 }
 
+/// The stats window's data as far as it is loaded: None while loading.
+pub fn data(cx: &App) -> Option<Result<Rc<ItemData>, SharedString>> {
+    match &cx.try_global::<ItemDataGlobal>()?.0 {
+        DataState::Loading => None,
+        DataState::Ready(data) => Some(Ok(Rc::clone(data))),
+        DataState::Failed(e) => Some(Err(e.clone())),
+    }
+}
+
+/// Redraw a view once the stats window's data is in.
+pub fn observe_data<V: 'static>(cx: &mut Context<V>) -> Subscription {
+    cx.observe_global::<ItemDataGlobal>(|_, cx| cx.notify())
+}
+
 /// A ship's bonuses as plain text, the way pyfa's browser tooltips show them.
 pub fn traits_text(loaded: &Loaded, data: &ItemData, ship: TypeId) -> Option<String> {
     let traits = data.type_info(ship)?.traits.as_ref()?;
@@ -762,11 +776,17 @@ impl ItemStats {
         let merged = self.mutated_info(data);
         let info = merged.as_ref().or_else(|| data.type_info(self.type_id));
         let values = self.values(info);
+        let overridden = if self.fitted() {
+            self.loaded.engine.overridden_attrs(self.type_id)
+        } else {
+            Vec::new()
+        };
         let describe = attributes::Describe {
             data,
             catalog,
             own: info,
             fitted: self.fitted(),
+            overridden: &overridden,
             raw: self.raw,
         };
         let category = catalog.get(self.type_id).map_or(0, |t| t.category_id);

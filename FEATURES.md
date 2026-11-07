@@ -1,7 +1,7 @@
 # Feature parity with pyfa
 
-Rough coverage: fitting, stats, additions, item stats, graphs, editors, context menus and the file formats are mostly there. What is left is mainly ESI/SSO, attribute overrides, Optimize Fit Price, generic command links and a tail of smaller items (the [ ] and [~] lines).
-Biggest gaps: ESI/SSO (skills, fittings), attribute overrides, fighters in the DNA/XML/ESI/multibuy formats, minimal stats views.
+Rough coverage: fitting, stats, additions, item stats, graphs, editors, context menus and the file formats are mostly there. What is left is mainly ESI/SSO, Optimize Fit Price, generic command links and a tail of smaller items (the [ ] and [~] lines).
+Biggest gaps: ESI/SSO (skills, fittings), minimal stats views.
 Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
 Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time, abstract target profiles for applied damage, lock/warp time formulas (all done graph-side in src/graphs).
 
@@ -12,8 +12,8 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Multiple fit tabs (gui/chrome_tabs.py, gui/mainFrame.py)
 - [x] Fits persisted between runs (eos/db): fits.json in the XDG data dir, written through a temp file
 - [ ] Safe loading and backups of saved data (eos/db/migration.py backs the DB up before migrating): a fits.json that fails to parse loads as empty and the next save overwrites it; no backup copy is kept
-- [ ] Delete confirmation (builtinShipBrowser/fitItem.py "Do you really want to delete this fit?", skipped with Shift): gyfa deletes from the fittings browser and the Fit menu without asking
-- [ ] Middle-click a tab to close it (chrome_tabs.py OnMiddleUp)
+- [x] Delete confirmation (builtinShipBrowser/fitItem.py "Do you really want to delete this fit?", skipped with Shift), from the fittings browser and Fit > Delete Fit; Enter says Yes as in pyfa, Escape cancels
+- [x] Middle-click a tab to close it (chrome_tabs.py OnMiddleUp)
 - [x] New fit (mainMenuBar.py New Tab)
 - [x] Delete fit (shipBrowser fitItem.py)
 - [x] Close tab without deleting the fit, close all tabs (mainMenuBar.py), Ctrl+W and Ctrl+Alt+W
@@ -44,7 +44,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Recently used items (itemView.py, service/market.py): pyfa's "Recently Used Items" tree entry, listed in the results pane, the last 20 items added from the market (double-click, menus, drags), saved with the fits
 - [x] "Charges For Active Fit" tree entry (itemView.py), listed in the results pane: every charge the fit's modules take, in market order
 - [~] Search delay and meta button behaviour prefs (pyfaMarketPreferences.py), search delay done; pyfa's four meta button modes (search and recents, group selection, empty view, market jump) are missing
-- [ ] Market shortcuts: Alt+1..9 adds the Nth listed item, "Show market shortcuts" numbers them (mainFrame.py ItemSelect, pyfaMarketPreferences.py)
+- [~] Market shortcuts: Alt+1..9 adds the Nth listed item (mainFrame.py ItemSelect); the "Show market shortcuts" preference that numbers them is missing (pyfaMarketPreferences.py)
 - [x] Jump to market group from an item (builtinContextMenus/itemMarketJump.py): from anything the results pane lists outside the item's own group, and the fit's, additions' and projected items' menus; the jump picks the group, presses the item's meta button and clears the pane's filters so it shows
 - [x] Drag item from market onto fit/slot/additions (itemView.py, fittingView.py)
 - [x] Item tooltip with name, Omega, price and the start of the description (gyfa extra: pyfa's item list has none); the description loads with the stats window's data on first hover
@@ -79,7 +79,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Color rows by slot type (pyfaGeneralPreferences.py)
 - [x] Highlight modules with unmet skills or invalid fitting in red (fittingView.py), with the reasons on hover; drones, fighters, implants, boosters and the mode too. pyfa colors the row background and leaves skills out; gyfa uses red text for both
 - [x] Drag and drop modules between slots, swap/rearrange (fittingView.py, fitCommands/gui/localModule)
-- [~] Shift/ctrl drag to copy module, drag module to cargo (fitCommands/gui/localModuleCargo), module/charge to and from cargo done with Ctrl to copy, copying between slots missing
+- [x] Ctrl drag to copy a module or rig onto an empty slot of its rack, Ctrl+Alt drag to fill the rack with copies (fittingView.py swapItems), drag module to cargo (fitCommands/gui/localModuleCargo), module/charge to and from cargo with Ctrl to copy
 - [x] Multi-select and bulk state change (fittingView.py): Shift/Ctrl selection, a state click takes the selection along, Alt every similar module, Ctrl switches them off
 - [x] Delete key removes selection, Ctrl+A selects all, Escape clears (fittingView.py)
 - [x] Column: ship/item icon and charge icon (baseIcon.py, ammoIcon.py)
@@ -89,7 +89,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Column: misc info per module type (tracking, neut, web, ewar, damage mods, reps, mining, ancillaries, RAH resists, command bursts, charges, subsystem slots) with pyfa's tooltips (misc.py), refine: item attrs and switched item stats; doomsdays show raw volley without pyfa's "over Ns"
 - [x] Column: heat, estimated time until an overheated module burns out (heat.py), pyfa's simulation on refine's attributes
 - [x] Column: price (price.py)
-- [~] Column: charge name and remaining charges/reload (ammo.py), name and icon only; pyfa's "Name (charges, N cycles)" is missing, refine: get_charge_count, get_charged_cycle_count
+- [x] Column: charge name with pyfa's "Name (charges, N cycles)" (ammo.py), refine: get_charge_count, get_charged_cycle_count
 - [x] Column: drone EHP and drone regen (droneEhp.py, droneRegen.py), refine: item stats get_stat_ehp, get_stat_erps
 - [x] Column: fighter abilities (abilities.py), refine: iter_abilities
 - [x] Column: booster side effects (sideEffects.py), refine: iter_side_effects
@@ -134,7 +134,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Show skills affecting item, change skill level inline (builtinContextMenus/skillAffectors.py), refine: iter_modifiers, set_level; modules, charges, ship, drones and fighters
 - [x] Price total options (builtinContextMenus/priceOptions.py): Drones, Cargo, Implants && Boosters
 - [x] Copy/paste/export/import additions lists (builtinContextMenus/additionsExportAll.py, additionsExportSelection.py, additionsImport.py)
-- [~] Context menu enable/disable preferences (pyfaContextMenuPreferences.py): every toggle is honoured; holding Ctrl while opening a menu does not bring the hidden entries back as in pyfa (gui/contextMenu.py)
+- [x] Context menu enable/disable preferences (pyfaContextMenuPreferences.py): every toggle is honoured, and holding Ctrl while opening a menu brings the hidden entries back as in pyfa (gui/contextMenu.py)
 
 ## Additions pane
 
@@ -142,7 +142,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Implants and boosters list (builtinAdditionPanes/implantView.py, boosterView.py), refine: add_implant, add_booster
 - [x] Cargo: parsed from EFT and exported, added from the market (double-click with Ctrl/Alt batches, drag, menus), edited, dragged to and from the fit (builtinAdditionPanes/cargoView.py)
 - [x] Tabbed additions pane (gui/additionsPane.py): Drones, Fighters, Cargo, Implants, Boosters, Projected, Command, Notes
-- [ ] Ctrl+1..9 switches additions tab (mainFrame.py AdditionsTabSelect)
+- [x] Ctrl+1..9 switches additions tab (mainFrame.py AdditionsTabSelect), counted in gyfa's tab order
 - [x] Tab names with counts (pyfaGeneralPreferences.py "Extra info in Additions panel tab names"): none, active or all items
 - [x] Drone stack amount editing, separate stacks (droneView.py)
 - [x] Fighters tab: squadrons with size, state, speed, EHP, regen, active abilities and price, sorted like pyfa, light/heavy/support tube counts, Delete/Escape/Ctrl+A, market drops, copy/paste, EFT in and out (builtinAdditionPanes/fighterView.py), refine: add_fighter, set_count_override, abilities, get_stat_launched_*_fighters
@@ -150,8 +150,8 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Commodities, materials, deployables and containers in the catalog for cargo; market tree shows pyfa's Deployable Structures and Filaments roots, search adds ice products (service/market.py)
 - [x] Implants: use character implants vs fit implants switch (implantView.py); the All 5 character has no implants until characters exist
 - [x] Implant slot conflict handling: one implant per slot, the new one replaces the old, listed in slot order (implantView.py, eos HandledImplantList)
-- [~] Implants pane columns: state checkbox (multi-select toggle), slot, icon, name, price; drag from the market onto the pane (implantView.py). No Delete/Esc keys yet
-- [~] Booster slot conflict and side effects (boosterView.py): one booster per slot, listed by slot, on/off state, side effect, price and duration columns, drop from the market; no Delete/Esc keys yet, refine: set_state, iter_side_effects
+- [x] Implants pane columns: state checkbox (multi-select toggle), slot, icon, name, price; drag from the market onto the pane, Delete/Escape/Ctrl+A (implantView.py)
+- [x] Booster slot conflict and side effects (boosterView.py): one booster per slot, listed by slot, on/off state, side effect, price and duration columns, drop from the market, Delete/Escape/Ctrl+A, refine: set_state, iter_side_effects
 - [x] Projected tab: fits (N copies each), modules with charges and spool, drones, fighters, environment effects, pyfa's columns and order, drops from the market, the fitting view and the fittings browser, Delete/Escape/Ctrl+A (builtinAdditionPanes/projectedView.py), refine: add_proj, add_fw_effect, add_proj_effect
 - [x] Projected item states and amounts (fitCommands/gui/projectedChangeStates.py), left click toggles, right click overheats modules, Alt takes similar items, double-click takes one copy or drone (Alt: all)
 - [x] Command tab: fleet booster fits (builtinAdditionPanes/commandView.py), refine: add_fleet, set_fleet. Fits are referenced by a stable id that survives deletes and moves
@@ -214,14 +214,14 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] EFT export to clipboard (service/port/eft.py exportEft)
 - [x] EFT import of cargo, charges and mutated items' blocks (eft.py), pyfa's /offline and several fits per paste
 - [x] EFT export options: implants, boosters, cargo, mutations, loaded charges (eft.py, gui/copySelectDialog.py), in pyfa's layout with empty slots up to the ship's count
-- [~] Import from clipboard with format autodetect (port.py importAuto), item lists go to the additions tabs or fit a single module; a list of fighters goes to cargo instead of the Fighters tab, and ESI dynamic item links are not fetched
+- [~] Import from clipboard with format autodetect (port.py importAuto), item lists go to the additions tabs (fighters to the Fighters tab) or fit a single module; ESI dynamic item links are not fetched
 - [x] Renamed item conversions on import (service/conversions/, applied in service/market.py getItem): pyfa's tables in src/port/renames.tsv (scripts/renames.py rebuilds it), applied in every name lookup with chains followed
 - [x] Import from file dialog, multiple files (port.py importFitsThreaded)
 - [x] EFT .cfg legacy format (port.py importEftCfg); notes come from Description= lines, with | as line breaks
-- [~] DNA import/export (service/port/dna.py), chat links and the DNA: variant too; fighters are not exported and import into the drone bay
-- [~] XML import/export (EVE client format) (service/port/xml.py); notes are the description, exported cut to 400 characters with line breaks as <br>; fighters are not exported and import into the drone bay (Backup All Fittings loses them too)
-- [~] ESI JSON import/export (service/port/esi.py); notes are the description, exported cut to 400 characters; fighters (flag 158) are not exported and import into the drone bay
-- [~] Multibuy export (service/port/multibuy.py), no Optimize Prices option, fighters left out
+- [x] DNA import/export (service/port/dna.py), chat links and the DNA: variant too; fighters as `typeid;size`
+- [~] XML import/export (EVE client format) (service/port/xml.py); notes are the description, exported cut to 400 characters with line breaks as <br>; fighters as "fighter bay" hardware with the squadron size
+- [~] ESI JSON import/export (service/port/esi.py); notes are the description, exported cut to 400 characters; fighters with flag 158 and the squadron size
+- [~] Multibuy export (service/port/multibuy.py), no Optimize Prices option
 - [x] EFS stats JSON export (service/port/efs.py), the copy dialog's "EFS" format: pyfa's fields, weapons, repairs and projections, and the weapon bonus multipliers measured with Tech II test weapons against a capsule
 - [x] Ship stats export (service/port/shipstats.py), the copy dialog's "Stats" format
 - [x] Mutated item (muta) format (service/port/muta.py): pasting one mutated item fits it into the current fit, drone copy/paste carries mutations; ESI dynamic item links are not fetched (no ESI)
@@ -280,7 +280,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [ ] Logging (pyfaLoggingPreferences.py)
 - [ ] Update checks (pyfaUpdatePreferences.py, service/update.py)
 - [x] HTML export path (pyfaHTMLExportPreferences.py)
-- [ ] Attribute overrides editor (gui/propertyEditor.py, eos/saveddata/override.py, mainMenuBar.py Global > Attribute Overrides and Turn Overrides On/Off): per type and attribute values applied to every item of that type while overrides are on, kept with the saved data; refine: set_value on items if exposed
+- [x] Attribute overrides editor (gui/propertyEditor.py, eos/saveddata/override.py, mainMenuBar.py Global > Attribute Overrides and Turn Overrides On/Off): a window to search a type or pick an overridden one, type a base value per attribute, reset one or all of a type, clear all, and import/export pyfa's override CSV; overrides and the on/off switch are saved; while on they replace the type's base value for every item of it, in projected and command fits, graphs and item stats too, and the item stats window marks them. refine has no API for base values, so the engine's adapted data is patched on load and rebuilt in the background when overrides change. The search leaves out skills; pyfa searches everything
 
 ## ESI and SSO
 
@@ -305,7 +305,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [x] Load EVE data from local dump (gyfa data.rs, pyfa eos/db gamedata)
 - [x] Skip unknown items on import with a status message (port.py)
 - [~] In-game icons, in progress (gui/bitmap_loader.py)
-- [~] Keyboard shortcuts (mainMenuBar.py, mainFrame.py registerMenu): Ctrl+T, W, Alt+W, Z, Y, C, V, O, S, P, I, K, G, Alt+G done; missing Ctrl+D (optimize price), Ctrl+B and Ctrl+E (ESI), Ctrl+F (focus market or fit search), Ctrl+Space (switch market and fittings browser), Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgUp/PgDn (next/previous tab), Ctrl+F4 and Ctrl+Alt+F4, Ctrl+Shift+Z (redo), Ctrl+1..9 (additions tab), Alt+1..9 (market item)
+- [~] Keyboard shortcuts (mainMenuBar.py, mainFrame.py registerMenu): Ctrl+T, W, Alt+W, Z, Y, Shift+Z, C, V, O, S, P, I, K, G, Alt+G, F (search box of the browser shown), Space (switch market and fittings browser), Tab, Shift+Tab, PgUp/PgDn (next/previous tab), F4 and Alt+F4 (close tab, close all), 1..9 (additions tab), Alt+1..9 (market item) done; missing Ctrl+D (optimize price), Ctrl+B and Ctrl+E (ESI)
 - [x] About dialog, version info (gui/aboutData.py)
 - [x] Error dialog with details (gui/errorDialog.py): unreadable data files, failed saves and panics, with the details to copy. A panic that ends gyfa is kept in crash.txt and shown on the next start
 - [ ] Update notifications (gui/updateDialog.py, service/update.py)
@@ -317,4 +317,4 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [x] Ammo service: flat and structured ammo lists, best ammo per range (service/ammo.py), in the Charge menus and the Application Profile graph
 - [x] Structures and services fitting (eos service slots): citadels, engineering complexes and refineries from the market, structure modules and rigs, a service rack with online/offline, EFT in and out, Citadel System Security, drones/implants/boosters/command/notes tabs disabled like pyfa; refine: add_service, get_stat_service_slots, set_sec_zone. pyfa does not model fuel, neither does gyfa
 - [x] Faction warfare system effects: pyfa's FW/Insurgency environment effects, in the Projected tab's environment menu, refine: add_fw_effect
-- [x] Fitting wizard (gyfa extra, no pyfa counterpart): Ctrl+Shift+W or Fit > Fitting Wizard opens one dialog with weapons sized to the hull and ranked by its bonuses, tier and ammo, propulsion, tackle and utility, tank, damage modules and rigs, defaults picked from the ship's bonuses and slots; the preview shows what goes in each rack and the CPU, powergrid and calibration it takes, "Make it fit" steps modules down to meta and drops the least wanted ones, and Apply fills the free slots (or cleared racks) as one undo step
+- [x] Fitting wizard (gyfa extra, no pyfa counterpart): Ctrl+Shift+W or Fit > Fitting Wizard opens one dialog laid out like the preferences: sections for weapons (sized to the hull, ranked by its mastery and bonuses), propulsion, tackle and utility, tank, and damage modules and rigs, defaults picked from the ship's mastery, bonuses and slots. A global bling tier (T1, compact, T2, faction, deadspace, officer) sets where every module starts, and each module row has its own variant dropdown with tier, meta level and price, e.g. a Quad LiF Restrained MWD; the last choices are saved for the next fit. The tank section picks a style (buffer, active, brick, none), shield or armor, and for active tanks a goal (max resists, max repair, balanced); Find best searches tanks for the free slots and rigs off the UI thread (plates, extenders, multispectrum and damage-type hardeners and membranes, the reactive armor hardener, damage control, repairers, boosters, ancillaries, amplifiers, resist and repair rigs) against the fit's damage pattern within the CPU, powergrid and calibration left, and shows the best five as cards to pick from. The preview shows each rack, CPU, powergrid and calibration, the new modules' price, EHP, resists per layer, sustained repair, capacitor and DPS; "Make it fit" steps modules down to meta and drops the least wanted ones, and Apply fills the free slots (or cleared racks) as one undo step

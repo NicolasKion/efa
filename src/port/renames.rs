@@ -44,8 +44,13 @@ mod tests {
     #[test]
     fn old_names_map_to_current_ones() {
         assert_eq!(
+            current_name("energized adaptive nano membrane ii"),
+            Some("multispectrum energized membrane ii")
+        );
+        // Renamed twice: the chain is followed to today's name.
+        assert_eq!(
             current_name("adaptive invulnerability field ii"),
-            Some("adaptive invulnerability shield hardener ii")
+            current_name("adaptive invulnerability shield hardener ii")
         );
         assert_eq!(current_name("125mm gatling autocannon ii"), None);
     }

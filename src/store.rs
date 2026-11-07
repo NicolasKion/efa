@@ -44,9 +44,16 @@ pub struct Saved {
     /// Items last added from the market, newest first: pyfa's Recently Used Items.
     #[serde(default)]
     pub recent_items: Vec<crate::data::TypeId>,
-    /// Height of the market tree over the results pane, in pixels, once the user dragged it.
+    /// Height of the market results pane, in pixels, once the user dragged its divider. It
+    /// keeps that height when the window resizes; the tree above takes the change.
     #[serde(default)]
-    pub market_split: Option<f32>,
+    pub market_results: Option<f32>,
+    /// The fitting wizard's last bling choices, which the next fit starts from.
+    #[serde(default)]
+    pub wizard: crate::wizard::Bling,
+    /// pyfa's attribute overrides and whether they are on.
+    #[serde(default)]
+    pub overrides: crate::overrides::Overrides,
 }
 
 /// What besides ship and fittings the price total includes, with pyfa's defaults.

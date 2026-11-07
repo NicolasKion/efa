@@ -55,6 +55,8 @@ pub struct General {
     /// The missing skills tooltip lists each skill once rather than per item, pyfa's "Compact
     /// skills needed tooltip".
     pub compact_skills: bool,
+    /// The fit's own implants and boosters travel in the cargo hold, so they count against it.
+    pub implants_in_cargo: bool,
 }
 
 impl Default for General {
@@ -75,6 +77,7 @@ impl Default for General {
             global_character: false,
             global_damage_pattern: false,
             compact_skills: true,
+            implants_in_cargo: true,
         }
     }
 }

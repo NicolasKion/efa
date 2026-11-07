@@ -44,8 +44,8 @@ const SEARCH_LIMIT: usize = 500;
 const INDENT: f32 = 14.;
 /// Height of every results row, items and headings alike, as the list needs.
 const RESULT_ROW_H: f32 = 26.;
-/// Height of the market tree over the results until the user drags the divider.
-const DEFAULT_SPLIT: f32 = 260.;
+/// Height of the market results pane until the user drags the divider.
+const DEFAULT_RESULTS: f32 = 420.;
 /// Least height either half of the market keeps.
 const MIN_PANE: f32 = 80.;
 /// Drones that can be in space at once without skills, the floor for a stack's size.
@@ -229,7 +229,7 @@ impl Gyfa {
         let jump = std::mem::take(&mut self.market_scroll_pending);
         let results = self.results_pane(loaded, jump, cx);
         let tree = self.market_tree(loaded, jump, cx);
-        let split = self.saved.market_split.unwrap_or(DEFAULT_SPLIT);
+        let results_height = self.saved.market_results.unwrap_or(DEFAULT_RESULTS);
         let weak = Self::weak(cx);
         v_flex()
             .flex_1()
@@ -244,23 +244,25 @@ impl Gyfa {
                     .child(
                         v_resizable("market-split")
                             .on_resize(move |state, _, cx| {
-                                let Some(&height) = state.read(cx).sizes().first() else {
+                                let Some(&height) = state.read(cx).sizes().last() else {
                                     return;
                                 };
                                 let _ = weak.update(cx, |g, _| {
-                                    g.saved.market_split = Some(f32::from(height));
+                                    g.saved.market_results = Some(f32::from(height));
                                     g.save();
                                 });
                             })
                             .child(
                                 resizable_panel()
-                                    .size(px(split))
                                     .size_range(px(MIN_PANE)..px(f32::MAX))
                                     .child(tree),
                             )
+                            // The results keep their height as the window resizes.
                             .child(
                                 resizable_panel()
+                                    .size(px(results_height))
                                     .size_range(px(MIN_PANE)..px(f32::MAX))
+                                    .fixed()
                                     .child(results),
                             ),
                     ),
@@ -683,7 +685,7 @@ impl Gyfa {
             )
             .context_menu({
                 let this = Self::weak(cx);
-                move |menu, _, cx| market_menu(menu, &this, id, context, cx)
+                move |menu, window, cx| market_menu(menu, &this, id, context, window, cx)
             })
             .into_any_element()
     }
@@ -1229,7 +1231,11 @@ impl Gyfa {
             return 0;
         };
         let volume = loaded.catalog.get(item).map_or(0.0, |t| t.volume);
-        let free = stats.cargo_capacity.unwrap_or(0.0) - fit.cargo_volume(&loaded.catalog);
+        let used = fit.hold_volume(
+            &loaded.catalog,
+            self.saved.preferences.general.implants_in_cargo,
+        );
+        let free = stats.cargo_capacity.unwrap_or(0.0) - used;
         if volume <= 0.0 || free <= 0.0 {
             return 0;
         }
@@ -1443,7 +1449,7 @@ fn fit_menu(menu: PopupMenu, this: &WeakEntity<Gyfa>, i: usize, has_fit: bool) -
             .item(entry(IconName::Globe, "Project onto Active Fit").on_click(link(Link::Projected)))
             .item(entry(IconName::Network, "Add Command Booster").on_click(link(Link::Command)));
     }
-    let rename = this.clone();
+    let (rename, delete) = (this.clone(), this.clone());
     menu.separator()
         .item(entry(IconName::Copy, "Copy").on_click(on(Gyfa::copy_fit)))
         .item(
@@ -1454,7 +1460,14 @@ fn fit_menu(menu: PopupMenu, this: &WeakEntity<Gyfa>, i: usize, has_fit: bool) -
                 });
             }),
         )
-        .item(entry(IconName::Delete, "Delete").on_click(on(Gyfa::delete_fit)))
+        .item(
+            entry(IconName::Delete, "Delete").on_click(move |event, window, cx| {
+                let shift = event.modifiers().shift;
+                Gyfa::app_update(&delete, cx, |g, cx| {
+                    g.confirm_delete_fit(i, shift, window, cx);
+                });
+            }),
+        )
 }
 
 /// pyfa's marketItemGroup / marketItemMisc menu.
@@ -1463,8 +1476,10 @@ fn market_menu(
     this: &WeakEntity<Gyfa>,
     id: TypeId,
     context: MarketContext,
+    window: &Window,
     cx: &App,
 ) -> PopupMenu {
+    let shown = super::hub::shown_menus(window, cx);
     let Some(g) = this.upgrade() else { return menu };
     let g = g.read(cx);
     let Some(loaded) = g.loaded() else {
@@ -1551,7 +1566,7 @@ fn market_menu(
     }
     if let Kind::Module(slot) = t.kind
         && slot != Slot::Subsystem
-        && g.saved.preferences.context_menus.module_fill
+        && shown.module_fill
         && !several
     {
         menu = menu.item(
@@ -1586,7 +1601,7 @@ fn market_menu(
         menu = menu
             .item(entry(IconName::Inbox, format!("Add {category} to Cargo")).on_click(to_cargo(1)));
     }
-    if goes_to_cargo(t.kind) && g.saved.preferences.context_menus.cargo_fill && !several {
+    if goes_to_cargo(t.kind) && shown.cargo_fill && !several {
         menu = menu.item(
             entry(IconName::Inbox, format!("Fill Cargo With {category}"))
                 .on_click(use_with(|g, id, _, cx| g.fill_cargo_with(id, cx))),
@@ -1606,7 +1621,6 @@ fn market_menu(
             .on_click(to_cargo(batch)),
         );
     }
-    let shown = super::hub::preferences(cx).context_menus;
     if shown.ammo_pattern && t.damage.iter().any(|&d| d > 0.0) && !several {
         let profile = crate::fit::DamageProfile::Pattern {
             name: crate::damage_pattern::SELECTED_AMMO.to_owned(),

@@ -520,8 +520,8 @@ impl Gyfa {
                     .child("Double-click drones in the market to add them.")
                     .context_menu({
                         let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
-                        move |menu, _, cx| {
-                            misc_entries(menu, &this, &loaded, AddKind::Drones, None, cx)
+                        move |menu, window, cx| {
+                            misc_entries(menu, &this, &loaded, AddKind::Drones, None, window, cx)
                         }
                     })
                     .into_any_element(),

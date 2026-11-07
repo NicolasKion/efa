@@ -195,7 +195,7 @@ impl Engine {
             return snap;
         }
         let stats = self.compute_for(fit, pilot, CalcOptions::default());
-        let mut sol = SolOwned::new(&self.src);
+        let mut sol = self.sol();
         let Some(Placement {
             ship: ship_id,
             modules,
@@ -347,7 +347,7 @@ impl Engine {
         catalog: &Catalog,
         quality: AmmoQuality,
     ) -> Vec<WeaponGroup> {
-        let mut sol = SolOwned::new(&self.src);
+        let mut sol = self.sol();
         let Some(placement) = Self::place(&mut sol, fit, pilot) else {
             return Vec::new();
         };
@@ -1388,7 +1388,7 @@ Damage Control II
     /// Weapon DPS refine applies to a standing target `distance` meters away, surface to
     /// surface, before resists.
     fn refine_applied(engine: &Engine, attacker: &Fit, target: &Fit, distance: f64) -> f64 {
-        let mut sol = SolOwned::new(&engine.src);
+        let mut sol = engine.sol();
         let Placement {
             ship: atk_ship,
             modules,
@@ -1500,7 +1500,7 @@ Damage Control II
         };
         let attacker = fit(&catalog, RUPTURE);
         let snap = engine.graph_snapshot(&attacker, engine.all5(), &catalog);
-        let mut sol = SolOwned::new(&engine.src);
+        let mut sol = engine.sol();
         let Placement { ship, .. } =
             Engine::place(&mut sol, &attacker, engine.all5()).expect("places");
         let fit_id = sol.get_ship(&ship).expect("ship").get_fit_id();

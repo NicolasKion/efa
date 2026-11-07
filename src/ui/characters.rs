@@ -466,7 +466,7 @@ pub(super) fn skills_submenu(
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
-    if !super::hub::preferences(cx).context_menus.change_skills {
+    if !super::hub::shown_menus(window, cx).change_skills {
         return menu;
     }
     let Some(g) = this.upgrade() else { return menu };

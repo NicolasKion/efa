@@ -350,7 +350,7 @@ fn num(value: Option<f64>) -> Value {
 
 impl Engine {
     fn build_for_efs(&self, fit: &Fit, fits: &[Fit], pilot: &Pilot) -> Option<Built> {
-        let mut sol = SolOwned::new(&self.src);
+        let mut sol = self.sol();
         sol.set_sec_zone(sec_zone(fit.system_security));
         sol.set_default_spool(rc::Spool::SpoolScale(rc::UnitInterval::from_f64_clamped(
             1.0,
@@ -568,7 +568,7 @@ impl Engine {
 
     /// An attribute of a type before anything modifies it.
     fn base_attr(&self, type_id: TypeId, attr: i32) -> Option<f64> {
-        let mut sol = SolOwned::new(&self.src);
+        let mut sol = self.sol();
         let mut f = sol.add_fit();
         let id = f
             .add_module(
@@ -895,7 +895,7 @@ impl Engine {
     /// Damage per second factor of each test weapon on the fit's hull, mode and subsystems:
     /// (kind, factor) with kinds 0 turret, 1 launcher, 2 drone.
     fn measure(&self, fit: &Fit, pilot: &Pilot, test: &[TestWeapon]) -> Vec<(usize, f64)> {
-        let mut sol = SolOwned::new(&self.src);
+        let mut sol = self.sol();
         let mut f = sol.add_fit();
         pilot.board(&mut f);
         if let Some(ship) = fit.ship {

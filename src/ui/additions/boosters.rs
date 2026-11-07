@@ -9,9 +9,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Context, InteractiveElement, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement, SharedString, StatefulInteractiveElement, Styled, WeakEntity,
-    Window, div, prelude::FluentBuilder, px,
+    AnyElement, App, ClickEvent, Context, InteractiveElement, IntoElement, KeyDownEvent,
+    MouseButton, MouseDownEvent, ParentElement, SharedString, StatefulInteractiveElement, Styled,
+    WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
 use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, misc_entries, price_text};
@@ -198,8 +198,8 @@ impl Gyfa {
                     .child("Double-click boosters in the market, or drag them here, to add them.")
                     .context_menu({
                         let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
-                        move |menu, _, cx| {
-                            misc_entries(menu, &this, &loaded, AddKind::Boosters, None, cx)
+                        move |menu, window, cx| {
+                            misc_entries(menu, &this, &loaded, AddKind::Boosters, None, window, cx)
                         }
                     })
                     .into_any_element(),
@@ -210,11 +210,16 @@ impl Gyfa {
                 content.push(self.booster_row(loaded, fit, i, cx));
             }
         }
+        let len = fit.boosters.len();
         v_flex()
             .id("additions-list")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_focus(&self.additions_focus)
+            .on_key_down(cx.listener(move |g, event: &KeyDownEvent, _, cx| {
+                g.list_key(event, AddKind::Boosters, len, true, cx);
+            }))
             .children(content)
             .drag_over::<Dragged>(|style, _, _, cx| style.bg(cx.theme().drop_target))
             // pyfa treats a market item dropped here like one double-clicked in the market.
@@ -343,7 +348,8 @@ impl Gyfa {
                     .children(price_text(&self.prices, booster.type_id, 1)),
             )
             .child(div().w(px(DURATION_W)).flex_none().child(duration))
-            .on_click(cx.listener(move |g, event: &ClickEvent, _, cx| {
+            .on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
+                window.focus(&g.additions_focus, cx);
                 if event.click_count() >= 2 {
                     g.apply(Action::RemoveAdditions(AddKind::Boosters, vec![i]), cx);
                 } else {
@@ -442,7 +448,7 @@ fn booster_menu(
         ));
     }
     let variations = booster_variations(catalog, type_id);
-    if variations.len() > 1 && crate::ui::hub::preferences(cx).context_menus.variations {
+    if variations.len() > 1 && crate::ui::hub::shown_menus(window, cx).variations {
         let entries: Vec<(TypeId, String)> =
             variations.iter().map(|&v| (v, catalog.name(v))).collect();
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
@@ -481,6 +487,7 @@ fn booster_menu(
         loaded,
         AddKind::Boosters,
         Some(i),
+        window,
         cx,
     )
 }

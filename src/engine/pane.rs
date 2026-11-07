@@ -269,7 +269,7 @@ fn local_reps(f: &mut rc::Fit<'_>, time: StatTimeOptions) -> [f64; 3] {
         })
 }
 
-fn tank(f: &mut rc::Fit<'_>, time: StatTimeOptions) -> Tank {
+pub(super) fn tank(f: &mut rc::Fit<'_>, time: StatTimeOptions) -> Tank {
     let Ok(r) = f
         .stats()
         .get_stat_rps(time, UnitInterval::from_f64_clamped(PEAK_SHIELD))
@@ -346,24 +346,7 @@ pub(super) fn pane_stats(
             drone: mining(&mut s, StatMiningItemKinds::new(false).with_minion(true)),
         };
 
-        let balance = |s: &mut rc::stats::FitStats<'_>, kinds| {
-            s.get_stat_cap_balance(kinds, StatTimeOptions::default())
-                .map_or(0.0, rc::Value::into_f64)
-        };
-        // Cap injectors stay out, like pyfa's delta, which only counts what flows steadily.
-        let recharge = balance(
-            &mut s,
-            StatCapBlcSrcKinds::new(false)
-                .with_regen(OptionExt::Enabled)
-                .with_nosfs(OptionExt::Enabled)
-                .with_incoming_transfers(true),
-        );
-        let used = -balance(
-            &mut s,
-            StatCapBlcSrcKinds::new(false)
-                .with_consumers(true)
-                .with_incoming_neuts(true),
-        );
+        let (recharge, used) = cap_flow(&mut s);
         stats.cap_detail = CapDetail {
             recharge,
             used,
@@ -420,9 +403,30 @@ pub(super) fn pane_stats(
         .collect();
 }
 
+/// Capacitor gained and spent per second. Cap injectors stay out, like pyfa's delta, which only
+/// counts what flows steadily.
+pub(super) fn cap_flow(s: &mut rc::stats::FitStats<'_>) -> (f64, f64) {
+    let mut balance = |kinds| {
+        s.get_stat_cap_balance(kinds, StatTimeOptions::default())
+            .map_or(0.0, rc::Value::into_f64)
+    };
+    let recharge = balance(
+        StatCapBlcSrcKinds::new(false)
+            .with_regen(OptionExt::Enabled)
+            .with_nosfs(OptionExt::Enabled)
+            .with_incoming_transfers(true),
+    );
+    let used = -balance(
+        StatCapBlcSrcKinds::new(false)
+            .with_consumers(true)
+            .with_incoming_neuts(true),
+    );
+    (recharge, used)
+}
+
 /// pyfa's sustainable tank: capacitor-using repairers only count for the share of their cycles
 /// the capacitor can pay for at peak recharge, most efficient repairer first.
-fn sustained(
+pub(super) fn sustained(
     sol: &mut SolOwned,
     fit_id: FitId,
     base: Tank,

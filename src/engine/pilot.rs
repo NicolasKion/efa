@@ -79,7 +79,7 @@ impl Engine {
     /// Every skill is trained to V for this, so skills the character lacks still show up: they
     /// are the ones a pilot would want to train.
     pub fn affecting_skills(&self, ship: Option<TypeId>, target: SkillTarget) -> Vec<TypeId> {
-        let mut sol = SolOwned::new(&self.src);
+        let mut sol = self.sol();
         let mut f = sol.add_fit();
         self.all5.board(&mut f);
         let ship_id = ship.map(|ship| {
