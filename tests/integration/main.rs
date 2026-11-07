@@ -16,3 +16,4 @@ mod profiles;
 mod stats;
 mod surroundings;
 mod validation;
+mod wizard;
