@@ -55,6 +55,38 @@ fn rifter(catalog: &Catalog) -> Fit {
 }
 
 #[test]
+fn esi_skills_replace_the_characters() {
+    let Some((catalog, _)) = setup() else {
+        return;
+    };
+    let mut characters = Characters::default();
+    let pilot = characters.create("Pilot");
+    let gunnery = id(catalog, "Gunnery");
+    let drones = id(catalog, "Drones");
+    let snake = id(catalog, "High-grade Snake Alpha");
+    characters.change_level(pilot, drones, Some(3), Keep::Pending, catalog);
+    characters.link_esi(pilot, Some(90_000_001));
+    characters.apply_esi(pilot, &[(gunnery, 4)], Some(&[snake]), Some(-2.5), catalog);
+    assert_eq!(characters.level(pilot, gunnery), Some(4));
+    assert_eq!(
+        characters.level(pilot, drones),
+        None,
+        "skills ESI does not list are gone"
+    );
+    assert!(
+        !characters.is_dirty(pilot),
+        "the levels are saved, not pending"
+    );
+    assert_eq!(characters.implants(pilot), &[snake]);
+    assert!((characters.sec_status(pilot) + 2.5).abs() < 1e-9);
+    assert_eq!(characters.esi_character(pilot), Some(90_000_001));
+    // Without implant access the implants stay as they were.
+    characters.apply_esi(pilot, &[(gunnery, 5)], None, None, catalog);
+    assert_eq!(characters.implants(pilot), &[snake]);
+    assert!((characters.sec_status(pilot) + 2.5).abs() < 1e-9);
+}
+
+#[test]
 fn stats_follow_the_characters_skills() {
     let Some((catalog, engine)) = setup() else {
         return;

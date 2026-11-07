@@ -6,6 +6,7 @@ mod additions;
 mod character_editor;
 mod characters;
 mod columns;
+mod esi;
 mod export;
 mod fitting;
 mod graphs;
@@ -477,6 +478,17 @@ impl Gyfa {
         if let Some(text) = import {
             self.import(&text);
             self.save();
+        }
+        // Fits imported from the ESI fittings window land here.
+        if self.role == Role::Main && !self.hub.read(cx).fit_imports.is_empty() {
+            let imports = self
+                .hub
+                .update(cx, |hub, _| std::mem::take(&mut hub.fit_imports));
+            for imported in imports {
+                self.add_imported(imported);
+            }
+            self.save();
+            changed = true;
         }
         if changed {
             self.recompute();

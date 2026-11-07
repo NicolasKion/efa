@@ -59,6 +59,8 @@ pub struct Character {
     /// Plugged-in implants, in slot order.
     pub implants: Vec<TypeId>,
     pub sec_status: f64,
+    /// The EVE character "Get Skills" reads from, pyfa's linked SSO character.
+    pub esi_character: Option<u64>,
     /// Level changes not saved yet, pyfa's dirty skills; None unlearns. Never written out, so
     /// they are gone after a restart, as in pyfa.
     #[serde(skip)]
@@ -351,6 +353,46 @@ impl Characters {
     pub fn set_sec_status(&mut self, id: CharacterId, sec_status: f64) {
         if let Some(c) = self.get_mut(id) {
             c.sec_status = sec_status.clamp(SEC_STATUS_RANGE.0, SEC_STATUS_RANGE.1);
+        }
+    }
+
+    /// The EVE character linked for "Get Skills", if any.
+    pub fn esi_character(&self, id: CharacterId) -> Option<u64> {
+        self.get(id).and_then(|c| c.esi_character)
+    }
+
+    /// Link a character to an EVE character, or unlink it with None.
+    pub fn link_esi(&mut self, id: CharacterId, esi_character: Option<u64>) {
+        if let Some(c) = self.get_mut(id) {
+            c.esi_character = esi_character;
+        }
+    }
+
+    /// Take what ESI says about the character, the way pyfa's Get Skills does: the trained
+    /// levels replace every saved and pending one, and implants and security status are taken
+    /// when they came along.
+    pub fn apply_esi(
+        &mut self,
+        id: CharacterId,
+        skills: &[(TypeId, u8)],
+        implants: Option<&[TypeId]>,
+        sec_status: Option<f64>,
+        catalog: &Catalog,
+    ) {
+        let Some(c) = self.get_mut(id) else { return };
+        c.pending.clear();
+        c.skills = skills
+            .iter()
+            .map(|&(skill, level)| (skill, level.min(MAX_LEVEL)))
+            .collect();
+        if let Some(implants) = implants {
+            c.implants.clear();
+            for &implant in implants {
+                plug_implant(&mut c.implants, catalog, implant);
+            }
+        }
+        if let Some(sec) = sec_status {
+            c.sec_status = sec.clamp(SEC_STATUS_RANGE.0, SEC_STATUS_RANGE.1);
         }
     }
 

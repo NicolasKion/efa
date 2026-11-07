@@ -426,6 +426,15 @@ impl Gyfa {
                 .disabled(!has_fit)
                 .on_click(on(|g, _, cx| g.export_skills_needed(cx))),
         )
+        .separator()
+        .item(
+            entry(IconName::CircleUser, "Manage ESI Characters…")
+                .on_click(on(|g, _, cx| g.open_esi_characters(cx))),
+        )
+        .item(
+            entry(IconName::Plus, "Add ESI Character…")
+                .on_click(on(|g, _, cx| g.add_esi_character(cx))),
+        )
     }
 }
 

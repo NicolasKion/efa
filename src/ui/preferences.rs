@@ -4,12 +4,15 @@
 //!
 //! Left out on purpose: language and theme (gyfa follows the system and Omarchy's theme),
 //! global character and damage pattern, compact skills tooltip, gauge animation, Omega icons,
-//! market shortcuts and market view modes, reactivation timers, update checks, ESI and SSO,
+//! market shortcuts and market view modes, reactivation timers, update checks, pyfa's own SSO
+//! server mode (gyfa always logs in through a local callback),
 //! database paths and logging.
 
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon as UiIcon, Sizable, h_flex,
+    ActiveTheme, Disableable, Icon as UiIcon, Sizable,
+    button::Button,
+    h_flex,
     input::{Input, InputEvent, InputState},
     switch::Switch,
     v_flex,
@@ -45,10 +48,11 @@ enum Page {
     Market,
     Network,
     Html,
+    Esi,
 }
 
 impl Page {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::General,
         Self::Engine,
         Self::Stats,
@@ -56,6 +60,7 @@ impl Page {
         Self::Market,
         Self::Network,
         Self::Html,
+        Self::Esi,
     ];
 
     fn title(self) -> &'static str {
@@ -67,6 +72,7 @@ impl Page {
             Self::Market => "Market & Prices",
             Self::Network => "Network",
             Self::Html => "HTML Export",
+            Self::Esi => "ESI",
         }
     }
 
@@ -79,6 +85,7 @@ impl Page {
             Self::Market => AssetIcon::Coins,
             Self::Network => AssetIcon::Globe,
             Self::Html => AssetIcon::FileCode,
+            Self::Esi => AssetIcon::KeyRound,
         }
     }
 
@@ -91,6 +98,7 @@ impl Page {
             Self::Market => "Market search and where prices come from.",
             Self::Network => "Internet access and proxy settings.",
             Self::Html => "Exporting every fit to one HTML page.",
+            Self::Esi => "Logging in with EVE for skills and in-game fittings.",
         }
     }
 }
@@ -103,6 +111,8 @@ struct Fields {
     proxy_user: Entity<InputState>,
     proxy_password: Entity<InputState>,
     html_path: Entity<InputState>,
+    esi_client_id: Entity<InputState>,
+    esi_port: Entity<InputState>,
 }
 
 pub struct PreferencesWindow {
@@ -160,6 +170,12 @@ impl PreferencesWindow {
                 &html_path("").display().to_string(),
                 false,
             ),
+            esi_client_id: field(prefs.esi.client_id.clone(), "Client ID", false),
+            esi_port: field(
+                prefs.esi.port.to_string(),
+                &crate::esi::DEFAULT_PORT.to_string(),
+                false,
+            ),
         };
         let on_change =
             |input: &Entity<InputState>, cx: &mut Context<Self>, apply: fn(&mut Saved, &str)| {
@@ -194,6 +210,16 @@ impl PreferencesWindow {
             }),
             on_change(&fields.html_path, cx, |s, v| {
                 v.trim().clone_into(&mut s.preferences.html.path);
+            }),
+            on_change(&fields.esi_client_id, cx, |s, v| {
+                v.trim().clone_into(&mut s.preferences.esi.client_id);
+            }),
+            on_change(&fields.esi_port, cx, |s, v| {
+                if let Ok(port) = v.trim().parse::<u16>()
+                    && port > 0
+                {
+                    s.preferences.esi.port = port;
+                }
             }),
         ];
         Self {
@@ -709,7 +735,7 @@ impl PreferencesWindow {
                     Self::toggle(
                         "network",
                         "Enable network",
-                        "Off stops price updates. Item icons still download when missing.",
+                        "Off stops price updates and ESI. Item icons still download when missing.",
                         n.enabled,
                         |s, v| s.preferences.network.enabled = v,
                         cx,
@@ -774,6 +800,98 @@ impl PreferencesWindow {
             ],
             cx,
         )]
+    }
+}
+
+impl PreferencesWindow {
+    fn esi(&self, p: &Preferences, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let url = crate::esi::callback_url(p.esi.port);
+        let logged_in = self.hub.read(cx).esi.accounts.accounts.len();
+        let theme = cx.theme();
+        let mono = |text: String| {
+            div()
+                .font_family("monospace")
+                .text_xs()
+                .child(text)
+                .into_any_element()
+        };
+        let callback = h_flex()
+            .gap_2()
+            .child(mono(url.clone()))
+            .child(
+                gpui_kit::component::clipboard::Clipboard::new("esi-callback-copy")
+                    .value(url)
+                    .tooltip("Copy the callback URL"),
+            )
+            .into_any_element();
+        let register = v_flex()
+            .gap_2()
+            .px_4()
+            .py_3()
+            .child(div().text_xs().text_color(theme.muted_foreground).child(
+                "Register an app at developers.eveonline.com with this callback URL and \
+                         these scopes, then paste its Client ID above:",
+            ))
+            .child(
+                v_flex()
+                    .gap_0p5()
+                    .children(crate::esi::SCOPES.map(|s| mono(s.to_owned()))),
+            )
+            .into_any_element();
+        let hub = self.hub.clone();
+        let manage = Button::new("esi-manage")
+            .small()
+            .label("Manage…")
+            .on_click(move |_, _, cx| super::esi::open_characters_window(hub.clone(), cx))
+            .into_any_element();
+        vec![
+            section(
+                "Application",
+                vec![
+                    row(
+                        "Client ID",
+                        "The ID of your application at developers.eveonline.com.",
+                        Input::new(&self.fields.esi_client_id)
+                            .small()
+                            .w(px(300.))
+                            .into_any_element(),
+                        false,
+                        false,
+                        cx,
+                    ),
+                    row(
+                        "Callback port",
+                        "The local port EVE sends the browser back to after logging in.",
+                        Input::new(&self.fields.esi_port)
+                            .small()
+                            .w(px(90.))
+                            .into_any_element(),
+                        false,
+                        false,
+                        cx,
+                    ),
+                    row("Callback URL", "", callback, false, false, cx),
+                    register,
+                ],
+                cx,
+            ),
+            section(
+                "Characters",
+                vec![row(
+                    match logged_in {
+                        0 => "No characters logged in".to_owned(),
+                        1 => "1 character logged in".to_owned(),
+                        n => format!("{n} characters logged in"),
+                    },
+                    "Add or remove them in Character > Manage ESI Characters.",
+                    manage,
+                    false,
+                    false,
+                    cx,
+                )],
+                cx,
+            ),
+        ]
     }
 }
 
@@ -869,6 +987,7 @@ impl Render for PreferencesWindow {
             Page::Market => self.market(&prefs, totals, cx),
             Page::Network => self.network(&prefs, cx),
             Page::Html => self.html(&prefs, cx),
+            Page::Esi => self.esi(&prefs, cx),
         };
         let theme = cx.theme();
         let pages = Page::ALL.into_iter().map(|page| {
