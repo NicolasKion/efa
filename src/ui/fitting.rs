@@ -88,6 +88,9 @@ impl Gyfa {
         let Some(ship) = self.saved.fits[current].ship else {
             return div()
                 .p_4()
+                .min_w_0()
+                .max_w_full()
+                .overflow_hidden()
                 .text_color(cx.theme().muted_foreground)
                 .child("Double-click a ship in the market to put it under this fit.")
                 .into_any_element();

@@ -1438,17 +1438,26 @@ impl Render for Gyfa {
                     )
                     .into_any_element()
             } else {
+                // The hint wraps within the column instead of pushing past it.
                 div()
                     .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
                     .flex()
                     .items_center()
                     .justify_center()
+                    .px_4()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Double-click a ship in the market to start a fit, or import one from the File menu.")
+                    .child(div().min_w_0().max_w_full().text_center().child(
+                        "Double-click a ship in the market to start a fit, or import one \
+                             from the File menu.",
+                    ))
                     .into_any_element()
             })
             .relative()
-            .when(self.tab_dragging, |center| center.child(Self::tear_off_zone(cx)));
+            .when(self.tab_dragging, |center| {
+                center.child(Self::tear_off_zone(cx))
+            });
 
         let title = match self.fit() {
             Some(fit) => match fit.ship {
