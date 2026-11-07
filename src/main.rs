@@ -1,3 +1,6 @@
+// Release builds on Windows are GUI apps, so no console window opens next to efa.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use std::{
     ffi::OsString,
     path::{Path, PathBuf},

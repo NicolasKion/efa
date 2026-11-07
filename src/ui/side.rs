@@ -641,6 +641,7 @@ impl Efa {
         let weak = Self::weak(cx);
         h_flex()
             .id(SharedString::from(format!("item-{id}")))
+            .w_full()
             .gap_2()
             .h(px(RESULT_ROW_H))
             .px_1()
@@ -653,7 +654,7 @@ impl Efa {
                 Icon::Type(id),
                 24.,
             ))
-            .child(div().truncate().child(name))
+            .child(div().flex_1().min_w_0().truncate().child(name))
             .when_some(self.loaded(), |row, loaded| {
                 row.tooltip(move |window, cx| item_tooltip(&loaded, id, price, window, cx))
             })
@@ -1276,6 +1277,7 @@ fn count_label(filtered: &Filtered) -> Option<String> {
 /// A heading over a run of results, such as a charge family.
 fn heading_row(title: &str, cx: &App) -> AnyElement {
     div()
+        .w_full()
         .h(px(RESULT_ROW_H))
         .flex()
         .items_end()
