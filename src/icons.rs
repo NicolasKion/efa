@@ -24,7 +24,7 @@ pub enum Icon {
     Id(i32),
     /// An item's own icon.
     Type(i32),
-    /// An overview bracket, by texture base name; see [`crate::brackets`].
+    /// An overview bracket, by texture file name without the extension; see [`crate::brackets`].
     Bracket(&'static str),
     /// A corporation's logo from CCP's image server, such as a faction's.
     CorpLogo(i32),
@@ -111,11 +111,10 @@ impl Icons {
                 self.cache_dir.join("types").join(format!("{id}.png")),
                 catalog.get(id).and_then(|t| t.icon.clone()),
             ),
-            // The 32 pixel textures, so the icons stay sharp when scaled.
             Icon::Bracket(name) => (
                 None,
                 self.cache_dir.join("brackets").join(format!("{name}.png")),
-                Some(format!("res:/ui/texture/shared/brackets/{name}_32.png")),
+                Some(format!("res:/ui/texture/shared/brackets/{name}.png")),
             ),
             Icon::CorpLogo(id) => (
                 None,
