@@ -463,7 +463,9 @@ impl Setup<'_> {
             .filter(|&i| next.rigs.get(i).is_none_or(Option::is_none))
             .take(room.rigs)
             .collect();
-        // Damage-specific modules for the layer's two weakest resists against the pattern.
+        // Damage-specific modules for every damage type the pattern brings, the most exposed
+        // first; the score against the pattern decides whether a kinetic or thermal hardener
+        // beats an omni one.
         let empty = engine.probe_tank(&next, pilot);
         let resists = match choices.layer {
             Layer::Shield => empty.shield.resists,
@@ -474,7 +476,11 @@ impl Setup<'_> {
             let hole = |i: usize| empty.incoming[i] * (1.0 - resists[i]);
             hole(b).total_cmp(&hole(a))
         });
-        let weakest = &order[..2];
+        let exposed: Vec<usize> = order
+            .into_iter()
+            .filter(|&i| empty.incoming[i] > 0.0)
+            .collect();
+        let weakest = exposed.as_slice();
         Some(Problem {
             candidates: self.tank_candidates(choices, weakest),
             rigs: if rig_positions.is_empty() {
@@ -521,6 +527,7 @@ impl Setup<'_> {
                             Role::Resist,
                             MAX_SPECIFIC,
                         );
+                        want(format!("{kind} Coating I"), Role::Resist, MAX_SPECIFIC);
                         want(
                             format!("{kind} Armor Hardener I"),
                             Role::Resist,
