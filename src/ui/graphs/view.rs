@@ -30,7 +30,7 @@ use crate::{
 };
 
 /// The fit and target lists' height.
-const LISTS_H: f32 = 170.;
+const LISTS_H: f32 = 240.;
 
 impl Render for GraphsWindow {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
