@@ -649,7 +649,7 @@ fn source_row(
             _ => ship_column(c, &s.ship),
         })
     };
-    let hidden = hidden_values(cols.all, cols.shown, &value);
+    let hidden = hidden_values(cols.all, cols.shown, value);
     row_frame(SharedString::from(format!("src-row-{i}")), selected, cx)
         .child(picker)
         .child(icon)
@@ -953,7 +953,7 @@ fn target_row(
         TargetKind::Profile(_) => None,
     };
     let icon = ship_icon(g, fit, AssetIcon::Target, cx);
-    let hidden = hidden_values(cols.all, cols.shown, &value);
+    let hidden = hidden_values(cols.all, cols.shown, value);
     row_frame(SharedString::from(format!("tgt-row-{i}")), selected, cx)
         .child(picker)
         .child(icon)

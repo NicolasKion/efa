@@ -57,6 +57,44 @@ const COMPACT_W: f32 = 640.;
 /// What the ship's name keeps beside the steps before they drop under it.
 const SHIP_MIN_W: f32 = 180.;
 
+/// How the panel fits the window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Layout {
+    /// The preview beside the step.
+    Wide,
+    /// The preview behind a button in the footer.
+    Folded,
+    /// Folded, and rows put their controls under their names.
+    Compact,
+}
+
+impl Layout {
+    fn of(width: gpui_kit::Pixels) -> Self {
+        if width < px(COMPACT_W) {
+            Self::Compact
+        } else if width < px(FOLD_PREVIEW_W) {
+            Self::Folded
+        } else {
+            Self::Wide
+        }
+    }
+
+    fn folded(self) -> bool {
+        self != Self::Wide
+    }
+
+    fn compact(self) -> bool {
+        self == Self::Compact
+    }
+}
+
+/// What a folded panel shows: the step, or the preview in its place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pane {
+    Step,
+    Preview,
+}
+
 /// Room the overlay leaves to the window's edges: less in a small window.
 fn inset(window: &Window) -> f32 {
     let size = window.viewport_size();
@@ -272,12 +310,10 @@ pub(super) struct WizardPanel {
     repairers_short: Option<usize>,
     /// The tank's module rows are open.
     fine_tune: bool,
-    /// The window is too narrow for the preview beside the step, and too narrow for rows'
-    /// names beside their controls; set on every render.
-    fold_preview: bool,
-    compact: bool,
-    /// With the preview folded, it shows in place of the step.
-    show_preview: bool,
+    /// How much room the window leaves; set on every render.
+    layout: Layout,
+    /// With the preview folded, which of it and the step shows.
+    pane: Pane,
     focus: FocusHandle,
     focused: bool,
     palette: Palette,
@@ -401,9 +437,8 @@ impl Efa {
                 limit: None,
                 repairers_short: None,
                 fine_tune: false,
-                fold_preview: false,
-                compact: false,
-                show_preview: false,
+                layout: Layout::Wide,
+                pane: Pane::Step,
                 focus: cx.focus_handle(),
                 focused: false,
                 palette,
@@ -2247,10 +2282,10 @@ impl WizardPanel {
         let active = cursor == Some(row);
         let tip = (!inline && !matches!(row, Row::Utility(u) if !self.choices.has(u)))
             .then_some(description.clone());
-        let compact = self.compact;
+        let compact = self.layout.compact();
         let label = h_flex()
             .id(SharedString::from(format!("wizard-label-{}", row.key())))
-            .when(compact, |d| d.w_full())
+            .when(compact, gpui_kit::Styled::w_full)
             .when(!compact, |d| d.w(px(LABEL_W)))
             .h(px(LINE_H))
             .flex_none()
@@ -2561,7 +2596,7 @@ impl WizardPanel {
                                     .when(!current, |d| d.text_color(theme.muted_foreground))
                                     .child(tab.label()),
                             )
-                            .when(!self.compact, |d| {
+                            .when(!self.layout.compact(), |d| {
                                 d.child(
                                     div()
                                         .max_w(px(200.))
@@ -3017,8 +3052,8 @@ impl WizardPanel {
                 )
                 .build(window, cx)
             });
-        let show_preview = self.show_preview;
-        let preview_toggle = self.fold_preview.then(|| {
+        let show_preview = self.pane == Pane::Preview;
+        let preview_toggle = self.layout.folded().then(|| {
             Button::new("wizard-preview-toggle")
                 .small()
                 .ghost()
@@ -3034,8 +3069,12 @@ impl WizardPanel {
                 } else {
                     "What the fit looks like with these modules"
                 })
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.show_preview = !this.show_preview;
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.pane = if show_preview {
+                        Pane::Step
+                    } else {
+                        Pane::Preview
+                    };
                     cx.notify();
                     this.refocus(window, cx);
                 }))
@@ -3047,12 +3086,12 @@ impl WizardPanel {
             .flex_wrap()
             .justify_end()
             .gap_2()
-            .when(self.compact, |d| d.px_3())
-            .when(!self.compact, |d| d.px_5())
+            .when(self.layout.compact(), gpui_kit::Styled::px_3)
+            .when(!self.layout.compact(), gpui_kit::Styled::px_5)
             .py_2p5()
             .border_t_1()
             .border_color(theme.border)
-            .when(!self.compact, |d| d.child(hints))
+            .when(!self.layout.compact(), |d| d.child(hints))
             .children(preview_toggle)
             .child(
                 Button::new("wizard-back")
@@ -3134,8 +3173,8 @@ impl WizardPanel {
             .flex_wrap()
             .gap_x_6()
             .gap_y_1()
-            .when(self.compact, |d| d.px_3())
-            .when(!self.compact, |d| d.px_5())
+            .when(self.layout.compact(), gpui_kit::Styled::px_3)
+            .when(!self.layout.compact(), gpui_kit::Styled::px_5)
             .py_2p5()
             // Room for the dialog's close button.
             .pr_12()
@@ -3426,13 +3465,12 @@ impl Render for WizardPanel {
             window.defer(cx, move |window, cx| window.focus(&focus, cx));
         }
         let viewport = window.viewport_size();
-        self.fold_preview = viewport.width < px(FOLD_PREVIEW_W);
-        self.compact = viewport.width < px(COMPACT_W);
-        if !self.fold_preview {
-            self.show_preview = false;
+        self.layout = Layout::of(viewport.width);
+        if !self.layout.folded() {
+            self.pane = Pane::Step;
         }
         // Folded, the preview shows in place of the step when asked for.
-        let (show_body, show_preview) = match (self.fold_preview, self.show_preview) {
+        let (show_body, show_preview) = match (self.layout.folded(), self.pane == Pane::Preview) {
             (false, _) => (true, true),
             (true, preview) => (!preview, preview),
         };
@@ -3443,8 +3481,8 @@ impl Render for WizardPanel {
         let preview = show_preview.then(|| self.preview(cx));
         let height = viewport.height - px(2. * inset(window));
         let theme = cx.theme();
-        let folded = self.fold_preview;
-        let compact = self.compact;
+        let folded = self.layout.folded();
+        let compact = self.layout.compact();
         v_flex()
             .track_focus(&self.focus)
             .key_context("FittingWizard")

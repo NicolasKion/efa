@@ -663,8 +663,8 @@ impl OverridesWindow {
                 let theme = cx.theme();
                 d.child(
                     div()
-                        .when(narrow, |d| d.px_4())
-                        .when(!narrow, |d| d.px_8())
+                        .when(narrow, gpui_kit::Styled::px_4)
+                        .when(!narrow, gpui_kit::Styled::px_8)
                         .pb_2()
                         .text_sm()
                         .text_color(if error {
