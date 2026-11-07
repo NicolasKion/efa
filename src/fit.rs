@@ -504,6 +504,26 @@ impl Fit {
         }
     }
 
+    /// Volume the hold carries, in m³: the cargo, plus the fit's own implants and boosters when
+    /// `with_character` is set, for fits whose pilot carries them along.
+    pub fn hold_volume(&self, catalog: &Catalog, with_character: bool) -> f64 {
+        let volume = |t: TypeId| catalog.get(t).map_or(0.0, |t| t.volume);
+        let character: f64 = if with_character {
+            let implants = (self.implant_source == ImplantSource::Fit)
+                .then_some(&self.implants)
+                .into_iter()
+                .flatten()
+                .copied();
+            implants
+                .chain(self.boosters.iter().map(|b| b.type_id))
+                .map(volume)
+                .sum()
+        } else {
+            0.0
+        };
+        self.cargo_volume(catalog) + character
+    }
+
     /// Volume the cargo takes, in m³.
     pub fn cargo_volume(&self, catalog: &Catalog) -> f64 {
         self.cargo

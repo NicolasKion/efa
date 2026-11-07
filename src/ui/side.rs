@@ -1231,7 +1231,11 @@ impl Gyfa {
             return 0;
         };
         let volume = loaded.catalog.get(item).map_or(0.0, |t| t.volume);
-        let free = stats.cargo_capacity.unwrap_or(0.0) - fit.cargo_volume(&loaded.catalog);
+        let used = fit.hold_volume(
+            &loaded.catalog,
+            self.saved.preferences.general.implants_in_cargo,
+        );
+        let free = stats.cargo_capacity.unwrap_or(0.0) - used;
         if volume <= 0.0 || free <= 0.0 {
             return 0;
         }

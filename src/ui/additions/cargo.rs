@@ -143,7 +143,7 @@ impl Gyfa {
             return div().into_any_element();
         };
         let catalog = &loaded.catalog;
-        let used = fit.cargo_volume(catalog);
+        let used = fit.hold_volume(catalog, self.saved.preferences.general.implants_in_cargo);
         let capacity = self
             .stats
             .as_ref()

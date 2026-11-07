@@ -180,6 +180,18 @@ impl Gyfa {
         if !enabled(self.additions_tab) {
             self.additions_tab = AdditionsTab::Fighters;
         }
+        // More in the hold than it takes, implants and boosters included when they count.
+        let overfull = self
+            .stats
+            .as_ref()
+            .and_then(|s| s.cargo_capacity)
+            .is_some_and(|capacity| {
+                let used = fit.hold_volume(
+                    &loaded.catalog,
+                    self.saved.preferences.general.implants_in_cargo,
+                );
+                used > capacity + 1e-6
+            });
         let theme = cx.theme();
         let labels = self.saved.preferences.general.additions_labels;
         let tabs = [
@@ -231,7 +243,23 @@ impl Gyfa {
                     })
                     .when(!selected, |t| t.text_color(theme.tab_foreground))
                     .when(!on, |t| t.text_color(theme.muted_foreground).opacity(0.5))
+                    .flex()
+                    .items_center()
+                    .gap_1()
                     .child(text)
+                    .when(tab == AdditionsTab::Cargo && overfull, |t| {
+                        t.child(
+                            gpui_kit::component::Icon::new(
+                                gpui_kit::component::IconName::TriangleAlert,
+                            )
+                            .size(px(13.))
+                            .text_color(theme.danger),
+                        )
+                        .tooltip(|window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new("The cargo hold is overfull")
+                                .build(window, cx)
+                        })
+                    })
                     .when(on, |t| {
                         t.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             this.additions_tab = tab;
