@@ -342,3 +342,15 @@ fn junk_is_not_a_fit() {
     assert!(port::import(&catalog, "hello there", None).is_err());
     assert!(port::import(&catalog, "   ", None).is_err());
 }
+
+#[test]
+fn renamed_items_import_under_their_new_names() {
+    let Some(catalog) = catalog() else { return };
+    let old = "Energized Adaptive Nano Membrane II";
+    let new = "Multispectrum Energized Membrane II";
+    assert!(catalog.find(new).is_some_and(|t| t.name == new));
+    let text = format!("[Rifter, Old Names]\n\n{old}\n");
+    let fit = one(port::import(&catalog, &text, None).expect("the fit imports"));
+    let low: Vec<i32> = fit.low.iter().flatten().map(|m| m.type_id).collect();
+    assert_eq!(low, [catalog.find(new).expect("exists").id]);
+}
