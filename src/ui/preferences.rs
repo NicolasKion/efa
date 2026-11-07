@@ -397,6 +397,16 @@ impl PreferencesWindow {
                         cx,
                     ),
                     Self::toggle(
+                        "implants-in-cargo",
+                        "Implants and boosters take cargo space",
+                        "The fit's own implants and boosters count against the cargo hold, as \
+                         they travel there. The hold warns when overfull and Fill Cargo leaves \
+                         room for them.",
+                        g.implants_in_cargo,
+                        |s, v| s.preferences.general.implants_in_cargo = v,
+                        cx,
+                    ),
+                    Self::toggle(
                         "expanded-mutants",
                         "Descriptive names for mutated items",
                         "Name them after the mutaplasmid and base item, like \"Unstable 50MN \

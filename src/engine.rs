@@ -7,6 +7,7 @@ mod inspect;
 mod overrides;
 mod pane;
 mod pilot;
+mod probe;
 mod surroundings;
 mod validate;
 
@@ -37,6 +38,7 @@ pub use pane::{
     CalcOptions, CapDetail, FirepowerDetail, Mining, MiningRate, Misc, Outgoing, SpoolRange, Tank,
 };
 pub use pilot::{MAX_LEVEL, Pilot, SkillTarget};
+pub use probe::TankProbe;
 pub use surroundings::{AbilityInfo, FighterClasses, FighterInfo};
 pub use validate::{Budget, ItemRef, MissingSkill, Problem, Validation};
 

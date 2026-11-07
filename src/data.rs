@@ -43,6 +43,11 @@ pub mod category {
 pub const FIT_STRUCTURE_GROUPS: [i32; 3] = [1657, 1404, 1406];
 
 const GROUP_BOOSTER: i32 = 303;
+/// The market's Implants & Boosters > Booster group.
+const MARKET_BOOSTERS: i32 = 977;
+/// A market group of gyfa's own under it, for usable boosters the market does not sell: AIR,
+/// Agency, event and "Limited Synth" doses. Negative so it never meets a real group's ID.
+pub const MARKET_SPECIAL_BOOSTERS: i32 = -MARKET_BOOSTERS;
 /// Tactical destroyer modes.
 const GROUP_SHIP_MODIFIERS: i32 = 1306;
 const GROUP_TACTICAL_DESTROYER: i32 = 1305;
@@ -296,7 +301,7 @@ pub struct Catalog {
 
 /// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
 /// instead of loaded.
-const CACHE_FORMAT: u32 = 6;
+const CACHE_FORMAT: u32 = 7;
 const CACHE_FILE: &str = "catalog.bin";
 
 /// The cache on disk: the key it was built for, then the catalog.
@@ -624,6 +629,35 @@ impl Catalog {
             if let Some(group) = market_groups.get_mut(&root) {
                 group.parent = None;
             }
+        }
+        // Boosters that can be plugged in but are not on the market get a group of their own,
+        // so the tree, search and the boosters tab can offer them.
+        let mut special_boosters = false;
+        for t in types.values_mut() {
+            let usable = t.kind == Kind::Booster
+                && t.published
+                && t.market_group.is_none()
+                && t.booster_slot.is_some()
+                && !t.name.contains("Accelerator")
+                && !t.name.starts_with("Expired");
+            if usable {
+                t.market_group = Some(MARKET_SPECIAL_BOOSTERS);
+                special_boosters = true;
+            }
+        }
+        if special_boosters && market_groups.contains_key(&MARKET_BOOSTERS) {
+            let icon_id = market_groups[&MARKET_BOOSTERS].icon_id;
+            market_groups.insert(
+                MARKET_SPECIAL_BOOSTERS,
+                MarketGroup {
+                    id: MARKET_SPECIAL_BOOSTERS,
+                    name: "Special Boosters".to_owned(),
+                    parent: Some(MARKET_BOOSTERS),
+                    children: Vec::new(),
+                    types: Vec::new(),
+                    icon_id,
+                },
+            );
         }
         let under_cargo_roots: HashSet<TypeId> = types
             .values()

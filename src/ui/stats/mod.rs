@@ -76,6 +76,8 @@ struct Pane<'a> {
     target_profiles: Rc<Vec<crate::target_profile::TargetProfile>>,
     /// Implants plugged into the fit's character.
     character_implants: &'a [crate::data::TypeId],
+    /// The fit's implants and boosters count against the cargo hold.
+    implants_in_cargo: bool,
 }
 
 impl Pane<'_> {
@@ -166,6 +168,7 @@ impl Gyfa {
             damage_patterns: Rc::new(self.saved.damage_patterns.clone()),
             target_profiles: Rc::new(self.saved.target_profiles.clone()),
             character_implants: self.character_implants(),
+            implants_in_cargo: self.saved.preferences.general.implants_in_cargo,
         };
         let this = Self::weak(cx);
         let sections = [
