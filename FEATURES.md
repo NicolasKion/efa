@@ -1,7 +1,7 @@
 # Feature parity with pyfa
 
-Rough coverage: fitting, stats, additions, item stats, graphs, editors, context menus, the file formats and ESI/SSO are mostly there.
-Biggest gaps: minimal stats views.
+Rough coverage: fitting, stats, additions, item stats, graphs, editors, context menus, the file formats, ESI/SSO, prices and Optimize Fit Price are mostly there.
+Biggest gaps: minimal stats views, generic command links.
 Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
 Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time, abstract target profiles for applied damage, lock/warp time formulas (all done graph-side in src/graphs).
 
@@ -171,7 +171,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Capacitor: capacity, stable or lasts, delta with recharge/use tooltip, neutralizer resistance with effective capacity (builtinStatsViews/capacitorViewFull.py), refine: get_stat_cap_sim, get_stat_cap_balance, get_stat_neut_resist
 - [x] Targeting and misc: targets, range, scan res with lock times, sensor strength with type and jam chance, drone range, speed, align with mass and agility, signature with probe size, warp speed with max warp distance and core strength, cargo with special holds (builtinStatsViews/targetingMiscViewMinimal.py), refine: get_stat_* sensors, mobility, drone control range, incoming jam
 - [x] Bombing: bombs to kill per damage type and Covert Ops level, collapsed by default as pyfa hides it (builtinStatsViews/bombingViewFull.py); wormhole bomb damage effects not applied
-- [x] Price: ship, fittings, character, drones, cargo, total from ESI prices, with the Drones/Cargo/Implants && Boosters total toggles (builtinStatsViews/priceViewFull.py, priceOptions.py)
+- [x] Price: ship, fittings, character, drones, cargo, total, with where the prices came from in the tooltip, and the Drones/Cargo/Implants && Boosters total toggles (builtinStatsViews/priceViewFull.py, priceOptions.py)
 - [x] Collapsible stat sections with header menus, also on right-click (gui/toggle_panel.py, statsPane.py)
 - [~] Per-view full/minimal/hidden preference (pyfaStatViewPreferences.py), shown or hidden; gyfa has no minimal views (each section would need a second, compact layout)
 - [ ] Capability flags: can warp/jump/dock/tether (no pyfa view), refine: get_stat_can_* (gyfa-only extra)
@@ -221,8 +221,8 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] DNA import/export (service/port/dna.py), chat links and the DNA: variant too; fighters as `typeid;size`
 - [~] XML import/export (EVE client format) (service/port/xml.py); notes are the description, exported cut to 400 characters with line breaks as <br>; fighters as "fighter bay" hardware with the squadron size
 - [~] ESI JSON import/export (service/port/esi.py); notes are the description, exported cut to 400 characters; fighters with flag 158 and the squadron size
-- [~] Multibuy export (service/port/multibuy.py), no Optimize Prices option
-- [x] EFS stats JSON export (service/port/efs.py), the copy dialog's "EFS" format: pyfa's fields, weapons, repairs and projections, and the weapon bonus multipliers measured with Tech II test weapons against a capsule
+- [x] Multibuy export (service/port/multibuy.py) with the Optimize Prices option
+- [x] EFS stats JSON export (service/port/efs.py), the copy dialog's "EFS" format
 - [x] Ship stats export (service/port/shipstats.py), the copy dialog's "Stats" format
 - [x] Mutated item (muta) format (service/port/muta.py): pasting one mutated item fits it into the current fit, drone copy/paste carries mutations; ESI dynamic item links are not fetched
 - [x] HTML export of all fits (pyfaHTMLExportPreferences.py), full and minimal
@@ -293,12 +293,12 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 
 ## Prices
 
-- [x] Price fetching with cache (service/price.py): cached on disk with ETag and expiry
-- [ ] Fallback to other price sources when the chosen one fails (service/price.py fetchPrices)
-- [~] Default price source: gyfa defaults to the ESI average, pyfa to Fuzzwork Jita
-- [~] Market sources: Fuzzwork, EVE Tycoon, evemarketdata, cevemarket (service/marketSources/), ESI average and Fuzzwork at the five hubs or universe; EVE Tycoon, evemarketdata and cevemarket missing
+- [x] Price fetching with cache (service/price.py): cached on disk with expiry, ETag for ESI
+- [x] Fallback to other price sources when the chosen one fails or lacks an item, in pyfa's order with ESI last (service/price.py fetchPrices); each price remembers its source, shown in the price column and price view tooltips
+- [x] Default price source: Fuzzwork Jita, as in pyfa
+- [x] Market sources (service/marketSources/): Fuzzwork, ceve-market.org (Tranquility), EVE Tycoon and the ESI average, at the five hubs or universe with pyfa's stations and universe retry. evemarketdata is gone (pyfa no longer registers it, the site is down) and ceve-market's Serenity source is left out
 - [x] Price column and price stats view (builtinViewColumns/price.py, builtinStatsViews/priceViewFull.py)
-- [ ] Optimize fit price: swap to cheaper equivalent modules (mainMenuBar.py optimizeFitPrice, Ctrl+D)
+- [x] Optimize Fit Price, Fit menu and Ctrl+D (mainFrame.py optimizeFitPrice, price.py findCheaperReplacements, itemsRebase.py): swaps modules, charges, rigs, subsystems, drones, fighters, implants, boosters and cargo for the cheapest replacement with the same group, skills, effects and attributes (db_update.py processReplacements), as one undo step; swaps the fitting rules refuse are skipped and the status line says what it saved
 - [x] Delete all cached prices (pyfaDatabasePreferences.py)
 
 ## Misc
@@ -306,7 +306,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [x] Load EVE data from local dump (gyfa data.rs, pyfa eos/db gamedata)
 - [x] Skip unknown items on import with a status message (port.py)
 - [~] In-game icons, in progress (gui/bitmap_loader.py)
-- [~] Keyboard shortcuts (mainMenuBar.py, mainFrame.py registerMenu): Ctrl+T, W, Alt+W, Z, Y, Shift+Z, C, V, O, S, P, I, K, G, Alt+G, B, E, F (search box of the browser shown), Space (switch market and fittings browser), Tab, Shift+Tab, PgUp/PgDn (next/previous tab), F4 and Alt+F4 (close tab, close all), 1..9 (additions tab), Alt+1..9 (market item) done; missing Ctrl+D (optimize price), Ctrl+B and Ctrl+E (ESI)
+- [~] Keyboard shortcuts (mainMenuBar.py, mainFrame.py registerMenu): Ctrl+T, W, Alt+W, Z, Y, Shift+Z, C, V, O, S, P, I, K, G, Alt+G, B, E, D, F (search box of the browser shown), Space (switch market and fittings browser), Tab, Shift+Tab, PgUp/PgDn (next/previous tab), F4 and Alt+F4 (close tab, close all), 1..9 (additions tab), Alt+1..9 (market item), D (optimize price) done; missing Ctrl+B and Ctrl+E (ESI)
 - [x] About dialog, version info (gui/aboutData.py)
 - [x] Error dialog with details (gui/errorDialog.py): unreadable data files, failed saves and panics, with the details to copy. A panic that ends gyfa is kept in crash.txt and shown on the next start
 - [ ] Update notifications (gui/updateDialog.py, service/update.py)

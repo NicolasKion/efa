@@ -1,8 +1,8 @@
 //! The menu bar and its keyboard shortcuts, laid out like pyfa's (gui/mainMenuBar.py): File,
 //! Fit, Character, Global, Editors, Help.
 //!
-//! Left out: Optimize Fit Price. Entries that belong to windows built
-//! elsewhere are marked "Hook:" below and stay disabled until those windows exist.
+//! Entries that belong to windows built elsewhere are marked "Hook:" below and stay disabled
+//! until those windows exist.
 
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
@@ -17,7 +17,8 @@ use gpui_kit::{
     SharedString, Styled, WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
-use super::{AdditionsTab, BrowserTab, Gyfa};
+use super::{AdditionsTab, BrowserTab, Gyfa, actions::Action};
+use crate::prices::optimize;
 
 /// Key context of a fit window, so text fields keep their own Ctrl+C, Ctrl+V and Ctrl+Z.
 const CONTEXT: &str = "Gyfa";
@@ -45,6 +46,7 @@ gpui_kit::actions!(
         FittingWizard,
         BrowseEsiFittings,
         ExportToEve,
+        OptimizeFitPrice,
         Quit,
         NextTab,
         PreviousTab,
@@ -109,6 +111,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-g", Graphs, Some(CONTEXT)),
         KeyBinding::new("ctrl-alt-g", HiddenGraphs, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-w", FittingWizard, Some(CONTEXT)),
+        KeyBinding::new("ctrl-d", OptimizeFitPrice, Some(CONTEXT)),
         // mainFrame.py's accelerator table.
         KeyBinding::new("ctrl-f4", CloseTab, Some(CONTEXT)),
         KeyBinding::new("ctrl-alt-f4", CloseAllTabs, Some(CONTEXT)),
@@ -199,6 +202,7 @@ impl Gyfa {
             }))
             .on_action(cx.listener(|g, _: &BrowseEsiFittings, _, cx| g.open_esi_fittings(cx)))
             .on_action(cx.listener(|g, _: &ExportToEve, _, cx| g.open_export_to_eve(cx)))
+            .on_action(cx.listener(|g, _: &OptimizeFitPrice, _, cx| g.optimize_fit_price(cx)))
             .on_action(cx.listener(|_, _: &Quit, _, cx| cx.quit()))
             .on_action(cx.listener(|g, _: &NextTab, _, cx| g.cycle_tab(true, cx)))
             .on_action(cx.listener(|g, _: &PreviousTab, _, cx| g.cycle_tab(false, cx)))
@@ -277,6 +281,24 @@ impl Gyfa {
         let mut fit = self.new_fit("New fit");
         self.new_fit_defaults(&mut fit);
         self.add_fit(fit, cx);
+    }
+
+    /// pyfa's Optimize Fit Price: price the fit's items and their replacements, then swap in the
+    /// cheaper ones as one undo step. The status line says what it saved.
+    fn optimize_fit_price(&mut self, cx: &mut Context<Self>) {
+        let (Some(loaded), Some(current), Some(fit)) =
+            (self.loaded(), self.saved.current, self.fit())
+        else {
+            return;
+        };
+        let items = optimize::fit_items(fit);
+        let types = optimize::types_to_price(&loaded.catalog, items);
+        self.with_prices_for(types, cx, move |g, cx| {
+            // The fetch may have taken long enough to switch fits.
+            if g.saved.current == Some(current) {
+                g.apply(Action::OptimizePrice, cx);
+            }
+        });
     }
 
     fn close_all_tabs(&mut self, cx: &mut Context<Self>) {
@@ -446,6 +468,16 @@ impl Gyfa {
                     .disabled(!has_fit),
                 )
                 .separator()
+                .item(
+                    command(
+                        &this,
+                        AssetIcon::PiggyBank,
+                        "Optimize Fit Price",
+                        Some(Box::new(OptimizeFitPrice)),
+                        |g, _, cx| g.optimize_fit_price(cx),
+                    )
+                    .disabled(!has_fit),
+                )
                 .item(command(
                     &this,
                     IconName::ChartPie,

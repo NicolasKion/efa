@@ -15,6 +15,7 @@ use crate::{
         DamageProfile, ImplantSource, Module, ModuleState, Mutation, RahPattern, SystemSecurity,
         cargo::Transfer, trim_rack,
     },
+    prices::optimize,
 };
 
 /// A row of the fitting view that holds something.
@@ -138,6 +139,9 @@ pub enum Action {
         placements: Vec<crate::wizard::Placement>,
         clear: bool,
     },
+    /// pyfa's Optimize Fit Price: swap items for their cheapest replacement at the current
+    /// prices, leaving out swaps the fitting rules refuse.
+    OptimizePrice,
 }
 
 /// What a mutaplasmid is applied to.
@@ -260,6 +264,8 @@ impl Gyfa {
             total.saturating_sub(used)
         };
         let stats = self.stats.as_ref();
+        let prices = std::rc::Rc::clone(&self.prices);
+        let mut report: Option<String> = None;
         let fit = &mut self.saved.fits[current];
         // In a grouped rack, whatever happens to a module happens to its whole group.
         let action = with_groups(fit, action);
@@ -534,6 +540,32 @@ impl Gyfa {
                 }
                 structural = true;
             }
+            Action::OptimizePrice => {
+                let catalog = &loaded.catalog;
+                let price = |t: TypeId| prices.get(t);
+                let was = optimize::value(fit, catalog, price);
+                let mut base = loaded.engine.validate(fit, &pilot);
+                let made = optimize::optimize(fit, catalog, price, |_, next| {
+                    let after = loaded.engine.validate(next, &pilot);
+                    let refused = base.refusal(&after, next.ignore_restrictions).is_some();
+                    if !refused {
+                        base = after;
+                    }
+                    refused
+                });
+                let saving = was - optimize::value(fit, catalog, price);
+                report = Some(if made.is_empty() {
+                    "No cheaper replacements found".to_owned()
+                } else {
+                    format!(
+                        "Swapped {} item type{} for cheaper ones, saving {} ISK",
+                        made.len(),
+                        if made.len() == 1 { "" } else { "s" },
+                        super::stats::format::currency(saving)
+                    )
+                });
+                structural = true;
+            }
             Action::FillClone(slot, i) => {
                 let Some(Some(template)) = fit.rack(slot).get(i).cloned() else {
                     return;
@@ -708,7 +740,7 @@ impl Gyfa {
                 self.saved.fits[current] = before.clone();
             }
         }
-        if let Some(reason) = refused {
+        if let Some(reason) = refused.or(report) {
             self.status = Some(reason.into());
         }
         if structural {

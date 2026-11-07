@@ -670,7 +670,7 @@ impl PreferencesWindow {
         let mut prices = vec![Self::choice(
             "price-source",
             "Price source",
-            "Where item prices come from.",
+            "Where item prices come from. Items it has no price for are asked of the others.",
             &sources,
             m.price_source,
             |s, v| s.preferences.market.price_source = v,
