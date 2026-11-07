@@ -63,13 +63,11 @@ impl Hub {
         if !prefs.network.enabled {
             return Err("The network is switched off in Preferences > Network.".to_owned());
         }
-        let client_id = prefs.esi.client_id.trim();
-        if client_id.is_empty() {
-            return Err(
-                "Paste the Client ID of your EVE application in Preferences > ESI first."
-                    .to_owned(),
-            );
-        }
+        // A Client ID in the preferences overrides gyfa's own application.
+        let client_id = match prefs.esi.client_id.trim() {
+            "" => crate::esi::CLIENT_ID,
+            own => own,
+        };
         Ok(Setup {
             client_id: client_id.to_owned(),
             port: prefs.esi.port,

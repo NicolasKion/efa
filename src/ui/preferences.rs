@@ -173,7 +173,7 @@ impl PreferencesWindow {
                 &html_path("").display().to_string(),
                 false,
             ),
-            esi_client_id: field(prefs.esi.client_id.clone(), "Client ID", false),
+            esi_client_id: field(prefs.esi.client_id.clone(), crate::esi::CLIENT_ID, false),
             esi_port: field(
                 prefs.esi.port.to_string(),
                 &crate::esi::DEFAULT_PORT.to_string(),
@@ -859,8 +859,9 @@ impl PreferencesWindow {
             .px_4()
             .py_3()
             .child(div().text_xs().text_color(theme.muted_foreground).child(
-                "Register an app at developers.eveonline.com with this callback URL and \
-                         these scopes, then paste its Client ID above:",
+                "Only needed for an application of your own: register it at \
+                 developers.eveonline.com with this callback URL and these scopes, then paste its \
+                 Client ID above.",
             ))
             .child(
                 v_flex()
@@ -880,7 +881,8 @@ impl PreferencesWindow {
                 vec![
                     row(
                         "Client ID",
-                        "The ID of your application at developers.eveonline.com.",
+                        "Leave empty to use gyfa's own application. Fill in only to log in \
+                         through an application of your own.",
                         Input::new(&self.fields.esi_client_id)
                             .small()
                             .w(px(300.))
@@ -891,7 +893,8 @@ impl PreferencesWindow {
                     ),
                     row(
                         "Callback port",
-                        "The local port EVE sends the browser back to after logging in.",
+                        "The local port EVE sends the browser back to after logging in. gyfa's \
+                         own application is registered for 6461.",
                         Input::new(&self.fields.esi_port)
                             .small()
                             .w(px(90.))
