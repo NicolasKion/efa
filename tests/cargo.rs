@@ -43,6 +43,7 @@ fn armed(module: TypeId, charge: TypeId) -> Fit {
         state: ModuleState::Active,
         charge: Some(charge),
         spool: None,
+        mutation: None,
     }));
     fit
 }

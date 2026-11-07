@@ -10,7 +10,7 @@ use rc::{
     AddMode, AttrId, Item, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack, Op, SolOwned,
 };
 
-use super::{Engine, Pilot, module_state, pane};
+use super::{Engine, Pilot, add_fit_drone, add_fit_module, pane};
 use crate::{
     data::{Slot, TypeId},
     fit::Fit,
@@ -237,23 +237,17 @@ impl Engine {
         ] {
             for (i, m) in modules.iter().enumerate() {
                 let Some(m) = m else { continue };
-                let Ok(mut module) = f.add_module(
+                let Ok(mut module) = add_fit_module(
+                    &mut f,
                     rack,
                     AddMode::Replace(rc::RackPos::from_usize_clamped(i)),
-                    ItemTypeId::from_i32(m.type_id),
-                    module_state(m.state),
+                    m,
                 ) else {
                     continue;
                 };
                 places.insert(module.get_item_id(), FitItem::Module(slot, i));
-                if let Some(cycles) = m.spool {
-                    module.set_spool_override(Some(rc::Spool::Cycles(rc::Count::from_u32(cycles))));
-                }
-                if let Some(charge) = m.charge {
-                    module.set_charge_type_id(ItemTypeId::from_i32(charge));
-                    if let Some(charge) = module.get_charge() {
-                        places.insert(charge.get_item_id(), FitItem::Charge(slot, i));
-                    }
+                if let Some(charge) = module.get_charge() {
+                    places.insert(charge.get_item_id(), FitItem::Charge(slot, i));
                 }
             }
         }
@@ -283,9 +277,7 @@ impl Engine {
                 } else {
                     MinionState::InBay
                 };
-                let id = f
-                    .add_drone(ItemTypeId::from_i32(stack.type_id), state, None, None)
-                    .get_item_id();
+                let id = add_fit_drone(&mut f, stack, state).get_item_id();
                 places.insert(id, FitItem::Drone(n));
             }
         }

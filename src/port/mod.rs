@@ -9,13 +9,14 @@ pub mod eft;
 pub mod esi;
 pub mod html;
 pub mod multibuy;
+pub mod muta;
 pub mod xml;
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
     data::{Catalog, Kind, Slot, TypeId},
-    fit::{Booster, Fit, Module, ModuleState, split_count},
+    fit::{Booster, Fit, Module, split_count},
 };
 
 /// Fits read from text, and names in it that matched no item.
@@ -196,18 +197,8 @@ pub(crate) fn place(fit: &mut Fit, catalog: &Catalog, type_id: TypeId, count: u3
     }
     match t.kind {
         Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low)) => {
-            let state = if t.activatable {
-                ModuleState::Active
-            } else {
-                ModuleState::Online
-            };
             for _ in 0..count {
-                fit.rack_mut(slot).push(Some(Module {
-                    type_id,
-                    state,
-                    charge: None,
-                    spool: None,
-                }));
+                fit.rack_mut(slot).push(Some(Module::new(catalog, type_id)));
             }
         }
         Kind::Module(Slot::Rig) => fit.rigs.extend((0..count).map(|_| Some(type_id))),

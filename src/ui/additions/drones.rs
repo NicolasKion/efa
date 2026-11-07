@@ -15,7 +15,7 @@ use super::{ROW_HEIGHT, addition_menu, misc_entries, price_text};
 use crate::{
     data::{Catalog, Kind},
     engine::{DroneInfo, ItemRef, Stats, drone_attr, drone_effect},
-    fit::DroneStack,
+    fit::{DroneStack, mutation::display_name},
     icons::Icon,
     prices::Prices,
     ui::{
@@ -132,9 +132,14 @@ impl Col {
         prices: &Prices,
         stack: &DroneStack,
         info: &DroneInfo,
+        expanded: bool,
     ) -> Option<String> {
         match self {
-            Self::Name => Some(format!("{}x {}", stack.count, catalog.name(stack.type_id))),
+            Self::Name => Some(format!(
+                "{}x {}",
+                stack.count,
+                display_name(catalog, stack.type_id, stack.mutation.as_ref(), expanded)
+            )),
             Self::Range => range_text(info),
             Self::Misc => misc(catalog, stack, info).map(|(text, _)| text),
             Self::Speed => info
@@ -215,16 +220,21 @@ impl Render for NoPreview {
 
 /// Stack indices in display order.
 fn display_order(catalog: &Catalog, drones: &[DroneStack]) -> Vec<usize> {
+    // Mutated drones go by their base drone's group, after the plain ones, as in pyfa.
     let rank = |stack: &DroneStack| {
         let group = catalog
-            .get(stack.type_id)
+            .get(stack.base_type())
             .and_then(|t| t.market_group)
             .and_then(|g| catalog.market_groups.get(&g))
             .map(|g| g.name.as_str());
-        order_rank(group)
+        (order_rank(group), stack.mutation.is_some())
+    };
+    let name = |stack: &DroneStack| match &stack.mutation {
+        Some(m) => m.full_name(catalog, stack.type_id),
+        None => catalog.name(stack.type_id),
     };
     let mut order: Vec<usize> = (0..drones.len()).collect();
-    order.sort_by_cached_key(|&i| (rank(&drones[i]), catalog.name(drones[i].type_id)));
+    order.sort_by_cached_key(|&i| (rank(&drones[i]), name(&drones[i])));
     order
 }
 
@@ -505,9 +515,13 @@ impl Gyfa {
         let order = display_order(catalog, &fit.drones);
         let no_info = DroneInfo::default();
         let info = |i: usize| stats.drones.get(i).unwrap_or(&no_info);
+        let expanded = self.saved.preferences.general.expanded_mutant_names;
         let cells: Vec<[Option<String>; Col::ALL.len()]> = order
             .iter()
-            .map(|&i| Col::ALL.map(|col| col.text(catalog, &self.prices, &fit.drones[i], info(i))))
+            .map(|&i| {
+                Col::ALL
+                    .map(|col| col.text(catalog, &self.prices, &fit.drones[i], info(i), expanded))
+            })
             .collect();
         let layout = Layout::measure(&self.saved.columns, &cells, window);
 

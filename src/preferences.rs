@@ -38,6 +38,8 @@ pub struct General {
     /// Changing a module's charge changes it in every module of the same type.
     pub ammo_change_all: bool,
     pub additions_labels: AdditionsLabels,
+    /// Name mutated items after their mutaplasmid and base item rather than the abyssal type.
+    pub expanded_mutant_names: bool,
 }
 
 impl Default for General {
@@ -50,6 +52,7 @@ impl Default for General {
             open_fit_in_new_tab: false,
             ammo_change_all: false,
             additions_labels: AdditionsLabels::Active,
+            expanded_mutant_names: false,
         }
     }
 }

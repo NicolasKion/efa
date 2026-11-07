@@ -90,6 +90,14 @@ impl Gyfa {
                 self.changed(cx);
             }
             Err(e) => {
+                // pyfa fits a pasted mutated item, as its muta text, into the current fit.
+                let mutant = port::muta::parse_single(&loaded.catalog, &text)
+                    .and_then(|p| p.mutation(&loaded.catalog))
+                    .filter(|_| self.saved.current.is_some());
+                if let Some((type_id, mutation)) = mutant {
+                    self.apply(Action::AddMutated(type_id, mutation), cx);
+                    return;
+                }
                 let items = port::parse_items(&loaded.catalog, &text)
                     .filter(|_| self.saved.current.is_some());
                 if let Some(items) = items {

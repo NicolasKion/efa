@@ -14,6 +14,7 @@ mod hub;
 mod implant_sets;
 mod item_stats;
 mod menu;
+mod mutations;
 mod port;
 mod preferences;
 pub mod profile_editor;
@@ -388,6 +389,13 @@ impl Gyfa {
             self.recompute();
             cx.notify();
         }
+        // Rolls set in a stats window's Mutations tab land here, to be undoable like any edit.
+        if self.role == Role::Main && !self.hub.read(cx).mutation_edits.is_empty() {
+            let edits = self
+                .hub
+                .update(cx, |hub, _| std::mem::take(&mut hub.mutation_edits));
+            self.apply_mutation_edits(edits, cx);
+        }
         // The graph window's "Open Fit in New Tab" lands here.
         if self.role == Role::Main && !self.hub.read(cx).open_requests.is_empty() {
             let requests = self
@@ -573,6 +581,26 @@ impl Gyfa {
         self.recompute();
         self.save();
         cx.notify();
+    }
+
+    /// Set rolls from stats windows on whichever fits they belong to, one undo step each.
+    fn apply_mutation_edits(&mut self, edits: Vec<hub::MutationEdit>, cx: &mut Context<Self>) {
+        let Some(loaded) = self.loaded() else { return };
+        for edit in edits {
+            let Some(fit) = self.saved.fits.get_mut(edit.fit) else {
+                continue;
+            };
+            let before = fit.clone();
+            let Some(mutation) = fit.mutation_mut(edit.item) else {
+                continue;
+            };
+            for (attr, value) in edit.values {
+                mutation.set(&loaded.catalog, attr, value);
+            }
+            self.history
+                .record(edit.fit, before, &self.saved.fits[edit.fit]);
+        }
+        self.changed(cx);
     }
 
     fn open_fit(&mut self, index: usize, cx: &mut Context<Self>) {

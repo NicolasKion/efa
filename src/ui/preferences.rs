@@ -3,8 +3,7 @@
 //! window, the way pyfa applies a preference as soon as it is clicked.
 //!
 //! Left out on purpose: language and theme (gyfa follows the system and Omarchy's theme),
-//! global character and damage pattern, compact skills tooltip, gauge animation, Omega icons
-//! and mutated item names (no characters, animated gauges or mutations to apply them to yet),
+//! global character and damage pattern, compact skills tooltip, gauge animation, Omega icons,
 //! market shortcuts and market view modes, reactivation timers, update checks, ESI and SSO,
 //! database paths and logging.
 
@@ -290,6 +289,14 @@ impl PreferencesWindow {
                 Some("Ctrl or Alt while picking a charge does the opposite."),
                 g.ammo_change_all,
                 |s, v| s.preferences.general.ammo_change_all = v,
+                cx,
+            ),
+            Self::check(
+                "expanded-mutants",
+                "Include more information in names of mutated items",
+                Some("Use short mutaplasmid name and base item name instead of actual item name."),
+                g.expanded_mutant_names,
+                |s, v| s.preferences.general.expanded_mutant_names = v,
                 cx,
             ),
             Self::choice(

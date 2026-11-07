@@ -23,6 +23,15 @@ pub fn preferences(cx: &App) -> Preferences {
         .map_or_default(|p| p.0.clone())
 }
 
+/// New rolled values for a mutated module or drone stack of a saved fit.
+#[derive(Debug, Clone)]
+pub struct MutationEdit {
+    pub fit: usize,
+    pub item: crate::engine::FitItem,
+    /// Attribute values by attribute ID.
+    pub values: Vec<(i32, f64)>,
+}
+
 pub enum HubLoading {
     Pending,
     Ready(Rc<Loaded>),
@@ -43,6 +52,8 @@ pub struct Hub {
     pub import: Option<String>,
     /// Fits other windows (the graphs) asked the main window to open as tabs.
     pub open_requests: Vec<usize>,
+    /// Rolls the stats window set on mutated items, for the main window to apply with undo.
+    pub mutation_edits: Vec<MutationEdit>,
     /// The main window's stats pane shows raw HP rather than EHP; the graphs follow it.
     pub raw_hp: bool,
     /// The characters. Replaced, never changed in place, so a window can tell it has the
@@ -83,6 +94,7 @@ impl Hub {
             prices: Rc::new(Prices::default()),
             import,
             open_requests: Vec::new(),
+            mutation_edits: Vec::new(),
             raw_hp: false,
             characters: Rc::new(Characters::load()),
             character_editor: None,

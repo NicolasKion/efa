@@ -147,6 +147,7 @@ fn modules_past_the_rack_are_too_many() {
             state: gyfa::fit::ModuleState::Online,
             charge: None,
             spool: None,
+            mutation: None,
         }));
     }
     let validation = engine.validate(&fit, engine.all5());
