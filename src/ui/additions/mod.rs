@@ -11,7 +11,7 @@ mod linked;
 mod notes;
 mod projected;
 
-pub(super) use cargo::{drop_transfer, goes_to_cargo};
+pub(super) use cargo::{amount, drop_transfer, goes_to_cargo};
 pub(super) use linked::{FitDrag, Link};
 
 use std::rc::Rc;
@@ -560,6 +560,9 @@ fn addition_menu(
                 },
             ),
         );
+    }
+    if kind == AddKind::Cargo {
+        menu = super::cargo_presets::menu_entries(menu.separator(), this, window, cx);
     }
     misc_entries(menu.separator(), this, loaded, kind, Some(i), window, cx)
 }

@@ -608,6 +608,9 @@ pub enum DragSource {
     Cargo,
     /// A stack of the drones pane, by its index in the fit.
     Drone(usize),
+    /// An entry of an editor's list, such as a cargo preset's item; dropped outside the list,
+    /// it comes off.
+    Listed,
 }
 
 /// An item being dragged: from the market onto a slot, or between slots.
@@ -745,7 +748,7 @@ impl Gyfa {
                 }
             }
             // Drone stacks only move within the drones pane.
-            DragSource::Drone(_) => {}
+            DragSource::Drone(_) | DragSource::Listed => {}
             // Several from the market: the grabbed one goes where it was dropped, the rest
             // wherever they fit, as a double-click would put them.
             DragSource::Market if !dragged.more.is_empty() => {

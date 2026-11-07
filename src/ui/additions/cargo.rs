@@ -4,11 +4,15 @@
 
 use std::rc::Rc;
 
-use gpui_kit::component::{ActiveTheme, h_flex, menu::ContextMenuExt, v_flex};
+use gpui_kit::component::{
+    ActiveTheme, h_flex,
+    menu::{ContextMenuExt, PopupMenu},
+    v_flex,
+};
 use gpui_kit::{
     AnyElement, AppContext, ClickEvent, Context, InteractiveElement, IntoElement, KeyDownEvent,
     Modifiers, MouseButton, MouseDownEvent, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, div, prelude::FluentBuilder, px,
+    StatefulInteractiveElement, Styled, WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
 use super::{PRICE_W, ROW_HEIGHT, addition_menu, misc_entries, price_text};
@@ -68,7 +72,7 @@ fn row_position(row: RowRef) -> (Slot, usize) {
 }
 
 /// pyfa's `formatAmount(value, 3, 0, 6)`: three significant digits, k and M above a thousand.
-fn amount(value: f64) -> String {
+pub(in crate::ui) fn amount(value: f64) -> String {
     fn round_to(value: f64, digits: i32) -> f64 {
         if value.fract() == 0.0 {
             return value;
@@ -115,6 +119,25 @@ fn name_text(catalog: &Catalog, type_id: TypeId, count: u32) -> String {
             format!("{count}x {name} ({} m³)", amount(t.capacity))
         }
         _ => format!("{count}x {name}"),
+    }
+}
+
+/// The menu of the Cargo tab's empty space: presets, then copy and paste.
+fn space_menu(
+    this: WeakEntity<Gyfa>,
+    loaded: Rc<Loaded>,
+) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
+    move |menu, window, cx| {
+        let menu = crate::ui::cargo_presets::menu_entries(menu, &this, window, cx);
+        misc_entries(
+            menu.separator(),
+            &this,
+            &loaded,
+            AddKind::Cargo,
+            None,
+            window,
+            cx,
+        )
     }
 }
 
@@ -179,12 +202,7 @@ impl Gyfa {
                     .p_2()
                     .text_color(theme.muted_foreground)
                     .child("Drag items here, or right-click them in the market.")
-                    .context_menu({
-                        let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
-                        move |menu, window, cx| {
-                            misc_entries(menu, &this, &loaded, AddKind::Cargo, None, window, cx)
-                        }
-                    })
+                    .context_menu(space_menu(Self::weak(cx), Rc::clone(loaded)))
                     .into_any_element(),
             );
         }
@@ -218,7 +236,17 @@ impl Gyfa {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .children(rows),
+                    .children(rows)
+                    // The space under the stacks has the tab's own menu.
+                    .when(!order.is_empty(), |list| {
+                        list.child(
+                            div()
+                                .id("cargo-space")
+                                .flex_1()
+                                .min_h(px(ROW_HEIGHT))
+                                .context_menu(space_menu(Self::weak(cx), Rc::clone(loaded))),
+                        )
+                    }),
             )
             .into_any_element()
     }
@@ -387,7 +415,7 @@ impl Gyfa {
                 }
             }
             // Drones dragged off the drones pane stay drones; pyfa does not move them to cargo.
-            DragSource::Cargo | DragSource::Drone(_) => {}
+            DragSource::Cargo | DragSource::Drone(_) | DragSource::Listed => {}
         }
     }
 

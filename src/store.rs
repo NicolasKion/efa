@@ -57,6 +57,9 @@ pub struct Saved {
     /// pyfa's attribute overrides and whether they are on.
     #[serde(default)]
     pub overrides: crate::overrides::Overrides,
+    /// The user's cargo presets, by name.
+    #[serde(default)]
+    pub cargo_presets: Vec<crate::cargo_preset::CargoPreset>,
 }
 
 /// What besides ship and fittings the price total includes, with pyfa's defaults.
