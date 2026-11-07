@@ -1,9 +1,16 @@
-//! Embeds the data pack when there is one (`EFA_PACK`, or assets/data/efa-data.pack), and names
-//! the refine commit efa builds against, which the pack's engine data is tied to.
+//! Build steps: embedding the data pack when there is one (`EFA_PACK`, or
+//! assets/data/efa-data.pack), naming the refine commit efa builds against, which the pack's
+//! engine data is tied to, and the exe icon on Windows.
 
 use std::{env, path::PathBuf};
 
 fn main() {
+    println!("cargo::rerun-if-changed=build.rs");
+    data_pack();
+    windows_icon();
+}
+
+fn data_pack() {
     println!("cargo::rustc-check-cfg=cfg(efa_pack)");
     println!("cargo::rerun-if-env-changed=EFA_PACK");
     println!("cargo::rerun-if-changed=Cargo.lock");
@@ -16,7 +23,7 @@ fn main() {
         path
     } else {
         // The folder always exists (it holds a .gitignore), so watching it notices a pack
-        // appearing without rerunning on every build.
+        // appearing or going away without rerunning on every build.
         println!("cargo::rerun-if-changed=assets/data");
         manifest.join("assets/data/efa-data.pack")
     };
@@ -38,4 +45,22 @@ fn refine_rev(lock: &str) -> &str {
         .and_then(|p| p.lines().find_map(|l| l.strip_prefix("source = ")))
         .and_then(|source| source.trim_matches('"').rsplit_once('#'))
         .map_or("unknown", |(_, rev)| rev)
+}
+
+/// The exe's icon and version info. GPUI takes the window icon from resource 1, which is what
+/// winresource writes. The resource compiler only exists on Windows hosts.
+fn windows_icon() {
+    let host = env::var("HOST").unwrap_or_default();
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") || !host.contains("windows") {
+        return;
+    }
+    println!("cargo::rerun-if-changed=assets/icons/efa.ico");
+    let mut resource = winresource::WindowsResource::new();
+    resource
+        .set_icon("assets/icons/efa.ico")
+        .set("ProductName", "efa")
+        .set("FileDescription", "efa");
+    resource
+        .compile()
+        .expect("embedding the Windows icon failed");
 }

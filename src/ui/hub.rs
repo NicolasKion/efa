@@ -7,7 +7,8 @@
 use std::rc::Rc;
 
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext, Context, Global, SharedString, Task, WeakEntity, Window,
+    AnyWindowHandle, App, AppContext, Context, Entity, Global, SharedString, Task, WeakEntity,
+    Window,
 };
 
 use super::{Loaded, character_editor::CharacterEditor, load};
@@ -82,6 +83,8 @@ pub struct Hub {
     pub fit_imports: Vec<crate::port::Imported>,
     /// The engine data being rebuilt for changed attribute overrides.
     overrides_task: Option<Task<()>>,
+    /// Update checks and installs, shown by the main window and the preferences.
+    pub updates: Entity<super::updates::Updates>,
 }
 
 impl Hub {
@@ -125,6 +128,7 @@ impl Hub {
             esi: super::esi::EsiState::load(),
             fit_imports: Vec::new(),
             overrides_task: None,
+            updates: cx.new(super::updates::Updates::new),
         }
     }
 

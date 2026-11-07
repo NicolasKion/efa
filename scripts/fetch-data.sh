@@ -7,7 +7,12 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 DEST="$ROOT/data/eve"
 API=https://api.github.com/repos/NicolasKion/deimos/releases/latest
 
-release=$(curl -fsSL "$API")
+# CI passes its token; unauthenticated API calls share a small rate limit per IP.
+auth=()
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+    auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
+fi
+release=$(curl -fsSL "${auth[@]}" "$API")
 tag=$(jq -r .tag_name <<<"$release")
 url=$(jq -r '.assets[] | select(.name | endswith(".tar.zst")) | .browser_download_url' <<<"$release")
 

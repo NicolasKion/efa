@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=efa
+GenericName=Fitting tool
+Comment=EVE Online fitting tool
+Exec=efa %f
+Icon=efa
+Terminal=false
+Categories=Utility;Game;
+StartupWMClass=efa

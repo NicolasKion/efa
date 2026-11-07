@@ -1,0 +1,343 @@
+name: Release
+
+# Push to the `release` branch (or run by hand) to build every package into a draft release
+# tagged v<version>. Publishing the draft makes it the update everyone gets. A version with a
+# hyphen (0.3.0-preview.1) becomes a pre-release, which only preview builds look at.
+#
+# Self-updates need the UPDATER_PUBKEY variable and the UPDATER_PRIVATE_KEY (and
+# UPDATER_PRIVATE_KEY_PASSWORD) secrets. Without them the packages are built unsigned, the app
+# only links to new releases and no latest.json is published.
+on:
+  workflow_dispatch:
+  push:
+    branches: [release]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The release notes from the conventional commits since the last tag, and the draft release
+  # every build uploads to.
+  draft:
+    name: Draft release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      notes: ${{ steps.notes.outputs.notes }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        run: |
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['package']['version'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate changelog
+        id: cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --unreleased --strip header
+
+      - name: Prepare notes
+        id: notes
+        env:
+          CONTENT: ${{ steps.cliff.outputs.content }}
+        run: |
+          notes="## What's Changed"$'\n\n'"$CONTENT"
+          if [ -z "$(printf '%s' "$CONTENT" | tr -d '[:space:]')" ]; then
+            notes="See the assets below to download and install efa."
+          fi
+          {
+            echo 'notes<<CHANGELOG_EOF'
+            echo "$notes"
+            echo CHANGELOG_EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ steps.notes.outputs.notes }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          tag="v$VERSION"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "Release $tag exists, uploading to it"
+            exit 0
+          fi
+          flags=(--draft --target "$GITHUB_SHA" --title "efa $tag" --notes "$NOTES")
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$tag" "${flags[@]}"
+
+  # The EVE data pack the app embeds, built once per deimos release. Skipped (and the app built
+  # without one) while scripts/build-pack.sh does not exist.
+  pack:
+    name: Data pack
+    runs-on: ubuntu-22.04
+    outputs:
+      built: ${{ steps.result.outputs.built }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Find the deimos release
+        id: deimos
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "tag=$(gh api repos/NicolasKion/deimos/releases/latest --jq .tag_name)" >> "$GITHUB_OUTPUT"
+          if [ -x scripts/build-pack.sh ]; then echo "script=true" >> "$GITHUB_OUTPUT"; fi
+
+      # The pack's format is efa's own, so code changes invalidate it too.
+      - name: Restore pack
+        if: steps.deimos.outputs.script == 'true'
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: assets/data/efa-data.pack
+          key: efa-pack-${{ steps.deimos.outputs.tag }}-${{ hashFiles('scripts/build-pack.sh', 'Cargo.lock', 'src/**') }}
+
+      - name: Install system dependencies
+        if: steps.deimos.outputs.script == 'true' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libfontconfig-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libzstd-dev libvulkan1
+
+      - name: Install Rust
+        if: steps.deimos.outputs.script == 'true' && steps.cache.outputs.cache-hit != 'true'
+        run: rustup toolchain install
+
+      - name: Build pack
+        if: steps.deimos.outputs.script == 'true' && steps.cache.outputs.cache-hit != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          scripts/fetch-data.sh
+          scripts/build-pack.sh
+
+      - name: Check pack
+        id: result
+        run: |
+          if [ -f assets/data/efa-data.pack ]; then
+            echo "built=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No data pack, the app is built without one"
+          fi
+
+      - uses: actions/upload-artifact@v7
+        if: steps.result.outputs.built == 'true'
+        with:
+          name: efa-data-pack
+          path: assets/data/efa-data.pack
+          retention-days: 1
+
+  publish:
+    name: ${{ matrix.name }}
+    needs: [draft, pack]
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple silicon)
+            platform: macos-latest
+            target: aarch64-apple-darwin
+            formats: app,dmg
+            updater: macos-aarch64
+          - name: macOS (Intel)
+            platform: macos-latest
+            target: x86_64-apple-darwin
+            formats: app,dmg
+            updater: macos-x86_64
+          # The oldest supported runner, so the binary runs on older glibc versions too
+          - name: Linux
+            platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            formats: deb,appimage
+            updater: linux-x86_64
+          - name: Windows
+            platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            formats: nsis
+            updater: windows-x86_64
+    runs-on: ${{ matrix.platform }}
+    env:
+      VERSION: ${{ needs.draft.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libfontconfig-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libzstd-dev libvulkan1 libfuse2
+
+      - name: Install Rust
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+
+      # Built from crates.io rather than a prebuilt binary, since it handles the signing key.
+      # --force keeps the Rust cache from substituting a stale install.
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --version 0.11.8 --locked --force
+
+      - uses: actions/download-artifact@v8
+        if: needs.pack.outputs.built == 'true'
+        with:
+          name: efa-data-pack
+          path: assets/data
+
+      - name: Package
+        shell: bash
+        env:
+          # The packager's own `cargo build --release` builds for this target too
+          CARGO_BUILD_TARGET: ${{ matrix.target }}
+          # The AppImage tooling is itself an AppImage, and runners have no FUSE mount
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          PUBKEY: ${{ vars.UPDATER_PUBKEY }}
+          SIGNING_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.UPDATER_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -f assets/data/efa-data.pack ]; then
+            export EFA_PACK="$GITHUB_WORKSPACE/assets/data/efa-data.pack"
+          fi
+          # The key goes into the app only when the packages get signed with its other half
+          if [ -n "$PUBKEY" ] && [ -n "$SIGNING_KEY" ]; then
+            export EFA_UPDATER_PUBKEY="$PUBKEY"
+            export CARGO_PACKAGER_SIGN_PRIVATE_KEY="$SIGNING_KEY"
+            export CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD="$SIGNING_KEY_PASSWORD"
+          fi
+          cargo packager --release --target ${{ matrix.target }} --formats ${{ matrix.formats }} --out-dir dist
+          ls -la dist
+
+      # GitHub rewrites spaces in asset names, which would break the URLs in latest.json, and
+      # both macOS builds would otherwise upload the same efa.app.tar.gz.
+      - name: Upload packages
+        shell: bash
+        run: |
+          shopt -s nullglob
+          mkdir upload
+          for file in dist/*.dmg dist/*.deb dist/*.AppImage dist/*-setup.exe; do
+            cp "$file" "upload/$(basename "$file" | tr ' ' '-')"
+          done
+          case "${{ runner.os }}" in
+            Windows)
+              # No runtime dependencies, so the bare exe works as a portable build
+              cp "target/${{ matrix.target }}/release/efa.exe" "upload/efa_${VERSION}_x64-portable.exe"
+              ;;
+            Linux)
+              # Binary, desktop entry and icons, for the AUR package and distros the AppImage
+              # does not suit
+              name="efa_${VERSION}_x86_64-linux"
+              mkdir -p "$name/icons"
+              cp "target/${{ matrix.target }}/release/efa" packaging/linux/efa.desktop "$name/"
+              cp assets/icons/32x32.png assets/icons/128x128.png assets/icons/512x512.png "$name/icons/"
+              cp assets/icons/128x128@2x.png "$name/icons/256x256.png"
+              cp assets/icons/efa-e.svg "$name/icons/efa.svg"
+              tar -czf "upload/$name.tar.gz" "$name"
+              ;;
+          esac
+          ls -la upload
+          gh release upload "v$VERSION" upload/* --clobber
+
+      - name: Upload update bundle
+        id: bundle
+        shell: bash
+        env:
+          PUBKEY: ${{ vars.UPDATER_PUBKEY }}
+          SIGNING_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
+        run: |
+          if [ -z "$PUBKEY" ] || [ -z "$SIGNING_KEY" ]; then
+            echo "::notice::No updater key, skipping the update bundle"
+            exit 0
+          fi
+          case "${{ matrix.updater }}" in
+            macos-*)
+              bundle=dist/efa.app.tar.gz
+              format=app
+              name="efa_${VERSION}_${{ matrix.target }}.app.tar.gz"
+              cp "$bundle" "$name"
+              gh release upload "v$VERSION" "$name" --clobber
+              ;;
+            linux-*)
+              bundle=$(find dist -maxdepth 1 -name '*.AppImage' | head -1)
+              format=appimage
+              name=$(basename "$bundle" | tr ' ' '-')
+              ;;
+            windows-*)
+              bundle=$(find dist -maxdepth 1 -name '*-setup.exe' | head -1)
+              format=nsis
+              name=$(basename "$bundle" | tr ' ' '-')
+              ;;
+          esac
+          if [ ! -f "$bundle" ] || [ ! -f "$bundle.sig" ]; then
+            echo "::error::Signed update bundle not found for ${{ matrix.updater }}"
+            ls -la dist
+            exit 1
+          fi
+          url="https://github.com/${{ github.repository }}/releases/download/v$VERSION/$name"
+          jq -n --rawfile signature "$bundle.sig" --arg url "$url" --arg format "$format" \
+            '{signature: ($signature | rtrimstr("\n")), $url, $format}' > "updater-${{ matrix.updater }}.json"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        if: steps.bundle.outputs.signed == 'true'
+        with:
+          name: updater-${{ matrix.updater }}
+          path: updater-${{ matrix.updater }}.json
+
+  # Combines every platform's signed bundle into the manifest the app polls
+  # (releases/latest/download/latest.json). It goes live when the draft is published.
+  updater-manifest:
+    name: Update manifest
+    needs: [draft, publish]
+    if: vars.UPDATER_PUBKEY != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: updater-*
+          merge-multiple: true
+          path: updater
+
+      - name: Publish latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.draft.outputs.version }}
+          NOTES: ${{ needs.draft.outputs.notes }}
+        run: |
+          platforms=$(for f in updater/updater-*.json; do
+            key=$(basename "$f" .json); key=${key#updater-}
+            jq --arg key "$key" '{($key): .}' "$f"
+          done | jq -s 'add')
+          jq -n --arg version "$VERSION" --arg notes "$NOTES" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson platforms "$platforms" \
+            '{$version, $notes, $pub_date, $platforms}' > latest.json
+          cat latest.json
+          gh release upload "v$VERSION" latest.json --clobber

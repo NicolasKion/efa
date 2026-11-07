@@ -1,0 +1,28 @@
+# Published to the AUR as efa-bin by .github/workflows/aur.yml, which fills in pkgver and the
+# checksum for each release.
+
+pkgname=efa-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="EVE Online fitting tool"
+arch=('x86_64')
+url="https://github.com/NicolasKion/efa"
+license=('AGPL-3.0-or-later')
+depends=('gcc-libs' 'glibc' 'libxcb' 'libxkbcommon' 'libxkbcommon-x11' 'fontconfig' 'vulkan-icd-loader')
+optdepends=('vulkan-driver: GPU accelerated rendering')
+provides=('efa')
+conflicts=('efa')
+options=('!debug' '!strip')
+source=("$url/releases/download/v$pkgver/efa_${pkgver}_x86_64-linux.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "efa_${pkgver}_x86_64-linux"
+    install -Dm755 efa "$pkgdir/usr/bin/efa"
+    install -Dm644 efa.desktop "$pkgdir/usr/share/applications/efa.desktop"
+    install -Dm644 icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/efa.png"
+    install -Dm644 icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/efa.png"
+    install -Dm644 icons/256x256.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/efa.png"
+    install -Dm644 icons/512x512.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/efa.png"
+    install -Dm644 icons/efa.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/efa.svg"
+}

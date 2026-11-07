@@ -15,6 +15,7 @@ fn main() {
     efa::persist::move_old_data();
     efa::errors::install_panic_hook();
     efa::errors::queue_last_crash();
+    efa::desktop::install();
     // An EFT file given on the command line is imported as a new fit.
     let import = first.map(|path| {
         std::fs::read_to_string(&path).unwrap_or_else(|e| {

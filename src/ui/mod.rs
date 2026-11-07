@@ -26,6 +26,7 @@ pub mod profile_editor;
 pub mod profile_menus;
 mod side;
 mod stats;
+mod updates;
 mod validation;
 mod widgets;
 mod wizard;
@@ -356,6 +357,10 @@ impl Efa {
 
         let mut subscriptions = subscriptions;
         subscriptions.push(cx.observe(&hub, |g, _, cx| g.pull(cx)));
+        if role == Role::Main {
+            let updates = hub.read(cx).updates.clone();
+            subscriptions.push(cx.observe(&updates, |_, _, cx| cx.notify()));
+        }
         let (mut saved, synced, characters) = {
             let hub = hub.read(cx);
             (
@@ -1486,6 +1491,11 @@ impl Render for Efa {
             }
         }))
         .child(self.menu_bar(cx))
+        .children(
+            (self.role == Role::Main)
+                .then(|| updates::notice(&self.hub.read(cx).updates, cx))
+                .flatten(),
+        )
         .child(
             h_flex()
                 .flex_1()
