@@ -209,3 +209,35 @@ fn applying_fills_free_slots_and_keeps_fitted_modules() {
     wizard::apply(&mut cleared, &wizard.placements(&fit, &all, true), true);
     assert_eq!(cleared.low.iter().flatten().count(), 4);
 }
+
+#[test]
+fn masteries_decide_the_weapons() {
+    let Some((catalog, engine, data)) = setup() else {
+        return;
+    };
+    let fit = ship(catalog, "Abaddon");
+    let (_, families) = hull(catalog, engine, data, &fit);
+    assert!(!families.is_empty(), "the Abaddon gets weapons");
+    assert!(
+        families
+            .iter()
+            .all(|f| f.kind == wizard::WeaponKind::Energy),
+        "only lasers on an Abaddon: {:?}",
+        families.iter().map(|f| &f.name).collect::<Vec<_>>()
+    );
+    let fit = ship(catalog, "Raven");
+    let (facts, families) = hull(catalog, engine, data, &fit);
+    assert!(
+        families
+            .iter()
+            .all(|f| f.kind == wizard::WeaponKind::Missile)
+    );
+    let wizard = Setup::new(catalog, data, &facts, &families);
+    assert!(
+        matches!(
+            wizard.defaults().tank,
+            wizard::Tank::ShieldBuffer | wizard::Tank::ShieldActive
+        ),
+        "the Raven's mastery asks for shield tanking"
+    );
+}

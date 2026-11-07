@@ -405,6 +405,8 @@ pub struct Facts {
     drone_bandwidth: f64,
     /// The hull's bonuses in lower case, one per line, without markup.
     bonuses: Vec<String>,
+    /// The certificates the ship's mastery asks for, lower case, like "large energy turret".
+    mastery: Vec<String>,
 }
 
 impl Facts {
@@ -451,11 +453,46 @@ impl Facts {
             bonuses: info
                 .and_then(|i| i.traits.as_ref())
                 .map_or_else(Vec::new, bonus_lines),
+            mastery: data
+                .masteries
+                .get(&ship)
+                .map_or_else(Vec::new, |m| m.iter().map(|c| c.to_lowercase()).collect()),
         })
     }
 
     pub fn total(&self, slot: Slot) -> usize {
         self.totals.get(&slot).copied().unwrap_or(0)
+    }
+
+    /// Whether the ship's mastery names weapons at all.
+    fn mastery_names_weapons(&self) -> bool {
+        self.mastery
+            .iter()
+            .any(|c| c.contains("turret") || c.contains("missiles") || c.contains("vorton"))
+    }
+
+    /// Whether the ship's mastery asks for this kind and size of weapon.
+    fn mastery_weapon(&self, kind: WeaponKind, size: HullSize) -> bool {
+        let size = size.label().to_lowercase();
+        let wanted = match kind {
+            WeaponKind::Projectile => format!("{size} projectile turret"),
+            WeaponKind::Hybrid => format!("{size} hybrid turret"),
+            WeaponKind::Energy => format!("{size} energy turret"),
+            WeaponKind::Precursor => format!("{size} disintegrator turret"),
+            WeaponKind::Vorton => format!("{size} vorton projector"),
+            WeaponKind::Missile => format!("{size} missiles"),
+        };
+        self.mastery.iter().any(|c| c.starts_with(&wanted))
+    }
+
+    /// The tank the ship's mastery asks for: Some(true) for shield, Some(false) for armor.
+    fn mastery_shield(&self) -> Option<bool> {
+        let has = |word: &str| self.mastery.iter().any(|c| c.ends_with(word));
+        match (has("shield tanking"), has("armor tanking")) {
+            (true, false) => Some(true),
+            (false, true) => Some(false),
+            _ => None,
+        }
     }
 
     fn bonused(&self, phrase: &str) -> bool {
@@ -590,6 +627,16 @@ impl<'a> Setup<'a> {
                     Hardpoint::None => return None,
                 };
                 let count = count.min(facts.total(Slot::High));
+                // The mastery says what the ship is meant to shoot with; that outranks the
+                // bonus text, and with it a hull gets nothing its race does not use, like
+                // autocannons on an Abaddon.
+                let bonus = if facts.mastery_weapon(kind, size) {
+                    3
+                } else if facts.mastery_names_weapons() {
+                    return None;
+                } else {
+                    bonus
+                };
                 if count == 0 || (size != facts.size && bonus < 2) {
                     return None;
                 }
@@ -743,11 +790,13 @@ impl<'a> Setup<'a> {
                 .count()
         };
         let (shield, armor) = (lines("shield"), lines("armor"));
-        let shield_tank = match shield.cmp(&armor) {
-            std::cmp::Ordering::Greater => true,
-            std::cmp::Ordering::Less => false,
-            std::cmp::Ordering::Equal => facts.total(Slot::Mid) > facts.total(Slot::Low),
-        };
+        let shield_tank = facts
+            .mastery_shield()
+            .unwrap_or_else(|| match shield.cmp(&armor) {
+                std::cmp::Ordering::Greater => true,
+                std::cmp::Ordering::Less => false,
+                std::cmp::Ordering::Equal => facts.total(Slot::Mid) > facts.total(Slot::Low),
+            });
         let active = facts.bonuses.iter().any(|b| {
             !b.contains("remote")
                 && if shield_tank {

@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use crate::data::TypeId;
 
 /// Bump whenever what [`ItemData`] holds or how it is built changes.
-const CACHE_FORMAT: u32 = 1;
+const CACHE_FORMAT: u32 = 2;
 const CACHE_FILE: &str = "item_data.bin";
 
 /// Attributes that are columns of types.json rather than dogma attributes. pyfa adds them to
@@ -131,6 +131,10 @@ pub struct ItemData {
     pub units: HashMap<i32, UnitInfo>,
     pub effects: HashMap<i32, EffectInfo>,
     pub types: HashMap<TypeId, TypeInfo>,
+    /// The certificates each ship's top mastery level asks for, by name, like "Large Energy
+    /// Turret". They say what the ship is meant to fly with.
+    #[serde(default)]
+    pub masteries: HashMap<TypeId, Vec<String>>,
     /// Types needing a skill, with the level they need, keyed by the skill.
     #[serde(skip)]
     pub required_for: HashMap<TypeId, Vec<(TypeId, u8)>>,
@@ -169,6 +173,7 @@ impl ItemData {
         let dogma: HashMap<String, TypeDogma> = read(dir, "sde/typedogma.json")?;
         let bonuses: HashMap<String, SdeTypeBonus> = read(dir, "sde/typebonus.json")?;
         let sde_types: HashMap<String, SdeType> = read(dir, "sde/types.json")?;
+        let masteries = masteries(dir, wanted)?;
 
         let attrs = sde_attrs
             .into_iter()
@@ -270,6 +275,7 @@ impl ItemData {
             units,
             effects,
             types,
+            masteries,
             required_for: HashMap::new(),
         })
     }
@@ -370,6 +376,47 @@ struct CacheFile {
 struct CacheFileRef<'a> {
     key: &'a str,
     data: &'a ItemData,
+}
+
+/// masteries.json: per ship, its mastery levels, each a list of certificate IDs.
+#[derive(Deserialize)]
+struct SdeMastery {
+    #[serde(rename = "_value")]
+    levels: Vec<SdeMasteryLevel>,
+}
+
+#[derive(Deserialize)]
+struct SdeMasteryLevel {
+    #[serde(rename = "_value")]
+    certificates: Vec<i32>,
+}
+
+#[derive(Deserialize)]
+struct SdeCertificate {
+    name: Localized,
+}
+
+/// The certificate names of each wanted ship's highest mastery level.
+fn masteries(dir: &Path, wanted: &HashSet<TypeId>) -> Result<HashMap<TypeId, Vec<String>>, String> {
+    let masteries: HashMap<String, SdeMastery> = read(dir, "sde/masteries.json")?;
+    let certificates: HashMap<String, SdeCertificate> = read(dir, "sde/certificates.json")?;
+    Ok(masteries
+        .into_iter()
+        .filter_map(|(ship, mastery)| {
+            let ship: TypeId = ship.parse().ok()?;
+            if !wanted.contains(&ship) {
+                return None;
+            }
+            let top = mastery.levels.last()?;
+            let names = top
+                .certificates
+                .iter()
+                .filter_map(|c| certificates.get(&c.to_string()))
+                .map(|c| c.name.en.clone())
+                .collect();
+            Some((ship, names))
+        })
+        .collect())
 }
 
 fn read<T: DeserializeOwned>(dir: &Path, file: &str) -> Result<T, String> {
