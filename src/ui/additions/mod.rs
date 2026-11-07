@@ -251,12 +251,16 @@ impl Gyfa {
                         })
                     })
                     .when(on, |t| {
-                        t.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.additions_tab = tab;
-                            this.additions_selection.clear();
-                            this.additions_anchor = None;
-                            cx.notify();
-                        }))
+                        // Tabs switch on press, as desktop tab bars do.
+                        t.on_mouse_down(
+                            gpui_kit::MouseButton::Left,
+                            cx.listener(move |this, _: &gpui_kit::MouseDownEvent, _, cx| {
+                                this.additions_tab = tab;
+                                this.additions_selection.clear();
+                                this.additions_anchor = None;
+                                cx.notify();
+                            }),
+                        )
                     })
             }));
 

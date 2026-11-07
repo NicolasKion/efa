@@ -498,10 +498,13 @@ impl CharacterEditor {
                         .when(!selected, |d| d.text_color(theme.muted_foreground))
                         .hover(|s| s.bg(theme.secondary.opacity(0.5)))
                         .child(label)
-                        .on_click(cx.listener(move |e, _: &ClickEvent, _, cx| {
-                            e.tab = tab;
-                            cx.notify();
-                        }))
+                        .on_mouse_down(
+                            gpui_kit::MouseButton::Left,
+                            cx.listener(move |e, _: &gpui_kit::MouseDownEvent, _, cx| {
+                                e.tab = tab;
+                                cx.notify();
+                            }),
+                        )
                 }),
             )
     }

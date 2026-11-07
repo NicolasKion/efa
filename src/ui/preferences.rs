@@ -16,9 +16,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext, ClickEvent, Context, Entity, FontWeight, InteractiveElement,
-    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Window, WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, size,
+    AnyElement, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
+    WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, size,
 };
 
 use super::{Gyfa, Hub, port::html_path};
@@ -304,9 +304,12 @@ impl PreferencesWindow {
                             .hover(|s| s.bg(theme.secondary).text_color(theme.foreground))
                     })
                     .child(label)
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.set(cx, |s| apply(s, value));
-                    }))
+                    .on_mouse_down(
+                        gpui_kit::MouseButton::Left,
+                        cx.listener(move |this, _: &gpui_kit::MouseDownEvent, _, cx| {
+                            this.set(cx, |s| apply(s, value));
+                        }),
+                    )
                     .into_any_element()
             })
             .collect();
@@ -1197,10 +1200,13 @@ impl Render for PreferencesWindow {
                         }),
                 )
                 .child(page.title())
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    this.page = page;
-                    cx.notify();
-                }))
+                .on_mouse_down(
+                    gpui_kit::MouseButton::Left,
+                    cx.listener(move |this, _: &gpui_kit::MouseDownEvent, _, cx| {
+                        this.page = page;
+                        cx.notify();
+                    }),
+                )
         });
         let header = h_flex()
             .gap_3()

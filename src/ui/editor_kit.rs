@@ -233,9 +233,13 @@ pub fn name_list<V: 'static>(
                         .text_color(theme.muted_foreground)
                         .child(entry.detail),
                 )
-                .on_click(cx.listener(move |view, _: &ClickEvent, window, cx| {
-                    on_select(view, name.clone(), window, cx);
-                }));
+                // Picking a preset or set happens on press, like a tab.
+                .on_mouse_down(
+                    gpui_kit::MouseButton::Left,
+                    cx.listener(move |view, _: &gpui_kit::MouseDownEvent, window, cx| {
+                        on_select(view, name.clone(), window, cx);
+                    }),
+                );
             match on_drop {
                 Some(on_drop) => row
                     .drag_over::<Dragged>(|style, dragged, _, cx| {
@@ -397,10 +401,13 @@ impl ItemTree {
                         .map(|icon| icon_box(catalog, &loaded.icons, Icon::Id(icon), 18.)),
                 )
                 .child(div().min_w_0().truncate().child(group.name.clone()))
-                .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
-                    tree(view).toggle(id);
-                    cx.notify();
-                }))
+                .on_mouse_down(
+                    gpui_kit::MouseButton::Left,
+                    cx.listener(move |view, _: &gpui_kit::MouseDownEvent, _, cx| {
+                        tree(view).toggle(id);
+                        cx.notify();
+                    }),
+                )
                 .into_any_element(),
         );
         if !open {

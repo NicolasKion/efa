@@ -1175,20 +1175,26 @@ impl Gyfa {
                                 cx.stop_propagation();
                                 this.close_fit(i, cx);
                             })),
-                    ),
+                    )
+                    // Pressing the close button must not bring its tab up first.
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
             )
-            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                if this.saved.current == Some(i) && event.click_count() >= 2 {
-                    this.start_rename(window, cx);
-                    return;
-                }
-                if this.saved.current != Some(i) {
-                    this.renaming = false;
-                    this.saved.current = Some(i);
-                    this.clear_selection();
-                    this.changed(cx);
-                }
-            }))
+            // A tab comes up on press; a second click on it renames the fit.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &gpui_kit::MouseDownEvent, window, cx| {
+                    if this.saved.current == Some(i) && event.click_count >= 2 {
+                        this.start_rename(window, cx);
+                        return;
+                    }
+                    if this.saved.current != Some(i) {
+                        this.renaming = false;
+                        this.saved.current = Some(i);
+                        this.clear_selection();
+                        this.changed(cx);
+                    }
+                }),
+            )
             // chrome_tabs.py OnMiddleUp: a middle click closes the tab.
             .on_mouse_up(
                 MouseButton::Middle,

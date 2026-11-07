@@ -631,10 +631,13 @@ impl ItemStats {
                     })
                     .when(!selected, |t| t.text_color(theme.tab_foreground))
                     .child(tab.label())
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.tab = Some(tab);
-                        cx.notify();
-                    }))
+                    .on_mouse_down(
+                        gpui_kit::MouseButton::Left,
+                        cx.listener(move |this, _: &gpui_kit::MouseDownEvent, _, cx| {
+                            this.tab = Some(tab);
+                            cx.notify();
+                        }),
+                    )
             }))
     }
 

@@ -3,9 +3,8 @@
 
 use gpui_kit::component::{ActiveTheme, Sizable, h_flex, switch::Switch, v_flex};
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Context, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, SharedString, StatefulInteractiveElement, Styled, div, prelude::FluentBuilder,
-    px,
+    AnyElement, App, Context, FontWeight, InteractiveElement, IntoElement, ParentElement,
+    SharedString, StatefulInteractiveElement, Styled, div, prelude::FluentBuilder, px,
 };
 
 use super::GraphsWindow;
@@ -105,7 +104,10 @@ pub fn choice<T: Copy + PartialEq + 'static>(
                         .hover(|s| s.bg(theme.secondary).text_color(theme.foreground))
                 })
                 .child(label)
-                .on_click(cx.listener(move |g, _: &ClickEvent, _, cx| apply(g, value, cx)))
+                .on_mouse_down(
+                    gpui_kit::MouseButton::Left,
+                    cx.listener(move |g, _: &gpui_kit::MouseDownEvent, _, cx| apply(g, value, cx)),
+                )
                 .into_any_element()
         })
         .collect();

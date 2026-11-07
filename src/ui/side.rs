@@ -115,10 +115,13 @@ impl Gyfa {
                 })
                 .when(!selected, |t| t.text_color(theme.tab_foreground))
                 .child(label)
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    this.browser_tab = which;
-                    cx.notify();
-                }))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                        this.browser_tab = which;
+                        cx.notify();
+                    }),
+                )
         };
         v_flex()
             .size_full()

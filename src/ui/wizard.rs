@@ -1476,13 +1476,14 @@ impl WizardPanel {
                         d.tooltip(move |window, cx| Tooltip::new(tip).build(window, cx))
                     })
                     .when(usable, |d| {
-                        d.cursor_pointer().on_click(cx.listener(
-                            move |this, _: &ClickEvent, window, cx| {
+                        d.cursor_pointer().on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _: &gpui_kit::MouseDownEvent, window, cx| {
                                 this.focus_row(row, cx);
                                 this.set_segment(row, i, cx);
                                 this.refocus(window, cx);
-                            },
-                        ))
+                            }),
+                        )
                     })
                     .into_any_element()
             })
@@ -2539,10 +2540,13 @@ impl WizardPanel {
                             ),
                     )
                     .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        this.set_tab(tab, cx);
-                        this.refocus(window, cx);
-                    })),
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _: &gpui_kit::MouseDownEvent, window, cx| {
+                            this.set_tab(tab, cx);
+                            this.refocus(window, cx);
+                        }),
+                    ),
             );
         }
         out.into_any_element()
