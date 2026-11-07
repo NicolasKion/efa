@@ -89,6 +89,7 @@ fn a_hurricane_gets_a_sane_brawler() {
         layer: Layer::Shield,
         goal: Goal::Balanced,
         search_tiers: wizard::SearchTiers::Bling,
+        budget: wizard::Budget::default(),
         tank_fit: None,
         damage: DamageMods::Weapon,
         rigs: wizard::Rigs::Tank,
@@ -286,7 +287,13 @@ fn best(
     let mut choices = wizard.defaults();
     edit(&mut choices);
     let problem = wizard
-        .tank_problem(engine, engine.all5(), fit, &choices)
+        .tank_problem(
+            engine,
+            engine.all5(),
+            fit,
+            &choices,
+            &gyfa::prices::Prices::default(),
+        )
         .expect("a tank to search for");
     let found = tank::optimise(engine, &problem, &Progress::default(), 5);
     (problem, found.outcomes)
@@ -502,7 +509,13 @@ fn the_tank_tab_alone_fills_free_lows_and_rigs_around_the_fit() {
         ..wizard.defaults()
     };
     let problem = wizard
-        .tank_problem(engine, engine.all5(), &fit, &choices)
+        .tank_problem(
+            engine,
+            engine.all5(),
+            &fit,
+            &choices,
+            &gyfa::prices::Prices::default(),
+        )
         .expect("a tank to search for");
     assert_eq!(problem.positions.len(), facts.total(Slot::Low) - 2);
     assert_eq!(problem.rig_positions.len(), facts.total(Slot::Rig));
@@ -593,4 +606,48 @@ fn wider_search_tiers_try_faction_hardeners() {
     });
     assert!(faction, "faction variations are tried");
     assert!(!outcomes.is_empty(), "a tank is found");
+}
+
+#[test]
+fn a_tank_budget_caps_the_price() {
+    let Some((catalog, engine, data)) = setup() else {
+        return;
+    };
+    let fit = ship(catalog, "Abaddon");
+    let (facts, families) = hull(catalog, engine, data, &fit);
+    let wizard = Setup::new(catalog, data, &facts, &families);
+    let mut choices = wizard.defaults();
+    choices.tank = TankStyle::Buffer;
+    choices.layer = Layer::Armor;
+    choices.search_tiers = wizard::SearchTiers::Faction;
+    // Faction items cost 100M each, everything else 1M.
+    let prices = gyfa::prices::Prices::fixed(catalog.types.values().map(|t| {
+        let price = if t.meta_group == Some(4) { 100e6 } else { 1e6 };
+        (t.id, price)
+    }));
+    let run = |choices: &Choices| {
+        let problem = wizard
+            .tank_problem(engine, engine.all5(), &fit, choices, &prices)
+            .expect("a tank to search for");
+        tank::optimise(engine, &problem, &Progress::default(), 5)
+    };
+    let free = run(&choices);
+    let best = free.outcomes.first().expect("a tank");
+    assert!(best.priced && best.price > 0.0);
+    choices.budget.total = Some(20_000_000);
+    let capped = run(&choices);
+    let cheap = capped.outcomes.first().expect("a cheap tank");
+    assert!(cheap.price <= 20e6, "{}", cheap.price);
+    choices.budget = wizard::Budget {
+        each: Some(10_000_000),
+        total: None,
+    };
+    let per_module = run(&choices);
+    assert!(
+        per_module.outcomes.iter().all(|o| o
+            .types
+            .iter()
+            .all(|&t| catalog.get(t).is_some_and(|t| t.meta_group != Some(4)))),
+        "no faction module over the per-module budget"
+    );
 }

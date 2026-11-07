@@ -354,6 +354,43 @@ impl Layer {
     }
 }
 
+/// What the tank search may spend, in whole ISK; None is no limit.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Budget {
+    /// The most any one module or rig may cost.
+    pub each: Option<u64>,
+    /// The most the whole tank, modules and rigs, may cost.
+    pub total: Option<u64>,
+}
+
+impl Budget {
+    /// The choices offered for one module.
+    pub const EACH: [Option<u64>; 5] = [
+        None,
+        Some(10_000_000),
+        Some(50_000_000),
+        Some(200_000_000),
+        Some(1_000_000_000),
+    ];
+    /// The choices offered for the whole tank.
+    pub const TOTAL: [Option<u64>; 5] = [
+        None,
+        Some(100_000_000),
+        Some(500_000_000),
+        Some(1_000_000_000),
+        Some(5_000_000_000),
+    ];
+
+    /// A budget as a short label: "Any", "50M", "1B".
+    pub fn label(limit: Option<u64>) -> String {
+        match limit {
+            None => "Any".to_owned(),
+            Some(isk) if isk >= 1_000_000_000 => format!("{}B", isk / 1_000_000_000),
+            Some(isk) => format!("{}M", isk / 1_000_000),
+        }
+    }
+}
+
 /// Which variations the tank search tries for each module and rig.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SearchTiers {
@@ -490,6 +527,8 @@ pub struct Choices {
     pub goal: Goal,
     /// Which variations of each tank module and rig the search tries.
     pub search_tiers: SearchTiers,
+    /// What the tank search may spend.
+    pub budget: Budget,
     /// The optimiser's pick for the tank; None lays out the usual tank for the style.
     pub tank_fit: Option<TankFit>,
     pub damage: DamageMods,
@@ -1143,6 +1182,7 @@ impl<'a> Setup<'a> {
             },
             goal: Goal::Balanced,
             search_tiers: SearchTiers::Bling,
+            budget: Budget::default(),
             tank_fit: None,
             damage: if drones || family.is_none() && facts.drone_bandwidth > 0.0 {
                 DamageMods::Drone

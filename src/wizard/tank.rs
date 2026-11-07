@@ -6,7 +6,7 @@
 //! best tanks last. Tanks that do not fit the CPU, powergrid or calibration left are dropped.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     ops::AddAssign,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
@@ -131,6 +131,10 @@ pub struct Problem {
     pub rigs: Vec<RigCandidate>,
     /// Only tanks with a repairer or booster count.
     pub need_repair: bool,
+    /// Known prices of the candidates and rigs, by type.
+    pub prices: HashMap<TypeId, f64>,
+    /// The most the whole tank may cost, in ISK.
+    pub max_total: Option<f64>,
 }
 
 /// A tank the optimiser found, with its numbers.
@@ -154,6 +158,10 @@ pub struct Outcome {
     pub cap_stable: bool,
     pub cpu: Resource,
     pub powergrid: Resource,
+    /// What the tank's modules and rigs cost, as far as their prices are known.
+    pub price: f64,
+    /// Whether every module and rig had a price.
+    pub priced: bool,
 }
 
 /// A fitting resource a tank can run out of.
@@ -162,6 +170,8 @@ pub enum Limit {
     Cpu,
     Powergrid,
     Calibration,
+    /// The total budget.
+    Budget,
 }
 
 impl Limit {
@@ -170,6 +180,7 @@ impl Limit {
             Limit::Cpu => "CPU",
             Limit::Powergrid => "Powergrid",
             Limit::Calibration => "Calibration",
+            Limit::Budget => "The budget",
         }
     }
 }
@@ -181,6 +192,8 @@ pub struct Rejected {
     pub cpu: usize,
     pub powergrid: usize,
     pub calibration: usize,
+    /// Over the total budget.
+    pub budget: usize,
 }
 
 impl Rejected {
@@ -191,6 +204,7 @@ impl Rejected {
             cpu: over(&probe.cpu),
             powergrid: over(&probe.powergrid),
             calibration: over(&probe.calibration),
+            budget: 0,
         }
     }
 
@@ -204,6 +218,7 @@ impl Rejected {
             (self.cpu, Limit::Cpu),
             (self.powergrid, Limit::Powergrid),
             (self.calibration, Limit::Calibration),
+            (self.budget, Limit::Budget),
         ]
         .into_iter()
         .filter(|&(n, _)| n > 0)
@@ -219,6 +234,7 @@ impl AddAssign for Rejected {
         self.cpu += other.cpu;
         self.powergrid += other.powergrid;
         self.calibration += other.calibration;
+        self.budget += other.budget;
     }
 }
 
@@ -465,6 +481,14 @@ fn try_score(
     modules: &[&Candidate],
     rigs: &[RigCandidate],
 ) -> Result<Outcome, Rejected> {
+    // The budget first: it needs no engine.
+    let (price, _) = price_of(problem, modules, rigs);
+    if problem.max_total.is_some_and(|max| price > max) {
+        return Err(Rejected {
+            budget: 1,
+            ..Rejected::default()
+        });
+    }
     let mut fit = problem.fit.clone();
     let slot = problem.layer.slot();
     for (candidate, &at) in modules.iter().zip(&problem.positions) {
@@ -487,6 +511,29 @@ fn try_score(
     } else {
         Err(rejected)
     }
+}
+
+/// What these modules and rigs cost, as far as prices are known, and whether all were.
+fn price_of(problem: &Problem, modules: &[&Candidate], rigs: &[RigCandidate]) -> (f64, bool) {
+    let ids = modules
+        .iter()
+        .take(problem.positions.len())
+        .map(|c| c.module.type_id)
+        .chain(
+            rigs.iter()
+                .take(problem.rig_positions.len())
+                .map(|r| r.type_id),
+        );
+    let mut priced = true;
+    let total = ids
+        .map(|id| {
+            problem.prices.get(&id).copied().unwrap_or_else(|| {
+                priced = false;
+                0.0
+            })
+        })
+        .sum();
+    (total, priced)
 }
 
 fn outcome(
@@ -521,6 +568,7 @@ fn outcome(
     if problem.need_repair && !modules.iter().any(|c| c.role == Role::Repair) {
         score *= 0.5;
     }
+    let (price, priced) = price_of(problem, modules, rigs);
     Outcome {
         modules: modules.iter().map(|c| c.base).collect(),
         types: modules.iter().map(|c| c.module.type_id).collect(),
@@ -534,6 +582,8 @@ fn outcome(
         cap_stable: probe.cap_stable,
         cpu: probe.cpu,
         powergrid: probe.powergrid,
+        price,
+        priced,
     }
 }
 
@@ -546,6 +596,7 @@ impl Setup<'_> {
         pilot: &Pilot,
         fit: &Fit,
         choices: &Choices,
+        prices: &crate::prices::Prices,
     ) -> Option<Problem> {
         if choices.tank == TankStyle::None {
             return None;
@@ -593,13 +644,32 @@ impl Setup<'_> {
             .iter()
             .flatten()
             .any(|m| category_of(self.catalog, m.type_id) == Category::Repairer);
+        // Anything over the per-module budget is left out; what has no price yet stays.
+        let affordable = |id: TypeId| {
+            choices
+                .budget
+                .each
+                .is_none_or(|max| prices.get(id).is_none_or(|price| price <= max as f64))
+        };
+        let mut candidates = self.tank_candidates(choices, weakest);
+        candidates.retain(|c| affordable(c.module.type_id));
+        let mut rigs = if rig_positions.is_empty() {
+            Vec::new()
+        } else {
+            self.rig_candidates(choices, weakest)
+        };
+        rigs.retain(|r| affordable(r.type_id));
+        let known = candidates
+            .iter()
+            .map(|c| c.module.type_id)
+            .chain(rigs.iter().map(|r| r.type_id))
+            .filter_map(|id| Some((id, prices.get(id)?)))
+            .collect();
         Some(Problem {
-            candidates: self.tank_candidates(choices, weakest),
-            rigs: if rig_positions.is_empty() {
-                Vec::new()
-            } else {
-                self.rig_candidates(choices, weakest)
-            },
+            candidates,
+            rigs,
+            prices: known,
+            max_total: choices.budget.total.map(|max| max as f64),
             fit: next,
             pilot: pilot.clone(),
             layer: choices.layer,
@@ -818,6 +888,7 @@ mod tests {
             cpu: 3,
             powergrid: 5,
             calibration: 0,
+            budget: 0,
         };
         assert_eq!(rejected.limit(), Some(Limit::Powergrid));
         rejected += Rejected {

@@ -238,6 +238,14 @@ impl Prices {
         }
     }
 
+    /// A fixed price list, for tests and offline use; nothing about it is ever stale.
+    pub fn fixed(prices: impl IntoIterator<Item = (TypeId, f64)>) -> Self {
+        Self {
+            by_type: prices.into_iter().collect(),
+            ..Self::default()
+        }
+    }
+
     pub fn get(&self, type_id: TypeId) -> Option<f64> {
         self.by_type.get(&type_id).copied()
     }

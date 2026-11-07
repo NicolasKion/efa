@@ -35,8 +35,8 @@ use crate::{
     prices::Prices,
     theme::Palette,
     wizard::{
-        self, Ammo, Category, Choices, DamageMods, Facts, Family, Goal, Layer, Pick, Prop, Rigs,
-        SearchTiers, Setup, Tab, Tabs, TankStyle, Tier, Utility,
+        self, Ammo, Budget, Category, Choices, DamageMods, Facts, Family, Goal, Layer, Pick, Prop,
+        Rigs, SearchTiers, Setup, Tab, Tabs, TankStyle, Tier, Utility,
         tank::{self, Found, Limit, Outcome, Progress},
     },
 };
@@ -79,6 +79,10 @@ enum Row {
     Goal,
     /// Which variations the tank search tries.
     Tiers,
+    /// The most one tank module or rig may cost.
+    BudgetEach,
+    /// The most the whole tank may cost.
+    BudgetTotal,
     Search,
     Results,
     /// A tank module, by its T1 item.
@@ -106,6 +110,8 @@ impl Row {
             | Row::Layer
             | Row::Goal
             | Row::Tiers
+            | Row::BudgetEach
+            | Row::BudgetTotal
             | Row::Search
             | Row::Results
             | Row::Module(_) => Some(Tab::Tank),
@@ -363,10 +369,13 @@ impl WizardPanel {
         if !self.choices.touched.has(Tab::Tank) {
             self.change(Some(Tab::Tank), cx, |_| {});
         }
-        let Some(problem) =
-            self.setup()
-                .tank_problem(&self.loaded.engine, &self.pilot, &self.fit, &self.choices)
-        else {
+        let Some(problem) = self.setup().tank_problem(
+            &self.loaded.engine,
+            &self.pilot,
+            &self.fit,
+            &self.choices,
+            &self.prices,
+        ) else {
             return;
         };
         if problem.positions.is_empty() && problem.rig_positions.is_empty() {
@@ -537,7 +546,14 @@ impl WizardPanel {
             Tab::Tank => {
                 let mut left = vec![Row::Racks(tab), Row::Style];
                 if self.choices.tank != TankStyle::None {
-                    left.extend([Row::Layer, Row::Goal, Row::Tiers, Row::Search]);
+                    left.extend([
+                        Row::Layer,
+                        Row::Goal,
+                        Row::Tiers,
+                        Row::BudgetEach,
+                        Row::BudgetTotal,
+                        Row::Search,
+                    ]);
                 }
                 left.extend(self.module_rows().into_iter().map(|(b, _)| Row::Module(b)));
                 let right = if self.choices.tank != TankStyle::None && !self.results.is_empty() {
@@ -671,6 +687,26 @@ impl WizardPanel {
                     .collect(),
                 Layer::ALL.iter().position(|&l| l == c.layer)?,
             ),
+            Row::BudgetEach if c.tank != TankStyle::None => (
+                Budget::EACH
+                    .iter()
+                    .map(|&b| (Budget::label(b).into(), true))
+                    .collect(),
+                Budget::EACH
+                    .iter()
+                    .position(|&b| b == c.budget.each)
+                    .unwrap_or(0),
+            ),
+            Row::BudgetTotal if c.tank != TankStyle::None => (
+                Budget::TOTAL
+                    .iter()
+                    .map(|&b| (Budget::label(b).into(), true))
+                    .collect(),
+                Budget::TOTAL
+                    .iter()
+                    .position(|&b| b == c.budget.total)
+                    .unwrap_or(0),
+            ),
             Row::Tiers if c.tank != TankStyle::None => (
                 SearchTiers::ALL
                     .iter()
@@ -758,6 +794,8 @@ impl WizardPanel {
                 Row::Style => c.tank = TankStyle::ALL[i],
                 Row::Layer => c.layer = Layer::ALL[i],
                 Row::Tiers => c.search_tiers = SearchTiers::ALL[i],
+                Row::BudgetEach => c.budget.each = Budget::EACH[i],
+                Row::BudgetTotal => c.budget.total = Budget::TOTAL[i],
                 Row::Goal => {
                     if let Some(&goal) = Goal::for_style(c.tank).get(i) {
                         c.goal = goal;
@@ -1186,6 +1224,16 @@ impl WizardPanel {
                 }
                 .into(),
             ),
+            Row::BudgetEach => (
+                "Per module".into(),
+                "The most any one tank module or rig may cost. Items without a price yet are \
+                 still tried."
+                    .into(),
+            ),
+            Row::BudgetTotal => (
+                "Tank budget".into(),
+                "The most the whole tank, modules and rigs, may cost.".into(),
+            ),
             Row::Search => ("Search".into(), self.search_detail()),
             Row::Results => (
                 "Results".into(),
@@ -1358,11 +1406,13 @@ impl WizardPanel {
     /// The keyboard and clicks pick one to fit.
     fn results_table(&self, cursor: Option<Row>, cx: &mut Context<Self>) -> AnyElement {
         let repair = self.results.iter().any(|o| o.repair > 0.0);
+        // Aiming for resists, the table shows the resist multiplier: EHP per raw HP.
+        let multiplier = self.choices.goal == Goal::Resists;
         let rows: Vec<AnyElement> = self
             .results
             .iter()
             .enumerate()
-            .map(|(i, outcome)| self.result_row(i, outcome, repair, cx))
+            .map(|(i, outcome)| self.result_row(i, outcome, repair, multiplier, cx))
             .collect();
         let stale = self.stale().then(|| self.text(Row::Results).1);
         let limit = self.limit.map(limit_text);
@@ -1375,10 +1425,11 @@ impl WizardPanel {
             .text_color(theme.muted_foreground)
             .child(div().w(px(20.)).flex_none().child("#"))
             .child(cell("EHP", 52.))
-            .child(cell("Resist", 52.))
+            .child(cell(if multiplier { "Multiplier" } else { "Resist" }, 60.))
             .when(repair, |d| d.child(cell("HP/s", 48.)))
             .child(cell("CPU", RESOURCE_W))
             .child(cell("PG", RESOURCE_W))
+            .child(cell("Price", 56.))
             .child(div().w(px(24.)).flex_none().text_center().child("Cap"))
             .child(div().flex_1().min_w_0().child("Modules"));
         let active = cursor == Some(Row::Results);
@@ -1417,6 +1468,7 @@ impl WizardPanel {
         i: usize,
         outcome: &Outcome,
         repair: bool,
+        multiplier: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
@@ -1489,7 +1541,14 @@ impl WizardPanel {
                     .child(format!("{}", i + 1)),
             )
             .child(cell(widgets::short(outcome.ehp), 52.).font_weight(FontWeight::MEDIUM))
-            .child(cell(format!("{:.1}%", outcome.resist * 100.0), 52.))
+            .child(cell(
+                if multiplier {
+                    format!("{:.2}x", 1.0 / (1.0 - outcome.resist).max(1e-9))
+                } else {
+                    format!("{:.1}%", outcome.resist * 100.0)
+                },
+                60.,
+            ))
             .when(repair, |d| {
                 d.child(cell(
                     if outcome.repair > 0.0 {
@@ -1502,6 +1561,18 @@ impl WizardPanel {
             })
             .child(self.resource_cell(&outcome.cpu))
             .child(self.resource_cell(&outcome.powergrid))
+            .child(
+                cell(
+                    if outcome.price > 0.0 {
+                        let sign = if outcome.priced { "" } else { "~" };
+                        format!("{sign}{}", widgets::short(outcome.price))
+                    } else {
+                        "?".to_owned()
+                    },
+                    56.,
+                )
+                .when(!outcome.priced, |d| d.text_color(theme.muted_foreground)),
+            )
             .child(cap)
             .child(strip)
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
@@ -1879,7 +1950,14 @@ fn section_of(row: Row) -> &'static str {
         Row::Weapon | Row::Ammo => "Weapons",
         Row::Prop => "Propulsion",
         Row::Utility(_) => "Tackle & utility",
-        Row::Style | Row::Layer | Row::Goal | Row::Tiers | Row::Search | Row::Module(_) => "Tank",
+        Row::Style
+        | Row::Layer
+        | Row::Goal
+        | Row::Tiers
+        | Row::BudgetEach
+        | Row::BudgetTotal
+        | Row::Search
+        | Row::Module(_) => "Tank",
         Row::Results => "Results",
         Row::Damage => "Damage modules",
         Row::Rigs | Row::Rig(_) => "Rigs",
@@ -1962,6 +2040,9 @@ fn limit_text(limit: Limit) -> SharedString {
             "better modules did not fit. Try Make it fit, lower tier weapons or fewer utilities."
         }
         Limit::Calibration => "better rigs did not fit.",
+        Limit::Budget => {
+            return "The budget is the limit: better tanks cost more. Raise it to see them.".into();
+        }
     };
     format!("{} is the limit: {rest}", limit.label()).into()
 }
