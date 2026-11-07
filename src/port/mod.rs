@@ -252,6 +252,7 @@ pub fn fit_types(fit: &Fit) -> impl Iterator<Item = TypeId> + '_ {
         .chain(fit.rigs.iter().flatten().copied())
         .chain(fit.subsystems.iter().copied())
         .chain(fit.drones.iter().map(|d| d.type_id))
+        .chain(fit.fighters.iter().map(|f| f.type_id))
         .chain(fit.implants.iter().copied())
         .chain(fit.boosters.iter().map(|b| b.type_id))
         .chain(fit.cargo.iter().map(|&(t, _)| t))

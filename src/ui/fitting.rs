@@ -506,8 +506,15 @@ impl Gyfa {
         .child(
             layout
                 .cell(Col::Price)
+                .id(SharedString::from(format!("price-{slot:?}-{i}")))
                 .truncate()
-                .children(text(Col::Price)),
+                .children(text(Col::Price))
+                .when_some(prices.source_label(m.type_id), |cell, source| {
+                    let source = SharedString::from(format!("Price from {source}"));
+                    cell.tooltip(move |window, cx| {
+                        gpui_kit::component::tooltip::Tooltip::new(source.clone()).build(window, cx)
+                    })
+                }),
         )
         .child(layout.cell(Col::Charge).child(h_flex().gap_1().when_some(
             m.charge,
