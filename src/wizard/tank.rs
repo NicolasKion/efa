@@ -7,13 +7,14 @@
 
 use std::{
     collections::HashSet,
+    ops::AddAssign,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 use super::{Category, Choices, Layer, Setup, TankFit, TankStyle, Utility, apply, attr, group};
 use crate::{
     data::{Catalog, Kind, Slot, TypeId},
-    engine::{Engine, Pilot, TankProbe},
+    engine::{Engine, Pilot, Resource, TankProbe},
     fit::{Fit, ModuleState},
 };
 
@@ -150,6 +151,81 @@ pub struct Outcome {
     /// The tanked layer's sustained repair, HP/s.
     pub repair: f64,
     pub cap_stable: bool,
+    pub cpu: Resource,
+    pub powergrid: Resource,
+}
+
+/// A fitting resource a tank can run out of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Limit {
+    Cpu,
+    Powergrid,
+    Calibration,
+}
+
+impl Limit {
+    pub fn label(self) -> &'static str {
+        match self {
+            Limit::Cpu => "CPU",
+            Limit::Powergrid => "Powergrid",
+            Limit::Calibration => "Calibration",
+        }
+    }
+}
+
+/// Tanks the search dropped for not fitting, by the resource they ran out of. A tank short of
+/// more than one counts for each.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Rejected {
+    pub cpu: usize,
+    pub powergrid: usize,
+    pub calibration: usize,
+}
+
+impl Rejected {
+    /// What the probed fit runs out of; all zero when it fits.
+    pub fn of(probe: &TankProbe) -> Self {
+        let over = |r: &Resource| usize::from(r.output.is_some_and(|out| r.used > out + 1e-6));
+        Self {
+            cpu: over(&probe.cpu),
+            powergrid: over(&probe.powergrid),
+            calibration: over(&probe.calibration),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The resource most dropped tanks ran out of, None when none were dropped.
+    pub fn limit(&self) -> Option<Limit> {
+        [
+            (self.cpu, Limit::Cpu),
+            (self.powergrid, Limit::Powergrid),
+            (self.calibration, Limit::Calibration),
+        ]
+        .into_iter()
+        .filter(|&(n, _)| n > 0)
+        // The first of a tie wins.
+        .rev()
+        .max_by_key(|&(n, _)| n)
+        .map(|(_, limit)| limit)
+    }
+}
+
+impl AddAssign for Rejected {
+    fn add_assign(&mut self, other: Self) {
+        self.cpu += other.cpu;
+        self.powergrid += other.powergrid;
+        self.calibration += other.calibration;
+    }
+}
+
+/// What a search found: the best tanks, best first, and what it dropped for not fitting.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Found {
+    pub outcomes: Vec<Outcome>,
+    pub rejected: Rejected,
 }
 
 impl Outcome {
@@ -194,12 +270,7 @@ struct State {
 
 /// The best tanks for the problem, best first, at most `keep` of them. Empty when nothing fits
 /// or the search was called off.
-pub fn optimise(
-    engine: &Engine,
-    problem: &Problem,
-    progress: &Progress,
-    keep: usize,
-) -> Vec<Outcome> {
+pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: usize) -> Found {
     let n = problem.candidates.len();
     let depth = problem.positions.len();
     let rig_depth = problem.rig_positions.len();
@@ -210,10 +281,12 @@ pub fn optimise(
     let mut seen: HashSet<State> = HashSet::new();
     let mut all: Vec<Outcome> = Vec::new();
     let mut states: Vec<(State, Outcome)> = Vec::new();
+    let mut rejected = Rejected::default();
 
     let start = State::default();
     seen.insert(start.clone());
-    let mut beam = evaluate_all(engine, problem, &[start], progress);
+    let (mut beam, dropped) = evaluate_all(engine, problem, &[start], progress);
+    rejected += dropped;
     states.extend(beam.iter().cloned());
     for _ in 0..depth {
         let mut next = Vec::new();
@@ -238,7 +311,8 @@ pub fn optimise(
         if next.is_empty() || progress.cancelled() {
             break;
         }
-        let mut scored = evaluate_all(engine, problem, &next, progress);
+        let (mut scored, dropped) = evaluate_all(engine, problem, &next, progress);
+        rejected += dropped;
         if scored.is_empty() {
             break;
         }
@@ -270,7 +344,8 @@ pub fn optimise(
             if next.is_empty() || progress.cancelled() {
                 break;
             }
-            let mut scored = evaluate_all(engine, problem, &next, progress);
+            let (mut scored, dropped) = evaluate_all(engine, problem, &next, progress);
+            rejected += dropped;
             if scored.is_empty() {
                 break;
             }
@@ -280,7 +355,7 @@ pub fn optimise(
         }
     }
     if progress.cancelled() {
-        return Vec::new();
+        return Found::default();
     }
     progress
         .done
@@ -301,20 +376,23 @@ pub fn optimise(
     );
     all.sort_by(|a, b| b.score.total_cmp(&a.score));
     all.truncate(keep);
-    all
+    Found {
+        outcomes: all,
+        rejected,
+    }
 }
 
 fn sort(scored: &mut [(State, Outcome)]) {
     scored.sort_by(|a, b| b.1.score.total_cmp(&a.1.score));
 }
 
-/// Score the states, spread over a few threads; those that do not fit are left out.
+/// Score the states, spread over a few threads; those that do not fit are left out and counted.
 fn evaluate_all(
     engine: &Engine,
     problem: &Problem,
     states: &[State],
     progress: &Progress,
-) -> Vec<(State, Outcome)> {
+) -> (Vec<(State, Outcome)>, Rejected) {
     let threads = std::thread::available_parallelism()
         .map_or(2, std::num::NonZero::get)
         .clamp(1, 6);
@@ -324,36 +402,42 @@ fn evaluate_all(
             .chunks(chunk)
             .map(|chunk| {
                 scope.spawn(move || {
-                    chunk
-                        .iter()
-                        .filter_map(|state| {
-                            if progress.cancelled() {
-                                return None;
-                            }
-                            let outcome = evaluate(engine, problem, state);
-                            progress.done.fetch_add(1, Ordering::Relaxed);
-                            outcome.map(|o| (state.clone(), o))
-                        })
-                        .collect::<Vec<_>>()
+                    let mut scored = Vec::new();
+                    let mut rejected = Rejected::default();
+                    for state in chunk {
+                        if progress.cancelled() {
+                            break;
+                        }
+                        match evaluate(engine, problem, state) {
+                            Ok(outcome) => scored.push((state.clone(), outcome)),
+                            Err(dropped) => rejected += dropped,
+                        }
+                        progress.done.fetch_add(1, Ordering::Relaxed);
+                    }
+                    (scored, rejected)
                 })
             })
             .collect();
-        handles
-            .into_iter()
-            .flat_map(|h| h.join().unwrap_or_default())
-            .collect()
+        let mut scored = Vec::new();
+        let mut rejected = Rejected::default();
+        for (chunk, dropped) in handles.into_iter().filter_map(|h| h.join().ok()) {
+            scored.extend(chunk);
+            rejected += dropped;
+        }
+        (scored, rejected)
     })
 }
 
-/// Fit the state's modules and rigs and score the result; None when it does not fit.
-fn evaluate(engine: &Engine, problem: &Problem, state: &State) -> Option<Outcome> {
+/// Fit the state's modules and rigs and score the result; what it ran out of when it does not
+/// fit.
+fn evaluate(engine: &Engine, problem: &Problem, state: &State) -> Result<Outcome, Rejected> {
     let modules: Vec<&Candidate> = state
         .modules
         .iter()
         .map(|&m| &problem.candidates[m])
         .collect();
     let rigs: Vec<RigCandidate> = state.rigs.iter().map(|&r| problem.rigs[r]).collect();
-    score(engine, problem, &modules, &rigs)
+    try_score(engine, problem, &modules, &rigs)
 }
 
 /// Score a tank of the problem's kind made of these modules and rigs; None when it does not fit.
@@ -364,6 +448,16 @@ pub fn score(
     modules: &[&Candidate],
     rigs: &[RigCandidate],
 ) -> Option<Outcome> {
+    try_score(engine, problem, modules, rigs).ok()
+}
+
+/// [`score`], with what the tank ran out of when it does not fit.
+fn try_score(
+    engine: &Engine,
+    problem: &Problem,
+    modules: &[&Candidate],
+    rigs: &[RigCandidate],
+) -> Result<Outcome, Rejected> {
     let mut fit = problem.fit.clone();
     let slot = problem.layer.slot();
     for (candidate, &at) in modules.iter().zip(&problem.positions) {
@@ -380,9 +474,12 @@ pub fn score(
         fit.rigs[at] = Some(rig.type_id);
     }
     let probe = engine.probe_tank(&fit, &problem.pilot);
-    probe
-        .fits()
-        .then(|| outcome(problem, modules, rigs, &probe))
+    let rejected = Rejected::of(&probe);
+    if rejected.is_empty() {
+        Ok(outcome(problem, modules, rigs, &probe))
+    } else {
+        Err(rejected)
+    }
 }
 
 fn outcome(
@@ -425,6 +522,8 @@ fn outcome(
         resist,
         repair,
         cap_stable: probe.cap_stable,
+        cpu: probe.cpu,
+        powergrid: probe.powergrid,
     }
 }
 
@@ -630,5 +729,53 @@ impl Setup<'_> {
                     .then_some(RigCandidate { base, type_id })
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resource(used: f64, output: f64) -> Resource {
+        Resource {
+            used,
+            output: Some(output),
+        }
+    }
+
+    #[test]
+    fn a_probe_short_of_cpu_counts_for_cpu() {
+        let probe = TankProbe {
+            cpu: resource(400.0, 350.0),
+            powergrid: resource(900.0, 1000.0),
+            calibration: resource(400.0, 400.0),
+            ..TankProbe::default()
+        };
+        let rejected = Rejected::of(&probe);
+        assert_eq!(
+            rejected,
+            Rejected {
+                cpu: 1,
+                ..Rejected::default()
+            }
+        );
+        assert_eq!(rejected.limit(), Some(Limit::Cpu));
+    }
+
+    #[test]
+    fn the_limit_is_what_most_tanks_ran_out_of() {
+        assert_eq!(Rejected::default().limit(), None);
+        let mut rejected = Rejected {
+            cpu: 3,
+            powergrid: 5,
+            calibration: 0,
+        };
+        assert_eq!(rejected.limit(), Some(Limit::Powergrid));
+        rejected += Rejected {
+            cpu: 2,
+            ..Rejected::default()
+        };
+        // A tie goes to the first.
+        assert_eq!(rejected.limit(), Some(Limit::Cpu));
     }
 }

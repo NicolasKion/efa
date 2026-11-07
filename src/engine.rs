@@ -61,7 +61,7 @@ pub struct Slots {
     pub total: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Resource {
     pub used: f64,
     pub output: Option<f64>,

@@ -282,8 +282,8 @@ fn best(
     let problem = wizard
         .tank_problem(engine, engine.all5(), fit, &choices)
         .expect("a tank to search for");
-    let outcomes = tank::optimise(engine, &problem, &Progress::default(), 5);
-    (problem, outcomes)
+    let found = tank::optimise(engine, &problem, &Progress::default(), 5);
+    (problem, found.outcomes)
 }
 
 #[test]

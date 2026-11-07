@@ -1,8 +1,9 @@
-//! The fitting wizard: one dialog over the fit with every choice on it, laid out like the
-//! preferences window: titled sections of rows, each with its text on the left and its controls
-//! on the right. Every module row picks its own variation; the tank section can search for the
-//! best tank off the UI thread. A live preview shows what goes where, what it costs and how it
-//! tanks. The picking is in [`crate::wizard`].
+//! The fitting wizard: an overlay over nearly the whole window with every choice on it. Three
+//! columns: the loadout, the tank and a live preview. Each column is captioned sections of rows,
+//! a fixed label column on the left (its description in a tooltip) and the controls filling the
+//! rest. Every module row picks its own variation; the tank column can search for the best tank
+//! off the UI thread and lists what it found as a table. The preview shows what goes where, what
+//! it costs and how it tanks. The picking is in [`crate::wizard`].
 
 use std::{rc::Rc, sync::Arc, time::Duration};
 
@@ -13,6 +14,7 @@ use gpui_kit::component::{
     h_flex,
     menu::{DropdownMenu, PopupMenuItem},
     switch::Switch,
+    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
@@ -34,14 +36,22 @@ use crate::{
     wizard::{
         self, Ammo, Category, Choices, DamageMods, Facts, Family, Goal, Layer, Pick, Prop, Rigs,
         Setup, TankStyle, Tier, Utility,
-        tank::{self, Outcome, Progress},
+        tank::{self, Found, Limit, Outcome, Progress},
     },
 };
 
-const WIDTH: f32 = 1240.;
+/// Room the overlay leaves to each edge of the window.
+const INSET: f32 = 24.;
 const PREVIEW_W: f32 = 300.;
 const ICON: f32 = 16.;
-const VARIANT_W: f32 = 200.;
+/// Icons in the results table's module strip.
+const STRIP_ICON: f32 = 20.;
+const LABEL_W: f32 = 140.;
+const ROW_H: f32 = 32.;
+/// The narrowest a variant dropdown gets before it wraps under the row's other controls.
+const VARIANT_MIN_W: f32 = 160.;
+/// A CPU or powergrid cell of the results table.
+const RESOURCE_W: f32 = 64.;
 /// Tanks the optimiser shows.
 const RESULTS: usize = 5;
 
@@ -53,7 +63,7 @@ mod attr {
     pub const UPGRADE_COST: i32 = 1153;
 }
 
-/// The rows of choices, in keyboard order: the left column, then the right.
+/// The rows of choices, in keyboard order: the loadout column, then the tank column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Row {
     Tier,
@@ -119,9 +129,12 @@ pub(super) struct WizardPanel {
     selected: Option<usize>,
     /// Why the last search found nothing.
     note: Option<SharedString>,
+    /// What the last search dropped the most tanks for not fitting.
+    limit: Option<Limit>,
     focus: FocusHandle,
     focused: bool,
     palette: Palette,
+    title: SharedString,
 }
 
 impl Gyfa {
@@ -173,7 +186,7 @@ impl Gyfa {
         let gyfa = cx.entity().downgrade();
         let palette = self.palette;
         let prices = Rc::clone(&self.prices);
-        let title = format!("Fitting Wizard: {}", loaded.catalog.name(facts.ship));
+        let title = format!("Fitting Wizard: {}", loaded.catalog.name(facts.ship)).into();
         let panel = cx.new(|cx| {
             let mut panel = WizardPanel {
                 gyfa,
@@ -195,17 +208,21 @@ impl Gyfa {
                 results_for: None,
                 selected: None,
                 note: None,
+                limit: None,
                 focus: cx.focus_handle(),
                 focused: false,
                 palette,
+                title,
             };
             panel.replan();
             panel
         });
-        window.open_dialog(cx, move |dialog, _, _| {
+        // The panel draws its own title and padding, so the overlay is all of it.
+        window.open_dialog(cx, move |dialog, window, _| {
             dialog
-                .title(title.clone())
-                .w(px(WIDTH))
+                .w(window.viewport_size().width - px(2. * INSET))
+                .margin_top(px(INSET))
+                .p_0()
                 .child(panel.clone())
         });
     }
@@ -281,6 +298,7 @@ impl WizardPanel {
             self.results_for = None;
             self.selected = None;
             self.note = None;
+            self.limit = None;
             self.search = None;
         }
         if self.choices != before || self.made_to_fit {
@@ -348,9 +366,9 @@ impl WizardPanel {
                     }
                 })
             };
-            let outcomes = work.await;
+            let found = work.await;
             drop(ticker);
-            let _ = this.update(cx, |p, cx| p.finish(generation, outcomes, cx));
+            let _ = this.update(cx, |p, cx| p.finish(generation, found, cx));
         });
         self.search = Some(Search {
             progress,
@@ -366,11 +384,13 @@ impl WizardPanel {
         }
     }
 
-    fn finish(&mut self, generation: u64, outcomes: Vec<Outcome>, cx: &mut Context<Self>) {
+    fn finish(&mut self, generation: u64, found: Found, cx: &mut Context<Self>) {
         if generation != self.generation || self.search.is_none() {
             return;
         }
         self.search = None;
+        self.limit = found.rejected.limit();
+        let outcomes = found.outcomes;
         if outcomes.is_empty() {
             self.note = Some(
                 "No tank fits in the CPU, powergrid and calibration left. Try a lower bling \
@@ -472,6 +492,8 @@ impl WizardPanel {
         }
         rows.push(Row::Prop);
         rows.extend(Utility::ALL.into_iter().map(Row::Utility));
+        rows.extend([Row::Damage, Row::Rigs]);
+        rows.extend(self.rig_rows().into_iter().map(|(b, _)| Row::Rig(b)));
         rows
     }
 
@@ -479,13 +501,11 @@ impl WizardPanel {
         let mut rows = vec![Row::Style];
         if self.choices.tank != TankStyle::None {
             rows.extend([Row::Layer, Row::Goal, Row::Search]);
-            if !self.results.is_empty() {
-                rows.push(Row::Results);
-            }
         }
         rows.extend(self.module_rows().into_iter().map(|(b, _)| Row::Module(b)));
-        rows.extend([Row::Damage, Row::Rigs]);
-        rows.extend(self.rig_rows().into_iter().map(|(b, _)| Row::Rig(b)));
+        if self.choices.tank != TankStyle::None && !self.results.is_empty() {
+            rows.push(Row::Results);
+        }
         rows
     }
 
@@ -848,7 +868,8 @@ impl WizardPanel {
                 .xsmall()
                 .tab_stop(false)
                 .dropdown_caret(true)
-                .w(px(VARIANT_W))
+                .flex_1()
+                .min_w(px(VARIANT_MIN_W))
                 .label(catalog.name(current))
                 .disabled(variants.len() < 2)
                 .dropdown_menu(move |menu, _, _| {
@@ -906,7 +927,8 @@ impl WizardPanel {
             .xsmall()
             .tab_stop(false)
             .dropdown_caret(true)
-            .w(px(VARIANT_W))
+            .flex_1()
+            .min_w(px(VARIANT_MIN_W))
             .label(label)
             .dropdown_menu(move |menu, _, _| {
                 lines.iter().fold(menu, |menu, (i, icon, text)| {
@@ -1010,7 +1032,7 @@ impl WizardPanel {
                 }
                 .into(),
             ),
-            Row::Search => ("Find the best tank".into(), self.search_detail()),
+            Row::Search => ("Search".into(), self.search_detail()),
             Row::Results => (
                 "Results".into(),
                 if self.stale() {
@@ -1093,45 +1115,49 @@ impl WizardPanel {
         format!("Tries tanks for the free {rack} slots and rigs against {pattern}, guns idle.")
     }
 
-    /// The controls on a row's right.
-    fn controls(&self, row: Row, cx: &mut Context<Self>) -> AnyElement {
-        let pair = |a: AnyElement, b: Option<AnyElement>| {
-            h_flex()
-                .gap_2()
-                .flex_wrap()
-                .justify_end()
-                .child(a)
-                .children(b)
-                .into_any_element()
-        };
+    /// The controls right of a row's label, which wrap when the column gets narrow. A variant
+    /// dropdown comes last and takes the room left.
+    fn controls(&self, row: Row, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let mut out = Vec::new();
         match row {
-            Row::Weapon => pair(self.family_button(cx), self.variant_button(row, cx)),
-            Row::Prop | Row::Damage => pair(self.segmented(row, cx), self.variant_button(row, cx)),
-            Row::Utility(u) => {
-                let usable = self.utility_usable(u);
-                let switch = Switch::new(SharedString::from(format!("wizard-{}", row.key())))
+            Row::Weapon => out.push(self.family_button(cx)),
+            Row::Utility(u) => out.push(
+                Switch::new(SharedString::from(format!("wizard-{}", row.key())))
                     .checked(self.choices.has(u))
-                    .disabled(!usable)
+                    .disabled(!self.utility_usable(u))
                     .on_click(cx.listener(move |this, _: &bool, window, cx| {
                         this.focus_row(row, cx);
                         this.change(cx, |c| c.toggle(u));
                         this.refocus(window, cx);
                     }))
-                    .into_any_element();
-                h_flex()
-                    .gap_2()
-                    .children(self.variant_button(row, cx))
-                    .child(switch)
-                    .into_any_element()
+                    .into_any_element(),
+            ),
+            Row::Module(base) | Row::Rig(base) => {
+                out.push(count_cell(self.count(base), cx));
             }
-            Row::Module(_) | Row::Rig(_) => self
-                .variant_button(row, cx)
-                .unwrap_or_else(|| div().into_any_element()),
-            Row::Goal if self.choices.tank == TankStyle::None => div().into_any_element(),
-            Row::Search => self.search_controls(cx),
-            Row::Results => div().into_any_element(),
-            _ => self.segmented(row, cx),
+            Row::Search => {
+                out.push(self.search_controls(cx));
+                if let Some(note) = &self.note {
+                    out.push(aside(note.clone(), cx));
+                }
+            }
+            Row::Results => {}
+            _ => out.push(self.segmented(row, cx)),
         }
+        out.extend(self.variant_button(row, cx));
+        match row {
+            Row::Ammo => out.push(aside(self.text(row).1, cx)),
+            Row::Rigs => out.push(aside(
+                format!(
+                    "{:.0}/{:.0} calibration",
+                    self.stats.calibration.used,
+                    self.stats.calibration.output.unwrap_or(0.0)
+                ),
+                cx,
+            )),
+            _ => {}
+        }
+        out
     }
 
     fn search_controls(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1174,18 +1200,71 @@ impl WizardPanel {
             .into_any_element()
     }
 
-    /// The optimiser's tanks, as cards to pick from.
-    fn result_cards(&self, cx: &mut Context<Self>) -> AnyElement {
-        let cards: Vec<AnyElement> = self
+    /// The optimiser's tanks as a table: rank, numbers, and the modules as a strip of icons.
+    /// The keyboard and clicks pick one to fit.
+    fn results_table(&self, cursor: Option<Row>, cx: &mut Context<Self>) -> AnyElement {
+        let repair = self.results.iter().any(|o| o.repair > 0.0);
+        let rows: Vec<AnyElement> = self
             .results
             .iter()
             .enumerate()
-            .map(|(i, outcome)| self.result_card(i, outcome, cx))
+            .map(|(i, outcome)| self.result_row(i, outcome, repair, cx))
             .collect();
-        v_flex().gap_1p5().pt_2().children(cards).into_any_element()
+        let stale = self.stale().then(|| self.text(Row::Results).1);
+        let limit = self.limit.map(limit_text);
+        let theme = cx.theme();
+        let header = h_flex()
+            .h(px(24.))
+            .gap_3()
+            .px_2()
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .child(div().w(px(20.)).flex_none().child("#"))
+            .child(cell("EHP", 52.))
+            .child(cell("Resist", 52.))
+            .when(repair, |d| d.child(cell("HP/s", 48.)))
+            .child(cell("CPU", RESOURCE_W))
+            .child(cell("PG", RESOURCE_W))
+            .child(div().w(px(24.)).flex_none().text_center().child("Cap"))
+            .child(div().flex_1().min_w_0().child("Modules"));
+        let active = cursor == Some(Row::Results);
+        v_flex()
+            .id(SharedString::from(format!(
+                "wizard-row-{}",
+                Row::Results.key()
+            )))
+            .py_1()
+            .border_l_2()
+            .border_color(if active {
+                theme.primary
+            } else {
+                theme.primary.opacity(0.)
+            })
+            .when(active, |d| d.bg(theme.secondary.opacity(0.5)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.focus_row(Row::Results, cx)),
+            )
+            .child(header)
+            .children(rows)
+            .children([limit, stale].into_iter().flatten().map(|note| {
+                div()
+                    .px_2()
+                    .pt_1()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(note)
+            }))
+            .into_any_element()
     }
 
-    fn result_card(&self, i: usize, outcome: &Outcome, cx: &mut Context<Self>) -> AnyElement {
+    fn result_row(
+        &self,
+        i: usize,
+        outcome: &Outcome,
+        repair: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = cx.theme();
         let catalog = &self.loaded.catalog;
         let selected = self.selected == Some(i);
@@ -1196,85 +1275,81 @@ impl WizardPanel {
                 None => lines.push((id, 1)),
             }
         }
-        let modules = h_flex()
+        let strip = h_flex()
+            .flex_1()
+            .min_w_0()
             .flex_wrap()
             .gap_x_2()
             .gap_y_0p5()
             .children(lines.into_iter().map(|(id, n)| {
+                let tip = SharedString::from(format!("{n}x {}", catalog.name(id)));
                 h_flex()
-                    .gap_1()
-                    .text_xs()
+                    .id(SharedString::from(format!("wizard-result-{i}-{id}")))
+                    .gap_0p5()
                     .child(widgets::icon_box(
                         catalog,
                         &self.loaded.icons,
                         Icon::Type(id),
-                        ICON,
+                        STRIP_ICON,
                     ))
-                    .child(format!("{n}x {}", catalog.name(id)))
+                    .when(n > 1, |d| {
+                        d.child(
+                            div()
+                                .text_color(theme.muted_foreground)
+                                .child(format!("{n}")),
+                        )
+                    })
+                    .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
             }));
-        let number = |label: &str, value: String| {
-            h_flex()
-                .gap_1()
-                .text_xs()
-                .child(
-                    div()
-                        .text_color(theme.muted_foreground)
-                        .child(label.to_owned()),
-                )
-                .child(div().font_weight(FontWeight::MEDIUM).child(value))
-        };
         let (cap_icon, cap_color, cap_text) = if outcome.cap_stable {
             (AssetIcon::BatteryFull, self.palette.green, "Cap stable")
         } else {
             (AssetIcon::BatteryLow, self.palette.yellow, "Cap runs out")
         };
-        let numbers = h_flex()
-            .flex_wrap()
-            .gap_3()
-            .child(number("EHP", widgets::short(outcome.ehp)))
-            .child(number("Resist", format!("{:.1}%", outcome.resist * 100.0)))
-            .when(outcome.repair > 0.0, |d| {
-                d.child(number("Repair", format!("{:.0} HP/s", outcome.repair)))
-            })
-            .child(
-                h_flex()
-                    .gap_1()
-                    .text_xs()
-                    .text_color(widgets::color(cap_color))
-                    .child(UiIcon::new(cap_icon).xsmall())
-                    .child(cap_text),
-            );
-        v_flex()
+        let cap = h_flex()
+            .id(SharedString::from(format!("wizard-result-{i}-cap")))
+            .w(px(24.))
+            .flex_none()
+            .justify_center()
+            .text_color(widgets::color(cap_color))
+            .child(UiIcon::new(cap_icon).xsmall())
+            .tooltip(move |window, cx| Tooltip::new(cap_text).build(window, cx));
+        h_flex()
             .id(SharedString::from(format!("wizard-result-{i}")))
-            .gap_1()
-            .p_2()
-            .rounded(px(6.))
-            .border_1()
-            .border_color(if selected {
-                theme.primary
-            } else {
-                theme.border
-            })
-            .bg(if selected {
-                theme.primary.opacity(0.08)
-            } else {
-                theme.background
-            })
+            .min_h(px(28.))
+            .gap_3()
+            .px_2()
+            .py_0p5()
+            .rounded(px(4.))
+            .text_xs()
             .cursor_pointer()
-            .hover(|s| s.border_color(theme.primary.opacity(0.6)))
+            .when(selected, |d| d.bg(theme.primary.opacity(0.15)))
+            .when(!selected, |d| d.hover(|s| s.bg(theme.secondary)))
             .child(
-                h_flex()
-                    .justify_between()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(format!("#{}", i + 1)),
-                    )
-                    .child(numbers),
+                div()
+                    .w(px(20.))
+                    .flex_none()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .when(selected, |d| d.text_color(theme.primary))
+                    .when(!selected, |d| d.text_color(theme.muted_foreground))
+                    .child(format!("{}", i + 1)),
             )
-            .child(modules)
+            .child(cell(widgets::short(outcome.ehp), 52.).font_weight(FontWeight::MEDIUM))
+            .child(cell(format!("{:.1}%", outcome.resist * 100.0), 52.))
+            .when(repair, |d| {
+                d.child(cell(
+                    if outcome.repair > 0.0 {
+                        format!("{:.0}", outcome.repair)
+                    } else {
+                        String::new()
+                    },
+                    48.,
+                ))
+            })
+            .child(self.resource_cell(&outcome.cpu))
+            .child(self.resource_cell(&outcome.powergrid))
+            .child(cap)
+            .child(strip)
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.focus_row(Row::Results, cx);
                 this.select(i, cx);
@@ -1283,51 +1358,59 @@ impl WizardPanel {
             .into_any_element()
     }
 
-    /// One row: its text on the left, its controls on the right (or under the text for wide
-    /// ones), marked while the keyboard is on it.
+    /// Used of output, red when within 1% of the limit.
+    fn resource_cell(&self, r: &Resource) -> Div {
+        let out = r.output.unwrap_or(0.0);
+        cell(format!("{:.0}/{out:.0}", r.used), RESOURCE_W).when(r.used >= out * 0.99, |d| {
+            d.text_color(widgets::color(self.palette.red))
+        })
+    }
+
+    /// One row: a fixed label column, its description in a tooltip, and the controls filling
+    /// the rest. Marked while the keyboard is on it.
     fn row_element(&self, row: Row, cursor: Option<Row>, cx: &mut Context<Self>) -> AnyElement {
+        if row == Row::Results {
+            return self.results_table(cursor, cx);
+        }
         let (title, description) = self.text(row);
-        let disabled = match row {
-            Row::Utility(u) => !self.utility_usable(u),
-            _ => false,
-        };
+        let disabled = matches!(row, Row::Utility(u) if !self.utility_usable(u));
         let controls = self.controls(row, cx);
-        let results = (row == Row::Results).then(|| self.result_cards(cx));
         let theme = cx.theme();
         let active = cursor == Some(row);
-        let stacked = matches!(row, Row::Tier | Row::Weapon)
-            || row == Row::Goal && self.choices.tank != TankStyle::None;
-        let text = v_flex()
-            .flex_1()
-            .min_w_0()
-            .gap_0p5()
-            .when(disabled, |d| d.opacity(0.5))
-            .child(div().font_weight(FontWeight::MEDIUM).child(title))
-            .when(!description.is_empty(), |d| {
-                d.child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(description),
-                )
-            });
-        let body = if stacked {
-            v_flex()
-                .gap_2()
-                .child(text)
-                .child(h_flex().child(controls))
-                .into_any_element()
-        } else {
-            h_flex()
-                .gap_4()
-                .child(text)
-                .child(div().flex_none().child(controls))
-                .into_any_element()
+        // Module titles truncate, so their tooltip names them in full.
+        let tip: SharedString = match row {
+            Row::Module(_) | Row::Rig(_) => format!("{title}: {description}").into(),
+            _ => description,
         };
-        v_flex()
+        let label = h_flex()
+            .id(SharedString::from(format!("wizard-label-{}", row.key())))
+            .w(px(LABEL_W))
+            .flex_none()
+            .gap_1()
+            .when(disabled, |d| d.opacity(0.5))
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(title),
+            )
+            .when(!tip.is_empty(), |d| {
+                d.child(
+                    UiIcon::new(AssetIcon::Info)
+                        .xsmall()
+                        .flex_none()
+                        .text_color(theme.muted_foreground.opacity(0.6)),
+                )
+                .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+            });
+        h_flex()
             .id(SharedString::from(format!("wizard-row-{}", row.key())))
-            .px_4()
-            .py_2()
+            .min_h(px(ROW_H))
+            .gap_3()
+            .px_2()
+            .py_0p5()
+            .text_sm()
             .border_l_2()
             .border_color(if active {
                 theme.primary
@@ -1339,12 +1422,26 @@ impl WizardPanel {
                 MouseButton::Left,
                 cx.listener(move |this, _, _, cx| this.focus_row(row, cx)),
             )
-            .child(body)
-            .children(results)
+            .child(label)
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .flex_wrap()
+                    .gap_2()
+                    .children(controls),
+            )
             .into_any_element()
     }
 
-    fn sections(&self, rows: &[Row], cursor: Option<Row>, cx: &mut Context<Self>) -> Div {
+    /// A column of captioned sections, which scrolls on its own when the window is too short.
+    fn column(
+        &self,
+        id: &'static str,
+        rows: &[Row],
+        cursor: Option<Row>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let mut groups: Vec<(&'static str, Vec<Row>)> = Vec::new();
         for &row in rows {
             let title = section_of(row);
@@ -1353,15 +1450,27 @@ impl WizardPanel {
                 _ => groups.push((title, vec![row])),
             }
         }
-        let mut column = v_flex().flex_1().min_w_0().gap_4();
+        let mut column = v_flex()
+            .id(id)
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .overflow_y_scroll()
+            .gap_5()
+            .pb_4();
         for (title, rows) in groups {
             let elements: Vec<AnyElement> = rows
                 .into_iter()
                 .map(|r| self.row_element(r, cursor, cx))
                 .collect();
-            column = column.child(section(title, elements, cx));
+            column = column.child(
+                v_flex()
+                    .gap_0p5()
+                    .child(caption(title, cx))
+                    .children(elements),
+            );
         }
-        column
+        column.into_any_element()
     }
 
     // The preview.
@@ -1454,7 +1563,7 @@ impl WizardPanel {
             .sum();
         let muted = cx.theme().muted_foreground;
         v_flex()
-            .gap_3()
+            .gap_2()
             .child(caption("Modules", cx))
             .child(self.racks(cx))
             .child(gauges)
@@ -1467,9 +1576,9 @@ impl WizardPanel {
                         .child(format!("{} ISK", widgets::short(cost))),
                 )
             })
-            .child(caption("Tank", cx))
+            .child(caption("Tank", cx).mt_3())
             .child(self.tank_summary(cx))
-            .child(caption("Damage", cx))
+            .child(caption("Damage", cx).mt_3())
             .child(self.damage_summary(cx))
     }
 
@@ -1576,7 +1685,8 @@ fn section_of(row: Row) -> &'static str {
         Row::Weapon | Row::Ammo => "Weapons",
         Row::Prop => "Propulsion",
         Row::Utility(_) => "Tackle & utility",
-        Row::Style | Row::Layer | Row::Goal | Row::Search | Row::Results | Row::Module(_) => "Tank",
+        Row::Style | Row::Layer | Row::Goal | Row::Search | Row::Module(_) => "Tank",
+        Row::Results => "Results",
         Row::Damage | Row::Rigs | Row::Rig(_) => "Damage & rigs",
     }
 }
@@ -1626,35 +1736,61 @@ fn line(label: &str, value: String, cx: &App) -> Div {
         .child(value)
 }
 
-/// A small uppercase caption over a group of rows.
+/// A small uppercase caption over a group of rows, with a hairline under it.
 fn caption(title: &str, cx: &App) -> Div {
+    let theme = cx.theme();
     div()
         .px_1()
+        .pb_1()
+        .mb_1()
+        .border_b_1()
+        .border_color(theme.border)
         .text_xs()
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(cx.theme().muted_foreground)
+        .text_color(theme.muted_foreground)
         .child(title.to_uppercase())
 }
 
-/// A titled card of rows, divided by hairlines.
-fn section(title: &'static str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
-    let theme = cx.theme();
-    let mut card = v_flex()
-        .rounded(px(8.))
-        .border_1()
-        .border_color(theme.border)
-        .bg(theme.sidebar)
-        .overflow_hidden();
-    for (n, row) in rows.into_iter().enumerate() {
-        if n > 0 {
-            card = card.child(div().h_px().mx_4().bg(theme.border));
+/// Why the search's better tanks did not make it.
+fn limit_text(limit: Limit) -> SharedString {
+    let rest = match limit {
+        Limit::Cpu | Limit::Powergrid => {
+            "better modules did not fit. Try Make it fit, lower tier weapons or fewer utilities."
         }
-        card = card.child(row);
-    }
-    v_flex()
-        .gap_2()
-        .child(caption(title, cx))
-        .child(card)
+        Limit::Calibration => "better rigs did not fit.",
+    };
+    format!("{} is the limit: {rest}", limit.label()).into()
+}
+
+/// A numeric cell of the results table, right aligned.
+fn cell(value: impl Into<SharedString>, width: f32) -> Div {
+    div()
+        .w(px(width))
+        .flex_none()
+        .text_right()
+        .child(value.into())
+}
+
+/// Muted text after a row's controls that takes what room is left and truncates.
+fn aside(text: impl Into<SharedString>, cx: &App) -> AnyElement {
+    div()
+        .flex_1()
+        .min_w_0()
+        .truncate()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .child(text.into())
+        .into_any_element()
+}
+
+/// How many of a module go on, ahead of its variant dropdown.
+fn count_cell(n: usize, cx: &App) -> AnyElement {
+    div()
+        .w(px(20.))
+        .flex_none()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .child(format!("{n}x"))
         .into_any_element()
 }
 
@@ -1712,83 +1848,92 @@ impl Render for WizardPanel {
         }
         let fits = wizard::fits(&self.stats);
         let cursor = self.current_row();
-        let left = self.sections(&self.left_rows(), cursor, cx);
-        let right = self.sections(&self.right_rows(), cursor, cx);
+        let loadout = self.column("wizard-loadout", &self.left_rows(), cursor, cx);
+        let tank = self.column("wizard-tank", &self.right_rows(), cursor, cx);
         let count = self.picks.len();
         let preview = self.preview(cx);
-        let height = (window.viewport_size().height * 0.72).max(px(360.));
+        let height = window.viewport_size().height - px(2. * INSET);
         let theme = cx.theme();
-        let hint = div().text_xs().text_color(theme.muted_foreground).child(
-            "Up/Down: row, Left/Right or 1-9: choose, [ ]: variant, Space: toggle, F: find the \
-             best tank, Enter: apply",
-        );
-        let footer = h_flex().justify_between().gap_2().child(hint).child(
-            h_flex()
-                .gap_2()
-                .when(!fits, |f| {
-                    f.child(
-                        Button::new("wizard-make-fit")
-                            .small()
-                            .tab_stop(false)
-                            .icon(AssetIcon::Minimize2)
-                            .label("Make it fit (M)")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.make_it_fit(cx);
-                                this.refocus(window, cx);
-                            })),
-                    )
-                })
-                .child(
-                    Button::new("wizard-apply")
+        let header = h_flex()
+            .flex_none()
+            .h(px(44.))
+            .px_5()
+            // Room for the dialog's close button.
+            .pr_12()
+            .text_base()
+            .font_weight(FontWeight::SEMIBOLD)
+            .child(div().truncate().child(self.title.clone()));
+        let hint = div()
+            .flex_1()
+            .min_w_0()
+            .truncate()
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .child(
+                "Up/Down: row   Left/Right or 1-9: choose   [ ]: variant   Space: toggle   \
+                 F: find the best tank   Enter: apply",
+            );
+        let footer = h_flex()
+            .flex_none()
+            .gap_3()
+            .px_5()
+            .py_2()
+            .border_t_1()
+            .border_color(theme.border)
+            .child(hint)
+            .when(!fits, |f| {
+                f.child(
+                    Button::new("wizard-make-fit")
                         .small()
-                        .primary()
                         .tab_stop(false)
-                        .icon(IconName::Check)
-                        .label(format!("Apply {count} modules"))
-                        .disabled(count == 0)
-                        .on_click(cx.listener(|this, _, window, cx| this.apply(window, cx))),
-                ),
-        );
+                        .icon(AssetIcon::Minimize2)
+                        .label("Make it fit (M)")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.make_it_fit(cx);
+                            this.refocus(window, cx);
+                        })),
+                )
+            })
+            .child(
+                Button::new("wizard-apply")
+                    .small()
+                    .primary()
+                    .tab_stop(false)
+                    .icon(IconName::Check)
+                    .label(format!("Apply {count} modules"))
+                    .disabled(count == 0)
+                    .on_click(cx.listener(|this, _, window, cx| this.apply(window, cx))),
+            );
         v_flex()
             .track_focus(&self.focus)
             .key_context("FittingWizard")
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 this.key(event, window, cx);
             }))
-            .gap_3()
+            .w_full()
+            .h(height)
+            .child(header)
             .child(
                 h_flex()
+                    .flex_1()
+                    .min_h_0()
                     .items_start()
-                    .gap_4()
-                    .child(
-                        h_flex()
-                            .id("wizard-choices")
-                            .flex_1()
-                            .min_w_0()
-                            .max_h(height)
-                            .overflow_y_scroll()
-                            .items_start()
-                            .gap_4()
-                            .pr_1()
-                            .child(left)
-                            .child(right),
-                    )
+                    .gap_8()
+                    .px_5()
+                    .pt_1()
+                    .child(loadout)
+                    .child(tank)
                     .child(
                         v_flex()
                             .id("wizard-preview")
                             .w(px(PREVIEW_W))
                             .flex_none()
-                            .max_h(height)
+                            .h_full()
                             .overflow_y_scroll()
-                            .p_3()
-                            .rounded(px(8.))
-                            .border_1()
-                            .border_color(theme.border)
-                            .bg(theme.sidebar)
+                            .pb_4()
                             .child(preview),
                     ),
             )
-            .child(div().h_px().bg(theme.border))
             .child(footer)
     }
 }
