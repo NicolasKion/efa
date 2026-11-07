@@ -51,6 +51,9 @@ pub struct Saved {
     /// The fitting wizard's last bling choices, which the next fit starts from.
     #[serde(default)]
     pub wizard: crate::wizard::Bling,
+    /// The fitting wizard's last tab, which it opens on next time.
+    #[serde(default)]
+    pub wizard_tab: crate::wizard::Tab,
     /// pyfa's attribute overrides and whether they are on.
     #[serde(default)]
     pub overrides: crate::overrides::Overrides,

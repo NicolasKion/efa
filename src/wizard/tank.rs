@@ -542,11 +542,8 @@ impl Setup<'_> {
         }
         let (base, room) = self.plan_base(fit, choices);
         let mut next = fit.clone();
-        apply(
-            &mut next,
-            &self.placements(fit, &base, choices.clear),
-            choices.clear,
-        );
+        let cleared = choices.cleared();
+        apply(&mut next, &self.placements(fit, &base, cleared), cleared);
         // Repair is judged with the guns idle, so the capacitor goes to the tank.
         for module in next.high.iter_mut().flatten() {
             if matches!(module.state, ModuleState::Active | ModuleState::Overload) {
@@ -580,6 +577,12 @@ impl Setup<'_> {
             .filter(|&i| empty.incoming[i] > 0.0)
             .collect();
         let weakest = exposed.as_slice();
+        // Repairers already fitted count: the search need not add one, though it may.
+        let repairing = next
+            .rack(slot)
+            .iter()
+            .flatten()
+            .any(|m| category_of(self.catalog, m.type_id) == Category::Repairer);
         Some(Problem {
             candidates: self.tank_candidates(choices, weakest),
             rigs: if rig_positions.is_empty() {
@@ -593,7 +596,7 @@ impl Setup<'_> {
             aim: Aim::of(choices),
             positions,
             rig_positions,
-            need_repair: choices.tank == TankStyle::Active,
+            need_repair: choices.tank == TankStyle::Active && !repairing,
         })
     }
 

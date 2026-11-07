@@ -1,9 +1,10 @@
-//! The fitting wizard: an overlay over nearly the whole window with every choice on it. Three
-//! columns: the loadout, the tank and a live preview. Each column is captioned sections of rows,
-//! a fixed label column on the left (its description in a tooltip) and the controls filling the
-//! rest. Every module row picks its own variation; the tank column can search for the best tank
-//! off the UI thread and lists what it found as a table. The preview shows what goes where, what
-//! it costs and how it tanks. The picking is in [`crate::wizard`].
+//! The fitting wizard: an overlay over nearly the whole window, with tabs for the loadout, the
+//! tank and the rigs and a live preview beside them. A tab adds to the fit only once something
+//! on it changed, so the tank tab alone fills the free slots around what is fitted. Each tab is
+//! captioned sections of rows, a fixed label column on the left (its description in a tooltip)
+//! and the controls filling the rest. Every module row picks its own variation; the tank tab can
+//! search for the best tank off the UI thread and lists what it found as a table. The preview
+//! shows what goes where, what it costs and how it tanks. The picking is in [`crate::wizard`].
 
 use std::{rc::Rc, sync::Arc, time::Duration};
 
@@ -35,7 +36,7 @@ use crate::{
     theme::Palette,
     wizard::{
         self, Ammo, Category, Choices, DamageMods, Facts, Family, Goal, Layer, Pick, Prop, Rigs,
-        Setup, TankStyle, Tier, Utility,
+        Setup, Tab, Tabs, TankStyle, Tier, Utility,
         tank::{self, Found, Limit, Outcome, Progress},
     },
 };
@@ -63,11 +64,12 @@ mod attr {
     pub const UPGRADE_COST: i32 = 1153;
 }
 
-/// The rows of choices, in keyboard order: the loadout column, then the tank column.
+/// The rows of choices. A tab's rows go in keyboard order: its left column, then its right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Row {
     Tier,
-    Racks,
+    /// Whether a tab fills the free slots or empties its racks first.
+    Racks(Tab),
     Weapon,
     Ammo,
     Prop,
@@ -88,6 +90,21 @@ enum Row {
 impl Row {
     fn key(self) -> String {
         format!("{self:?}")
+    }
+
+    /// The tab a change on the row puts on the fit; None for the bling, which every tab uses.
+    fn tab(self) -> Option<Tab> {
+        match self {
+            Row::Tier => None,
+            Row::Racks(tab) => Some(tab),
+            Row::Weapon | Row::Ammo | Row::Prop | Row::Utility(_) | Row::Damage => {
+                Some(Tab::Loadout)
+            }
+            Row::Style | Row::Layer | Row::Goal | Row::Search | Row::Results | Row::Module(_) => {
+                Some(Tab::Tank)
+            }
+            Row::Rigs | Row::Rig(_) => Some(Tab::Rigs),
+        }
     }
 }
 
@@ -135,6 +152,7 @@ pub(super) struct WizardPanel {
     focused: bool,
     palette: Palette,
     title: SharedString,
+    tab: Tab,
 }
 
 impl Gyfa {
@@ -183,6 +201,9 @@ impl Gyfa {
         let families = wizard::families(&loaded.catalog, &data, &facts);
         let mut choices = Setup::new(&loaded.catalog, &data, &facts, &families).defaults();
         choices.bling = self.saved.wizard.clone();
+        // Nothing goes on until a tab's choices change.
+        choices.touched = Tabs::NONE;
+        let tab = self.saved.wizard_tab;
         let gyfa = cx.entity().downgrade();
         let palette = self.palette;
         let prices = Rc::clone(&self.prices);
@@ -213,6 +234,7 @@ impl Gyfa {
                 focused: false,
                 palette,
                 title,
+                tab,
             };
             panel.replan();
             panel
@@ -248,13 +270,13 @@ impl WizardPanel {
     fn set_picks(&mut self, picks: Vec<Pick>) {
         let placements = self
             .setup()
-            .placements(&self.fit, &picks, self.choices.clear);
+            .placements(&self.fit, &picks, self.choices.cleared());
         self.stats = wizard::preview(
             &self.loaded.engine,
             &self.pilot,
             &self.fit,
             &placements,
-            self.choices.clear,
+            self.choices.cleared(),
         );
         self.picks = picks;
     }
@@ -265,7 +287,7 @@ impl WizardPanel {
             &self.pilot,
             &self.fit,
             &self.picks,
-            self.choices.clear,
+            self.choices.cleared(),
         );
         self.set_picks(picks);
         self.made_to_fit = true;
@@ -274,7 +296,7 @@ impl WizardPanel {
 
     fn apply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search = None;
-        let clear = self.choices.clear;
+        let clear = self.choices.cleared();
         let placements = self.setup().placements(&self.fit, &self.picks, clear);
         let bling = self.choices.bling.clone();
         window.close_dialog(cx);
@@ -284,9 +306,13 @@ impl WizardPanel {
         });
     }
 
-    fn change(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Choices)) {
+    /// Change the choices; `touch` is the tab whose choices that puts on the fit.
+    fn change(&mut self, touch: Option<Tab>, cx: &mut Context<Self>, f: impl FnOnce(&mut Choices)) {
         let before = self.choices.clone();
         f(&mut self.choices);
+        if let Some(tab) = touch {
+            self.choices.touched.set(tab, true);
+        }
         // A new weapon kind brings its own damage modules.
         if self.choices.family != before.family && self.choices.damage == DamageMods::None {
             self.choices.damage = before.damage;
@@ -326,6 +352,10 @@ impl WizardPanel {
     fn find_best(&mut self, cx: &mut Context<Self>) {
         if self.search.is_some() {
             return;
+        }
+        // Searching is a tank choice: the tank tab goes on the fit.
+        if !self.choices.touched.has(Tab::Tank) {
+            self.change(Some(Tab::Tank), cx, |_| {});
         }
         let Some(problem) =
             self.setup()
@@ -410,7 +440,7 @@ impl WizardPanel {
             return;
         };
         self.selected = Some(i);
-        self.change(cx, |c| c.tank_fit = Some(found));
+        self.change(Some(Tab::Tank), cx, |c| c.tank_fit = Some(found));
     }
 
     // Rows and what they hold.
@@ -485,34 +515,105 @@ impl WizardPanel {
         self.distinct(|p| p.slot == Slot::Rig)
     }
 
-    fn left_rows(&self) -> Vec<Row> {
-        let mut rows = vec![Row::Tier, Row::Racks, Row::Weapon];
-        if self.choices.family.is_some() {
-            rows.push(Row::Ammo);
+    /// A tab's rows: its left column and its right one.
+    fn tab_rows(&self, tab: Tab) -> (Vec<Row>, Vec<Row>) {
+        match tab {
+            Tab::Loadout => {
+                let mut left = vec![Row::Tier, Row::Racks(tab), Row::Weapon];
+                if self.choices.family.is_some() {
+                    left.push(Row::Ammo);
+                }
+                left.push(Row::Prop);
+                let mut right: Vec<Row> = Utility::ALL.into_iter().map(Row::Utility).collect();
+                right.push(Row::Damage);
+                (left, right)
+            }
+            Tab::Tank => {
+                let mut left = vec![Row::Racks(tab), Row::Style];
+                if self.choices.tank != TankStyle::None {
+                    left.extend([Row::Layer, Row::Goal, Row::Search]);
+                }
+                left.extend(self.module_rows().into_iter().map(|(b, _)| Row::Module(b)));
+                let right = if self.choices.tank != TankStyle::None && !self.results.is_empty() {
+                    vec![Row::Results]
+                } else {
+                    Vec::new()
+                };
+                (left, right)
+            }
+            Tab::Rigs => {
+                let mut left = vec![Row::Racks(tab), Row::Rigs];
+                left.extend(self.rig_rows().into_iter().map(|(b, _)| Row::Rig(b)));
+                (left, Vec::new())
+            }
         }
-        rows.push(Row::Prop);
-        rows.extend(Utility::ALL.into_iter().map(Row::Utility));
-        rows.extend([Row::Damage, Row::Rigs]);
-        rows.extend(self.rig_rows().into_iter().map(|(b, _)| Row::Rig(b)));
-        rows
     }
 
-    fn right_rows(&self) -> Vec<Row> {
-        let mut rows = vec![Row::Style];
-        if self.choices.tank != TankStyle::None {
-            rows.extend([Row::Layer, Row::Goal, Row::Search]);
-        }
-        rows.extend(self.module_rows().into_iter().map(|(b, _)| Row::Module(b)));
-        if self.choices.tank != TankStyle::None && !self.results.is_empty() {
-            rows.push(Row::Results);
-        }
-        rows
-    }
-
+    /// The current tab's rows, in keyboard order.
     fn rows(&self) -> Vec<Row> {
-        let mut rows = self.left_rows();
-        rows.extend(self.right_rows());
+        let (mut rows, right) = self.tab_rows(self.tab);
+        rows.extend(right);
         rows
+    }
+
+    fn set_tab(&mut self, tab: Tab, cx: &mut Context<Self>) {
+        if tab == self.tab {
+            return;
+        }
+        self.tab = tab;
+        self.row = 0;
+        Gyfa::app_update(&self.gyfa, cx, |g, _| {
+            g.saved.wizard_tab = tab;
+            g.save();
+        });
+        cx.notify();
+    }
+
+    /// The picks a tab adds: the loadout's modules, the tank with its rigs, or every rig.
+    fn tab_picks(&self, tab: Tab) -> impl Iterator<Item = &Pick> {
+        self.picks.iter().filter(move |p| match tab {
+            Tab::Loadout => !p.tank && p.slot != Slot::Rig,
+            Tab::Tank => p.tank,
+            Tab::Rigs => p.slot == Slot::Rig,
+        })
+    }
+
+    /// One line on what a tab adds to the fit, or why it adds nothing.
+    fn summary(&self, tab: Tab) -> String {
+        let word = |slot: Slot| match slot {
+            Slot::High => "high",
+            Slot::Mid => "mid",
+            Slot::Low => "low",
+            _ => "rig",
+        };
+        let counts: Vec<String> = [Slot::High, Slot::Mid, Slot::Low, Slot::Rig]
+            .into_iter()
+            .filter_map(|slot| {
+                let n = self.tab_picks(tab).filter(|p| p.slot == slot).count();
+                (n > 0).then(|| format!("{n} {}{}", word(slot), if n == 1 { "" } else { "s" }))
+            })
+            .collect();
+        if !counts.is_empty() {
+            return format!("Adds {}", join_and(&counts, "and"));
+        }
+        let cleared = self.choices.cleared();
+        let racks = self.choices.racks(tab);
+        let free = racks.iter().any(|&slot| {
+            let others = self
+                .picks
+                .iter()
+                .filter(|p| p.slot == slot && !self.tab_picks(tab).any(|q| std::ptr::eq(q, *p)))
+                .count();
+            self.setup().free(&self.fit, slot, cleared).len() > others
+        });
+        if !free {
+            let names: Vec<String> = racks.iter().map(|&s| word(s).to_owned()).collect();
+            format!("Nothing to add: no free {} slots", join_and(&names, "or"))
+        } else if !self.choices.touched.has(tab) {
+            "Nothing to add yet: the fit stays as it is until something here changes".into()
+        } else {
+            "Nothing to add with these choices".into()
+        }
     }
 
     fn current_row(&self) -> Option<Row> {
@@ -530,9 +631,9 @@ impl WizardPanel {
                 Tier::ALL.iter().map(|t| (t.label().into(), true)).collect(),
                 Tier::ALL.iter().position(|&t| t == c.bling.tier)?,
             ),
-            Row::Racks => (
+            Row::Racks(tab) => (
                 vec![("Fill free".into(), true), ("Clear first".into(), true)],
-                usize::from(c.clear),
+                usize::from(c.clear.has(tab)),
             ),
             Row::Ammo => (
                 vec![
@@ -632,9 +733,9 @@ impl WizardPanel {
         let families = self.families.len();
         match row {
             Row::Results => self.select(i, cx),
-            _ => self.change(cx, |c| match row {
+            _ => self.change(row.tab(), cx, |c| match row {
                 Row::Tier => c.bling.set_tier(Tier::ALL[i]),
-                Row::Racks => c.clear = i == 1,
+                Row::Racks(tab) => c.clear.set(tab, i == 1),
                 Row::Weapon => c.family = (i < families).then_some(i),
                 Row::Ammo => c.ammo = Ammo::ALL[i],
                 Row::Prop => c.prop = Prop::ALL[i],
@@ -657,7 +758,7 @@ impl WizardPanel {
         match row {
             Row::Utility(u) => {
                 if self.utility_usable(u) {
-                    self.change(cx, |c| c.toggle(u));
+                    self.change(row.tab(), cx, |c| c.toggle(u));
                 }
                 return;
             }
@@ -712,7 +813,7 @@ impl WizardPanel {
             return;
         };
         let tier = Tier::of(&self.loaded.catalog, id, base);
-        self.change(cx, |c| c.bling.choose(category, base, id, tier));
+        self.change(row.tab(), cx, |c| c.bling.choose(category, base, id, tier));
     }
 
     fn step_variant(&mut self, row: Row, back: bool, cx: &mut Context<Self>) {
@@ -742,7 +843,22 @@ impl WizardPanel {
 
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
-        if keystroke.modifiers.control || keystroke.modifiers.alt {
+        if keystroke.modifiers.alt {
+            return;
+        }
+        if keystroke.modifiers.control {
+            let at = Tab::ALL.iter().position(|&t| t == self.tab).unwrap_or(0);
+            let len = Tab::ALL.len();
+            let tab = match keystroke.key.as_str() {
+                "tab" if keystroke.modifiers.shift => Tab::ALL[(at + len - 1) % len],
+                "tab" => Tab::ALL[(at + 1) % len],
+                key => match key.parse::<usize>() {
+                    Ok(n @ 1..=3) => Tab::ALL[n - 1],
+                    _ => return,
+                },
+            };
+            self.set_tab(tab, cx);
+            cx.stop_propagation();
             return;
         }
         let rows = self.rows();
@@ -960,14 +1076,19 @@ impl WizardPanel {
                 "The tier every module starts at. Each module row can pick its own variation."
                     .into(),
             ),
-            Row::Racks => (
-                "Racks".into(),
-                if c.clear {
-                    "Empty the racks and rigs, then fit everything anew.".into()
+            Row::Racks(tab) => ("Racks".into(), {
+                let racks = match (tab, c.layer) {
+                    (Tab::Loadout, _) => "high, mid and low racks",
+                    (Tab::Tank, Layer::Shield) => "mid rack",
+                    (Tab::Tank, Layer::Armor) => "low rack",
+                    (Tab::Rigs, _) => "rigs",
+                };
+                if c.clear.has(tab) {
+                    format!("Empty the {racks}, then fit them anew.")
                 } else {
-                    "Keep what is fitted and fill the free slots.".into()
-                },
-            ),
+                    format!("Keep what is fitted in the {racks} and fill the free slots.")
+                }
+            }),
             Row::Weapon => (
                 "Weapons".into(),
                 match self.setup().family(c) {
@@ -1127,7 +1248,7 @@ impl WizardPanel {
                     .disabled(!self.utility_usable(u))
                     .on_click(cx.listener(move |this, _: &bool, window, cx| {
                         this.focus_row(row, cx);
-                        this.change(cx, |c| c.toggle(u));
+                        this.change(row.tab(), cx, |c| c.toggle(u));
                         this.refocus(window, cx);
                     }))
                     .into_any_element(),
@@ -1473,6 +1594,46 @@ impl WizardPanel {
         column.into_any_element()
     }
 
+    /// The tabs, the current one underlined; a dot marks those that add to the fit.
+    fn tab_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let tabs: Vec<AnyElement> = Tab::ALL
+            .into_iter()
+            .map(|tab| {
+                let current = tab == self.tab;
+                let touched = self.choices.touched.has(tab);
+                h_flex()
+                    .id(SharedString::from(format!("wizard-tab-{tab:?}")))
+                    .h_full()
+                    .gap_1p5()
+                    .px_2()
+                    .border_b_2()
+                    .text_sm()
+                    .cursor_pointer()
+                    .when(current, |d| {
+                        d.border_color(theme.primary)
+                            .text_color(theme.foreground)
+                            .font_weight(FontWeight::MEDIUM)
+                    })
+                    .when(!current, |d| {
+                        d.border_color(theme.primary.opacity(0.))
+                            .text_color(theme.muted_foreground)
+                            .hover(|s| s.text_color(theme.foreground))
+                    })
+                    .child(tab.label())
+                    .when(touched, |d| {
+                        d.child(div().size(px(5.)).rounded_full().bg(theme.primary))
+                    })
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        this.set_tab(tab, cx);
+                        this.refocus(window, cx);
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+        h_flex().h_full().gap_2().children(tabs).into_any_element()
+    }
+
     // The preview.
 
     fn racks(&self, cx: &App) -> Div {
@@ -1485,7 +1646,7 @@ impl WizardPanel {
                 continue;
             }
             let picks: Vec<&Pick> = self.picks.iter().filter(|p| p.slot == slot).collect();
-            let kept = if self.choices.clear {
+            let kept = if self.choices.cleared().has(slot) {
                 0
             } else if slot == Slot::Rig {
                 self.fit.rigs.iter().flatten().count()
@@ -1681,13 +1842,14 @@ impl WizardPanel {
 /// The section a row sits in.
 fn section_of(row: Row) -> &'static str {
     match row {
-        Row::Tier | Row::Racks => "General",
+        Row::Tier | Row::Racks(_) => "General",
         Row::Weapon | Row::Ammo => "Weapons",
         Row::Prop => "Propulsion",
         Row::Utility(_) => "Tackle & utility",
         Row::Style | Row::Layer | Row::Goal | Row::Search | Row::Module(_) => "Tank",
         Row::Results => "Results",
-        Row::Damage | Row::Rigs | Row::Rig(_) => "Damage & rigs",
+        Row::Damage => "Damage modules",
+        Row::Rigs | Row::Rig(_) => "Rigs",
     }
 }
 
@@ -1749,6 +1911,15 @@ fn caption(title: &str, cx: &App) -> Div {
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme.muted_foreground)
         .child(title.to_uppercase())
+}
+
+/// "a, b and c".
+fn join_and(parts: &[String], word: &str) -> String {
+    match parts {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} {word} {last}", rest.join(", ")),
+    }
 }
 
 /// Why the search's better tanks did not make it.
@@ -1848,8 +2019,11 @@ impl Render for WizardPanel {
         }
         let fits = wizard::fits(&self.stats);
         let cursor = self.current_row();
-        let loadout = self.column("wizard-loadout", &self.left_rows(), cursor, cx);
-        let tank = self.column("wizard-tank", &self.right_rows(), cursor, cx);
+        let (left, right) = self.tab_rows(self.tab);
+        let left = self.column("wizard-left", &left, cursor, cx);
+        let right = self.column("wizard-right", &right, cursor, cx);
+        let summary = self.summary(self.tab);
+        let tabs = self.tab_bar(cx);
         let count = self.picks.len();
         let preview = self.preview(cx);
         let height = window.viewport_size().height - px(2. * INSET);
@@ -1860,9 +2034,15 @@ impl Render for WizardPanel {
             .px_5()
             // Room for the dialog's close button.
             .pr_12()
-            .text_base()
-            .font_weight(FontWeight::SEMIBOLD)
-            .child(div().truncate().child(self.title.clone()));
+            .gap_6()
+            .child(
+                div()
+                    .flex_none()
+                    .text_base()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(self.title.clone()),
+            )
+            .child(tabs);
         let hint = div()
             .flex_1()
             .min_w_0()
@@ -1870,8 +2050,8 @@ impl Render for WizardPanel {
             .text_xs()
             .text_color(theme.muted_foreground)
             .child(
-                "Up/Down: row   Left/Right or 1-9: choose   [ ]: variant   Space: toggle   \
-                 F: find the best tank   Enter: apply",
+                "Ctrl+Tab or Ctrl+1-3: tab   Up/Down: row   Left/Right or 1-9: choose   \
+                 [ ]: variant   Space: toggle   F: find the best tank   Enter: apply",
             );
         let footer = h_flex()
             .flex_none()
@@ -1920,9 +2100,33 @@ impl Render for WizardPanel {
                     .items_start()
                     .gap_8()
                     .px_5()
-                    .pt_1()
-                    .child(loadout)
-                    .child(tank)
+                    .pt_3()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .gap_3()
+                            .child(
+                                h_flex()
+                                    .flex_none()
+                                    .gap_1p5()
+                                    .px_2()
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child(UiIcon::new(AssetIcon::Info).xsmall())
+                                    .child(summary),
+                            )
+                            .child(
+                                h_flex()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .items_start()
+                                    .gap_8()
+                                    .child(left)
+                                    .child(right),
+                            ),
+                    )
                     .child(
                         v_flex()
                             .id("wizard-preview")

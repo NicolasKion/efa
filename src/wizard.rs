@@ -2,6 +2,10 @@
 //! suit a hull, and where they go. No UI here; the wizard dialog shows and applies what this
 //! works out.
 //!
+//! The choices come in three tabs: loadout, tank and rigs. Each adds to the free slots of the
+//! racks it fills, around what is fitted, and only once the user changed something on it, so
+//! the tank tab alone searches a tank for the fit exactly as it is.
+//!
 //! Items are found by their T1 name and resolved to a tier through their variations, so a new
 //! meta item or a renamed faction one is picked up without a list of type IDs.
 
@@ -9,6 +13,8 @@ mod bling;
 pub mod tank;
 
 use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
 
 pub use bling::{Bling, Category, Tier};
 
@@ -435,9 +441,97 @@ pub struct Choices {
     pub tank_fit: Option<TankFit>,
     pub damage: DamageMods,
     pub rigs: Rigs,
-    /// Empty the module racks and rigs first, instead of filling the free slots.
-    pub clear: bool,
+    /// Tabs that empty their racks first, instead of filling the free slots.
+    pub clear: Tabs,
+    /// Tabs whose choices go on the fit; the others leave it as it is.
+    pub touched: Tabs,
     pub bling: Bling,
+}
+
+/// The wizard's tabs, each with the racks it fills.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Tab {
+    /// Weapons, propulsion, tackle, utilities and damage modules: the high, mid and low racks.
+    #[default]
+    Loadout,
+    /// The tank layer's rack, and the rigs when the tank takes them.
+    Tank,
+    Rigs,
+}
+
+impl Tab {
+    pub const ALL: [Self; 3] = [Self::Loadout, Self::Tank, Self::Rigs];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Loadout => "Loadout",
+            Self::Tank => "Tank",
+            Self::Rigs => "Rigs",
+        }
+    }
+
+    fn bit(self) -> u8 {
+        1 << self as u8
+    }
+}
+
+/// A set of tabs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Tabs(u8);
+
+impl Tabs {
+    pub const NONE: Self = Self(0);
+    pub const ALL: Self = Self(0b111);
+
+    pub fn has(self, tab: Tab) -> bool {
+        self.0 & tab.bit() != 0
+    }
+
+    pub fn set(&mut self, tab: Tab, on: bool) {
+        if on {
+            self.0 |= tab.bit();
+        } else {
+            self.0 &= !tab.bit();
+        }
+    }
+
+    #[must_use]
+    pub fn with(mut self, tab: Tab) -> Self {
+        self.set(tab, true);
+        self
+    }
+}
+
+/// Racks emptied before the wizard's modules go on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Cleared(u8);
+
+impl Cleared {
+    pub const NONE: Self = Self(0);
+    pub const ALL: Self = Self(0b1111);
+
+    fn bit(slot: Slot) -> u8 {
+        match slot {
+            Slot::High => 1,
+            Slot::Mid => 2,
+            Slot::Low => 4,
+            Slot::Rig => 8,
+            _ => 0,
+        }
+    }
+
+    pub fn has(self, slot: Slot) -> bool {
+        self.0 & Self::bit(slot) != 0
+    }
+
+    pub fn any(self) -> bool {
+        self.0 != 0
+    }
+
+    #[must_use]
+    pub fn with(self, slot: Slot) -> Self {
+        Self(self.0 | Self::bit(slot))
+    }
 }
 
 impl Choices {
@@ -452,6 +546,25 @@ impl Choices {
 
     pub fn has(&self, utility: Utility) -> bool {
         self.utilities.contains(&utility)
+    }
+
+    /// The racks a tab fills.
+    pub fn racks(&self, tab: Tab) -> &'static [Slot] {
+        match (tab, self.layer) {
+            (Tab::Loadout, _) => &[Slot::High, Slot::Mid, Slot::Low],
+            (Tab::Tank, Layer::Shield) => &[Slot::Mid],
+            (Tab::Tank, Layer::Armor) => &[Slot::Low],
+            (Tab::Rigs, _) => &[Slot::Rig],
+        }
+    }
+
+    /// The racks emptied first: those of the touched tabs that clear theirs.
+    pub fn cleared(&self) -> Cleared {
+        Tab::ALL
+            .into_iter()
+            .filter(|&t| self.clear.has(t) && self.touched.has(t))
+            .flat_map(|t| self.racks(t).iter().copied())
+            .fold(Cleared::NONE, Cleared::with)
     }
 }
 
@@ -985,7 +1098,8 @@ impl<'a> Setup<'a> {
                 DamageMods::None
             },
             rigs: Rigs::Tank,
-            clear: false,
+            clear: Tabs::NONE,
+            touched: Tabs::ALL,
             bling: Bling::default(),
         }
     }
@@ -1126,12 +1240,12 @@ impl<'a> Setup<'a> {
         }
     }
 
-    /// Free positions of each rack in `fit`, all of them when the racks are cleared first.
-    fn free(&self, fit: &Fit, slot: Slot, clear: bool) -> Vec<usize> {
+    /// Free positions of a rack in `fit`, all of them when the rack is cleared first.
+    pub fn free(&self, fit: &Fit, slot: Slot, cleared: Cleared) -> Vec<usize> {
         let total = self.facts.total(slot);
         (0..total)
             .filter(|&i| {
-                clear
+                cleared.has(slot)
                     || match slot {
                         Slot::Rig => fit.rigs.get(i).is_none_or(Option::is_none),
                         _ => fit.rack(slot).get(i).is_none_or(Option::is_none),
@@ -1141,9 +1255,9 @@ impl<'a> Setup<'a> {
     }
 
     /// Calibration left for new rigs.
-    fn calibration_left(&self, fit: &Fit, clear: bool) -> f64 {
+    fn calibration_left(&self, fit: &Fit, cleared: Cleared) -> f64 {
         self.facts.calibration
-            - if clear {
+            - if cleared.has(Slot::Rig) {
                 0.0
             } else {
                 fit.rigs.iter().flatten().map(|&r| self.cost(r)).sum()
@@ -1180,7 +1294,12 @@ impl<'a> Setup<'a> {
         let group = |id: TypeId| self.catalog.get(id).map(|t| t.group_id);
         // One damage control and one propulsion module per fit.
         if let Some(g) = group(base).filter(|g| ONE_PER_FIT.contains(g)) {
-            let fitted = !choices.clear && fit.modules().any(|m| group(m.type_id) == Some(g));
+            let cleared = choices.cleared();
+            let fitted = [Slot::High, Slot::Mid, Slot::Low]
+                .into_iter()
+                .filter(|&s| !cleared.has(s))
+                .flat_map(|s| fit.rack(s).iter().flatten())
+                .any(|m| group(m.type_id) == Some(g));
             if fitted || picks.iter().any(|p| group(p.base) == Some(g)) {
                 return None;
             }
@@ -1197,14 +1316,17 @@ impl<'a> Setup<'a> {
     }
 
     /// Everything but the tank: weapons, propulsion, tackle, utilities, damage modules and damage
-    /// rigs, with what is left for the tank.
+    /// rigs, with what is left for the tank. Only the touched tabs add anything.
     fn plan_base(&self, fit: &Fit, choices: &Choices) -> (Vec<Pick>, Room) {
         let catalog = self.catalog;
         let facts = self.facts;
-        let clear = choices.clear;
-        let free_high = self.free(fit, Slot::High, clear).len();
-        let free_mid = self.free(fit, Slot::Mid, clear).len();
-        let free_low = self.free(fit, Slot::Low, clear).len();
+        let cleared = choices.cleared();
+        let loadout = choices.touched.has(Tab::Loadout);
+        let tank_tab = choices.touched.has(Tab::Tank);
+        let rig_tab = choices.touched.has(Tab::Rigs);
+        let free_high = self.free(fit, Slot::High, cleared).len();
+        let free_mid = self.free(fit, Slot::Mid, cleared).len();
+        let free_low = self.free(fit, Slot::Low, cleared).len();
         let family = self.family(choices);
         let kind = family.map(|f| f.kind);
         let tank = choices.tank != TankStyle::None;
@@ -1222,8 +1344,8 @@ impl<'a> Setup<'a> {
 
         // Highs: weapons on every free hardpoint, then a neut and a nos.
         let mut highs_left = free_high;
-        if let Some(family) = family {
-            let used = if clear {
+        if let Some(family) = family.filter(|_| loadout) {
+            let used = if cleared.has(Slot::High) {
                 0
             } else {
                 fit.high
@@ -1254,7 +1376,7 @@ impl<'a> Setup<'a> {
             highs_left -= count;
         }
         for utility in [Utility::Neut, Utility::Nos] {
-            if choices.has(utility) && highs_left > 0 {
+            if loadout && choices.has(utility) && highs_left > 0 {
                 let name = self.utility_name(utility, kind);
                 push(
                     &mut picks,
@@ -1269,13 +1391,13 @@ impl<'a> Setup<'a> {
 
         // Mids: propulsion, tackle and utilities; a cap booster for an armor repairer.
         let mut mids_left = free_mid;
-        if let Some(name) = self.prop_name(choices.prop)
+        if let Some(name) = self.prop_name(choices.prop).filter(|_| loadout)
             && mids_left > 0
             && push(&mut picks, Slot::Mid, &name, Category::Propulsion, 9)
         {
             mids_left -= 1;
         }
-        for &utility in &choices.utilities {
+        for &utility in choices.utilities.iter().filter(|_| loadout) {
             if utility.slot() == Slot::Mid && mids_left > 0 {
                 let name = self.utility_name(utility, kind);
                 push(
@@ -1288,7 +1410,8 @@ impl<'a> Setup<'a> {
                 mids_left -= 1;
             }
         }
-        if armor
+        if loadout
+            && armor
             && choices.tank == TankStyle::Active
             && mids_left > 0
             && !choices.has(Utility::CapBooster)
@@ -1300,8 +1423,10 @@ impl<'a> Setup<'a> {
         }
 
         // Lows: damage modules and an enhancer; a damage control under a shield tank.
-        let enhancer = usize::from(choices.has(Utility::Enhancer) && free_low > 0);
-        let damage_mod = self.damage_mod_name(choices.damage, kind);
+        let enhancer = usize::from(loadout && choices.has(Utility::Enhancer) && free_low > 0);
+        let damage_mod = self
+            .damage_mod_name(choices.damage, kind)
+            .filter(|_| loadout);
         let damage_count = match (damage_mod, armor) {
             (None, _) => 0,
             (Some(_), true) => free_low.saturating_sub(3 + enhancer).min(3),
@@ -1325,6 +1450,7 @@ impl<'a> Setup<'a> {
         }
         let mut lows_left = free_low - damage_count - enhancer;
         if tank
+            && tank_tab
             && !armor
             && lows_left > 0
             && push(
@@ -1335,6 +1461,9 @@ impl<'a> Setup<'a> {
                 6,
             )
         {
+            if let Some(control) = picks.last_mut() {
+                control.tank = true;
+            }
             lows_left -= 1;
         }
         // A fourth damage module where nothing else wants the slot.
@@ -1348,9 +1477,13 @@ impl<'a> Setup<'a> {
         }
 
         // Damage rigs, as many as the calibration takes.
-        let mut calibration = self.calibration_left(fit, clear);
-        let mut rigs_left = self.free(fit, Slot::Rig, clear).len();
-        let names = Self::damage_rig_names(choices, kind);
+        let mut calibration = self.calibration_left(fit, cleared);
+        let mut rigs_left = self.free(fit, Slot::Rig, cleared).len();
+        let names = if rig_tab {
+            Self::damage_rig_names(choices, kind)
+        } else {
+            &[]
+        };
         let bases: Vec<TypeId> = (0..rigs_left)
             .filter_map(|i| {
                 let name = names.get(i % names.len().max(1))?;
@@ -1362,12 +1495,12 @@ impl<'a> Setup<'a> {
             rigs_left -= 1;
         }
         let room = Room {
-            slots: match (tank, armor) {
+            slots: match (tank && tank_tab, armor) {
                 (false, _) => 0,
                 (true, true) => lows_left,
                 (true, false) => mids_left,
             },
-            rigs: if Self::tank_takes_rigs(choices, kind) {
+            rigs: if (tank_tab || rig_tab) && Self::tank_takes_rigs(choices, kind) {
                 rigs_left
             } else {
                 0
@@ -1509,10 +1642,10 @@ impl<'a> Setup<'a> {
     }
 
     /// The picks at the free positions of `fit`.
-    pub fn placements(&self, fit: &Fit, picks: &[Pick], clear: bool) -> Vec<Placement> {
+    pub fn placements(&self, fit: &Fit, picks: &[Pick], cleared: Cleared) -> Vec<Placement> {
         let mut out = Vec::new();
         for slot in [Slot::High, Slot::Mid, Slot::Low, Slot::Rig] {
-            let positions = self.free(fit, slot, clear);
+            let positions = self.free(fit, slot, cleared);
             for (pick, i) in picks.iter().filter(|p| p.slot == slot).zip(positions) {
                 let mut module = Module::new(self.catalog, pick.type_id);
                 module.charge = pick.charge;
@@ -1531,7 +1664,7 @@ impl<'a> Setup<'a> {
         pilot: &Pilot,
         fit: &Fit,
         picks: &[Pick],
-        clear: bool,
+        cleared: Cleared,
     ) -> Vec<Pick> {
         let mut picks = picks.to_vec();
         for _ in 0..64 {
@@ -1539,8 +1672,8 @@ impl<'a> Setup<'a> {
                 engine,
                 pilot,
                 fit,
-                &self.placements(fit, &picks, clear),
-                clear,
+                &self.placements(fit, &picks, cleared),
+                cleared,
             );
             if fits(&stats) {
                 break;
@@ -1607,12 +1740,14 @@ impl<'a> Setup<'a> {
     }
 }
 
-/// `fit` with the placements made, the racks emptied first if `clear`.
-pub fn apply(fit: &mut Fit, placements: &[Placement], clear: bool) {
-    if clear {
-        fit.high.clear();
-        fit.mid.clear();
-        fit.low.clear();
+/// `fit` with the placements made, the `cleared` racks emptied first.
+pub fn apply(fit: &mut Fit, placements: &[Placement], cleared: Cleared) {
+    for slot in [Slot::High, Slot::Mid, Slot::Low] {
+        if cleared.has(slot) {
+            fit.rack_mut(slot).clear();
+        }
+    }
+    if cleared.has(Slot::Rig) {
         fit.rigs.clear();
     }
     for (slot, i, module) in placements {
@@ -1637,10 +1772,10 @@ pub fn preview(
     pilot: &Pilot,
     fit: &Fit,
     placements: &[Placement],
-    clear: bool,
+    cleared: Cleared,
 ) -> Stats {
     let mut next = fit.clone();
-    apply(&mut next, placements, clear);
+    apply(&mut next, placements, cleared);
     engine.compute_for(&next, pilot, CalcOptions::default())
 }
 

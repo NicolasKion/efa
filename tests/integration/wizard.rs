@@ -8,8 +8,8 @@ use gyfa::{
     fit::Fit,
     item_data::ItemData,
     wizard::{
-        self, Ammo, Bling, Category, Choices, DamageMods, Facts, Family, Goal, HullSize, Layer,
-        Prop, Setup, TankStyle, Tier, Utility,
+        self, Ammo, Bling, Category, Choices, Cleared, DamageMods, Facts, Family, Goal, HullSize,
+        Layer, Prop, Setup, Tab, Tabs, TankStyle, Tier, Utility,
         tank::{self, Progress},
     },
 };
@@ -91,7 +91,8 @@ fn a_hurricane_gets_a_sane_brawler() {
         tank_fit: None,
         damage: DamageMods::Weapon,
         rigs: wizard::Rigs::Tank,
-        clear: false,
+        clear: Tabs::NONE,
+        touched: Tabs::ALL,
         bling: Bling::default(),
     };
     let picks = wizard.plan(&fit, &choices);
@@ -123,14 +124,14 @@ fn a_hurricane_gets_a_sane_brawler() {
                 .all(|r| r == "Medium Core Defense Field Extender I")
     );
 
-    let placements = wizard.placements(&fit, &picks, false);
-    let fitted = wizard.make_it_fit(engine, engine.all5(), &fit, &picks, false);
+    let placements = wizard.placements(&fit, &picks, Cleared::NONE);
+    let fitted = wizard.make_it_fit(engine, engine.all5(), &fit, &picks, Cleared::NONE);
     let stats = wizard::preview(
         engine,
         engine.all5(),
         &fit,
-        &wizard.placements(&fit, &fitted, false),
-        false,
+        &wizard.placements(&fit, &fitted, Cleared::NONE),
+        Cleared::NONE,
     );
     assert!(wizard::fits(&stats), "made to fit");
     assert!(placements.len() >= fitted.len());
@@ -195,20 +196,24 @@ fn applying_fills_free_slots_and_keeps_fitted_modules() {
     let choices = wizard.defaults();
     let picks = wizard.plan(&fit, &choices);
     assert_eq!(picks.iter().filter(|p| p.slot == Slot::Low).count(), 3);
-    let placements = wizard.placements(&fit, &picks, false);
+    let placements = wizard.placements(&fit, &picks, Cleared::NONE);
     let mut next = fit.clone();
-    wizard::apply(&mut next, &placements, false);
+    wizard::apply(&mut next, &placements, Cleared::NONE);
     assert_eq!(next.low[0].as_ref().map(|m| m.type_id), Some(kept));
     assert_eq!(next.low.iter().flatten().count(), 4);
     let mut cleared = fit.clone();
     let all = wizard.plan(
         &fit,
         &Choices {
-            clear: true,
+            clear: Tabs::ALL,
             ..choices
         },
     );
-    wizard::apply(&mut cleared, &wizard.placements(&fit, &all, true), true);
+    wizard::apply(
+        &mut cleared,
+        &wizard.placements(&fit, &all, Cleared::ALL),
+        Cleared::ALL,
+    );
     assert_eq!(cleared.low.iter().flatten().count(), 4);
 }
 
@@ -468,5 +473,75 @@ fn a_buffer_tank_mixes_in_resists() {
             || n.contains("Hardener")
             || n.contains("Damage Control")),
         "resist modules too: {names:?}"
+    );
+}
+
+#[test]
+fn the_tank_tab_alone_fills_free_lows_and_rigs_around_the_fit() {
+    let Some((catalog, engine, data)) = setup() else {
+        return;
+    };
+    let mut fit = ship(catalog, "Abaddon");
+    let id = |name: &str| catalog.find(name).expect(name).id;
+    let (gun, rep) = (id("Mega Pulse Laser II"), id("Large Armor Repairer II"));
+    for _ in 0..4 {
+        fit.add(catalog, gun);
+    }
+    fit.add(catalog, rep);
+    fit.add(catalog, rep);
+    let kept: Vec<_> = fit.low.iter().flatten().map(|m| m.type_id).collect();
+    assert_eq!(kept, [rep, rep]);
+    let (facts, families) = hull(catalog, engine, data, &fit);
+    let wizard = Setup::new(catalog, data, &facts, &families);
+    let mut choices = Choices {
+        touched: Tabs::NONE.with(Tab::Tank),
+        tank: TankStyle::Active,
+        layer: Layer::Armor,
+        goal: Goal::Resists,
+        ..wizard.defaults()
+    };
+    let problem = wizard
+        .tank_problem(engine, engine.all5(), &fit, &choices)
+        .expect("a tank to search for");
+    assert_eq!(problem.positions.len(), facts.total(Slot::Low) - 2);
+    assert_eq!(problem.rig_positions.len(), facts.total(Slot::Rig));
+    assert!(!problem.need_repair, "the fitted repairers count");
+    let found = tank::optimise(engine, &problem, &Progress::default(), 5);
+    let best = found.outcomes.first().expect("a tank");
+    choices.tank_fit = Some(best.tank_fit());
+    let picks = wizard.plan(&fit, &choices);
+    assert!(
+        picks
+            .iter()
+            .all(|p| matches!(p.slot, Slot::Low | Slot::Rig)),
+        "{picks:?}"
+    );
+    assert!(picks.iter().any(|p| p.slot == Slot::Low), "{picks:?}");
+    let mut next = fit.clone();
+    wizard::apply(
+        &mut next,
+        &wizard.placements(&fit, &picks, choices.cleared()),
+        choices.cleared(),
+    );
+    assert_eq!(
+        next.high
+            .iter()
+            .flatten()
+            .filter(|m| m.type_id == gun)
+            .count(),
+        4,
+        "the guns stay and none are added"
+    );
+    assert_eq!(
+        next.mid.iter().flatten().count(),
+        0,
+        "no tackle or propulsion"
+    );
+    let lows: Vec<_> = next.low.iter().flatten().map(|m| m.type_id).collect();
+    assert_eq!(lows[..2], [rep, rep], "the repairers stay where they were");
+    assert_eq!(
+        lows.len(),
+        facts.total(Slot::Low),
+        "the free lows are filled"
     );
 }
