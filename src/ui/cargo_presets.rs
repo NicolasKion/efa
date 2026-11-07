@@ -517,6 +517,7 @@ impl CargoPresetEditor {
             self.selected.as_deref(),
             cx,
             |e: &mut Self, name, window, cx| e.select(Some(name), window, cx),
+            None,
         );
         let has = self.selected.is_some();
         let empty = if presets.is_empty() {

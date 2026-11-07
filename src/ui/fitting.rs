@@ -647,6 +647,12 @@ impl Dragged {
         self
     }
 
+    /// Show `label` while dragging, such as the name of a set of items.
+    pub fn labelled(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = label.into();
+        self
+    }
+
     /// Every item dragged, the grabbed one first.
     pub fn types(&self) -> impl Iterator<Item = TypeId> + '_ {
         std::iter::once(self.type_id).chain(self.more.iter().copied())

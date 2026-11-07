@@ -30,8 +30,10 @@ use crate::{
 /// Most search hits the item tree lists, so a one-letter query stays cheap to draw.
 const SEARCH_LIMIT: usize = 200;
 pub const ROW_HEIGHT: f32 = 28.;
-const TREE_ROW: f32 = 24.;
-const INDENT: f32 = 14.;
+/// Height of a line of an item tree.
+pub const TREE_ROW: f32 = 24.;
+/// How far each level of an item tree is indented.
+pub const INDENT: f32 = 14.;
 
 /// A small uppercase caption over a column or section.
 pub fn caption(text: &str, cx: &App) -> Div {
@@ -93,6 +95,14 @@ pub fn prompt_name(
     let input = cx.new(|cx| InputState::new(window, cx).default_value(default));
     let error = cx.new(|_| None::<SharedString>);
     let (check, done) = (Rc::new(check), Rc::new(done));
+    // Typing replaces the name, once the dialog is up and cannot take the focus back.
+    let field = input.clone();
+    window.defer(cx, move |window, cx| {
+        field.update(cx, |input, cx| {
+            input.focus(window, cx);
+            input.select_all(window, cx);
+        });
+    });
     window.open_dialog(cx, move |dialog, _, cx| {
         let problem = error.read(cx).clone();
         let submit: super::widgets::Submit = {
@@ -181,13 +191,18 @@ pub struct ListEntry {
     pub detail: String,
 }
 
-/// The entries matching `query`, as clickable rows; the selected one highlighted.
+/// What dropping market items on an entry of a [`name_list`] does, given the entry's name.
+pub type DropOnEntry<V> = fn(&mut V, String, &Dragged, &mut Context<V>);
+
+/// The entries matching `query`, as clickable rows; the selected one highlighted. With
+/// `on_drop`, items from the market can be dropped on an entry.
 pub fn name_list<V: 'static>(
     entries: Vec<ListEntry>,
     query: &str,
     selected: Option<&str>,
     cx: &mut Context<V>,
     on_select: fn(&mut V, String, &mut Window, &mut Context<V>),
+    on_drop: Option<DropOnEntry<V>>,
 ) -> Vec<AnyElement> {
     let query = query.trim().to_lowercase();
     let theme = cx.theme().clone();
@@ -198,7 +213,8 @@ pub fn name_list<V: 'static>(
         .map(|(i, entry)| {
             let is_selected = selected == Some(entry.name.as_str());
             let name = entry.name.clone();
-            h_flex()
+            let drop_name = entry.name.clone();
+            let row = h_flex()
                 .id(SharedString::from(format!("entry-{i}")))
                 .gap_2()
                 .h(px(ROW_HEIGHT))
@@ -219,8 +235,25 @@ pub fn name_list<V: 'static>(
                 )
                 .on_click(cx.listener(move |view, _: &ClickEvent, window, cx| {
                     on_select(view, name.clone(), window, cx);
-                }))
-                .into_any_element()
+                }));
+            match on_drop {
+                Some(on_drop) => row
+                    .drag_over::<Dragged>(|style, dragged, _, cx| {
+                        if matches!(dragged.source, DragSource::Market) {
+                            style.bg(cx.theme().drop_target)
+                        } else {
+                            style
+                        }
+                    })
+                    .on_drop(cx.listener(move |view, dragged: &Dragged, _, cx| {
+                        if matches!(dragged.source, DragSource::Market) {
+                            cx.stop_propagation();
+                            on_drop(view, drop_name.clone(), dragged, cx);
+                        }
+                    }))
+                    .into_any_element(),
+                None => row.into_any_element(),
+            }
         })
         .collect()
 }
