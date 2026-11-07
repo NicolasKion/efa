@@ -15,6 +15,7 @@ pub struct Preferences {
     pub market: Market,
     pub network: Network,
     pub html: HtmlExport,
+    pub esi: Esi,
 }
 
 /// pyfa's General page (gui/builtinPreferenceViews/pyfaGeneralPreferences.py).
@@ -48,6 +49,13 @@ pub struct General {
     pub omega_icons: bool,
     /// Name mutated items after their mutaplasmid and base item rather than the abyssal type.
     pub expanded_mutant_names: bool,
+    /// Every fit flies the character picked last, pyfa's "Use global character".
+    pub global_character: bool,
+    /// Every fit takes the damage pattern picked last, pyfa's "Use global damage pattern".
+    pub global_damage_pattern: bool,
+    /// The missing skills tooltip lists each skill once rather than per item, pyfa's "Compact
+    /// skills needed tooltip".
+    pub compact_skills: bool,
     /// The fit's own implants and boosters travel in the cargo hold, so they count against it.
     pub implants_in_cargo: bool,
 }
@@ -67,6 +75,9 @@ impl Default for General {
             ship_browser_tooltips: true,
             omega_icons: false,
             expanded_mutant_names: false,
+            global_character: false,
+            global_damage_pattern: false,
+            compact_skills: true,
             implants_in_cargo: true,
         }
     }
@@ -259,7 +270,7 @@ impl Default for Market {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Network {
-    /// Master switch: off means no price requests at all.
+    /// Master switch: off means no price or ESI requests at all.
     pub enabled: bool,
     pub prices: bool,
     pub proxy: Proxy,
@@ -340,4 +351,26 @@ pub struct HtmlExport {
     pub path: String,
     /// Plain links only, without styling or the EFT text.
     pub minimal: bool,
+}
+
+/// EVE SSO and ESI, pyfa's ESI page. gyfa ships no client ID of its own: the user registers an
+/// application at developers.eveonline.com and pastes its ID here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Esi {
+    pub client_id: String,
+    /// The local port EVE SSO sends the browser back to.
+    pub port: u16,
+    /// What Export to EVE sends along with the fit.
+    pub upload: crate::port::esi::UploadOptions,
+}
+
+impl Default for Esi {
+    fn default() -> Self {
+        Self {
+            client_id: String::new(),
+            port: crate::esi::DEFAULT_PORT,
+            upload: crate::port::esi::UploadOptions::default(),
+        }
+    }
 }

@@ -297,11 +297,24 @@ pub struct Catalog {
     pub ship_groups: Vec<(i32, Vec<TypeId>)>,
     /// What each mutaplasmid takes, gives and rolls.
     pub mutaplasmids: muta::Mutaplasmids,
+    /// Published types that are the same item under another name, pyfa's item replacements
+    /// (`db_update.py` `processReplacements`): same group, skills, effects and attributes.
+    pub replacements: HashMap<TypeId, Vec<TypeId>>,
+    /// The Alpha clone grades, by name.
+    pub alpha_clones: Vec<AlphaClone>,
+}
+
+/// An Alpha clone grade: the skills it can use and the highest level of each.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AlphaClone {
+    pub id: i32,
+    pub name: String,
+    pub caps: HashMap<TypeId, u8>,
 }
 
 /// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
 /// instead of loaded.
-const CACHE_FORMAT: u32 = 7;
+const CACHE_FORMAT: u32 = 9;
 const CACHE_FILE: &str = "catalog.bin";
 
 /// The cache on disk: the key it was built for, then the catalog.
@@ -376,6 +389,7 @@ impl Catalog {
             .collect();
 
         let mut projection = projection::Builder::new(&effect_category);
+        let mut same_items = SameItems::default();
         let mut types = HashMap::with_capacity(sde_types.len());
         let mut skills = Vec::new();
         let mut required_skills = HashMap::new();
@@ -485,6 +499,9 @@ impl Catalog {
                     .collect();
                 Race::resolve(t.faction_id, &skill_races, t.race_id)
             });
+            if t.published && stand_in.is_none() {
+                same_items.consider(id, &t, category_id, dogma, &required);
+            }
             if !required.is_empty() {
                 required_skills.insert(id, required);
             }
@@ -579,7 +596,18 @@ impl Catalog {
             );
         }
 
-        let alpha = alpha_skill_caps(clone_grades.into_values());
+        let mut alpha_clones: Vec<AlphaClone> = clone_grades
+            .into_iter()
+            .filter_map(|(id, grade)| {
+                Some(AlphaClone {
+                    id: id.parse().ok()?,
+                    name: grade.name,
+                    caps: grade.skills.iter().map(|s| (s.type_id, s.level)).collect(),
+                })
+            })
+            .collect();
+        alpha_clones.sort_by(|a, b| a.name.cmp(&b.name));
+        let alpha = alpha_skill_caps(&alpha_clones);
         let mut omega = HashMap::new();
         for t in types.values_mut() {
             t.omega = needs_omega(t.id, &required_skills, &alpha, &mut omega);
@@ -745,6 +773,8 @@ impl Catalog {
             projection,
             ship_groups,
             mutaplasmids,
+            alpha_clones,
+            replacements: same_items.finish(),
         })
     }
 
@@ -757,6 +787,11 @@ impl Catalog {
         let Some(t) = self.get(id) else { return &[] };
         let parent = t.variation_parent.unwrap_or(id);
         self.variations.get(&parent).map_or(&[], Vec::as_slice)
+    }
+
+    /// Published types that are the same item as `id`, pyfa's replacements. Empty when none.
+    pub fn replacements_of(&self, id: TypeId) -> &[TypeId] {
+        self.replacements.get(&id).map_or(&[], Vec::as_slice)
     }
 
     /// A tactical destroyer's modes, found the way pyfa finds them: mode items named after the
@@ -796,10 +831,19 @@ impl Catalog {
             .map_or_else(|| format!("#{id}"), |t| t.name.clone())
     }
 
+    /// The type by name. Names pyfa knows as renamed are looked up under their current name
+    /// first, as pyfa's `getItem` does, so old fits still import.
     pub fn find(&self, name: &str) -> Option<&ItemType> {
-        self.by_name
-            .get(&name.trim().to_lowercase())
+        let key = name.trim().to_lowercase();
+        crate::port::renames::current_name(&key)
+            .and_then(|current| self.by_name.get(current))
+            .or_else(|| self.by_name.get(&key))
             .and_then(|id| self.types.get(id))
+    }
+
+    /// An Alpha clone grade by ID.
+    pub fn alpha_clone(&self, id: i32) -> Option<&AlphaClone> {
+        self.alpha_clones.iter().find(|c| c.id == id)
     }
 
     /// Published, fittable types matching a market search the way pyfa runs it: every word
@@ -861,11 +905,11 @@ fn ship_groups(
 }
 
 /// The highest level any Alpha clone can train each skill to.
-fn alpha_skill_caps(grades: impl Iterator<Item = SdeCloneGrade>) -> HashMap<TypeId, u8> {
+fn alpha_skill_caps(grades: &[AlphaClone]) -> HashMap<TypeId, u8> {
     let mut caps: HashMap<TypeId, u8> = HashMap::new();
-    for skill in grades.flat_map(|g| g.skills) {
-        let cap = caps.entry(skill.type_id).or_default();
-        *cap = (*cap).max(skill.level);
+    for (&skill, &level) in grades.iter().flat_map(|g| &g.caps) {
+        let cap = caps.entry(skill).or_default();
+        *cap = (*cap).max(level);
     }
     caps
 }
@@ -1039,6 +1083,8 @@ struct SdeType {
 #[derive(Deserialize)]
 struct SdeCloneGrade {
     #[serde(default)]
+    name: String,
+    #[serde(default)]
     skills: Vec<SdeCloneSkill>,
 }
 
@@ -1060,6 +1106,95 @@ struct PhbEffect {
     effect_category: i32,
     #[serde(rename = "fittingUsageChanceAttributeID", default)]
     fitting_usage_chance_attribute_id: Option<i32>,
+}
+
+/// Groups types into pyfa's replacement sets while the catalog is built.
+#[derive(Default)]
+struct SameItems {
+    /// Types by everything that makes them the same item.
+    classes: HashMap<SameItemKey, Vec<TypeId>>,
+}
+
+/// Group, required skills (types, not levels), effects, and the attributes that matter with
+/// their exact values.
+type SameItemKey = (i32, Vec<TypeId>, Vec<i32>, Vec<(i32, u64)>);
+
+impl SameItems {
+    /// Categories pyfa looks for replacements in, less the ones nothing is swapped in.
+    const CATEGORIES: [i32; 8] = [
+        category::MODULE,
+        category::CHARGE,
+        category::DRONE,
+        category::IMPLANT,
+        category::DEPLOYABLE,
+        category::SUBSYSTEM,
+        category::STRUCTURE_MODULE,
+        category::FIGHTER,
+    ];
+    /// Attributes that differ between otherwise identical items: mass, main color, radius, tech
+    /// level, meta level, meta group and color scheme.
+    const IGNORED: [i32; 7] = [4, 124, 162, 422, 633, 1692, 1768];
+
+    fn consider(
+        &mut self,
+        id: TypeId,
+        t: &SdeType,
+        category_id: i32,
+        dogma: Option<&PhbTypeDogma>,
+        required: &[(TypeId, u8)],
+    ) {
+        if !Self::CATEGORIES.contains(&category_id) {
+            return;
+        }
+        let skill_attrs: HashSet<i32> = attr::REQUIRED_SKILLS
+            .iter()
+            .flat_map(|&(skill, level)| [skill, level])
+            .collect();
+        // -0.0 and 0.0 are the same value, as in pyfa's comparison.
+        let bits = |v: f64| (v + 0.0).to_bits();
+        let mut attrs: Vec<(i32, u64)> = dogma
+            .map_or_default(|d| d.attributes.as_slice())
+            .iter()
+            .filter(|a| !skill_attrs.contains(&a.attribute_id))
+            .filter(|a| !Self::IGNORED.contains(&a.attribute_id))
+            .map(|a| (a.attribute_id, bits(a.value)))
+            .collect();
+        // pyfa adds these type columns as attributes, unless dogma already has them.
+        for (attr_id, value) in [(38, t.capacity), (161, t.volume)] {
+            if let Some(v) = value
+                && !attrs.iter().any(|&(a, _)| a == attr_id)
+            {
+                attrs.push((attr_id, bits(v)));
+            }
+        }
+        // Items without attributes are never the same as anything.
+        if attrs.is_empty() {
+            return;
+        }
+        attrs.sort_unstable();
+        attrs.dedup_by_key(|(a, _)| *a);
+        let mut skills: Vec<TypeId> = required.iter().map(|&(s, _)| s).collect();
+        skills.sort_unstable();
+        let mut effects: Vec<i32> =
+            dogma.map_or_default(|d| d.effects.iter().map(|e| e.effect_id).collect());
+        effects.sort_unstable();
+        effects.dedup();
+        self.classes
+            .entry((t.group_id, skills, effects, attrs))
+            .or_default()
+            .push(id);
+    }
+
+    fn finish(self) -> HashMap<TypeId, Vec<TypeId>> {
+        let mut out = HashMap::new();
+        for mut members in self.classes.into_values().filter(|m| m.len() > 1) {
+            members.sort_unstable();
+            for &id in &members {
+                out.insert(id, members.iter().copied().filter(|&o| o != id).collect());
+            }
+        }
+        out
+    }
 }
 
 #[derive(Deserialize)]

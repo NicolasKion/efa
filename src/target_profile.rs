@@ -85,7 +85,15 @@ pub fn apply_resists(damage: Damage, resists: [f64; 4]) -> Damage {
         thermal: damage.thermal * thermal,
         kinetic: damage.kinetic * kinetic,
         explosive: damage.explosive * explosive,
+        breacher: damage.breacher,
     }
+}
+
+/// Breacher pod damage against a fit's target profile, or its flat cap without one, pyfa's
+/// `DmgTypes.pure`.
+pub fn applied_breacher(damage: Damage, profile: Option<&TargetProfile>) -> f64 {
+    let b = damage.breacher;
+    profile.map_or(b.absolute, |p| p.breacher(b.absolute, b.relative))
 }
 
 /// Damage against a fit's target profile, or raw without one.
@@ -1219,6 +1227,7 @@ mod tests {
             thermal: 100.0,
             kinetic: 0.0,
             explosive: 50.0,
+            ..Damage::default()
         };
         // pyfa's T1 shield: 0/20/40/50.
         let shield = TargetProfile::new("Shield", [0.0, 0.2, 0.4, 0.5]);

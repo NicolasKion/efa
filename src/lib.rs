@@ -4,6 +4,8 @@ pub mod character;
 pub mod damage_pattern;
 pub mod data;
 pub mod engine;
+pub mod errors;
+pub mod esi;
 pub mod fit;
 pub mod graphs;
 pub mod icons;

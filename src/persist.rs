@@ -15,12 +15,14 @@ pub fn load<T: DeserializeOwned + Default>(path: &Path) -> T {
         Read::Missing => {}
         Read::Broken(e) => {
             let aside = set_aside(path);
-            eprintln!(
-                "{} could not be read ({e}); kept it as {} and loading the backup",
-                path.display(),
-                aside
-                    .as_deref()
-                    .map_or("<not moved>".into(), |p| p.display().to_string()),
+            crate::errors::report(
+                format!("{} could not be read", path.display()),
+                format!(
+                    "{e}\n\nThe file was kept as {} and the backup loaded instead.",
+                    aside
+                        .as_deref()
+                        .map_or("<not moved>".into(), |p| p.display().to_string()),
+                ),
             );
         }
     }
@@ -30,18 +32,53 @@ pub fn load<T: DeserializeOwned + Default>(path: &Path) -> T {
     }
 }
 
+/// gyfa's data directory: `$XDG_DATA_HOME/gyfa`, or `~/.local/share/gyfa`.
+pub fn data_dir() -> Option<PathBuf> {
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
+    Some(data.join("gyfa"))
+}
+
 /// Write `value` to `path` through a temporary file, keeping what was there as the backup.
 pub fn save<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    write(path, value, false)
+}
+
+/// [`save`] for secrets: the file and its backup are readable by the user only.
+pub fn save_private<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    write(path, value, true)
+}
+
+fn write<T: Serialize>(path: &Path, value: &T, private: bool) -> Result<(), String> {
     let dir = path.parent().ok_or("no data directory")?;
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let json = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, json).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    write_file(&tmp, &json, private).map_err(|e| format!("{}: {e}", tmp.display()))?;
     // Only a file that still reads is worth keeping as the backup.
     if matches!(read::<serde_json::Value>(path), Read::Ok(_)) {
         let _ = std::fs::copy(path, backup(path));
     }
     std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Create or truncate a file and write it, owner-only from the start when `private`.
+fn write_file(path: &Path, bytes: &[u8], private: bool) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    if private {
+        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+        options.mode(0o600);
+        let file = options.open(path)?;
+        // The mode only applies to a new file; a leftover one keeps its own.
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        return (&file).write_all(bytes);
+    }
+    let _ = private;
+    options.open(path)?.write_all(bytes)
 }
 
 enum Read<T> {

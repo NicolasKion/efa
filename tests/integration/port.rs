@@ -269,6 +269,55 @@ fn esi_json_round_trips() {
 }
 
 #[test]
+fn esi_upload_names_flags_and_carries_extras() {
+    let Some(catalog) = catalog() else { return };
+    let tengu = fit(&catalog, TENGU);
+    let options = esi::UploadOptions {
+        charges: true,
+        implants: true,
+        boosters: true,
+    };
+    let json = esi::upload(&tengu, &catalog, options).expect("the fit uploads");
+    let body: serde_json::Value = serde_json::from_str(&json).expect("JSON");
+    let items = body["items"].as_array().expect("items");
+    let flags: Vec<&str> = items.iter().filter_map(|i| i["flag"].as_str()).collect();
+    assert_eq!(flags.len(), items.len(), "every flag is a name");
+    assert!(flags.contains(&"HiSlot0") && flags.contains(&"SubSystemSlot3"));
+    let id = |name: &str| i64::from(catalog.find(name).expect(name).id);
+    let cargo = |type_id: i64| {
+        items
+            .iter()
+            .filter(|i| i["flag"] == "Cargo" && i["type_id"] == type_id)
+            .map(|i| i["quantity"].as_i64().unwrap_or(0))
+            .sum::<i64>()
+    };
+    assert!(
+        cargo(id("High-grade Snake Alpha")) == 1,
+        "implants go in the cargo"
+    );
+    assert!(cargo(id("Strong Blue Pill Booster")) == 1, "boosters too");
+    let missiles = id("Scourge Rage Heavy Assault Missile");
+    assert!(cargo(missiles) > 1000, "loaded charges join the cargo");
+    // Without the extras, only what the fit carries itself.
+    let plain = esi::upload(&tengu, &catalog, esi::UploadOptions::default()).expect("uploads");
+    assert!(!plain.contains(&format!("{}", id("High-grade Snake Alpha"))));
+    // What the game sends back reads in again.
+    let again = one(port::import(&catalog, &json, None).expect("the upload JSON imports"));
+    assert_eq!(again.subsystems.len(), 4);
+}
+
+#[test]
+fn esi_fitting_from_the_list_becomes_a_fit() {
+    let Some(catalog) = catalog() else { return };
+    let vexor = fit(&catalog, VEXOR);
+    let json = esi::export(&vexor, &catalog).expect("exports");
+    let mut fitting: esi::Fitting = serde_json::from_str(&json).expect("parses");
+    fitting.fitting_id = Some(7);
+    let imported = esi::to_fit(&catalog, &fitting).expect("imports");
+    assert_eq!(fitted(&imported.fits[0]), fitted(&vexor));
+}
+
+#[test]
 fn esi_json_with_named_flags_imports() {
     let Some(catalog) = catalog() else { return };
     let vexor = catalog.find("Vexor").expect("the Vexor exists").id;
@@ -341,6 +390,18 @@ fn junk_is_not_a_fit() {
     let Some(catalog) = catalog() else { return };
     assert!(port::import(&catalog, "hello there", None).is_err());
     assert!(port::import(&catalog, "   ", None).is_err());
+}
+
+#[test]
+fn renamed_items_import_under_their_new_names() {
+    let Some(catalog) = catalog() else { return };
+    let old = "Energized Adaptive Nano Membrane II";
+    let new = "Multispectrum Energized Membrane II";
+    assert!(catalog.find(new).is_some_and(|t| t.name == new));
+    let text = format!("[Rifter, Old Names]\n\n{old}\n");
+    let fit = one(port::import(&catalog, &text, None).expect("the fit imports"));
+    let low: Vec<i32> = fit.low.iter().flatten().map(|m| m.type_id).collect();
+    assert_eq!(low, [catalog.find(new).expect("exists").id]);
 }
 
 /// A carrier with full and short squadrons, plus a spare squadron in cargo.

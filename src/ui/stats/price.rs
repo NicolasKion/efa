@@ -85,12 +85,18 @@ pub(super) fn section(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &App) -> Sectio
     let totals = p.price_totals;
     let price =
         FitPrice::with_character_implants(p.fit, p.character_implants, |id| p.prices.get(id));
+    // Prices can come from several sources when the chosen one lacks some items.
+    let sources = p.prices.sources_summary(crate::port::fit_types(p.fit));
     let cell = |key: &str, icon_el: Div, label: &str, value: f64| {
+        let mut text = format!("{} ISK", format::grouped(value, 2));
+        if !sources.is_empty() {
+            text = format!("{text}\n\nPrices from\n{sources}");
+        }
         h_flex().flex_1().gap_1().child(icon_el).child(
             v_flex().child(div().child(label.to_owned())).child(tip(
                 format!("price-{key}"),
                 isk(value),
-                format!("{} ISK", format::grouped(value, 2)),
+                text,
             )),
         )
     };

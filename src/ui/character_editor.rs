@@ -18,7 +18,8 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, App, AppContext, ClickEvent, ClipboardItem, Context, Entity, FocusHandle,
     InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder, px,
+    StatefulInteractiveElement, Styled, Subscription, Task, Window, div, prelude::FluentBuilder,
+    px,
 };
 
 use super::{
@@ -38,11 +39,15 @@ const SEARCH_LIMIT: usize = 200;
 const MENU_MAX_H: f32 = 480.;
 /// What pyfa says before importing skills.
 const IMPORT_NOTICE: &str = "Imported skills are pending: click Save to keep them.";
+/// The clone choice's label for no Alpha clone.
+const OMEGA: &str = "Omega Clone";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Skills,
     Implants,
+    /// pyfa's EVE SSO tab: the linked EVE character and Get Skills.
+    Esi,
 }
 
 /// A skill group of the tree, with its skills by name.
@@ -67,6 +72,10 @@ pub struct CharacterEditor {
     implant_search: Entity<InputState>,
     tree_focus: FocusHandle,
     notice: Option<SharedString>,
+    /// A Get Skills request on its way.
+    esi_fetch: Option<Task<()>>,
+    /// What the last ESI request came to, and whether it failed.
+    esi_message: Option<(SharedString, bool)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -87,6 +96,12 @@ impl CharacterEditor {
                 let characters = &hub.read(cx).characters;
                 if !Rc::ptr_eq(characters, &this.characters) {
                     this.characters = Rc::clone(characters);
+                    cx.notify();
+                }
+            }),
+            // Logins and their progress show on the EVE SSO tab.
+            cx.observe(&hub, |this: &mut Self, _, cx| {
+                if this.tab == Tab::Esi {
                     cx.notify();
                 }
             }),
@@ -116,6 +131,8 @@ impl CharacterEditor {
             implant_search,
             tree_focus: cx.focus_handle(),
             notice: None,
+            esi_fetch: None,
+            esi_message: None,
             _subscriptions: subscriptions,
         }
     }
@@ -125,6 +142,7 @@ impl CharacterEditor {
         self.selected = self.characters.resolve(id);
         self.skill = None;
         self.notice = None;
+        self.esi_message = None;
         self.search
             .update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
@@ -464,7 +482,12 @@ impl CharacterEditor {
             .border_b_1()
             .border_color(theme.border)
             .children(
-                [(Tab::Skills, "Skills"), (Tab::Implants, "Implants")].map(|(tab, label)| {
+                [
+                    (Tab::Skills, "Skills"),
+                    (Tab::Implants, "Implants"),
+                    (Tab::Esi, "EVE SSO"),
+                ]
+                .map(|(tab, label)| {
                     let selected = self.tab == tab;
                     div()
                         .id(SharedString::from(format!("editor-tab-{label}")))
@@ -483,12 +506,66 @@ impl CharacterEditor {
             )
     }
 
-    /// The level column's text, pyfa's "Level N" or "Not learned".
-    fn level_text(&self, skill: TypeId) -> String {
-        match self.characters.level(self.selected, skill) {
-            Some(level) => format!("Level {level}"),
-            None => "Not learned".to_owned(),
+    /// The level column's text, pyfa's "Level N" or "Not learned", with the trained level
+    /// after it when an Alpha clone caps the skill.
+    fn level_text(&self, skill: TypeId) -> (String, bool) {
+        let id = self.selected;
+        let trained = self.characters.level(id, skill);
+        let flown = self.characters.flown_level(id, skill, &self.loaded.catalog);
+        match (trained, flown) {
+            (Some(trained), Some(flown)) if flown < trained => {
+                (format!("Level {flown} (of {trained})"), true)
+            }
+            (Some(level), _) => (format!("Level {level}"), false),
+            (None, _) => ("Not learned".to_owned(), false),
         }
+    }
+
+    fn set_alpha_clone(&mut self, clone: Option<i32>, cx: &mut Context<Self>) {
+        let id = self.selected;
+        if id.is_builtin() {
+            return;
+        }
+        self.edit(cx, |c, _| c.set_alpha_clone(id, clone));
+    }
+
+    /// pyfa's clone choice: Omega, or an Alpha clone that caps the skills.
+    fn clone_picker(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let current = self.characters.alpha_clone(self.selected);
+        let catalog = &self.loaded.catalog;
+        let label = current
+            .and_then(|c| catalog.alpha_clone(c))
+            .map_or_else(|| OMEGA.to_owned(), |c| c.name.clone());
+        let choices: Vec<(Option<i32>, String)> = std::iter::once((None, OMEGA.to_owned()))
+            .chain(
+                catalog
+                    .alpha_clones
+                    .iter()
+                    .map(|c| (Some(c.id), c.name.clone())),
+            )
+            .collect();
+        let this = cx.entity().downgrade();
+        Button::new("alpha-clone")
+            .small()
+            .outline()
+            .label(label)
+            .tooltip(
+                "Setting an Alpha clone does not replace the character's skills, \
+                 but rather caps them to Alpha levels.",
+            )
+            .disabled(self.selected.is_builtin())
+            .dropdown_menu(move |menu, _, _| {
+                choices.iter().fold(menu, |menu, (clone, name)| {
+                    let (this, clone) = (this.clone(), *clone);
+                    menu.item(
+                        PopupMenuItem::new(name.clone())
+                            .checked(clone == current)
+                            .on_click(move |_, _, cx| {
+                                let _ = this.update(cx, |e, cx| e.set_alpha_clone(clone, cx));
+                            }),
+                    )
+                })
+            })
     }
 
     fn skill_row(
@@ -520,16 +597,19 @@ impl CharacterEditor {
                     }),
             )
             .child(div().flex_1().truncate().child(name.to_owned()))
-            .child(
+            .child({
+                let (text, capped) = self.level_text(skill);
                 div()
-                    .w(px(90.))
+                    .w(px(130.))
                     .text_color(if dirty {
                         theme.danger
+                    } else if capped {
+                        theme.warning
                     } else {
                         theme.foreground
                     })
-                    .child(self.level_text(skill)),
-            )
+                    .child(text)
+            })
             .on_click(cx.listener(move |e, _: &ClickEvent, window, cx| {
                 e.skill = Some(skill);
                 window.focus(&e.tree_focus, cx);
@@ -542,18 +622,38 @@ impl CharacterEditor {
                     cx.notify();
                 }),
             );
-        if builtin {
-            return row.into_any_element();
-        }
         let this = cx.entity().downgrade();
         row.context_menu(move |menu, _, _| {
+            let stats = {
+                let this = this.clone();
+                entry(IconName::Info, "Skill Stats").on_click(move |event, window, cx| {
+                    if let Some(e) = this.upgrade() {
+                        let (loaded, hub) = {
+                            let e = e.read(cx);
+                            (Rc::clone(&e.loaded), e.hub.clone())
+                        };
+                        let request = super::item_stats::Request {
+                            target: super::item_stats::Target::Type(skill),
+                            fit: None,
+                        };
+                        let reuse = event.modifiers().shift;
+                        super::item_stats::open(&loaded, &hub, request, reuse, window, cx);
+                    }
+                })
+            };
+            let menu = menu.item(stats);
+            if builtin {
+                return menu;
+            }
             let set = |level: Option<u8>| {
                 let this = this.clone();
                 move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
                     let _ = this.update(cx, |e, cx| e.set_level(skill, level, cx));
                 }
             };
-            let menu = menu.item(PopupMenuItem::new("Unlearn").on_click(set(None)));
+            let menu = menu
+                .separator()
+                .item(PopupMenuItem::new("Unlearn").on_click(set(None)));
             (0..=MAX_LEVEL).fold(menu, |menu, level| {
                 menu.item(PopupMenuItem::new(format!("Level {level}")).on_click(set(Some(level))))
             })
@@ -649,6 +749,7 @@ impl CharacterEditor {
                                 cx.listener(|e, _, window, cx| e.sec_status_dialog(window, cx)),
                             ),
                     )
+                    .child(self.clone_picker(cx))
                     .child(div().flex_1())
                     .child(
                         Button::new("skills-import")
@@ -862,6 +963,222 @@ impl CharacterEditor {
     }
 }
 
+/// The EVE SSO tab.
+impl CharacterEditor {
+    /// pyfa's Get Skills: skills, implants and security status from ESI, for the linked
+    /// character.
+    fn get_skills(&mut self, cx: &mut Context<Self>) {
+        let id = self.selected;
+        let Some(esi) = self.characters.esi_character(id) else {
+            return;
+        };
+        self.esi_message = Some(("Fetching skills".into(), false));
+        self.esi_fetch = Some(super::esi::call(
+            &self.hub,
+            esi,
+            cx,
+            crate::esi::api::Session::sheet,
+            move |e: &mut Self, result, cx| {
+                e.esi_fetch = None;
+                e.esi_message = Some(match result {
+                    Ok(sheet) => {
+                        e.edit(cx, |c, loaded| {
+                            c.apply_esi(
+                                id,
+                                &sheet.skills,
+                                sheet.implants.as_deref(),
+                                sheet.sec_status,
+                                &loaded.catalog,
+                            );
+                        });
+                        let implants = match &sheet.implants {
+                            Some(i) => format!(", {} implants", i.len()),
+                            None => String::new(),
+                        };
+                        (
+                            format!("Fetched {} skills{implants}.", sheet.skills.len()).into(),
+                            false,
+                        )
+                    }
+                    Err(error) => (error.into(), true),
+                });
+                cx.notify();
+            },
+        ));
+        cx.notify();
+    }
+
+    fn link_esi(&mut self, esi: Option<u64>, cx: &mut Context<Self>) {
+        let id = self.selected;
+        self.esi_message = None;
+        self.edit(cx, |c, _| c.link_esi(id, esi));
+    }
+
+    /// Log in with EVE. The new EVE character is linked to the character shown; a built-in one
+    /// cannot be linked, so a new character named after the EVE one is made and filled in.
+    fn esi_login(&mut self, cx: &mut Context<Self>) {
+        let target = self.selected;
+        let this = cx.entity().downgrade();
+        self.hub.update(cx, |hub, cx| {
+            hub.esi_login(cx, move |result, cx| {
+                if let Ok(esi) = result {
+                    let _ = this.update(cx, |e, cx| e.logged_in(target, esi, cx));
+                }
+            });
+        });
+    }
+
+    fn logged_in(&mut self, target: CharacterId, esi: u64, cx: &mut Context<Self>) {
+        if !target.is_builtin() && self.characters.get(target).is_some() {
+            self.selected = target;
+            self.link_esi(Some(esi), cx);
+            return;
+        }
+        let base = self
+            .hub
+            .read(cx)
+            .esi
+            .accounts
+            .name(esi)
+            .unwrap_or("EVE character")
+            .to_owned();
+        // A name nobody has yet: the EVE name, else with a number after it.
+        let name = (1..1000)
+            .map(|n| {
+                if n == 1 {
+                    base.clone()
+                } else {
+                    format!("{base} {n}")
+                }
+            })
+            .find(|name| self.characters.name_problem(name).is_none())
+            .unwrap_or(base);
+        let id = self.edit(cx, |c, _| {
+            let id = c.create(&name);
+            c.link_esi(id, Some(esi));
+            id
+        });
+        self.selected = id;
+        self.skill = None;
+        self.get_skills(cx);
+    }
+
+    fn esi_picker(&self, linked: Option<u64>, cx: &mut Context<Self>) -> AnyElement {
+        let accounts = self.hub.read(cx).esi.accounts.clone();
+        let label = match linked {
+            None => "None".to_owned(),
+            Some(id) => accounts
+                .name(id)
+                .map_or_else(|| format!("Logged out ({id})"), str::to_owned),
+        };
+        let choices: Vec<(Option<u64>, String)> = std::iter::once((None, "None".to_owned()))
+            .chain(
+                accounts
+                    .sorted()
+                    .into_iter()
+                    .map(|a| (Some(a.character_id), a.name.clone())),
+            )
+            .collect();
+        let this = cx.entity().downgrade();
+        Button::new("esi-link")
+            .small()
+            .outline()
+            .label(label)
+            .dropdown_menu(move |menu, _, _| {
+                choices.iter().fold(menu, |menu, (id, name)| {
+                    let (this, id) = (this.clone(), *id);
+                    menu.item(
+                        PopupMenuItem::new(name.clone())
+                            .checked(linked == id)
+                            .on_click(move |_, _, cx| {
+                                let _ = this.update(cx, |e, cx| e.link_esi(id, cx));
+                            }),
+                    )
+                })
+            })
+            .into_any_element()
+    }
+
+    fn esi_tab(&self, cx: &mut Context<Self>) -> AnyElement {
+        let builtin = self.selected.is_builtin();
+        let linked = self.characters.esi_character(self.selected);
+        let logged_in = linked.is_some_and(|id| self.hub.read(cx).esi.accounts.get(id).is_some());
+        let busy = self.esi_fetch.is_some();
+        let waiting = self.hub.read(cx).esi.login.is_some();
+        let picker = (!builtin).then(|| self.esi_picker(linked, cx));
+        let status = super::esi::login_status(&self.hub, cx).into_any_element();
+        let theme = cx.theme();
+        let muted = theme.muted_foreground;
+        let link = v_flex()
+            .gap_2()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(div().text_color(muted).child("EVE character"))
+                    .children(picker)
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("esi-get-skills")
+                            .small()
+                            .primary()
+                            .icon(IconName::RefreshCw)
+                            .label("Get Skills")
+                            .loading(busy)
+                            .disabled(builtin || !logged_in || busy)
+                            .on_click(cx.listener(|e, _, _, cx| e.get_skills(cx))),
+                    ),
+            )
+            .child(div().text_xs().text_color(muted).child(
+                "Get Skills replaces this character's skills, implants and security status with \
+                 what EVE has, and saves them.",
+            ))
+            .when_some(self.esi_message.clone(), |col, (text, error)| {
+                col.child(
+                    div()
+                        .text_xs()
+                        .text_color(if error { theme.danger } else { muted })
+                        .child(text),
+                )
+            });
+        let tip = div().text_color(muted).child(
+            "All 0 and All 5 cannot be linked to an EVE character. Pick another character, or log \
+             one in below to make a new character from it.",
+        );
+        v_flex()
+            .flex_1()
+            .gap_4()
+            .p_3()
+            .child(if builtin {
+                tip.into_any_element()
+            } else {
+                link.into_any_element()
+            })
+            .child(div().flex_1())
+            .child(div().h_px().bg(theme.border))
+            .child(
+                v_flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_color(muted)
+                            .child("Don't see your EVE character in the list?"),
+                    )
+                    .child(
+                        Button::new("esi-login")
+                            .small()
+                            .icon(IconName::CircleUser)
+                            .label("Log In with EVE SSO")
+                            .loading(waiting)
+                            .disabled(waiting)
+                            .on_click(cx.listener(|e, _, _, cx| e.esi_login(cx))),
+                    ),
+            )
+            .child(status)
+            .into_any_element()
+    }
+}
+
 fn apply_set_menu(
     menu: PopupMenu,
     this: &gpui_kit::WeakEntity<CharacterEditor>,
@@ -931,6 +1248,7 @@ impl Render for CharacterEditor {
         let body = match self.tab {
             Tab::Skills => self.skills_tab(cx).into_any_element(),
             Tab::Implants => self.implants_tab(cx),
+            Tab::Esi => self.esi_tab(cx),
         };
         v_flex()
             .size_full()

@@ -70,7 +70,7 @@ impl Gyfa {
         {
             return Rc::clone(pilot);
         }
-        let pilot = Rc::new(self.characters.pilot(id, &loaded.catalog.skills));
+        let pilot = Rc::new(self.characters.pilot(id, &loaded.catalog));
         self.pilot_cache = Some((Rc::clone(&self.characters), id, Rc::clone(&pilot)));
         pilot
     }
@@ -124,7 +124,7 @@ impl Gyfa {
         };
         let id = self.fit_character();
         requirements::missing(fit, &loaded.catalog, self.character_implants(), |s| {
-            self.characters.level_or_zero(id, s)
+            self.characters.flown_level_or_zero(id, s, &loaded.catalog)
         })
     }
 
@@ -281,7 +281,12 @@ impl Gyfa {
         let missing = self.missing_skills(loaded);
         let needs_skills = has_fit && !missing.is_empty();
         let tip: SharedString = if has_fit {
-            requirements::tooltip(&missing, &loaded.catalog, TooltipStyle::Condensed).into()
+            let style = if self.saved.preferences.general.compact_skills {
+                TooltipStyle::Condensed
+            } else {
+                TooltipStyle::Full
+            };
+            requirements::tooltip(&missing, &loaded.catalog, style).into()
         } else {
             "No active fit".into()
         };
@@ -425,6 +430,15 @@ impl Gyfa {
             entry(IconName::FileText, "Export Skills Needed…")
                 .disabled(!has_fit)
                 .on_click(on(|g, _, cx| g.export_skills_needed(cx))),
+        )
+        .separator()
+        .item(
+            entry(IconName::CircleUser, "Manage ESI Characters…")
+                .on_click(on(|g, _, cx| g.open_esi_characters(cx))),
+        )
+        .item(
+            entry(IconName::Plus, "Add ESI Character…")
+                .on_click(on(|g, _, cx| g.add_esi_character(cx))),
         )
     }
 }

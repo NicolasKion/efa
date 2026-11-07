@@ -641,6 +641,11 @@ fn fighter_menu(
             },
         );
     }
+    menu = menu.item(crate::ui::item_stats::stats_entry(
+        this,
+        "Fighter",
+        crate::ui::item_stats::StatsOf::Fitted(crate::engine::FitItem::Fighter(i)),
+    ));
     if catalog
         .get(type_id)
         .and_then(|t| t.market_group)
@@ -732,7 +737,14 @@ fn fighter_menu(
             },
         );
     }
-    menu
+    crate::ui::characters::skills_submenu(
+        menu,
+        this,
+        loaded,
+        crate::engine::SkillTarget::Fighter(type_id),
+        window,
+        cx,
+    )
 }
 
 /// pyfa's fighterItemMisc: copy the selection or every squadron, paste squadrons.

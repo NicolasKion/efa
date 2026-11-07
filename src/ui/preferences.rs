@@ -2,14 +2,15 @@
 //! of its own. Every change goes straight to the hub, which saves it and hands it to every fit
 //! window, the way pyfa applies a preference as soon as it is clicked.
 //!
-//! Left out on purpose: language and theme (gyfa follows the system and Omarchy's theme),
-//! global character and damage pattern, compact skills tooltip, gauge animation, Omega icons,
-//! market shortcuts and market view modes, reactivation timers, update checks, ESI and SSO,
-//! database paths and logging.
+//! Left out on purpose: language and theme (gyfa follows the system and Omarchy's theme), gauge
+//! animation, market shortcuts and market view modes, reactivation timers, update checks, pyfa's
+//! own SSO server mode (gyfa always logs in through a local callback), and logging.
 
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon as UiIcon, Sizable, h_flex,
+    ActiveTheme, Disableable, Icon as UiIcon, Sizable,
+    button::Button,
+    h_flex,
     input::{Input, InputEvent, InputState},
     switch::Switch,
     v_flex,
@@ -45,10 +46,12 @@ enum Page {
     Market,
     Network,
     Html,
+    Esi,
+    Database,
 }
 
 impl Page {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 9] = [
         Self::General,
         Self::Engine,
         Self::Stats,
@@ -56,6 +59,8 @@ impl Page {
         Self::Market,
         Self::Network,
         Self::Html,
+        Self::Esi,
+        Self::Database,
     ];
 
     fn title(self) -> &'static str {
@@ -67,6 +72,8 @@ impl Page {
             Self::Market => "Market & Prices",
             Self::Network => "Network",
             Self::Html => "HTML Export",
+            Self::Esi => "ESI",
+            Self::Database => "Database",
         }
     }
 
@@ -79,6 +86,8 @@ impl Page {
             Self::Market => AssetIcon::Coins,
             Self::Network => AssetIcon::Globe,
             Self::Html => AssetIcon::FileCode,
+            Self::Esi => AssetIcon::KeyRound,
+            Self::Database => AssetIcon::Database,
         }
     }
 
@@ -91,6 +100,8 @@ impl Page {
             Self::Market => "Market search and where prices come from.",
             Self::Network => "Internet access and proxy settings.",
             Self::Html => "Exporting every fit to one HTML page.",
+            Self::Esi => "Logging in with EVE for skills and in-game fittings.",
+            Self::Database => "Where gyfa keeps its files, and starting over.",
         }
     }
 }
@@ -103,6 +114,8 @@ struct Fields {
     proxy_user: Entity<InputState>,
     proxy_password: Entity<InputState>,
     html_path: Entity<InputState>,
+    esi_client_id: Entity<InputState>,
+    esi_port: Entity<InputState>,
 }
 
 pub struct PreferencesWindow {
@@ -160,6 +173,12 @@ impl PreferencesWindow {
                 &html_path("").display().to_string(),
                 false,
             ),
+            esi_client_id: field(prefs.esi.client_id.clone(), "Client ID", false),
+            esi_port: field(
+                prefs.esi.port.to_string(),
+                &crate::esi::DEFAULT_PORT.to_string(),
+                false,
+            ),
         };
         let on_change =
             |input: &Entity<InputState>, cx: &mut Context<Self>, apply: fn(&mut Saved, &str)| {
@@ -194,6 +213,16 @@ impl PreferencesWindow {
             }),
             on_change(&fields.html_path, cx, |s, v| {
                 v.trim().clone_into(&mut s.preferences.html.path);
+            }),
+            on_change(&fields.esi_client_id, cx, |s, v| {
+                v.trim().clone_into(&mut s.preferences.esi.client_id);
+            }),
+            on_change(&fields.esi_port, cx, |s, v| {
+                if let Ok(port) = v.trim().parse::<u16>()
+                    && port > 0
+                {
+                    s.preferences.esi.port = port;
+                }
             }),
         ];
         Self {
@@ -394,6 +423,33 @@ impl PreferencesWindow {
                          the opposite.",
                         g.ammo_change_all,
                         |s, v| s.preferences.general.ammo_change_all = v,
+                        cx,
+                    ),
+                    Self::toggle(
+                        "global-character",
+                        "Use global character",
+                        "Every fit flies the character picked last, instead of each fit keeping \
+                         its own.",
+                        g.global_character,
+                        |s, v| s.preferences.general.global_character = v,
+                        cx,
+                    ),
+                    Self::toggle(
+                        "global-damage-pattern",
+                        "Use global damage pattern",
+                        "Every fit takes the damage pattern picked last, instead of each fit \
+                         keeping its own.",
+                        g.global_damage_pattern,
+                        |s, v| s.preferences.general.global_damage_pattern = v,
+                        cx,
+                    ),
+                    Self::toggle(
+                        "compact-skills",
+                        "Compact skills needed tooltip",
+                        "List each missing skill once. Off lists the skills under each item \
+                         that needs them.",
+                        g.compact_skills,
+                        |s, v| s.preferences.general.compact_skills = v,
                         cx,
                     ),
                     Self::toggle(
@@ -614,7 +670,7 @@ impl PreferencesWindow {
         let mut prices = vec![Self::choice(
             "price-source",
             "Price source",
-            "Where item prices come from.",
+            "Where item prices come from. Items it has no price for are asked of the others.",
             &sources,
             m.price_source,
             |s, v| s.preferences.market.price_source = v,
@@ -709,7 +765,7 @@ impl PreferencesWindow {
                     Self::toggle(
                         "network",
                         "Enable network",
-                        "Off stops price updates. Item icons still download when missing.",
+                        "Off stops price updates and ESI. Item icons still download when missing.",
                         n.enabled,
                         |s, v| s.preferences.network.enabled = v,
                         cx,
@@ -774,6 +830,242 @@ impl PreferencesWindow {
             ],
             cx,
         )]
+    }
+}
+
+impl PreferencesWindow {
+    fn esi(&self, p: &Preferences, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let url = crate::esi::callback_url(p.esi.port);
+        let logged_in = self.hub.read(cx).esi.accounts.accounts.len();
+        let theme = cx.theme();
+        let mono = |text: String| {
+            div()
+                .font_family("monospace")
+                .text_xs()
+                .child(text)
+                .into_any_element()
+        };
+        let callback = h_flex()
+            .gap_2()
+            .child(mono(url.clone()))
+            .child(
+                gpui_kit::component::clipboard::Clipboard::new("esi-callback-copy")
+                    .value(url)
+                    .tooltip("Copy the callback URL"),
+            )
+            .into_any_element();
+        let register = v_flex()
+            .gap_2()
+            .px_4()
+            .py_3()
+            .child(div().text_xs().text_color(theme.muted_foreground).child(
+                "Register an app at developers.eveonline.com with this callback URL and \
+                         these scopes, then paste its Client ID above:",
+            ))
+            .child(
+                v_flex()
+                    .gap_0p5()
+                    .children(crate::esi::SCOPES.map(|s| mono(s.to_owned()))),
+            )
+            .into_any_element();
+        let hub = self.hub.clone();
+        let manage = Button::new("esi-manage")
+            .small()
+            .label("Manage…")
+            .on_click(move |_, _, cx| super::esi::open_characters_window(hub.clone(), cx))
+            .into_any_element();
+        vec![
+            section(
+                "Application",
+                vec![
+                    row(
+                        "Client ID",
+                        "The ID of your application at developers.eveonline.com.",
+                        Input::new(&self.fields.esi_client_id)
+                            .small()
+                            .w(px(300.))
+                            .into_any_element(),
+                        false,
+                        false,
+                        cx,
+                    ),
+                    row(
+                        "Callback port",
+                        "The local port EVE sends the browser back to after logging in.",
+                        Input::new(&self.fields.esi_port)
+                            .small()
+                            .w(px(90.))
+                            .into_any_element(),
+                        false,
+                        false,
+                        cx,
+                    ),
+                    row("Callback URL", "", callback, false, false, cx),
+                    register,
+                ],
+                cx,
+            ),
+            section(
+                "Characters",
+                vec![row(
+                    match logged_in {
+                        0 => "No characters logged in".to_owned(),
+                        1 => "1 character logged in".to_owned(),
+                        n => format!("{n} characters logged in"),
+                    },
+                    "Add or remove them in Character > Manage ESI Characters.",
+                    manage,
+                    false,
+                    false,
+                    cx,
+                )],
+                cx,
+            ),
+        ]
+    }
+}
+
+/// What the Database page can delete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Wipe {
+    DamagePatterns,
+    TargetProfiles,
+    Prices,
+}
+
+impl Wipe {
+    fn button(self) -> &'static str {
+        match self {
+            Self::DamagePatterns => "Delete All Damage Pattern Profiles",
+            Self::TargetProfiles => "Delete All Target Profiles",
+            Self::Prices => "Delete All Prices",
+        }
+    }
+
+    /// pyfa's question before going ahead.
+    fn question(self) -> &'static str {
+        match self {
+            Self::DamagePatterns => {
+                "This is a destructive action that will delete all damage pattern profiles. \
+                 Are you sure you want to do this?"
+            }
+            Self::TargetProfiles => {
+                "This is a destructive action that will delete all target profiles. Are you \
+                 sure you want to do this?"
+            }
+            Self::Prices => {
+                "This is a destructive action that will delete all cached prices. Are you sure \
+                 you want to do this?"
+            }
+        }
+    }
+}
+
+impl PreferencesWindow {
+    /// pyfa's Database page: where things are kept, and the three deletes.
+    fn database(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let cache_dir = match &self.hub.read(cx).loading {
+            super::hub::HubLoading::Ready(loaded) => Some(loaded.cache_dir.clone()),
+            _ => None,
+        };
+        let shown = |path: Option<std::path::PathBuf>| {
+            path.map_or_else(|| "unknown".to_owned(), |p| p.display().to_string())
+        };
+        let path_row = |title: &'static str, path: String, cx: &App| {
+            row(
+                title,
+                "",
+                div()
+                    .text_xs()
+                    .max_w(px(360.))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(path)
+                    .into_any_element(),
+                false,
+                false,
+                cx,
+            )
+        };
+        let wipes = [Wipe::DamagePatterns, Wipe::TargetProfiles, Wipe::Prices]
+            .into_iter()
+            .map(|wipe| {
+                let description = match wipe {
+                    Wipe::DamagePatterns => "Your own damage patterns. The built-in ones stay.",
+                    Wipe::TargetProfiles => "Your own target profiles. The built-in ones stay.",
+                    Wipe::Prices => "Every price fetched so far. They are fetched again.",
+                };
+                let control = gpui_kit::component::button::Button::new(wipe.button())
+                    .small()
+                    .label(wipe.button())
+                    .on_click(cx.listener(move |_, _, window, cx| {
+                        Self::confirm_wipe(wipe, window, cx);
+                    }))
+                    .into_any_element();
+                row(wipe.button(), description, control, false, false, cx)
+            })
+            .collect();
+        vec![
+            section(
+                "Locations",
+                vec![
+                    path_row("Fits and settings", shown(crate::store::path()), cx),
+                    path_row("Characters", shown(crate::character::path()), cx),
+                    path_row("Cache", shown(cache_dir), cx),
+                ],
+                cx,
+            ),
+            section("Start over", wipes, cx),
+        ]
+    }
+
+    fn confirm_wipe(wipe: Wipe, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui_kit::component::{
+            WindowExt,
+            button::{Button, ButtonVariants},
+        };
+        let this = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let this = this.clone();
+            dialog.title("Confirm").w(px(380.)).child(
+                v_flex().gap_3().child(wipe.question()).child(
+                    h_flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            Button::new("wipe-no")
+                                .label("No")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(Button::new("wipe-yes").danger().label("Yes").on_click(
+                            move |_, window, cx| {
+                                window.close_dialog(cx);
+                                let _ = this.update(cx, |this, cx| this.wipe(wipe, cx));
+                            },
+                        )),
+                ),
+            )
+        });
+    }
+
+    fn wipe(&self, wipe: Wipe, cx: &mut Context<Self>) {
+        match wipe {
+            Wipe::DamagePatterns => self.set(cx, |s| s.damage_patterns.clear()),
+            Wipe::TargetProfiles => self.set(cx, |s| s.target_profiles.clear()),
+            Wipe::Prices => {
+                let cache_dir = match &self.hub.read(cx).loading {
+                    super::hub::HubLoading::Ready(loaded) => Some(loaded.cache_dir.clone()),
+                    _ => None,
+                };
+                if let Some(dir) = cache_dir
+                    && let Err(e) = crate::prices::Prices::delete_cached(&dir)
+                {
+                    crate::errors::report("Deleting the prices failed", e);
+                }
+                self.hub.update(cx, |hub, cx| {
+                    hub.set_prices(std::rc::Rc::new(crate::prices::Prices::default()), cx);
+                });
+            }
+        }
     }
 }
 
@@ -869,6 +1161,8 @@ impl Render for PreferencesWindow {
             Page::Market => self.market(&prefs, totals, cx),
             Page::Network => self.network(&prefs, cx),
             Page::Html => self.html(&prefs, cx),
+            Page::Esi => self.esi(&prefs, cx),
+            Page::Database => self.database(cx),
         };
         let theme = cx.theme();
         let pages = Page::ALL.into_iter().map(|page| {

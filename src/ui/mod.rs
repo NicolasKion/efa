@@ -6,6 +6,8 @@ mod additions;
 mod character_editor;
 mod characters;
 mod columns;
+mod error_dialog;
+mod esi;
 mod export;
 mod fitting;
 mod graphs;
@@ -104,6 +106,9 @@ use crate::{
 
 /// How long to wait before asking ESI again after a failed price fetch.
 const PRICE_RETRY: Duration = Duration::from_secs(600);
+
+/// What runs once prices for some types are in, or could not be had.
+type PriceWaiter = Box<dyn FnOnce(&mut Gyfa, &mut Context<Gyfa>)>;
 
 /// How often background work is checked: icons that finished downloading, theme switches.
 const POLL: Duration = Duration::from_millis(250);
@@ -265,12 +270,17 @@ pub struct Gyfa {
     prices_fetch: Option<Task<()>>,
     /// When a failed price fetch may be tried again.
     prices_retry: Option<Instant>,
+    /// Work waiting for prices of particular types, with those types.
+    price_waiters: Vec<(HashSet<TypeId>, PriceWaiter)>,
     /// The hub's characters as of its last change.
     characters: Rc<Characters>,
     /// The pilot last built, and from which characters and character.
     pilot_cache: Option<(Rc<Characters>, CharacterId, Rc<Pilot>)>,
     /// The character last picked, which new fits get, as in pyfa.
     last_character: CharacterId,
+    /// The damage pattern last picked, which every fit takes with the global damage pattern
+    /// preference. Uniform until one is picked, as in pyfa.
+    last_damage_profile: crate::fit::DamageProfile,
     _subscriptions: Vec<Subscription>,
     _tasks: Vec<Task<()>>,
 }
@@ -410,9 +420,11 @@ impl Gyfa {
             prices: Rc::new(Prices::default()),
             prices_fetch: None,
             prices_retry: None,
+            price_waiters: Vec::new(),
             characters,
             pilot_cache: None,
             last_character: CharacterId::default(),
+            last_damage_profile: crate::fit::DamageProfile::default(),
             _subscriptions: subscriptions,
             _tasks: vec![poller],
         };
@@ -477,6 +489,17 @@ impl Gyfa {
         if let Some(text) = import {
             self.import(&text);
             self.save();
+        }
+        // Fits imported from the ESI fittings window land here.
+        if self.role == Role::Main && !self.hub.read(cx).fit_imports.is_empty() {
+            let imports = self
+                .hub
+                .update(cx, |hub, _| std::mem::take(&mut hub.fit_imports));
+            for imported in imports {
+                self.add_imported(imported);
+            }
+            self.save();
+            changed = true;
         }
         if changed {
             self.recompute();
@@ -558,39 +581,73 @@ impl Gyfa {
         }
     }
 
-    /// Redraw for downloaded icons, restyle for a theme switch.
+    /// The source and hub the preferences ask prices from.
+    fn price_origin(&self) -> crate::prices::Origin {
+        let market = &self.saved.preferences.market;
+        crate::prices::Origin {
+            source: market.price_source,
+            system: market.price_system,
+        }
+    }
+
+    fn prices_online(&self) -> bool {
+        let network = &self.saved.preferences.network;
+        network.enabled && network.prices
+    }
+
+    /// Every type the saved fits use, what the price sources are asked about.
+    fn saved_fit_types(&self) -> HashSet<TypeId> {
+        self.saved
+            .fits
+            .iter()
+            .flat_map(crate::port::fit_types)
+            .collect()
+    }
+
     /// Fetch newer prices in the background when the ones we have are stale. After a failure it
     /// waits a while before trying again, so being offline does not mean a request every poll.
     fn refresh_prices(&mut self, cx: &mut Context<Self>) {
-        let Some(loaded) = self.loaded() else { return };
-        let preferences = &self.saved.preferences;
-        if !preferences.network.enabled || !preferences.network.prices {
+        if !self.prices_online() {
             return;
         }
         let waiting = self.prices_retry.is_some_and(|at| Instant::now() < at);
         if self.prices_fetch.is_some() || waiting {
             return;
         }
-        let origin = crate::prices::Origin {
-            source: preferences.market.price_source,
-            system: preferences.market.price_system,
-        };
-        // Sources priced per type are asked about what the saved fits use.
-        let types: HashSet<TypeId> = if origin.source.uses_system() {
-            self.saved
-                .fits
-                .iter()
-                .flat_map(crate::port::fit_types)
-                .collect()
-        } else {
-            HashSet::new()
-        };
-        if !self.prices.is_stale_for(origin, &types) {
+        let types = self.saved_fit_types();
+        if self.prices.is_stale_for(self.price_origin(), &types) {
+            self.start_price_fetch(types, cx);
+        }
+    }
+
+    /// Run `then` once there are prices for `types`, fetching them first when they are stale
+    /// and the network allows. Without them it runs with what there is.
+    pub(super) fn with_prices_for(
+        &mut self,
+        types: HashSet<TypeId>,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, &mut Context<Self>) + 'static,
+    ) {
+        if !self.prices_online() || !self.prices.is_stale_for(self.price_origin(), &types) {
+            then(self, cx);
             return;
         }
+        self.status = Some("Fetching prices...".into());
+        cx.notify();
+        let mut all = self.saved_fit_types();
+        all.extend(&types);
+        self.price_waiters.push((types, Box::new(then)));
+        if self.prices_fetch.is_none() {
+            self.start_price_fetch(all, cx);
+        }
+    }
+
+    fn start_price_fetch(&mut self, types: HashSet<TypeId>, cx: &mut Context<Self>) {
+        let Some(loaded) = self.loaded() else { return };
+        let origin = self.price_origin();
         let prices = (*self.prices).clone();
         let cache_dir = loaded.cache_dir.clone();
-        let proxy = preferences.network.proxy.clone();
+        let proxy = self.saved.preferences.network.proxy.clone();
         self.prices_fetch = Some(cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -600,27 +657,46 @@ impl Gyfa {
                 .await;
             let _ = this.update(cx, |g, cx| {
                 g.prices_fetch = None;
+                let fetched = result.is_ok();
                 match result {
                     Ok(prices) => {
                         let prices = Rc::new(prices);
                         g.prices = Rc::clone(&prices);
                         g.prices_retry = None;
                         g.hub.update(cx, |hub, cx| hub.set_prices(prices, cx));
-                        cx.notify();
                     }
                     Err(e) => {
                         eprintln!("prices: {e}");
                         g.prices_retry = Some(Instant::now() + PRICE_RETRY);
+                        if !g.price_waiters.is_empty() {
+                            g.status = Some(format!("Could not fetch prices: {e}").into());
+                        }
                     }
                 }
+                // Waiters whose types this fetch did not cover start another; after a failure
+                // they make do with what there is.
+                for (types, then) in std::mem::take(&mut g.price_waiters) {
+                    if fetched {
+                        g.with_prices_for(types, cx, then);
+                    } else {
+                        then(g, cx);
+                    }
+                }
+                cx.notify();
             });
         }));
     }
 
+    /// Redraw for downloaded icons, restyle for a theme switch.
     fn poll(&mut self, cx: &mut Context<Self>) {
-        // One window fetching prices is enough; the hub hands them to the rest.
+        // One window fetching prices is enough; the hub hands them to the rest. The same goes
+        // for showing errors.
         if self.role == Role::Main {
             self.refresh_prices(cx);
+            let errors = crate::errors::take();
+            if !errors.is_empty() {
+                cx.defer(move |cx| error_dialog::open(&errors, cx));
+            }
         }
         if std::mem::take(&mut self.unsaved) {
             self.publish(cx);
@@ -644,6 +720,7 @@ impl Gyfa {
 
     fn recompute(&mut self) {
         let Some(loaded) = self.loaded() else { return };
+        self.follow_globals();
         let options = crate::engine::CalcOptions {
             factor_reload: self.saved.factor_reload,
             default_spool: Some(self.saved.preferences.engine.default_spool),
@@ -661,6 +738,23 @@ impl Gyfa {
                 .engine
                 .compute_among(fit, &self.saved.fits, &pilot, options)
         });
+    }
+
+    /// With pyfa's "Use global character" and "Use global damage pattern", the current fit
+    /// takes the character and damage pattern picked last, as pyfa's `switchFit` does.
+    fn follow_globals(&mut self) {
+        let general = &self.saved.preferences.general;
+        let (character, pattern) = (general.global_character, general.global_damage_pattern);
+        let Some(i) = self.saved.current else { return };
+        let fit = &mut self.saved.fits[i];
+        if character && fit.character != self.last_character {
+            fit.character = self.last_character;
+            self.unsaved = true;
+        }
+        if pattern && fit.damage_profile != self.last_damage_profile {
+            fit.damage_profile = self.last_damage_profile.clone();
+            self.unsaved = true;
+        }
     }
 
     /// Mark the fits as changed. The poll publishes them to the hub, which writes them out and

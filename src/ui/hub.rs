@@ -76,6 +76,10 @@ pub struct Hub {
     pub characters: Rc<Characters>,
     /// The open character editor, which is brought forward instead of opening a second one.
     pub character_editor: Option<(AnyWindowHandle, WeakEntity<CharacterEditor>)>,
+    /// Characters logged in with EVE SSO, and a login under way.
+    pub esi: super::esi::EsiState,
+    /// Fits other windows (Browse ESI Fittings) want the main window to add as new tabs.
+    pub fit_imports: Vec<crate::port::Imported>,
     /// The engine data being rebuilt for changed attribute overrides.
     overrides_task: Option<Task<()>>,
 }
@@ -120,6 +124,8 @@ impl Hub {
             raw_hp: false,
             characters: Rc::new(Characters::load()),
             character_editor: None,
+            esi: super::esi::EsiState::load(),
+            fit_imports: Vec::new(),
             overrides_task: None,
         }
     }
@@ -134,7 +140,7 @@ impl Hub {
         let result = edit(&mut characters);
         if characters != *self.characters {
             if let Err(e) = characters.save() {
-                eprintln!("saving characters: {e}");
+                crate::errors::report("Saving characters failed", e);
             }
             self.characters = Rc::new(characters);
             cx.notify();
@@ -173,7 +179,7 @@ impl Hub {
             ..saved.clone()
         };
         if let Err(e) = self.saved.save() {
-            eprintln!("saving fits: {e}");
+            crate::errors::report("Saving fits failed", e);
         }
         self.sync_preferences(cx);
         cx.notify();
@@ -185,7 +191,7 @@ impl Hub {
         edit(&mut self.saved);
         self.generation += 1;
         if let Err(e) = self.saved.save() {
-            eprintln!("saving settings: {e}");
+            crate::errors::report("Saving settings failed", e);
         }
         self.sync_preferences(cx);
         cx.notify();

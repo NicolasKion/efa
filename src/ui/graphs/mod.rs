@@ -337,7 +337,7 @@ impl GraphsWindow {
     fn pilot(&self, f: &Fit, loaded: &Loaded) -> crate::engine::Pilot {
         self.characters.as_ref().map_or_else(
             || loaded.engine.all5().clone(),
-            |c| c.pilot(f.character, &loaded.catalog.skills),
+            |c| c.pilot(f.character, &loaded.catalog),
         )
     }
 
