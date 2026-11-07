@@ -113,6 +113,28 @@ fn ensure_data(loaded: &Rc<Loaded>, cx: &mut App) {
     .detach();
 }
 
+/// The stats window's data for hover text, such as descriptions and traits. Starts loading it
+/// the first time; None until it is in.
+pub fn hover_data(loaded: &Rc<Loaded>, cx: &mut App) -> Option<Rc<ItemData>> {
+    ensure_data(loaded, cx);
+    match &cx.try_global::<ItemDataGlobal>()?.0 {
+        DataState::Ready(data) => Some(Rc::clone(data)),
+        DataState::Loading | DataState::Failed(_) => None,
+    }
+}
+
+/// A ship's bonuses as plain text, the way pyfa's browser tooltips show them.
+pub fn traits_text(loaded: &Loaded, data: &ItemData, ship: TypeId) -> Option<String> {
+    let traits = data.type_info(ship)?.traits.as_ref()?;
+    Some(text::plain(&text::traits_html(&loaded.catalog, traits)))
+}
+
+/// An item's description as plain text.
+pub fn description_text(data: &ItemData, id: TypeId) -> Option<String> {
+    let description = data.type_info(id)?.description.as_ref()?;
+    Some(text::plain(&text::description_html(description)))
+}
+
 /// The open stats windows, for Shift to replace the last one used.
 #[derive(Default)]
 struct StatsWindows {

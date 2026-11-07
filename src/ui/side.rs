@@ -1,26 +1,34 @@
-//! The left side: market browser and saved fittings.
+//! The left side: market browser and fittings browser.
+
+use std::{collections::HashSet, rc::Rc};
 
 use gpui_kit::component::{
-    ActiveTheme, IconName, h_flex,
+    ActiveTheme, Disableable, Icon as LucideIcon, IconName, Selectable, Sizable,
+    button::{Button, ButtonVariants},
+    h_flex,
     menu::{ContextMenuExt, PopupMenu},
     tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext, ClickEvent, Context, InteractiveElement, IntoElement,
-    ParentElement, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
-    prelude::FluentBuilder, px,
+    AnyElement, AnyView, App, AppContext, ClickEvent, Context, InteractiveElement, IntoElement,
+    MouseButton, MouseUpEvent, ParentElement, SharedString, StatefulInteractiveElement, Styled,
+    WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
 use super::{
     Action, AdditionsTab, BrowserTab, Gyfa, Loaded,
     additions::{FitDrag, Link, goes_to_cargo},
     fitting::{DragPreview, DragSource, Dragged},
+    item_stats,
+    stats::format,
     widgets::{entry, icon_box},
 };
 use crate::{
     data::{Kind, Slot, TypeId},
     icons::Icon,
+    market::{MetaCategory, charges_for_fit},
+    ship_browser::{self, Race, Stage},
 };
 
 /// Search results shown at most, to keep the list quick to draw.
@@ -31,18 +39,42 @@ const BASE_ACTIVE_DRONES: u32 = 5;
 /// Charges "Add to Cargo" puts in at once, and the smaller batch for scan probes.
 const AMMO_BATCH: u32 = 1000;
 const PROBE_BATCH: u32 = 8;
+/// pyfa's market tree entries that are not market groups, kept apart by negative IDs.
+const RECENT_GROUP: i32 = -1;
+const CHARGES_GROUP: i32 = -2;
+/// The Omega clone icon pyfa marks hulls and items with.
+const OMEGA_ICON: i32 = 25874;
+/// Widest a hover text gets before it wraps.
+const TOOLTIP_W: f32 = 380.;
+/// Longest description excerpt a market tooltip shows.
+const DESCRIPTION_MAX: usize = 400;
 
-/// A row of the market list, with the item it shows so a jump can find it.
-struct MarketRow {
-    id: Option<TypeId>,
-    element: AnyElement,
-}
-
-/// Whether the market list shows search results or browses groups, as pyfa tells them apart.
+/// Whether the market list shows search results or browses groups, as pyfa tells them apart:
+/// recently used items count as a search, charges for the fit as a group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MarketContext {
     Group,
     Search,
+}
+
+/// A line of the market list before it is drawn, so the meta buttons can look at what it holds.
+enum MarketEntry {
+    Group {
+        id: i32,
+        depth: usize,
+        name: SharedString,
+        icon: GroupIcon,
+    },
+    Item {
+        id: TypeId,
+        depth: usize,
+        context: MarketContext,
+    },
+}
+
+enum GroupIcon {
+    Game(Option<i32>),
+    Lucide(IconName),
 }
 
 impl Gyfa {
@@ -85,27 +117,146 @@ impl Gyfa {
             .child(content)
     }
 
-    fn market(&mut self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut rows: Vec<MarketRow> = Vec::new();
-        if self.search_text.trim().len() >= 2 {
-            for id in loaded.catalog.search(&self.search_text, SEARCH_LIMIT) {
-                rows.push(self.item_row(loaded, id, 0, MarketContext::Search, cx));
-            }
-        } else {
-            for &root in &loaded.catalog.market_roots {
-                self.market_group(loaded, root, 0, &mut rows, cx);
-            }
+    /// Remember an item taken from the market, for pyfa's Recently Used Items.
+    pub(super) fn used_from_market(&mut self, id: TypeId) {
+        crate::market::remember(&mut self.saved.recent_items, id);
+        self.save();
+    }
+
+    /// The market search's results, searched again only when the text changed.
+    fn search_results(&mut self, loaded: &Loaded) -> Option<Rc<Vec<TypeId>>> {
+        let text = self.search_text.trim();
+        // pyfa goes back to the tree while there is nothing but wildcards.
+        if text.replace(['*', '?'], "").is_empty() {
+            return None;
         }
+        if let Some((cached, results)) = &self.search_results
+            && cached == text
+        {
+            return Some(Rc::clone(results));
+        }
+        let results = Rc::new(loaded.catalog.search(text, SEARCH_LIMIT));
+        self.search_results = Some((text.to_owned(), Rc::clone(&results)));
+        Some(results)
+    }
+
+    fn market_entries(&mut self, loaded: &Loaded) -> Vec<MarketEntry> {
+        let mut entries = Vec::new();
+        if let Some(results) = self.search_results(loaded) {
+            entries.extend(results.iter().map(|&id| MarketEntry::Item {
+                id,
+                depth: 0,
+                context: MarketContext::Search,
+            }));
+            return entries;
+        }
+        for &root in &loaded.catalog.market_roots {
+            self.market_group(loaded, root, 0, &mut entries);
+        }
+        entries.push(MarketEntry::Group {
+            id: RECENT_GROUP,
+            depth: 0,
+            name: "Recently Used Items".into(),
+            icon: GroupIcon::Lucide(IconName::Calendar),
+        });
+        if self.expanded_groups.contains(&RECENT_GROUP) {
+            entries.extend(
+                self.saved
+                    .recent_items
+                    .iter()
+                    .filter(|&&id| loaded.catalog.get(id).is_some())
+                    .map(|&id| MarketEntry::Item {
+                        id,
+                        depth: 1,
+                        context: MarketContext::Search,
+                    }),
+            );
+        }
+        entries.push(MarketEntry::Group {
+            id: CHARGES_GROUP,
+            depth: 0,
+            name: "Charges For Active Fit".into(),
+            icon: GroupIcon::Lucide(IconName::Asterisk),
+        });
+        if self.expanded_groups.contains(&CHARGES_GROUP)
+            && let Some(fit) = self.fit()
+        {
+            entries.extend(charges_for_fit(&loaded.catalog, fit).into_iter().map(|id| {
+                MarketEntry::Item {
+                    id,
+                    depth: 1,
+                    context: MarketContext::Group,
+                }
+            }));
+        }
+        entries
+    }
+
+    fn market_group(&self, loaded: &Loaded, id: i32, depth: usize, out: &mut Vec<MarketEntry>) {
+        let Some(group) = loaded.catalog.market_groups.get(&id) else {
+            return;
+        };
+        out.push(MarketEntry::Group {
+            id,
+            depth,
+            name: group.name.clone().into(),
+            icon: GroupIcon::Game(group.icon_id),
+        });
+        if !self.expanded_groups.contains(&id) {
+            return;
+        }
+        for &child in &group.children {
+            self.market_group(loaded, child, depth + 1, out);
+        }
+        out.extend(group.types.iter().map(|&t| MarketEntry::Item {
+            id: t,
+            depth: depth + 1,
+            context: MarketContext::Group,
+        }));
+    }
+
+    fn market(&mut self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
+        let searching = self.search_results(loaded).is_some();
+        let entries = self.market_entries(loaded);
+        let present: HashSet<MetaCategory> = entries
+            .iter()
+            .filter_map(|e| match e {
+                MarketEntry::Item { id, .. } => loaded.catalog.get(*id),
+                MarketEntry::Group { .. } => None,
+            })
+            .map(MetaCategory::of_item)
+            .collect();
+        // pyfa never leaves a list empty because of the buttons.
+        self.meta_filter.show_something(&present);
+        let filter = self.meta_filter;
+        let rows: Vec<(Option<TypeId>, AnyElement)> = entries
+            .into_iter()
+            .filter_map(|entry| match entry {
+                MarketEntry::Group {
+                    id,
+                    depth,
+                    name,
+                    icon,
+                } => Some((None, self.group_row(loaded, id, depth, name, icon, cx))),
+                MarketEntry::Item { id, depth, context } => {
+                    let t = loaded.catalog.get(id)?;
+                    filter
+                        .allows(t)
+                        .then(|| (Some(id), self.item_row(loaded, id, depth, context, cx)))
+                }
+            })
+            .collect();
         if self.market_scroll_pending {
             self.market_scroll_pending = false;
             let target = self.market_highlight;
             if let Some(index) = rows
                 .iter()
-                .position(|row| row.id.is_some() && row.id == target)
+                .position(|row| row.0.is_some() && row.0 == target)
             {
                 self.market_scroll.scroll_to_item(index);
             }
         }
+        let empty_search = searching && rows.is_empty();
         v_flex()
             .flex_1()
             .min_h_0()
@@ -117,62 +268,101 @@ impl Gyfa {
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.market_scroll)
-                    .children(rows.into_iter().map(|row| row.element)),
+                    .when(empty_search, |list| {
+                        list.child(
+                            div()
+                                .p_2()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("No matching items."),
+                        )
+                    })
+                    .children(rows.into_iter().map(|row| row.1)),
             )
+            .child(self.meta_buttons(&present, cx))
     }
 
-    fn market_group(
+    /// pyfa's meta group toggles under the market list. A click shows one category, Ctrl+click
+    /// adds or removes one; categories the list does not hold are greyed out.
+    fn meta_buttons(&self, present: &HashSet<MetaCategory>, cx: &mut Context<Self>) -> AnyElement {
+        h_flex()
+            .gap_1()
+            .p_1()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .children(MetaCategory::ALL.into_iter().map(|category| {
+                div().flex_1().child(
+                    Button::new(SharedString::from(format!("meta-{}", category.label())))
+                        .xsmall()
+                        .w_full()
+                        .label(category.label())
+                        .toggled(self.meta_filter.is_on(category))
+                        .selected(self.meta_filter.is_on(category))
+                        .disabled(!present.contains(&category))
+                        .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                            let ctrl = event.modifiers().control;
+                            this.meta_filter.click(category, ctrl);
+                            cx.notify();
+                        })),
+                )
+            }))
+            .into_any_element()
+    }
+
+    fn group_row(
         &self,
         loaded: &Loaded,
         id: i32,
         depth: usize,
-        rows: &mut Vec<MarketRow>,
+        name: SharedString,
+        icon: GroupIcon,
         cx: &mut Context<Self>,
-    ) {
-        let Some(group) = loaded.catalog.market_groups.get(&id) else {
-            return;
-        };
+    ) -> AnyElement {
         let expanded = self.expanded_groups.contains(&id);
-        rows.push(MarketRow {
-            id: None,
-            element: h_flex()
-                .id(SharedString::from(format!("group-{id}")))
-                .gap_1()
-                .h(px(22.))
-                .pl(px(4. + INDENT * depth as f32))
-                .hover(|s| s.bg(cx.theme().list_hover))
-                .child(
+        h_flex()
+            .id(SharedString::from(format!("group-{id}")))
+            .gap_1()
+            .h(px(22.))
+            .pl(px(4. + INDENT * depth as f32))
+            .hover(|s| s.bg(cx.theme().list_hover))
+            .child(
+                div()
+                    .w(px(10.))
+                    .text_xs()
+                    .child(if expanded { "▾" } else { "▸" }),
+            )
+            .map(|row| match icon {
+                GroupIcon::Game(Some(icon_id)) => row.child(icon_box(
+                    &loaded.catalog,
+                    &loaded.icons,
+                    Icon::Id(icon_id),
+                    18.,
+                )),
+                GroupIcon::Game(None) => row,
+                GroupIcon::Lucide(name) => row.child(
                     div()
-                        .w(px(10.))
-                        .text_xs()
-                        .child(if expanded { "▾" } else { "▸" }),
-                )
-                .when_some(group.icon_id, |row, icon_id| {
-                    row.child(icon_box(
-                        &loaded.catalog,
-                        &loaded.icons,
-                        Icon::Id(icon_id),
-                        18.,
-                    ))
-                })
-                .child(group.name.clone())
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    if !this.expanded_groups.remove(&id) {
-                        this.expanded_groups.insert(id);
-                    }
-                    cx.notify();
-                }))
-                .into_any_element(),
-        });
-        if !expanded {
-            return;
-        }
-        for &child in &group.children {
-            self.market_group(loaded, child, depth + 1, rows, cx);
-        }
-        for &t in &group.types {
-            rows.push(self.item_row(loaded, t, depth + 1, MarketContext::Group, cx));
-        }
+                        .size(px(18.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(LucideIcon::new(name).size(px(14.))),
+                ),
+            })
+            .child(name)
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                if !this.expanded_groups.remove(&id) {
+                    this.expanded_groups.insert(id);
+                }
+                cx.notify();
+            }))
+            .into_any_element()
+    }
+
+    /// The Omega marker, when the preference shows it and the type needs Omega.
+    fn omega_marker(&self, loaded: &Loaded, id: TypeId, size: f32) -> Option<AnyElement> {
+        let omega = loaded.catalog.get(id).is_some_and(|t| t.omega);
+        (omega && self.saved.preferences.general.omega_icons).then(|| {
+            icon_box(&loaded.catalog, &loaded.icons, Icon::Id(OMEGA_ICON), size).into_any_element()
+        })
     }
 
     fn item_row(
@@ -182,16 +372,19 @@ impl Gyfa {
         depth: usize,
         context: MarketContext,
         cx: &mut Context<Self>,
-    ) -> MarketRow {
+    ) -> AnyElement {
         let name = loaded.catalog.name(id);
         let highlighted = self.market_highlight == Some(id);
-        let element = h_flex()
+        let price = self.prices.get(id).filter(|&p| p > 0.0);
+        let weak = Self::weak(cx);
+        h_flex()
             .id(SharedString::from(format!("item-{id}")))
             .gap_2()
             .h(px(26.))
             .pl(px(18. + INDENT * depth as f32))
             .when(highlighted, |row| row.bg(cx.theme().list_active))
             .hover(|s| s.bg(cx.theme().list_hover))
+            .children(self.omega_marker(loaded, id, 16.))
             .child(icon_box(
                 &loaded.catalog,
                 &loaded.icons,
@@ -199,15 +392,20 @@ impl Gyfa {
                 24.,
             ))
             .child(div().truncate().child(name))
+            .when_some(self.loaded(), |row, loaded| {
+                row.tooltip(move |window, cx| item_tooltip(&loaded, id, price, window, cx))
+            })
             .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                 if event.click_count() >= 2 {
+                    this.used_from_market(id);
                     this.market_double_click(id, event.modifiers(), cx);
                 }
             }))
             .when_some(
                 Dragged::of(loaded, DragSource::Market, Some(id)),
                 |row, dragged| {
-                    row.on_drag(dragged, |dragged, _, _, cx| {
+                    row.on_drag(dragged, move |dragged, _, _, cx| {
+                        let _ = weak.update(cx, |g, _| g.used_from_market(id));
                         cx.new(|_| DragPreview(dragged.clone()))
                     })
                 },
@@ -216,162 +414,434 @@ impl Gyfa {
                 let this = Self::weak(cx);
                 move |menu, _, cx| market_menu(menu, &this, id, context, cx)
             })
-            .into_any_element();
-        MarketRow {
-            id: Some(id),
-            element,
+            .into_any_element()
+    }
+
+    /// Search ships and fits from the fittings browser's box; clearing it goes back.
+    pub(super) fn search_fittings(&mut self, text: String, cx: &mut Context<Self>) {
+        if text.trim().is_empty() {
+            if matches!(self.ship_browser.stage, Stage::Search(_)) {
+                self.ship_browser.back();
+            }
+        } else {
+            self.ship_browser.go(Stage::Search(text));
         }
+        cx.notify();
+    }
+
+    /// A new fit for a ship from the fittings browser, named the way pyfa's browser names it.
+    fn new_fit_for_ship(&mut self, ship: TypeId, cx: &mut Context<Self>) {
+        let Some(loaded) = self.loaded() else { return };
+        let mut fit = self.new_fit(format!("{} fit", loaded.catalog.name(ship)));
+        fit.ship = Some(ship);
+        fit.mode = loaded.catalog.modes_for(ship).first().copied();
+        self.new_fit_defaults(&mut fit);
+        self.ship_browser.go(Stage::Fits(ship));
+        self.add_fit(fit, cx);
     }
 
     fn fittings(&self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut by_ship: Vec<(String, usize)> = self
-            .saved
-            .fits
-            .iter()
-            .enumerate()
-            .filter(|(_, f)| self.fittings_ship.is_none() || f.ship == self.fittings_ship)
-            .map(|(i, f)| {
-                (
-                    f.ship.map_or_else(String::new, |s| loaded.catalog.name(s)),
-                    i,
-                )
+        let counts = ship_browser::fit_counts(&self.saved.fits);
+        let stage = self.ship_browser.stage.clone();
+        let mut races = Vec::new();
+        let rows: Vec<AnyElement> = match &stage {
+            Stage::Groups => loaded
+                .catalog
+                .ship_groups
+                .iter()
+                .filter_map(|(group, _)| {
+                    let count = ship_browser::group_fit_count(&loaded.catalog, *group, &counts);
+                    (!self.ship_browser.hide_empty || count > 0)
+                        .then(|| Self::ship_group_row(loaded, *group, count, cx))
+                })
+                .collect(),
+            Stage::Ships(group) => {
+                let ships = loaded.catalog.ships_in(*group);
+                let present: HashSet<Race> = ships
+                    .iter()
+                    .filter_map(|&s| loaded.catalog.get(s)?.race)
+                    .collect();
+                races = present.iter().copied().collect();
+                races.sort();
+                ships
+                    .iter()
+                    .filter_map(|&ship| {
+                        let count = counts.get(&ship).copied().unwrap_or(0);
+                        let race = loaded.catalog.get(ship).and_then(|t| t.race);
+                        let shown = self.ship_browser.shows_race(race, &present)
+                            && (!self.ship_browser.hide_empty || count > 0);
+                        shown.then(|| self.ship_row(loaded, ship, count, cx))
+                    })
+                    .collect()
+            }
+            Stage::Fits(ship) => ship_browser::fits_of(&self.saved.fits, *ship)
+                .into_iter()
+                .map(|i| self.fit_row(loaded, i, cx))
+                .collect(),
+            Stage::Search(query) => {
+                let ships = ship_browser::search_ships(&loaded.catalog, query);
+                let fits = ship_browser::search_fits(&self.saved.fits, query);
+                let mut rows: Vec<AnyElement> = ships
+                    .into_iter()
+                    .map(|ship| {
+                        let count = counts.get(&ship).copied().unwrap_or(0);
+                        self.ship_row(loaded, ship, count, cx)
+                    })
+                    .collect();
+                rows.extend(fits.into_iter().map(|i| self.fit_row(loaded, i, cx)));
+                rows
+            }
+            Stage::Recent => ship_browser::recent_fits(&self.saved.fits)
+                .into_iter()
+                .map(|i| self.fit_row(loaded, i, cx))
+                .collect(),
+        };
+        let empty = match &stage {
+            Stage::Groups | Stage::Ships(_) if self.ship_browser.hide_empty => "No fits yet.",
+            Stage::Groups | Stage::Ships(_) => "Nothing here.",
+            Stage::Fits(_) => "No fits for this ship yet.",
+            Stage::Search(_) => "No matching results.",
+            Stage::Recent => "No fits yet.",
+        };
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .child(self.fittings_toolbar(&stage, cx))
+            .child(Self::fittings_title(loaded, &stage, cx))
+            .child(
+                v_flex()
+                    .id("fittings-list")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .when(rows.is_empty(), |list| {
+                        list.child(
+                            div()
+                                .p_2()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(empty),
+                        )
+                    })
+                    .children(rows),
+            )
+            .when(!races.is_empty(), |pane| {
+                pane.child(self.race_filter(&races, cx))
             })
-            .collect();
-        by_ship.sort();
-        let filter = self.fittings_ship.map(|ship| {
-            h_flex()
-                .id("fittings-filter")
-                .gap_2()
-                .p_1()
-                .border_b_1()
-                .border_color(cx.theme().border)
-                .child(icon_box(
+    }
+
+    /// pyfa's navigation panel: ship groups, back, recent fits, empty groups, new fit, and the
+    /// search box.
+    fn fittings_toolbar(&self, stage: &Stage, cx: &mut Context<Self>) -> impl IntoElement {
+        let browser = &self.ship_browser;
+        let browsing = matches!(stage, Stage::Groups | Stage::Ships(_));
+        let ship = match stage {
+            Stage::Fits(ship) => Some(*ship),
+            _ => None,
+        };
+        let tool = |id: &'static str, icon: IconName, tip: &'static str| {
+            Button::new(id).ghost().xsmall().icon(icon).tooltip(tip)
+        };
+        v_flex()
+            .gap_1()
+            .p_1()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                h_flex()
+                    .gap_0p5()
+                    .child(
+                        tool("fittings-home", IconName::LayoutDashboard, "Ship groups").on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.ship_browser.go(Stage::Groups);
+                                cx.notify();
+                            }),
+                        ),
+                    )
+                    .child(
+                        tool("fittings-back", IconName::ArrowLeft, "Back")
+                            .disabled(!browser.can_go_back())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.ship_browser.back();
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        tool(
+                            "fittings-recent",
+                            IconName::Calendar,
+                            if *stage == Stage::Recent {
+                                "Hide Recent Fits"
+                            } else {
+                                "Recent Fits"
+                            },
+                        )
+                        .selected(*stage == Stage::Recent)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if this.ship_browser.stage == Stage::Recent {
+                                this.ship_browser.go(Stage::Groups);
+                            } else {
+                                this.ship_browser.go(Stage::Recent);
+                            }
+                            cx.notify();
+                        })),
+                    )
+                    .when(browsing, |bar| {
+                        let hide = browser.hide_empty;
+                        bar.child(
+                            tool(
+                                "fittings-empty",
+                                if hide {
+                                    IconName::EyeOff
+                                } else {
+                                    IconName::Eye
+                                },
+                                if hide {
+                                    "Show empty ship groups"
+                                } else {
+                                    "Hide empty ship groups"
+                                },
+                            )
+                            .selected(hide)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.ship_browser.hide_empty = !this.ship_browser.hide_empty;
+                                cx.notify();
+                            })),
+                        )
+                    })
+                    .when_some(ship, |bar, ship| {
+                        bar.child(tool("fittings-new", IconName::Plus, "New fit").on_click(
+                            cx.listener(move |this, _, _, cx| this.new_fit_for_ship(ship, cx)),
+                        ))
+                    }),
+            )
+            .child(self.fit_search_input())
+    }
+
+    /// Where the browser is: the group, ship, search or recent fits.
+    fn fittings_title(loaded: &Loaded, stage: &Stage, cx: &mut Context<Self>) -> AnyElement {
+        let title = match stage {
+            Stage::Groups => "Ship groups".to_owned(),
+            Stage::Ships(group) => loaded
+                .catalog
+                .group_names
+                .get(group)
+                .cloned()
+                .unwrap_or_default(),
+            Stage::Fits(ship) => loaded.catalog.name(*ship),
+            Stage::Search(query) => format!("Search: {}", query.trim()),
+            Stage::Recent => "Recent fits".to_owned(),
+        };
+        let row = h_flex()
+            .id("fittings-title")
+            .gap_2()
+            .px_2()
+            .py_1()
+            .text_xs()
+            .text_color(cx.theme().muted_foreground)
+            .border_b_1()
+            .border_color(cx.theme().border);
+        match stage {
+            // pyfa's baseShip menu, on the ship whose fits are listed.
+            Stage::Fits(ship) => {
+                let ship = *ship;
+                row.child(icon_box(
                     &loaded.catalog,
                     &loaded.icons,
                     Icon::Type(ship),
-                    20.,
+                    18.,
                 ))
-                .child(div().flex_1().child(loaded.catalog.name(ship)))
-                // pyfa's baseShip menu, on the ship the list is narrowed to.
+                .child(title)
                 .context_menu({
                     let this = Self::weak(cx);
-                    move |menu, _, _| {
-                        menu.item(super::item_stats::stats_entry(
-                            &this,
-                            "Ship Basic",
-                            super::item_stats::StatsOf::Type(ship),
-                        ))
-                    }
+                    move |menu, _, _| ship_menu(menu, &this, ship)
                 })
-                .child(
+                .into_any_element()
+            }
+            _ => row.child(title).into_any_element(),
+        }
+    }
+
+    /// The race toggles under a group's ships, pyfa's race selector.
+    fn race_filter(&self, races: &[Race], cx: &mut Context<Self>) -> AnyElement {
+        h_flex()
+            .flex_wrap()
+            .gap_1()
+            .p_1()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .children(races.iter().map(|&race| {
+                Button::new(SharedString::from(format!("race-{race:?}")))
+                    .xsmall()
+                    .label(race.label())
+                    .toggled(self.ship_browser.races.contains(&race))
+                    .selected(self.ship_browser.races.contains(&race))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.ship_browser.toggle_race(race);
+                        cx.notify();
+                    }))
+            }))
+            .into_any_element()
+    }
+
+    fn ship_group_row(
+        loaded: &Loaded,
+        group: i32,
+        count: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let name = loaded
+            .catalog
+            .group_names
+            .get(&group)
+            .cloned()
+            .unwrap_or_default();
+        h_flex()
+            .id(SharedString::from(format!("ship-group-{group}")))
+            .gap_2()
+            .px_2()
+            .h(px(26.))
+            .hover(|s| s.bg(cx.theme().list_hover))
+            .child(div().flex_1().truncate().child(name))
+            .when(count > 0, |row| {
+                row.child(
                     div()
-                        .id("fittings-show-all")
-                        .px_1()
-                        .text_color(cx.theme().link)
-                        .child("Show all")
-                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.fittings_ship = None;
-                            cx.notify();
-                        })),
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(fits_label(count)),
                 )
-        });
-        v_flex().flex_1().min_h_0().children(filter).child(
-            v_flex()
-                .id("fittings-list")
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .when(by_ship.is_empty(), |list| {
-                    list.child(
+            })
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.ship_browser.go(Stage::Ships(group));
+                cx.notify();
+            }))
+            .into_any_element()
+    }
+
+    fn ship_row(
+        &self,
+        loaded: &Loaded,
+        ship: TypeId,
+        count: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let tooltips = self.saved.preferences.general.ship_browser_tooltips;
+        h_flex()
+            .id(SharedString::from(format!("ship-{ship}")))
+            .gap_2()
+            .p_1()
+            .hover(|s| s.bg(cx.theme().list_hover))
+            .child(icon_box(
+                &loaded.catalog,
+                &loaded.icons,
+                Icon::Type(ship),
+                32.,
+            ))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .child(div().truncate().child(loaded.catalog.name(ship)))
+                    .child(
                         div()
-                            .p_2()
+                            .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("No fits yet."),
-                    )
+                            .child(fits_label(count)),
+                    ),
+            )
+            .children(self.omega_marker(loaded, ship, 16.))
+            .when_some(self.loaded().filter(|_| tooltips), |row, loaded| {
+                row.tooltip(move |window, cx| {
+                    ship_tooltip(&loaded, ship, TipHead::Traits, window, cx)
                 })
-                .children(by_ship.into_iter().map(|(ship_name, i)| {
-                    let fit = &self.saved.fits[i];
-                    h_flex()
-                        .id(SharedString::from(format!("fitting-{i}")))
-                        .gap_2()
-                        .p_1()
-                        .hover(|s| s.bg(cx.theme().list_hover))
-                        .when_some(Self::fitting_tooltip(fit, &ship_name), |row, tip| {
-                            row.tooltip(move |window, cx| {
-                                Tooltip::new(tip.clone()).build(window, cx)
-                            })
-                        })
-                        .when_some(fit.ship, |row, ship| {
-                            row.child(icon_box(
-                                &loaded.catalog,
-                                &loaded.icons,
-                                Icon::Type(ship),
-                                32.,
-                            ))
-                        })
-                        .child(
-                            v_flex().child(fit.name.clone()).child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(ship_name),
-                            ),
-                        )
-                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.open_from_browser(i, cx);
-                        }))
-                        // The Projected and Command tabs take fits dragged from here.
-                        .on_drag(
-                            FitDrag {
-                                index: i,
-                                label: fit.name.clone().into(),
-                            },
-                            |drag, _, _, cx| cx.new(|_| drag.clone()),
-                        )
-                        .context_menu({
-                            let this = Self::weak(cx);
-                            let has_fit = self.saved.current.is_some();
-                            move |menu, _, _| {
-                                let (open, delete) = (this.clone(), this.clone());
-                                let link = |link: Link| {
-                                    let this = this.clone();
-                                    move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                                        Self::app_update(&this, cx, |g, cx| g.link(link, &[i], cx));
-                                    }
-                                };
-                                let menu = menu.item(
-                                    entry(IconName::FolderOpen, "Open in new tab").on_click(
-                                        move |_, _, cx| {
-                                            Self::app_update(&open, cx, |this, cx| {
-                                                this.open_fit(i, cx);
-                                            });
-                                        },
-                                    ),
-                                );
-                                let menu = if has_fit {
-                                    menu.item(
-                                        entry(IconName::Globe, "Project onto Active Fit")
-                                            .on_click(link(Link::Projected)),
-                                    )
-                                    .item(
-                                        entry(IconName::Network, "Add Command Booster")
-                                            .on_click(link(Link::Command)),
-                                    )
-                                } else {
-                                    menu
-                                };
-                                menu.separator()
-                                    .item(entry(IconName::Delete, "Delete").on_click(
-                                        move |_, _, cx| {
-                                            Self::app_update(&delete, cx, |this, cx| {
-                                                this.delete_fit(i, cx);
-                                            });
-                                        },
-                                    ))
-                            }
-                        })
-                })),
-        )
+            })
+            // A ship without fits gets one, as clicking it in pyfa starts one.
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                if count > 0 {
+                    this.ship_browser.go(Stage::Fits(ship));
+                    cx.notify();
+                } else {
+                    this.new_fit_for_ship(ship, cx);
+                }
+            }))
+            .context_menu({
+                let this = Self::weak(cx);
+                move |menu, _, _| ship_menu(menu, &this, ship)
+            })
+            .into_any_element()
+    }
+
+    fn fit_row(&self, loaded: &Loaded, i: usize, cx: &mut Context<Self>) -> AnyElement {
+        let fit = &self.saved.fits[i];
+        let ship_name = fit
+            .ship
+            .map_or_else(String::new, |s| loaded.catalog.name(s));
+        let notes = Self::fitting_tooltip(fit, &ship_name).map(|n| n.to_string());
+        let tooltips = self.saved.preferences.general.ship_browser_tooltips;
+        let subtitle = match ship_browser::fit_date(fit.modified) {
+            Some(date) => format!("{ship_name}  {date}"),
+            None => ship_name.clone(),
+        };
+        let open = self.saved.current == Some(i);
+        h_flex()
+            .id(SharedString::from(format!("fitting-{i}")))
+            .gap_2()
+            .p_1()
+            .when(open, |row| row.bg(cx.theme().list_active))
+            .hover(|s| s.bg(cx.theme().list_hover))
+            .map(|row| match (fit.ship, self.loaded().filter(|_| tooltips)) {
+                (Some(ship), Some(loaded)) => row.tooltip(move |window, cx| {
+                    ship_tooltip(&loaded, ship, TipHead::Fit(notes.clone()), window, cx)
+                }),
+                _ => match notes {
+                    Some(notes) => {
+                        let tip: SharedString = notes.into();
+                        row.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                    }
+                    None => row,
+                },
+            })
+            .when_some(fit.ship, |row, ship| {
+                row.child(icon_box(
+                    &loaded.catalog,
+                    &loaded.icons,
+                    Icon::Type(ship),
+                    32.,
+                ))
+            })
+            .child(
+                v_flex()
+                    .min_w_0()
+                    .child(div().truncate().child(fit.name.clone()))
+                    .child(
+                        div()
+                            .text_xs()
+                            .truncate()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(subtitle),
+                    ),
+            )
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.open_from_browser(i, cx);
+            }))
+            // A middle click opens the fit in a tab of its own, as in pyfa.
+            .on_mouse_up(
+                MouseButton::Middle,
+                cx.listener(move |this, _: &MouseUpEvent, _, cx| this.open_fit(i, cx)),
+            )
+            // The Projected and Command tabs take fits dragged from here.
+            .on_drag(
+                FitDrag {
+                    index: i,
+                    label: fit.name.clone().into(),
+                },
+                |drag, _, _, cx| cx.new(|_| drag.clone()),
+            )
+            .context_menu({
+                let this = Self::weak(cx);
+                let has_fit = self.saved.current.is_some();
+                move |menu, _, _| fit_menu(menu, &this, i, has_fit)
+            })
+            .into_any_element()
     }
 
     /// How many of a drone one "Add to Drone Bay" adds, as pyfa sizes it: no more than can be in
@@ -402,6 +872,145 @@ impl Gyfa {
     }
 }
 
+/// "No fits", "1 fit", "3 fits", as pyfa's ship rows count them.
+fn fits_label(count: usize) -> String {
+    match count {
+        0 => "No fits".to_owned(),
+        1 => "1 fit".to_owned(),
+        n => format!("{n} fits"),
+    }
+}
+
+/// Hover text as lines in a box that wraps.
+fn text_tooltip(lines: Vec<String>, window: &mut Window, cx: &mut App) -> AnyView {
+    Tooltip::element(move |_, _| {
+        v_flex()
+            .max_w(px(TOOLTIP_W))
+            .children(lines.iter().map(|line| {
+                if line.is_empty() {
+                    div().h(px(8.))
+                } else {
+                    div().child(line.clone())
+                }
+            }))
+    })
+    .build(window, cx)
+}
+
+/// A market item's hover text: name, Omega, price and the start of its description.
+fn item_tooltip(
+    loaded: &Rc<Loaded>,
+    id: TypeId,
+    price: Option<f64>,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyView {
+    let mut lines = vec![loaded.catalog.name(id)];
+    if loaded.catalog.get(id).is_some_and(|t| t.omega) {
+        lines.push("Omega clones only".to_owned());
+    }
+    if let Some(price) = price {
+        lines.push(format!("Price: {}", format::currency(price)));
+    }
+    let description =
+        item_stats::hover_data(loaded, cx).and_then(|data| item_stats::description_text(&data, id));
+    if let Some(description) = description {
+        lines.push(String::new());
+        let mut excerpt: String = description.chars().take(DESCRIPTION_MAX).collect();
+        if excerpt.len() < description.len() {
+            excerpt.push_str("...");
+        }
+        lines.extend(excerpt.lines().map(str::to_owned));
+    }
+    text_tooltip(lines, window, cx)
+}
+
+/// What a fittings browser tooltip starts with before the traits.
+enum TipHead {
+    /// Nothing: a ship row shows only the traits.
+    Traits,
+    /// A fit row: the ship, or the ship with the notes when there are any.
+    Fit(Option<String>),
+}
+
+/// pyfa's ship and fit hover text: for a fit the ship and its notes, then the ship's traits.
+fn ship_tooltip(
+    loaded: &Rc<Loaded>,
+    ship: TypeId,
+    head: TipHead,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyView {
+    let rule = "─".repeat(20);
+    let traits = item_stats::hover_data(loaded, cx)
+        .and_then(|data| item_stats::traits_text(loaded, &data, ship));
+    let mut text = match head {
+        TipHead::Fit(Some(notes)) => notes,
+        TipHead::Fit(None) => loaded.catalog.name(ship),
+        TipHead::Traits => String::new(),
+    };
+    if let Some(traits) = traits {
+        if !text.is_empty() {
+            text.push('\n');
+            text.push_str(&rule);
+            text.push('\n');
+        }
+        text.push_str(&traits);
+    }
+    if text.is_empty() {
+        text = loaded.catalog.name(ship);
+    }
+    text_tooltip(text.lines().map(str::to_owned).collect(), window, cx)
+}
+
+/// pyfa's baseShip menu, with the browser's New Fit.
+fn ship_menu(menu: PopupMenu, this: &WeakEntity<Gyfa>, ship: TypeId) -> PopupMenu {
+    let new_fit = this.clone();
+    menu.item(item_stats::stats_entry(
+        this,
+        "Ship Basic",
+        item_stats::StatsOf::Type(ship),
+    ))
+    .item(entry(IconName::Plus, "New Fit").on_click(move |_, _, cx| {
+        Gyfa::app_update(&new_fit, cx, |g, cx| g.new_fit_for_ship(ship, cx));
+    }))
+}
+
+/// pyfa's fit row menu, plus the copy, rename and delete buttons pyfa has on the row.
+fn fit_menu(menu: PopupMenu, this: &WeakEntity<Gyfa>, i: usize, has_fit: bool) -> PopupMenu {
+    let on = |f: fn(&mut Gyfa, usize, &mut Context<Gyfa>)| {
+        let this = this.clone();
+        move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+            Gyfa::app_update(&this, cx, |g, cx| f(g, i, cx));
+        }
+    };
+    let link = |link: Link| {
+        let this = this.clone();
+        move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+            Gyfa::app_update(&this, cx, |g, cx| g.link(link, &[i], cx));
+        }
+    };
+    let mut menu =
+        menu.item(entry(IconName::FolderOpen, "Open in new tab").on_click(on(Gyfa::open_fit)));
+    if has_fit {
+        menu = menu
+            .item(entry(IconName::Globe, "Project onto Active Fit").on_click(link(Link::Projected)))
+            .item(entry(IconName::Network, "Add Command Booster").on_click(link(Link::Command)));
+    }
+    let rename = this.clone();
+    menu.separator()
+        .item(entry(IconName::Copy, "Copy").on_click(on(Gyfa::copy_fit)))
+        .item(
+            entry(IconName::Replace, "Rename").on_click(move |_, window, cx| {
+                let _ = rename.update(cx, |g, cx| {
+                    g.open_from_browser(i, cx);
+                    g.start_rename(window, cx);
+                });
+            }),
+        )
+        .item(entry(IconName::Delete, "Delete").on_click(on(Gyfa::delete_fit)))
+}
+
 /// pyfa's marketItemGroup / marketItemMisc menu.
 fn market_menu(
     menu: PopupMenu,
@@ -426,17 +1035,30 @@ fn market_menu(
             Gyfa::app_update(&this, cx, |g, cx| f(g, id, window, cx));
         }
     };
+    // Adding an item from here counts as using it, as pyfa's commands remember it.
+    let use_with = |f: fn(&mut Gyfa, TypeId, &mut Window, &mut Context<Gyfa>)| {
+        let this = this.clone();
+        move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+            Gyfa::app_update(&this, cx, |g, cx| {
+                g.used_from_market(id);
+                f(g, id, window, cx);
+            });
+        }
+    };
     let apply = |action: Action| {
         let this = this.clone();
         move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-            Gyfa::app_update(&this, cx, |g, cx| g.apply(action.clone(), cx));
+            Gyfa::app_update(&this, cx, |g, cx| {
+                g.used_from_market(id);
+                g.apply(action.clone(), cx);
+            });
         }
     };
 
-    let mut menu = menu.item(super::item_stats::stats_entry(
+    let mut menu = menu.item(item_stats::stats_entry(
         this,
         category,
-        super::item_stats::StatsOf::Type(id),
+        item_stats::StatsOf::Type(id),
     ));
     // Ice products are found by search but sit outside the market tree, so there is no group.
     let listed = t
@@ -451,7 +1073,7 @@ fn market_menu(
     if !has_fit {
         return menu.item(
             entry(IconName::Plus, format!("Add {category} to Fit"))
-                .on_click(on(|g, id, _, cx| g.add_item(id, cx))),
+                .on_click(use_with(|g, id, _, cx| g.add_item(id, cx))),
         );
     }
     if let Kind::Module(slot) = t.kind
@@ -477,7 +1099,10 @@ fn market_menu(
     let to_cargo = |count: u32| {
         let this = this.clone();
         move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-            Gyfa::app_update(&this, cx, |g, cx| g.add_to_cargo(id, count, cx));
+            Gyfa::app_update(&this, cx, |g, cx| {
+                g.used_from_market(id);
+                g.add_to_cargo(id, count, cx);
+            });
         }
     };
     menu =
@@ -485,7 +1110,7 @@ fn market_menu(
     if goes_to_cargo(t.kind) && g.saved.preferences.context_menus.cargo_fill {
         menu = menu.item(
             entry(IconName::Inbox, format!("Fill Cargo With {category}"))
-                .on_click(on(|g, id, _, cx| g.fill_cargo_with(id, cx))),
+                .on_click(use_with(|g, id, _, cx| g.fill_cargo_with(id, cx))),
         );
     }
     if t.kind == Kind::Charge {
@@ -508,12 +1133,17 @@ fn market_menu(
             name: crate::damage_pattern::SELECTED_AMMO.to_owned(),
             amounts: t.damage,
         };
+        let this = this.clone();
         menu = menu.item(
             entry(
                 IconName::ChartPie,
                 format!("Set {category} as Damage Pattern"),
             )
-            .on_click(apply(Action::SetDamageProfile(profile))),
+            .on_click(move |_, _, cx| {
+                Gyfa::app_update(&this, cx, |g, cx| {
+                    g.apply(Action::SetDamageProfile(profile.clone()), cx);
+                });
+            }),
         );
     }
     if shown.project && loaded.catalog.projection.projectable.contains(&id) {

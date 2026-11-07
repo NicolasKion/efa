@@ -162,6 +162,17 @@ pub struct Fit {
     /// Fleet boosters, pyfa's command fits.
     #[serde(default)]
     pub command: Vec<projected::CommandFit>,
+    /// When the fit was created or last changed, in seconds since the Unix epoch; zero for fits
+    /// saved before gyfa kept it. The fittings browser's recent fits go by it.
+    #[serde(default)]
+    pub modified: u64,
+}
+
+/// The time to stamp a changed fit with.
+pub fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// Incoming damage that effective HP, effective repair rates and the reactive armor hardener

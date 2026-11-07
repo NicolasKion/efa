@@ -38,6 +38,10 @@ pub struct General {
     /// Changing a module's charge changes it in every module of the same type.
     pub ammo_change_all: bool,
     pub additions_labels: AdditionsLabels,
+    /// Hovering a ship or fit in the fittings browser shows the ship's traits.
+    pub ship_browser_tooltips: bool,
+    /// Mark hulls and items an Alpha clone cannot use.
+    pub omega_icons: bool,
 }
 
 impl Default for General {
@@ -50,6 +54,8 @@ impl Default for General {
             open_fit_in_new_tab: false,
             ammo_change_all: false,
             additions_labels: AdditionsLabels::Active,
+            ship_browser_tooltips: true,
+            omega_icons: false,
         }
     }
 }

@@ -182,8 +182,14 @@ pub struct Gyfa {
     market_highlight: Option<TypeId>,
     market_scroll_pending: bool,
     market_scroll: ScrollHandle,
-    /// Ship whose fits the fittings browser is narrowed to.
-    fittings_ship: Option<TypeId>,
+    /// Which market items the meta group buttons let through.
+    meta_filter: crate::market::MetaFilter,
+    /// The last market search and what it found, so a redraw does not search again.
+    search_results: Option<(String, Rc<Vec<TypeId>>)>,
+    /// Where the fittings browser is.
+    ship_browser: crate::ship_browser::Browser,
+    /// The fittings browser's search box, for ships and fits by name.
+    fit_search: Entity<InputState>,
     selection: Vec<RowRef>,
     /// Where a Shift-click selection range starts.
     anchor: Option<RowRef>,
@@ -228,6 +234,8 @@ impl Gyfa {
         widgets::apply_palette(&palette, cx);
 
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search items"));
+        let fit_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Search ships and fits"));
         let name_input = cx.new(|cx| InputState::new(window, cx).placeholder("Fit name"));
         let notes_input = cx.new(|cx| TextareaState::new(window, cx).rows(6).placeholder("Notes"));
         let subscriptions = vec![
@@ -235,6 +243,12 @@ impl Gyfa {
                 if matches!(event, InputEvent::Change) {
                     let text = input.read(cx).value().to_string();
                     this.search_after_delay(text, cx);
+                }
+            }),
+            cx.subscribe(&fit_search, |this, input, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let text = input.read(cx).value().to_string();
+                    this.search_fittings(text, cx);
                 }
             }),
             cx.subscribe(&name_input, |this, _, event: &InputEvent, cx| {
@@ -249,7 +263,9 @@ impl Gyfa {
                 if matches!(event, InputEvent::Change)
                     && let Some(i) = this.saved.current
                 {
-                    this.saved.fits[i].name = input.read(cx).value().to_string();
+                    let fit = &mut this.saved.fits[i];
+                    fit.name = input.read(cx).value().to_string();
+                    fit.modified = crate::fit::now();
                     this.save();
                     cx.notify();
                 }
@@ -306,7 +322,10 @@ impl Gyfa {
             market_highlight: None,
             market_scroll_pending: false,
             market_scroll: ScrollHandle::new(),
-            fittings_ship: None,
+            meta_filter: crate::market::MetaFilter::default(),
+            search_results: None,
+            ship_browser: crate::ship_browser::Browser::default(),
+            fit_search,
             selection: Vec::new(),
             anchor: None,
             unsaved: false,
@@ -602,7 +621,8 @@ impl Gyfa {
         }
     }
 
-    fn add_fit(&mut self, fit: Fit, cx: &mut Context<Self>) {
+    fn add_fit(&mut self, mut fit: Fit, cx: &mut Context<Self>) {
+        fit.modified = crate::fit::now();
         self.saved.fits.push(fit);
         self.open_fit(self.saved.fits.len() - 1, cx);
     }
@@ -637,6 +657,13 @@ impl Gyfa {
         self.saved.current = self.saved.current.map(shift);
         self.inputs_show = None;
         self.changed(cx);
+    }
+
+    /// Keep `before` for undo and date the fit, when the edit changed it.
+    fn record_edit(&mut self, index: usize, before: Fit) {
+        if self.history.record(index, before, &self.saved.fits[index]) {
+            self.saved.fits[index].modified = crate::fit::now();
+        }
     }
 
     /// Import fits in any format as new open fits. Problems end up in the status line.
@@ -706,7 +733,7 @@ impl Gyfa {
         self.status =
             (!added).then(|| format!("Nothing on this fit takes {}", catalog.name(id)).into());
         if let Some(before) = before {
-            self.history.record(i, before, &self.saved.fits[i]);
+            self.record_edit(i, before);
         }
         self.changed(cx);
     }
@@ -780,10 +807,22 @@ impl Gyfa {
     }
 
     fn duplicate_fit(&mut self, cx: &mut Context<Self>) {
-        let Some(mut copy) = self.fit().cloned() else {
+        if let Some(i) = self.saved.current {
+            self.copy_fit(i, cx);
+        }
+    }
+
+    /// Add a copy of a fit named as pyfa names copies, and open it.
+    fn copy_fit(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(original) = self.saved.fits.get(index) else {
             return;
         };
-        copy.name = format!("{} copy", copy.name);
+        let copy = Fit {
+            name: format!("{} copy", original.name),
+            // A fresh identity, so links to the original stay with it.
+            uid: 0,
+            ..original.clone()
+        };
         self.add_fit(copy, cx);
     }
 
@@ -1037,16 +1076,27 @@ impl Gyfa {
         self.search
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.expanded_groups.extend(loaded.catalog.market_path(id));
+        // The item would not show with its meta button off.
+        if let Some(t) = loaded.catalog.get(id) {
+            self.meta_filter
+                .enable(crate::market::MetaCategory::of_item(t));
+        }
         self.market_highlight = Some(id);
         self.market_scroll_pending = true;
         cx.notify();
     }
 
-    /// Show the fittings browser narrowed to one ship's fits.
+    /// Show one ship's fits in the fittings browser, pyfa's shipJump.
     pub(super) fn jump_to_fittings(&mut self, ship: TypeId, cx: &mut Context<Self>) {
         self.browser_tab = BrowserTab::Fittings;
-        self.fittings_ship = Some(ship);
+        self.ship_browser.go(crate::ship_browser::Stage::Fits(ship));
         cx.notify();
+    }
+
+    /// Whether the fittings browser shows this ship's fits right now.
+    pub(super) fn browsing_fits_of(&self, ship: TypeId) -> bool {
+        self.browser_tab == BrowserTab::Fittings
+            && self.ship_browser.stage == crate::ship_browser::Stage::Fits(ship)
     }
 }
 
@@ -1181,6 +1231,10 @@ impl Render for Gyfa {
 impl Gyfa {
     fn search_input(&self) -> Input {
         Input::new(&self.search).small()
+    }
+
+    fn fit_search_input(&self) -> Input {
+        Input::new(&self.fit_search).small()
     }
 
     fn name_field(&self) -> Input {

@@ -55,6 +55,7 @@ impl Gyfa {
         let count = imported.fits.len();
         for (n, mut fit) in imported.fits.into_iter().enumerate() {
             self.new_fit_defaults(&mut fit);
+            fit.modified = crate::fit::now();
             self.saved.fits.push(fit);
             let index = self.saved.fits.len() - 1;
             if n < OPEN_AFTER_IMPORT {

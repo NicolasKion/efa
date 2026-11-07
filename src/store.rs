@@ -37,6 +37,9 @@ pub struct Saved {
     /// The copy dialog's last format and options.
     #[serde(default)]
     pub export: ExportSettings,
+    /// Items last added from the market, newest first: pyfa's Recently Used Items.
+    #[serde(default)]
+    pub recent_items: Vec<crate::data::TypeId>,
 }
 
 /// What besides ship and fittings the price total includes, with pyfa's defaults.

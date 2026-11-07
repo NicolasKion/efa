@@ -22,10 +22,11 @@ struct Steps {
 
 impl History {
     /// Remember `before` as the state to go back to from fit `index`'s current one, when the
-    /// edit changed anything. A new edit drops what could be redone, as in pyfa.
-    pub fn record(&mut self, index: usize, before: Fit, after: &Fit) {
+    /// edit changed anything, which it returns. A new edit drops what could be redone, as in
+    /// pyfa.
+    pub fn record(&mut self, index: usize, before: Fit, after: &Fit) -> bool {
         if same(&before, after) {
-            return;
+            return false;
         }
         let steps = self.fits.entry(index).or_default();
         steps.undo.push(before);
@@ -33,6 +34,7 @@ impl History {
             steps.undo.remove(0);
         }
         steps.redo.clear();
+        true
     }
 
     pub fn can_undo(&self, index: usize) -> bool {

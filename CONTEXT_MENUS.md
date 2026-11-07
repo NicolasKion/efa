@@ -195,7 +195,7 @@ Contexts: commandFit (row is a fit, not a generic link), separator, commandView 
 
 Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 - [x] {Category} Stats | always | stats window | itemStats.py
-- [x] {Category} Market Group | marketItemMisc only | jumps to the item's group | itemMarketJump.py
+- [x] {Category} Market Group | marketItemMisc only | jumps to the item's group | itemMarketJump.py. gyfa: search results and Recently Used Items, as pyfa's search and recent modes
 - [x] Fill With Module | active fit, category Module (pref moduleFill) | adds the module to every free slot. GuiFillWithNewLocalModulesCommand | itemFill.py
 - [x] Add {Drone} to Drone Bay (xN) | active fit, category Drone, room for >= 1 | adds stack sized to bay/bandwidth limit. GuiAddLocalDroneCommand | droneAddStack.py
 - [x] Add {Category} to Cargo | active fit (structures: charges only) | adds 1 to cargo. GuiAddCargoCommand | cargoAdd.py
@@ -207,12 +207,14 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 ## Fitting browser (gui/builtinShipBrowser)
 
 ### baseShip (ship row, shipItem.py)
-- [~] Ship Basic Stats | always | stats window for the ship type | itemStats.py. gyfa has no ship list stage, so it sits on the ship header of a narrowed fit list
+- [x] Ship Basic Stats | always | stats window for the ship type | itemStats.py. On ship rows and on the ship title above its fits
+- [x] New Fit | always | a fit for the ship named "<ship> fit" | gyfa: pyfa's New button on the ship row
 
 ### fit row (fitItem.py, hand-built wx.Menu, only when a fit is active)
 - [x] Open in new tab | active fit exists | opens the fit in a new tab | gui/builtinShipBrowser/fitItem.py
 - [x] Project onto Active Fit | active fit exists | projects this fit onto the active fit | gui/builtinShipBrowser/fitItem.py
 - [x] Add Command Booster | active fit exists | adds this fit as command fit | gui/builtinShipBrowser/fitItem.py
+- [x] Copy, Rename, Delete | always | pyfa's buttons on the fit row: copy opens "<fit> copy", rename edits the name in the fit's tab | gui/builtinShipBrowser/fitItem.py
 
 ## Character selection, missing-skills icon (gui/characterSelection.py, hand-built)
 - [x] Grant Missing Skills | fit needs skills | raises character skills to fit requirements | gui/characterSelection.py. Pending until the character is saved, as in pyfa
