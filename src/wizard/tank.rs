@@ -134,6 +134,8 @@ pub struct Problem {
     pub rigs: Vec<RigCandidate>,
     /// Only tanks with a repairer or booster count.
     pub need_repair: bool,
+    /// How many repairers or boosters the search adds, exactly; None leaves it open.
+    pub repairers: Option<usize>,
     /// Known prices of the candidates and rigs, by type.
     pub prices: HashMap<TypeId, f64>,
     /// The most the whole tank may cost, in ISK.
@@ -246,6 +248,8 @@ impl AddAssign for Rejected {
 pub struct Found {
     pub outcomes: Vec<Outcome>,
     pub rejected: Rejected,
+    /// With a number of repairers chosen, how many the results have when fewer fit.
+    pub repairers_short: Option<usize>,
 }
 
 impl Outcome {
@@ -321,6 +325,14 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
                     .iter()
                     .filter(|&&m| problem.candidates[m].base == candidate.base)
                     .count();
+                // A chosen number of repairers is a ceiling while growing, and exact at the end.
+                if candidate.role == Role::Repair
+                    && problem
+                        .repairers
+                        .is_some_and(|n| repair_count(problem, &state.modules) >= n)
+                {
+                    continue;
+                }
                 if count >= candidate.max {
                     continue;
                 }
@@ -395,9 +407,20 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
             .any(|&m| problem.candidates[m].role == Role::Repair)
     };
     let any_repair = states.iter().any(|(s, _)| repairs(s));
+    // With a number of repairers chosen, only tanks with that many, or the most there are when
+    // none get there.
+    let exact = problem.repairers.map(|n| {
+        let most = states
+            .iter()
+            .map(|(s, _)| repair_count(problem, &s.modules))
+            .max()
+            .unwrap_or(0);
+        n.min(most)
+    });
     all.extend(
         states
             .into_iter()
+            .filter(|(s, _)| exact.is_none_or(|n| repair_count(problem, &s.modules) == n))
             .filter(|(s, _)| !problem.need_repair || !any_repair || repairs(s))
             .filter(|(s, _)| !s.modules.is_empty() || !s.rigs.is_empty())
             .map(|(_, o)| o),
@@ -407,7 +430,19 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
     Found {
         outcomes: all,
         rejected,
+        repairers_short: problem
+            .repairers
+            .zip(exact)
+            .and_then(|(wanted, got)| (got < wanted).then_some(got)),
     }
+}
+
+/// How many of `modules` are repairers or boosters.
+fn repair_count(problem: &Problem, modules: &[usize]) -> usize {
+    modules
+        .iter()
+        .filter(|&&m| problem.candidates[m].role == Role::Repair)
+        .count()
 }
 
 fn sort(scored: &mut [(State, Outcome)]) {
@@ -643,12 +678,19 @@ impl Setup<'_> {
             .filter(|&i| empty.incoming[i] > 0.0)
             .collect();
         let weakest = exposed.as_slice();
-        // Repairers already fitted count: the search need not add one, though it may.
-        let repairing = next
+        // Repairers already fitted count: the search need not add one, though it may, and a
+        // chosen number of them counts the fitted ones too.
+        let fitted_repairers = next
             .rack(slot)
             .iter()
             .flatten()
-            .any(|m| category_of(self.catalog, m.type_id) == Category::Repairer);
+            .filter(|m| category_of(self.catalog, m.type_id) == Category::Repairer)
+            .count();
+        let repairing = fitted_repairers > 0;
+        let repairers = choices
+            .repairers
+            .filter(|_| choices.tank == TankStyle::Active)
+            .map(|n| usize::from(n).saturating_sub(fitted_repairers));
         // Anything over the per-module budget is left out. With a budget set, so is anything
         // without a price: the market has none of it, and it could cost anything.
         let budgeted = choices.budget.each.is_some() || choices.budget.total.is_some();
@@ -681,7 +723,10 @@ impl Setup<'_> {
             aim: Aim::of(choices),
             positions,
             rig_positions,
-            need_repair: choices.tank == TankStyle::Active && !repairing,
+            need_repair: choices.tank == TankStyle::Active
+                && !repairing
+                && repairers.is_none_or(|n| n > 0),
+            repairers,
         })
     }
 
@@ -689,18 +734,18 @@ impl Setup<'_> {
     fn tank_candidates(&self, choices: &Choices, weakest: &[usize]) -> Vec<Candidate> {
         let style = choices.tank;
         let active = style == TankStyle::Active;
-        let brick = style == TankStyle::Brick;
+        let max_repairers = MAX_REPAIRERS.max(choices.repairers.map_or(0, usize::from));
         let all = usize::MAX;
         let mut wanted: Vec<(String, Role, usize)> = Vec::new();
         let mut want = |name: String, role: Role, max: usize| wanted.push((name, role, max));
         match choices.layer {
             Layer::Armor => {
                 if active {
-                    want(self.repairer_name(), Role::Repair, MAX_REPAIRERS);
+                    want(self.repairer_name(), Role::Repair, max_repairers);
                     want(self.ancillary_name(Layer::Armor), Role::Repair, 1);
                 }
                 want(self.plate_name().into(), Role::Buffer, all);
-                if !brick {
+                {
                     want(
                         "Multispectrum Energized Membrane I".into(),
                         Role::Resist,
@@ -727,7 +772,7 @@ impl Setup<'_> {
             }
             Layer::Shield => {
                 if active {
-                    want(self.booster_name().into(), Role::Repair, MAX_REPAIRERS);
+                    want(self.booster_name().into(), Role::Repair, max_repairers);
                     want(self.ancillary_name(Layer::Shield), Role::Repair, 1);
                     want(
                         "Shield Boost Amplifier I".into(),
@@ -736,7 +781,7 @@ impl Setup<'_> {
                     );
                 }
                 want(self.extender_name().into(), Role::Buffer, all);
-                if !brick {
+                {
                     want("Multispectrum Shield Hardener I".into(), Role::Resist, all);
                     for &i in weakest {
                         let kind = DAMAGE_TYPES[i];
@@ -873,7 +918,7 @@ impl Setup<'_> {
                     names.push("Auxiliary Nano Pump I".into());
                     names.push("Nanobot Accelerator I".into());
                 }
-                if style != TankStyle::Brick {
+                {
                     for &i in weakest {
                         names.push(format!("{} Armor Reinforcer I", DAMAGE_TYPES[i]));
                     }
@@ -884,7 +929,7 @@ impl Setup<'_> {
                 if style == TankStyle::Active {
                     names.push("Core Defense Operational Solidifier I".into());
                 }
-                if style != TankStyle::Brick {
+                {
                     for &i in weakest {
                         names.push(format!("{} Shield Reinforcer I", DAMAGE_TYPES[i]));
                     }

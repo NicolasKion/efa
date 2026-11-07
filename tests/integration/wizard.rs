@@ -89,6 +89,7 @@ fn a_hurricane_gets_a_sane_brawler() {
         layer: Layer::Shield,
         goal: Goal::Balanced,
         search_tiers: wizard::SearchTiers::default(),
+        repairers: None,
         budget: wizard::Budget::default(),
         tank_fit: None,
         damage: DamageMods::Weapon,
@@ -379,29 +380,27 @@ fn a_drake_buffer_takes_extenders_over_amplifiers() {
 }
 
 #[test]
-fn a_brick_abaddon_gets_plates() {
+fn an_active_tank_takes_the_chosen_number_of_repairers() {
     let Some((catalog, engine, data)) = setup() else {
         return;
     };
     let fit = ship(catalog, "Abaddon");
-    let (problem, outcomes) = best(catalog, engine, data, &fit, |c| {
-        c.tank = TankStyle::Brick;
-        c.layer = Layer::Armor;
-    });
-    let found = outcomes.first().expect("a tank");
-    assert_eq!(found.modules.len(), problem.positions.len());
-    assert!(
-        found
+    for wanted in [1_u8, 2] {
+        // The tank alone, so guns do not eat the CPU the repairers need.
+        let (_, outcomes) = best(catalog, engine, data, &fit, |c| {
+            c.touched = wizard::Tabs::NONE.with(wizard::Tab::Tank);
+            c.tank = TankStyle::Active;
+            c.layer = Layer::Armor;
+            c.repairers = Some(wanted);
+        });
+        let found = outcomes.first().expect("a tank");
+        let repairers = found
             .types
             .iter()
-            .all(|&t| catalog.name(t).contains("Plates")),
-        "{:?}",
-        found
-            .types
-            .iter()
-            .map(|&t| catalog.name(t))
-            .collect::<Vec<_>>()
-    );
+            .filter(|&&t| catalog.name(t).contains("Repairer"))
+            .count();
+        assert_eq!(repairers, usize::from(wanted), "{wanted} repairers wanted");
+    }
 }
 
 #[test]

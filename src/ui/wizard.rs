@@ -78,6 +78,8 @@ enum Row {
     Style,
     Layer,
     Goal,
+    /// How many repairers or boosters an active tank gets.
+    Repairers,
     /// Which variations the tank search tries.
     Tiers,
     /// The most one tank module or rig may cost.
@@ -110,6 +112,7 @@ impl Row {
             Row::Style
             | Row::Layer
             | Row::Goal
+            | Row::Repairers
             | Row::Tiers
             | Row::BudgetEach
             | Row::BudgetTotal
@@ -161,6 +164,8 @@ pub(super) struct WizardPanel {
     note: Option<SharedString>,
     /// What the last search dropped the most tanks for not fitting.
     limit: Option<Limit>,
+    /// Fewer repairers than chosen fit, and this many did.
+    repairers_short: Option<usize>,
     focus: FocusHandle,
     focused: bool,
     palette: Palette,
@@ -279,6 +284,7 @@ impl Gyfa {
                 selected: None,
                 note: None,
                 limit: None,
+                repairers_short: None,
                 focus: cx.focus_handle(),
                 focused: false,
                 palette,
@@ -520,6 +526,7 @@ impl WizardPanel {
         }
         self.search = None;
         self.limit = found.rejected.limit();
+        self.repairers_short = found.repairers_short;
         let outcomes = found.outcomes;
         if outcomes.is_empty() {
             self.note = Some(
@@ -631,14 +638,11 @@ impl WizardPanel {
             Tab::Tank => {
                 let mut left = vec![Row::Racks(tab), Row::Style];
                 if self.choices.tank != TankStyle::None {
-                    left.extend([
-                        Row::Layer,
-                        Row::Goal,
-                        Row::Tiers,
-                        Row::BudgetEach,
-                        Row::BudgetTotal,
-                        Row::Search,
-                    ]);
+                    left.extend([Row::Layer, Row::Goal]);
+                    if self.choices.tank == TankStyle::Active {
+                        left.push(Row::Repairers);
+                    }
+                    left.extend([Row::Tiers, Row::BudgetEach, Row::BudgetTotal, Row::Search]);
                 }
                 left.extend(self.module_rows().into_iter().map(|(b, _)| Row::Module(b)));
                 let right = if self.choices.tank != TankStyle::None && !self.results.is_empty() {
@@ -792,6 +796,16 @@ impl WizardPanel {
                     .position(|&b| b == c.budget.total)
                     .unwrap_or(usize::MAX),
             ),
+            Row::Repairers if c.tank == TankStyle::Active => (
+                REPAIRER_CHOICES
+                    .iter()
+                    .map(|&n| (repairer_label(n).into(), true))
+                    .collect(),
+                REPAIRER_CHOICES
+                    .iter()
+                    .position(|&n| n == c.repairers)
+                    .unwrap_or(0),
+            ),
             // Switches rather than one choice: each group is on or off.
             Row::Tiers if c.tank != TankStyle::None => (
                 SearchGroup::ALL
@@ -877,6 +891,7 @@ impl WizardPanel {
                 Row::Style => c.tank = TankStyle::ALL[i],
                 Row::Layer => c.layer = Layer::ALL[i],
                 Row::Tiers => c.search_tiers.toggle(SearchGroup::ALL[i]),
+                Row::Repairers => c.repairers = REPAIRER_CHOICES[i],
                 Row::BudgetEach => c.budget.each = Budget::EACH[i],
                 Row::BudgetTotal => c.budget.total = Budget::TOTAL[i],
                 Row::Goal => {
@@ -1275,7 +1290,6 @@ impl WizardPanel {
                 match c.tank {
                     TankStyle::Buffer => "Plates or extenders with resists.",
                     TankStyle::Active => "Repairers or boosters with resists.",
-                    TankStyle::Brick => "Nothing but plates or extenders.",
                     TankStyle::None => "Leave the tank slots to the rest.",
                 }
                 .into(),
@@ -1308,6 +1322,12 @@ impl WizardPanel {
                 "Which kinds of each module the search tries, the strongest few of each kind \
                  switched on. Officer and deadspace modules get expensive; the budgets keep \
                  them in check."
+                    .into(),
+            ),
+            Row::Repairers => (
+                "Repairers".into(),
+                "How many repairers or boosters the tank ends up with, the fitted ones counted. \
+                 Auto lets the search decide."
                     .into(),
             ),
             Row::BudgetEach => (
@@ -1516,6 +1536,14 @@ impl WizardPanel {
             .collect();
         let stale = self.stale().then(|| self.text(Row::Results).1);
         let limit = self.limit.map(limit_text);
+        let short = self.repairers_short.map(|got| {
+            SharedString::from(match got {
+                0 => "No repairer fits with the rest of the fit; the results tank without one."
+                    .to_owned(),
+                1 => "Only 1 more repairer fits with the rest of the fit.".to_owned(),
+                n => format!("Only {n} more repairers fit with the rest of the fit."),
+            })
+        });
         let theme = cx.theme();
         let header = h_flex()
             .h(px(24.))
@@ -1552,7 +1580,7 @@ impl WizardPanel {
             )
             .child(header)
             .children(rows)
-            .children([limit, stale].into_iter().flatten().map(|note| {
+            .children([short, limit, stale].into_iter().flatten().map(|note| {
                 div()
                     .px_2()
                     .pt_1()
@@ -2053,6 +2081,7 @@ fn section_of(row: Row) -> &'static str {
         Row::Style
         | Row::Layer
         | Row::Goal
+        | Row::Repairers
         | Row::Tiers
         | Row::BudgetEach
         | Row::BudgetTotal
@@ -2354,4 +2383,11 @@ impl Render for WizardPanel {
             )
             .child(footer)
     }
+}
+
+/// The numbers of repairers the Tank tab offers; None is Auto.
+const REPAIRER_CHOICES: [Option<u8>; 5] = [None, Some(1), Some(2), Some(3), Some(4)];
+
+fn repairer_label(n: Option<u8>) -> String {
+    n.map_or_else(|| "Auto".to_owned(), |n| n.to_string())
 }

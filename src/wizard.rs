@@ -310,19 +310,16 @@ pub enum TankStyle {
     Buffer,
     /// Repairers or boosters with resists.
     Active,
-    /// Nothing but plates or extenders.
-    Brick,
     None,
 }
 
 impl TankStyle {
-    pub const ALL: [Self; 4] = [Self::Buffer, Self::Active, Self::Brick, Self::None];
+    pub const ALL: [Self; 3] = [Self::Buffer, Self::Active, Self::None];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Buffer => "Buffer",
             Self::Active => "Active",
-            Self::Brick => "Brick",
             Self::None => "None",
         }
     }
@@ -599,6 +596,9 @@ pub struct Choices {
     pub goal: Goal,
     /// Which variations of each tank module and rig the search tries.
     pub search_tiers: SearchTiers,
+    /// How many repairers or boosters an active tank ends up with, fitted ones counted; None
+    /// leaves it to the search.
+    pub repairers: Option<u8>,
     /// What the tank search may spend.
     pub budget: Budget,
     /// The optimiser's pick for the tank; None lays out the usual tank for the style.
@@ -1254,6 +1254,7 @@ impl<'a> Setup<'a> {
             },
             goal: Goal::Balanced,
             search_tiers: SearchTiers::default(),
+            repairers: None,
             budget: Budget::default(),
             tank_fit: None,
             damage: if drones || family.is_none() && facts.drone_bandwidth > 0.0 {
@@ -1759,8 +1760,6 @@ impl<'a> Setup<'a> {
             for i in 0..room.slots {
                 let (wanted, priority) = match (choices.tank, layer) {
                     (TankStyle::None, _) => break,
-                    (TankStyle::Brick, Layer::Shield) => (extender, 6),
-                    (TankStyle::Brick, Layer::Armor) => (plate, 6),
                     (TankStyle::Buffer, Layer::Shield) => match i {
                         1 | 4 => (hardener, 5),
                         0 => (extender, 7),
