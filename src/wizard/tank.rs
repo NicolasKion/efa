@@ -82,6 +82,7 @@ impl Aim {
             },
             _ => match choices.goal {
                 super::Goal::Ehp => Self::Ehp,
+                super::Goal::Resists => Self::Resists,
                 _ => Self::BufferBalanced,
             },
         }
@@ -502,8 +503,11 @@ fn outcome(
         .sum();
     let mut score = match problem.aim {
         Aim::Ehp => ehp,
-        // A nudge towards more repair among tanks that resist the same.
-        Aim::Resists => resist + 0.01 * effective / (effective + 100.0),
+        // The resist multiplier, nudged towards more repair, then more EHP, among tanks that
+        // resist the same.
+        Aim::Resists => {
+            resist + 0.01 * effective / (effective + 100.0) + 0.001 * ehp / (ehp + 100_000.0)
+        }
         Aim::Repair => effective + layer_ehp * 1e-6,
         Aim::Balanced => effective * layer_ehp,
         Aim::BufferBalanced => ehp * (1.0 + resist),

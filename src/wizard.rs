@@ -366,7 +366,7 @@ pub enum Goal {
 
 impl Goal {
     const ACTIVE: [Self; 3] = [Self::Resists, Self::Repair, Self::Balanced];
-    const BUFFER: [Self; 2] = [Self::Balanced, Self::Ehp];
+    const BUFFER: [Self; 3] = [Self::Balanced, Self::Ehp, Self::Resists];
 
     /// The goals that make sense for a tank style, in the order they are offered.
     pub fn for_style(style: TankStyle) -> &'static [Self] {

@@ -545,3 +545,30 @@ fn the_tank_tab_alone_fills_free_lows_and_rigs_around_the_fit() {
         "the free lows are filled"
     );
 }
+
+#[test]
+fn a_buffer_tank_can_aim_for_resists() {
+    let Some((catalog, engine, data)) = setup() else {
+        return;
+    };
+    let fit = ship(catalog, "Abaddon");
+    let run = |goal| {
+        best(catalog, engine, data, &fit, |c| {
+            c.tank = TankStyle::Buffer;
+            c.layer = Layer::Armor;
+            c.goal = goal;
+        })
+        .1
+        .into_iter()
+        .next()
+        .expect("a tank")
+    };
+    let resists = run(wizard::Goal::Resists);
+    let balanced = run(wizard::Goal::Balanced);
+    assert!(
+        resists.resist >= balanced.resist,
+        "{} vs {}",
+        resists.resist,
+        balanced.resist
+    );
+}

@@ -1149,6 +1149,10 @@ impl WizardPanel {
                     }
                     (TankStyle::Active, _) => "Repair and buffer together.",
                     (_, Goal::Ehp) => "The most raw effective HP, however it resists.",
+                    (_, Goal::Resists) => {
+                        "The highest resist multiplier on the tanked layer, so logistics repairs \
+                         land hardest; EHP decides between equals."
+                    }
                     _ => "Effective HP, favouring resists over plates when they are close.",
                 }
                 .into(),
