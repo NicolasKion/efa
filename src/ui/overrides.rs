@@ -28,6 +28,11 @@ use crate::{data::TypeId, icons::Icon, item_data::ItemData, overrides::Overrides
 const SEARCH_LIMIT: usize = 200;
 const ROW_HEIGHT: f32 = 30.;
 const SIDEBAR_W: f32 = 300.;
+const SIDEBAR_NARROW_W: f32 = 200.;
+/// Below this width the item list narrows and the attributes sit closer to the edges.
+const NARROW_W: f32 = 760.;
+/// What an attribute's name keeps beside its field before the field drops under it.
+const NAME_MIN_W: f32 = 160.;
 const FIELD_W: f32 = 150.;
 
 /// An attribute of the selected type and the field its override is typed into.
@@ -385,7 +390,7 @@ impl OverridesWindow {
             .into_any_element()
     }
 
-    fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn sidebar(&self, narrow: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let overrides = self.overrides(cx).clone();
         let query = self.search.read(cx).value().trim().to_owned();
         let searching = query.chars().filter(|c| !matches!(c, '*' | '?')).count() >= 3;
@@ -416,7 +421,7 @@ impl OverridesWindow {
                 this.edit(cx, |o| o.enabled = value);
             }));
         v_flex()
-            .w(px(SIDEBAR_W))
+            .w(px(if narrow { SIDEBAR_NARROW_W } else { SIDEBAR_W }))
             .h_full()
             .flex_none()
             .overflow_hidden()
@@ -480,7 +485,8 @@ impl OverridesWindow {
                             .small()
                             .ghost()
                             .icon(UiIcon::new(AssetIcon::FileUp))
-                            .label("Import")
+                            .when(narrow, |b| b.tooltip("Import"))
+                            .when(!narrow, |b| b.label("Import"))
                             .on_click(cx.listener(|_, _: &ClickEvent, _, cx| Self::import(cx))),
                     )
                     .child(
@@ -488,7 +494,8 @@ impl OverridesWindow {
                             .small()
                             .ghost()
                             .icon(UiIcon::new(AssetIcon::FileDown))
-                            .label("Export")
+                            .when(narrow, |b| b.tooltip("Export"))
+                            .when(!narrow, |b| b.label("Export"))
                             .disabled(overrides.values.is_empty())
                             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.export(cx))),
                     )
@@ -497,7 +504,8 @@ impl OverridesWindow {
                             .small()
                             .ghost()
                             .icon(UiIcon::new(AssetIcon::Trash))
-                            .label("Clear All")
+                            .when(narrow, |b| b.tooltip("Clear All"))
+                            .when(!narrow, |b| b.label("Clear All"))
                             .disabled(overrides.values.is_empty())
                             .on_click(cx.listener(|_, _: &ClickEvent, window, cx| {
                                 Self::confirm_clear(window, cx);
@@ -515,14 +523,17 @@ impl OverridesWindow {
         } else {
             format!("{}, base value {}", field.name, number(field.base))
         };
+        // The field drops under the attribute's name when the two don't fit on a line.
         h_flex()
-            .gap_4()
+            .flex_wrap()
+            .gap_x_4()
+            .gap_y_1()
             .px_4()
             .py_2()
             .child(
                 v_flex()
                     .flex_1()
-                    .min_w_0()
+                    .min_w(px(NAME_MIN_W))
                     .gap_0p5()
                     .child(
                         div()
@@ -538,26 +549,31 @@ impl OverridesWindow {
                     ),
             )
             .child(
-                div()
+                h_flex()
                     .flex_none()
-                    .w(px(FIELD_W))
-                    .child(Input::new(&field.input).small()),
-            )
-            .child(
-                Button::new(SharedString::from(format!("override-reset-{attr}")))
-                    .xsmall()
-                    .ghost()
-                    .icon(UiIcon::new(AssetIcon::RotateCcw))
-                    .tooltip("Back to the base value")
-                    .disabled(value.is_none())
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        this.reset(attr, window, cx);
-                    })),
+                    .gap_4()
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(FIELD_W))
+                            .child(Input::new(&field.input).small()),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("override-reset-{attr}")))
+                            .xsmall()
+                            .ghost()
+                            .icon(UiIcon::new(AssetIcon::RotateCcw))
+                            .tooltip("Back to the base value")
+                            .disabled(value.is_none())
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.reset(attr, window, cx);
+                            })),
+                    ),
             )
             .into_any_element()
     }
 
-    fn body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn body(&mut self, narrow: bool, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let (muted_color, danger) = (cx.theme().muted_foreground, cx.theme().danger);
         let muted = |text: &'static str| {
             div()
@@ -590,9 +606,8 @@ impl OverridesWindow {
         };
         let header = h_flex()
             .gap_3()
-            .px_8()
-            .pt_6()
-            .pb_4()
+            .when(narrow, |d| d.px_4().pt_4().pb_3())
+            .when(!narrow, |d| d.px_8().pt_6().pb_4())
             .child(icon_box(
                 catalog,
                 &self.loaded.icons,
@@ -618,10 +633,12 @@ impl OverridesWindow {
                     ),
             )
             .child(
+                // Narrow, the button keeps only its icon.
                 Button::new("overrides-reset-type")
                     .small()
                     .icon(UiIcon::new(AssetIcon::ListRestart))
-                    .label("Remove Overrides for Item")
+                    .when(!narrow, |b| b.label("Remove Overrides for Item"))
+                    .when(narrow, |b| b.tooltip("Remove Overrides for Item"))
                     .disabled(count == 0)
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.reset_type(window, cx);
@@ -646,7 +663,8 @@ impl OverridesWindow {
                 let theme = cx.theme();
                 d.child(
                     div()
-                        .px_8()
+                        .when(narrow, |d| d.px_4())
+                        .when(!narrow, |d| d.px_8())
                         .pb_2()
                         .text_sm()
                         .text_color(if error {
@@ -663,8 +681,8 @@ impl OverridesWindow {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .px_8()
-                    .pb_8()
+                    .when(narrow, |d| d.px_4().pb_4())
+                    .when(!narrow, |d| d.px_8().pb_8())
                     .child(content),
             )
             .into_any_element()
@@ -673,7 +691,8 @@ impl OverridesWindow {
 
 impl Render for OverridesWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body = self.body(window, cx);
+        let narrow = window.viewport_size().width < px(NARROW_W);
+        let body = self.body(narrow, window, cx);
         let theme = cx.theme();
         h_flex()
             .size_full()
@@ -681,7 +700,7 @@ impl Render for OverridesWindow {
             .bg(theme.background)
             .text_color(theme.foreground)
             .text_sm()
-            .child(self.sidebar(cx))
+            .child(self.sidebar(narrow, cx))
             // The attribute list takes the rest of the width and can shrink, so nothing in it
             // pushes past the window.
             .child(
