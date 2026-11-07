@@ -34,6 +34,7 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 ### fittingCharge
 - [x] {Charge} Stats | charge loaded | stats window for the charge | itemStats.py
 - [x] {Charge} Market Group | charge has market group | jump to charge in market | itemMarketJump.py
+- [x] Show Compatible Charges | module loads charges | gyfa extra: lists every charge the module takes in the market's results pane, titled "Charges for {Module}", grouped like the Charge submenu | none
 - [x] Change {Charge} Skills | skills affect charge attrs | as above, on chargeModifiedAttributes | skillAffectors.py
 
 ### fittingMode
@@ -148,6 +149,7 @@ Contexts: one of projectedModule (+ projectedCharge if loaded) / projectedDrone 
 ### projectedCharge
 - [ ] {Charge} Stats | charge loaded | stats window | itemStats.py
 - [x] {Charge} Market Group | has market group | market jump | itemMarketJump.py
+- [x] Show Compatible Charges | module loads charges | gyfa extra, as on fittingCharge | none
 
 ### projectedDrone
 - [ ] Projected Item Stats | row clicked | stats window | itemStats.py
@@ -195,7 +197,7 @@ Contexts: commandFit (row is a fit, not a generic link), separator, commandView 
 
 Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 - [x] {Category} Stats | always | stats window | itemStats.py
-- [x] {Category} Market Group | marketItemMisc only | jumps to the item's group | itemMarketJump.py. gyfa: search results and Recently Used Items, as pyfa's search and recent modes
+- [x] {Category} Market Group | marketItemMisc only | jumps to the item's group | itemMarketJump.py. gyfa: anything the results pane lists outside the item's own group (search, recent items, charge lists, a parent group's items)
 - [x] Fill With Module | active fit, category Module (pref moduleFill) | adds the module to every free slot. GuiFillWithNewLocalModulesCommand | itemFill.py
 - [x] Add {Drone} to Drone Bay (xN) | active fit, category Drone, room for >= 1 | adds stack sized to bay/bandwidth limit. GuiAddLocalDroneCommand | droneAddStack.py
 - [x] Add {Category} to Cargo | active fit (structures: charges only) | adds 1 to cargo. GuiAddCargoCommand | cargoAdd.py
@@ -307,6 +309,7 @@ refine API paths are under refine-core/src/api. "ui only" = no engine involvemen
 ## fittingCharge / fittingMode
 - Charge Stats: yes, Charge item attrs (ItemMut::iter_attrs).
 - Charge Market Group: ui only.
+- Show Compatible Charges: ui only.
 - Change Charge Skills: yes, Skill::set_level.
 - Tactical Mode Stats: yes, Stance item attrs.
 
