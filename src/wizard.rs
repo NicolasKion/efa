@@ -348,22 +348,34 @@ impl Layer {
     }
 }
 
-/// What an active tank is tuned for.
+/// What a tank is tuned for. Active tanks pick from resists, repair or both; buffer and brick
+/// tanks from balanced or the most raw effective HP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Goal {
     Resists,
     Repair,
     Balanced,
+    Ehp,
 }
 
 impl Goal {
-    pub const ALL: [Self; 3] = [Self::Resists, Self::Repair, Self::Balanced];
+    const ACTIVE: [Self; 3] = [Self::Resists, Self::Repair, Self::Balanced];
+    const BUFFER: [Self; 2] = [Self::Balanced, Self::Ehp];
+
+    /// The goals that make sense for a tank style, in the order they are offered.
+    pub fn for_style(style: TankStyle) -> &'static [Self] {
+        match style {
+            TankStyle::Active => &Self::ACTIVE,
+            _ => &Self::BUFFER,
+        }
+    }
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Resists => "Max resists",
             Self::Repair => "Max repair",
             Self::Balanced => "Balanced",
+            Self::Ehp => "Max EHP",
         }
     }
 }

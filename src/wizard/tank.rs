@@ -66,6 +66,9 @@ pub enum Aim {
     Repair,
     /// Repair and buffer of the tanked layer together.
     Balanced,
+    /// Effective HP, weighted by how well the tanked layer resists: of two tanks with about
+    /// the same EHP, the one that resists more takes logistics better and carries less plate.
+    BufferBalanced,
 }
 
 impl Aim {
@@ -74,9 +77,12 @@ impl Aim {
             TankStyle::Active => match choices.goal {
                 super::Goal::Resists => Self::Resists,
                 super::Goal::Repair => Self::Repair,
-                super::Goal::Balanced => Self::Balanced,
+                super::Goal::Balanced | super::Goal::Ehp => Self::Balanced,
             },
-            _ => Self::Ehp,
+            _ => match choices.goal {
+                super::Goal::Ehp => Self::Ehp,
+                _ => Self::BufferBalanced,
+            },
         }
     }
 }
@@ -403,6 +409,7 @@ fn outcome(
         Aim::Resists => resist + 0.01 * effective / (effective + 100.0),
         Aim::Repair => effective + layer_ehp * 1e-6,
         Aim::Balanced => effective * layer_ehp,
+        Aim::BufferBalanced => ehp * (1.0 + resist),
     };
     if problem.need_repair && !modules.iter().any(|c| c.role == Role::Repair) {
         score *= 0.5;

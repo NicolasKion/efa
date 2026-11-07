@@ -350,6 +350,7 @@ fn a_drake_buffer_takes_extenders_over_amplifiers() {
     let (_, outcomes) = best(catalog, engine, data, &fit, |c| {
         c.tank = TankStyle::Buffer;
         c.layer = Layer::Shield;
+        c.goal = wizard::Goal::Ehp;
     });
     let found = outcomes.first().expect("a tank");
     let names: Vec<String> = found.types.iter().map(|&t| catalog.name(t)).collect();
@@ -441,5 +442,31 @@ fn bling_picks_the_variation() {
     assert!(
         outcomes[0].types.iter().all(|t| fitted.contains(t)),
         "the found tank is planned"
+    );
+}
+
+#[test]
+fn a_buffer_tank_mixes_in_resists() {
+    let Some((catalog, engine, data)) = setup() else {
+        return;
+    };
+    let fit = ship(catalog, "Abaddon");
+    let (_, outcomes) = best(catalog, engine, data, &fit, |c| {
+        c.tank = TankStyle::Buffer;
+        c.layer = Layer::Armor;
+        c.goal = wizard::Goal::Balanced;
+    });
+    let found = outcomes.first().expect("a tank");
+    let names: Vec<String> = found.types.iter().map(|&t| catalog.name(t)).collect();
+    assert!(
+        names.iter().any(|n| n.contains("Plates")),
+        "some buffer: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Membrane")
+            || n.contains("Coating")
+            || n.contains("Hardener")
+            || n.contains("Damage Control")),
+        "resist modules too: {names:?}"
     );
 }

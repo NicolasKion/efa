@@ -544,10 +544,13 @@ impl WizardPanel {
                     .collect(),
                 Layer::ALL.iter().position(|&l| l == c.layer)?,
             ),
-            Row::Goal if c.tank == TankStyle::Active => (
-                Goal::ALL.iter().map(|g| (g.label().into(), true)).collect(),
-                Goal::ALL.iter().position(|&g| g == c.goal)?,
-            ),
+            Row::Goal if c.tank != TankStyle::None => {
+                let goals = Goal::for_style(c.tank);
+                (
+                    goals.iter().map(|g| (g.label().into(), true)).collect(),
+                    goals.iter().position(|&g| g == c.goal).unwrap_or(0),
+                )
+            }
             Row::Damage => {
                 let kind = self.kind();
                 let lows = self.facts.total(Slot::Low) > 0;
@@ -617,7 +620,11 @@ impl WizardPanel {
                 Row::Prop => c.prop = Prop::ALL[i],
                 Row::Style => c.tank = TankStyle::ALL[i],
                 Row::Layer => c.layer = Layer::ALL[i],
-                Row::Goal => c.goal = Goal::ALL[i],
+                Row::Goal => {
+                    if let Some(&goal) = Goal::for_style(c.tank).get(i) {
+                        c.goal = goal;
+                    }
+                }
                 Row::Damage => c.damage = DamageMods::ALL[i],
                 Row::Rigs => c.rigs = Rigs::ALL[i],
                 _ => {}
@@ -997,8 +1004,9 @@ impl WizardPanel {
                     (TankStyle::Active, Goal::Repair) => {
                         "The most HP repaired per second the capacitor keeps up, times resists."
                     }
-                    (TankStyle::Active, Goal::Balanced) => "Repair and buffer together.",
-                    _ => "Buffer and brick tanks go for the most effective HP.",
+                    (TankStyle::Active, _) => "Repair and buffer together.",
+                    (_, Goal::Ehp) => "The most raw effective HP, however it resists.",
+                    _ => "Effective HP, favouring resists over plates when they are close.",
                 }
                 .into(),
             ),
@@ -1119,11 +1127,7 @@ impl WizardPanel {
             Row::Module(_) | Row::Rig(_) => self
                 .variant_button(row, cx)
                 .unwrap_or_else(|| div().into_any_element()),
-            Row::Goal if self.choices.tank != TankStyle::Active => div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child("Max EHP")
-                .into_any_element(),
+            Row::Goal if self.choices.tank == TankStyle::None => div().into_any_element(),
             Row::Search => self.search_controls(cx),
             Row::Results => div().into_any_element(),
             _ => self.segmented(row, cx),
@@ -1292,7 +1296,7 @@ impl WizardPanel {
         let theme = cx.theme();
         let active = cursor == Some(row);
         let stacked = matches!(row, Row::Tier | Row::Weapon)
-            || row == Row::Goal && self.choices.tank == TankStyle::Active;
+            || row == Row::Goal && self.choices.tank != TankStyle::None;
         let text = v_flex()
             .flex_1()
             .min_w_0()
