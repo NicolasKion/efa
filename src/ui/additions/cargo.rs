@@ -181,8 +181,8 @@ impl Gyfa {
                     .child("Drag items here, or right-click them in the market.")
                     .context_menu({
                         let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
-                        move |menu, _, cx| {
-                            misc_entries(menu, &this, &loaded, AddKind::Cargo, None, cx)
+                        move |menu, window, cx| {
+                            misc_entries(menu, &this, &loaded, AddKind::Cargo, None, window, cx)
                         }
                     })
                     .into_any_element(),

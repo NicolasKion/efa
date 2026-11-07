@@ -17,7 +17,7 @@ use gpui_kit::{
     SharedString, Styled, WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
-use super::Gyfa;
+use super::{AdditionsTab, BrowserTab, Gyfa};
 
 /// Key context of a fit window, so text fields keep their own Ctrl+C, Ctrl+V and Ctrl+Z.
 const CONTEXT: &str = "Gyfa";
@@ -44,8 +44,49 @@ gpui_kit::actions!(
         HiddenGraphs,
         FittingWizard,
         Quit,
+        NextTab,
+        PreviousTab,
+        FocusSearch,
+        ToggleBrowser,
+        AdditionsTab1,
+        AdditionsTab2,
+        AdditionsTab3,
+        AdditionsTab4,
+        AdditionsTab5,
+        AdditionsTab6,
+        AdditionsTab7,
+        AdditionsTab8,
+        AdditionsTab9,
+        MarketItem1,
+        MarketItem2,
+        MarketItem3,
+        MarketItem4,
+        MarketItem5,
+        MarketItem6,
+        MarketItem7,
+        MarketItem8,
+        MarketItem9,
     ]
 );
+
+/// Calls `$m!` with `$args` and then each numbered action pair, its zero-based index and its
+/// key, for Ctrl+1..9 and Alt+1..9.
+macro_rules! numbered {
+    ($m:ident!($($args:tt)*)) => {
+        $m!(
+            $($args)*;
+            (AdditionsTab1, MarketItem1, 0, "1"),
+            (AdditionsTab2, MarketItem2, 1, "2"),
+            (AdditionsTab3, MarketItem3, 2, "3"),
+            (AdditionsTab4, MarketItem4, 3, "4"),
+            (AdditionsTab5, MarketItem5, 4, "5"),
+            (AdditionsTab6, MarketItem6, 5, "6"),
+            (AdditionsTab7, MarketItem7, 6, "7"),
+            (AdditionsTab8, MarketItem8, 7, "8"),
+            (AdditionsTab9, MarketItem9, 8, "9")
+        )
+    };
+}
 
 /// Bind pyfa's shortcuts. Call once at startup.
 pub fn init(cx: &mut App) {
@@ -66,7 +107,40 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-g", Graphs, Some(CONTEXT)),
         KeyBinding::new("ctrl-alt-g", HiddenGraphs, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-w", FittingWizard, Some(CONTEXT)),
+        // mainFrame.py's accelerator table.
+        KeyBinding::new("ctrl-f4", CloseTab, Some(CONTEXT)),
+        KeyBinding::new("ctrl-alt-f4", CloseAllTabs, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-z", Redo, Some(CONTEXT)),
+        KeyBinding::new("ctrl-tab", NextTab, Some(CONTEXT)),
+        KeyBinding::new("ctrl-pagedown", NextTab, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-tab", PreviousTab, Some(CONTEXT)),
+        KeyBinding::new("ctrl-pageup", PreviousTab, Some(CONTEXT)),
+        KeyBinding::new("ctrl-f", FocusSearch, Some(CONTEXT)),
+        KeyBinding::new("ctrl-space", ToggleBrowser, Some(CONTEXT)),
     ]);
+    macro_rules! bind_numbered {
+        ($cx:ident; $(($tab:ident, $item:ident, $index:expr, $key:literal)),*) => {
+            $cx.bind_keys([
+                $(
+                    KeyBinding::new(concat!("ctrl-", $key), $tab, Some(CONTEXT)),
+                    KeyBinding::new(concat!("alt-", $key), $item, Some(CONTEXT)),
+                )*
+            ]);
+        };
+    }
+    numbered!(bind_numbered!(cx));
+}
+
+/// The open tab `step` places from `current`, wrapping around at either end, as pyfa's
+/// `chrome_tabs.py` `NextPage` and `PrevPage` do. None without an open tab to land on.
+pub fn cycle_tab(open: &[usize], current: Option<usize>, forward: bool) -> Option<usize> {
+    let at = open.iter().position(|&i| Some(i) == current)?;
+    let next = if forward {
+        (at + 1) % open.len()
+    } else {
+        (at + open.len() - 1) % open.len()
+    };
+    open.get(next).copied()
 }
 
 /// A menu entry that runs `f` on the window and shows `action`'s shortcut.
@@ -92,7 +166,8 @@ fn command(
 impl Gyfa {
     /// The root element with the menu's shortcuts wired to this window.
     pub(super) fn bind_actions(root: Div, cx: &mut Context<Self>) -> Div {
-        root.key_context(CONTEXT)
+        let root = root
+            .key_context(CONTEXT)
             .on_action(cx.listener(|g, _: &NewTab, _, cx| g.new_tab(cx)))
             .on_action(cx.listener(|g, _: &CloseTab, _, cx| {
                 if let Some(current) = g.saved.current {
@@ -119,6 +194,77 @@ impl Gyfa {
                 g.open_wizard(window, cx);
             }))
             .on_action(cx.listener(|_, _: &Quit, _, cx| cx.quit()))
+            .on_action(cx.listener(|g, _: &NextTab, _, cx| g.cycle_tab(true, cx)))
+            .on_action(cx.listener(|g, _: &PreviousTab, _, cx| g.cycle_tab(false, cx)))
+            .on_action(cx.listener(|g, _: &FocusSearch, window, cx| g.focus_search(window, cx)))
+            .on_action(cx.listener(|g, _: &ToggleBrowser, _, cx| g.toggle_browser(cx)));
+        macro_rules! on_numbered {
+            ($root:ident, $cx:ident; $(($tab:ident, $item:ident, $index:expr, $key:literal)),*) => {
+                $root$(
+                    .on_action($cx.listener(|g, _: &$tab, _, cx| {
+                        g.pick_additions_tab($index, cx);
+                    }))
+                    .on_action($cx.listener(|g, _: &$item, _, cx| {
+                        g.add_listed_item($index, cx);
+                    }))
+                )*
+            };
+        }
+        numbered!(on_numbered!(root, cx))
+    }
+
+    /// Ctrl+Tab and friends: the next or previous open fit.
+    fn cycle_tab(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let Some(next) = cycle_tab(&self.saved.open, self.saved.current, forward) else {
+            return;
+        };
+        if self.saved.current != Some(next) {
+            self.renaming = false;
+            self.saved.current = Some(next);
+            self.clear_selection();
+            self.changed(cx);
+        }
+    }
+
+    /// Ctrl+F, mainFrame.py toggleSearchBox: the search box of whichever browser shows.
+    fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let input = match self.browser_tab {
+            BrowserTab::Market => &self.search,
+            BrowserTab::Fittings => &self.fit_search,
+        };
+        input.update(cx, |input, cx| input.focus(window, cx));
+    }
+
+    /// Ctrl+Space, mainFrame.py toggleShipMarket: swap the market and the fittings browser.
+    fn toggle_browser(&mut self, cx: &mut Context<Self>) {
+        self.browser_tab = match self.browser_tab {
+            BrowserTab::Market => BrowserTab::Fittings,
+            BrowserTab::Fittings => BrowserTab::Market,
+        };
+        cx.notify();
+    }
+
+    /// Ctrl+1..9, `mainFrame.py` `AdditionsTabSelect`: the additions tab at that place.
+    fn pick_additions_tab(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(&tab) = AdditionsTab::ORDER.get(index) else {
+            return;
+        };
+        if self.additions_tab != tab {
+            self.additions_tab = tab;
+            self.additions_selection.clear();
+            self.additions_anchor = None;
+            cx.notify();
+        }
+    }
+
+    /// Alt+1..9, `mainFrame.py` `ItemSelect`: add the market's Nth listed item, as a double-click
+    /// without modifiers would.
+    fn add_listed_item(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(&id) = self.market_order.get(index) else {
+            return;
+        };
+        self.used_from_market(id);
+        self.market_double_click(id, gpui_kit::Modifiers::default(), cx);
     }
 
     pub(super) fn new_tab(&mut self, cx: &mut Context<Self>) {
@@ -324,11 +470,18 @@ impl Gyfa {
                     .disabled(!has_fit),
                 )
                 .item(
-                    command(&this, IconName::Delete, "Delete Fit", None, |g, _, cx| {
-                        if let Some(current) = g.saved.current {
-                            g.delete_fit(current, cx);
-                        }
-                    })
+                    command(
+                        &this,
+                        IconName::Delete,
+                        "Delete Fit",
+                        None,
+                        |g, window, cx| {
+                            if let Some(current) = g.saved.current {
+                                let shift = window.modifiers().shift;
+                                g.confirm_delete_fit(current, shift, window, cx);
+                            }
+                        },
+                    )
                     .disabled(!has_fit),
                 )
             }) as Box<dyn Fn(PopupMenu) -> PopupMenu>
@@ -492,5 +645,24 @@ impl Gyfa {
                     ),
             )
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cycle_tab;
+
+    #[test]
+    fn tabs_cycle_and_wrap() {
+        let open = [4, 1, 7];
+        assert_eq!(cycle_tab(&open, Some(4), true), Some(1));
+        assert_eq!(cycle_tab(&open, Some(7), true), Some(4));
+        assert_eq!(cycle_tab(&open, Some(4), false), Some(7));
+        assert_eq!(cycle_tab(&open, Some(1), false), Some(4));
+        assert_eq!(cycle_tab(&[3], Some(3), true), Some(3));
+        assert_eq!(cycle_tab(&open, None, true), None);
+        assert_eq!(cycle_tab(&[], Some(2), false), None);
+        // A current fit that is not open (just deleted, say) goes nowhere.
+        assert_eq!(cycle_tab(&open, Some(9), true), None);
     }
 }

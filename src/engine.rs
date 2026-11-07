@@ -104,6 +104,10 @@ pub struct ModuleInfo {
     pub spool_max: Option<u32>,
     /// Expected seconds until an overheated module burns out.
     pub burnout: Option<f64>,
+    /// How many of its loaded charge the module holds.
+    pub charges: Option<u32>,
+    /// Cycles before the loaded charges run out, for modules that use them up.
+    pub charged_cycles: Option<u32>,
 }
 
 /// What the Boosters tab shows for a booster, after skills.
@@ -476,11 +480,14 @@ impl Engine {
         stats.fighter_classes = surroundings::fighter_classes(&mut sol, fit_id);
 
         for &(slot, i, id) in &module_ids {
-            let spool_max = sol
-                .get_module(&id)
-                .ok()
-                .and_then(|mut m| m.get_spool_cycle_count())
-                .map(|info| info.max.into_u32());
+            let (spool_max, charges, charged_cycles) =
+                sol.get_module(&id).ok().map_or_default(|mut m| {
+                    (
+                        m.get_spool_cycle_count().map(|info| info.max.into_u32()),
+                        m.get_charge_count().map(rc::Count::into_u32),
+                        m.get_charged_cycle_count().map(rc::Count::into_u32),
+                    )
+                });
             let Ok(mut item) = sol.get_item(&id) else {
                 continue;
             };
@@ -503,6 +510,8 @@ impl Engine {
                 falloff: get(attr::FALLOFF).filter(|&v| v > 0.0),
                 spool_max,
                 burnout: None,
+                charges,
+                charged_cycles,
             };
             stats.modules.insert((slot, i), info);
             stats

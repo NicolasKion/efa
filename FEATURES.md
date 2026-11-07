@@ -12,8 +12,8 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Multiple fit tabs (gui/chrome_tabs.py, gui/mainFrame.py)
 - [x] Fits persisted between runs (eos/db): fits.json in the XDG data dir, written through a temp file
 - [ ] Safe loading and backups of saved data (eos/db/migration.py backs the DB up before migrating): a fits.json that fails to parse loads as empty and the next save overwrites it; no backup copy is kept
-- [ ] Delete confirmation (builtinShipBrowser/fitItem.py "Do you really want to delete this fit?", skipped with Shift): gyfa deletes from the fittings browser and the Fit menu without asking
-- [ ] Middle-click a tab to close it (chrome_tabs.py OnMiddleUp)
+- [x] Delete confirmation (builtinShipBrowser/fitItem.py "Do you really want to delete this fit?", skipped with Shift), from the fittings browser and Fit > Delete Fit; Enter says Yes as in pyfa, Escape cancels
+- [x] Middle-click a tab to close it (chrome_tabs.py OnMiddleUp)
 - [x] New fit (mainMenuBar.py New Tab)
 - [x] Delete fit (shipBrowser fitItem.py)
 - [x] Close tab without deleting the fit, close all tabs (mainMenuBar.py), Ctrl+W and Ctrl+Alt+W
@@ -44,7 +44,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Recently used items (itemView.py, service/market.py): pyfa's "Recently Used Items" tree entry, listed in the results pane, the last 20 items added from the market (double-click, menus, drags), saved with the fits
 - [x] "Charges For Active Fit" tree entry (itemView.py), listed in the results pane: every charge the fit's modules take, in market order
 - [~] Search delay and meta button behaviour prefs (pyfaMarketPreferences.py), search delay done; pyfa's four meta button modes (search and recents, group selection, empty view, market jump) are missing
-- [ ] Market shortcuts: Alt+1..9 adds the Nth listed item, "Show market shortcuts" numbers them (mainFrame.py ItemSelect, pyfaMarketPreferences.py)
+- [~] Market shortcuts: Alt+1..9 adds the Nth listed item (mainFrame.py ItemSelect); the "Show market shortcuts" preference that numbers them is missing (pyfaMarketPreferences.py)
 - [x] Jump to market group from an item (builtinContextMenus/itemMarketJump.py): from anything the results pane lists outside the item's own group, and the fit's, additions' and projected items' menus; the jump picks the group, presses the item's meta button and clears the pane's filters so it shows
 - [x] Drag item from market onto fit/slot/additions (itemView.py, fittingView.py)
 - [x] Item tooltip with name, Omega, price and the start of the description (gyfa extra: pyfa's item list has none); the description loads with the stats window's data on first hover
@@ -79,7 +79,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Color rows by slot type (pyfaGeneralPreferences.py)
 - [x] Highlight modules with unmet skills or invalid fitting in red (fittingView.py), with the reasons on hover; drones, fighters, implants, boosters and the mode too. pyfa colors the row background and leaves skills out; gyfa uses red text for both
 - [x] Drag and drop modules between slots, swap/rearrange (fittingView.py, fitCommands/gui/localModule)
-- [~] Shift/ctrl drag to copy module, drag module to cargo (fitCommands/gui/localModuleCargo), module/charge to and from cargo done with Ctrl to copy, copying between slots missing
+- [x] Ctrl drag to copy a module or rig onto an empty slot of its rack, Ctrl+Alt drag to fill the rack with copies (fittingView.py swapItems), drag module to cargo (fitCommands/gui/localModuleCargo), module/charge to and from cargo with Ctrl to copy
 - [x] Multi-select and bulk state change (fittingView.py): Shift/Ctrl selection, a state click takes the selection along, Alt every similar module, Ctrl switches them off
 - [x] Delete key removes selection, Ctrl+A selects all, Escape clears (fittingView.py)
 - [x] Column: ship/item icon and charge icon (baseIcon.py, ammoIcon.py)
@@ -89,7 +89,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Column: misc info per module type (tracking, neut, web, ewar, damage mods, reps, mining, ancillaries, RAH resists, command bursts, charges, subsystem slots) with pyfa's tooltips (misc.py), refine: item attrs and switched item stats; doomsdays show raw volley without pyfa's "over Ns"
 - [x] Column: heat, estimated time until an overheated module burns out (heat.py), pyfa's simulation on refine's attributes
 - [x] Column: price (price.py)
-- [~] Column: charge name and remaining charges/reload (ammo.py), name and icon only; pyfa's "Name (charges, N cycles)" is missing, refine: get_charge_count, get_charged_cycle_count
+- [x] Column: charge name with pyfa's "Name (charges, N cycles)" (ammo.py), refine: get_charge_count, get_charged_cycle_count
 - [x] Column: drone EHP and drone regen (droneEhp.py, droneRegen.py), refine: item stats get_stat_ehp, get_stat_erps
 - [x] Column: fighter abilities (abilities.py), refine: iter_abilities
 - [x] Column: booster side effects (sideEffects.py), refine: iter_side_effects
@@ -134,7 +134,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [~] Show skills affecting item, change skill level inline (builtinContextMenus/skillAffectors.py), refine: iter_modifiers, set_level; modules, charges, ship and drones done, fighters missing
 - [x] Price total options (builtinContextMenus/priceOptions.py): Drones, Cargo, Implants && Boosters
 - [x] Copy/paste/export/import additions lists (builtinContextMenus/additionsExportAll.py, additionsExportSelection.py, additionsImport.py)
-- [~] Context menu enable/disable preferences (pyfaContextMenuPreferences.py): every toggle is honoured; holding Ctrl while opening a menu does not bring the hidden entries back as in pyfa (gui/contextMenu.py)
+- [x] Context menu enable/disable preferences (pyfaContextMenuPreferences.py): every toggle is honoured, and holding Ctrl while opening a menu brings the hidden entries back as in pyfa (gui/contextMenu.py)
 
 ## Additions pane
 
@@ -142,7 +142,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Implants and boosters list (builtinAdditionPanes/implantView.py, boosterView.py), refine: add_implant, add_booster
 - [x] Cargo: parsed from EFT and exported, added from the market (double-click with Ctrl/Alt batches, drag, menus), edited, dragged to and from the fit (builtinAdditionPanes/cargoView.py)
 - [x] Tabbed additions pane (gui/additionsPane.py): Drones, Fighters, Cargo, Implants, Boosters, Projected, Command, Notes
-- [ ] Ctrl+1..9 switches additions tab (mainFrame.py AdditionsTabSelect)
+- [x] Ctrl+1..9 switches additions tab (mainFrame.py AdditionsTabSelect), counted in gyfa's tab order
 - [x] Tab names with counts (pyfaGeneralPreferences.py "Extra info in Additions panel tab names"): none, active or all items
 - [x] Drone stack amount editing, separate stacks (droneView.py)
 - [x] Fighters tab: squadrons with size, state, speed, EHP, regen, active abilities and price, sorted like pyfa, light/heavy/support tube counts, Delete/Escape/Ctrl+A, market drops, copy/paste, EFT in and out (builtinAdditionPanes/fighterView.py), refine: add_fighter, set_count_override, abilities, get_stat_launched_*_fighters
@@ -150,8 +150,8 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Commodities, materials, deployables and containers in the catalog for cargo; market tree shows pyfa's Deployable Structures and Filaments roots, search adds ice products (service/market.py)
 - [x] Implants: use character implants vs fit implants switch (implantView.py); the All 5 character has no implants until characters exist
 - [x] Implant slot conflict handling: one implant per slot, the new one replaces the old, listed in slot order (implantView.py, eos HandledImplantList)
-- [~] Implants pane columns: state checkbox (multi-select toggle), slot, icon, name, price; drag from the market onto the pane (implantView.py). No Delete/Esc keys yet
-- [~] Booster slot conflict and side effects (boosterView.py): one booster per slot, listed by slot, on/off state, side effect, price and duration columns, drop from the market; no Delete/Esc keys yet, refine: set_state, iter_side_effects
+- [x] Implants pane columns: state checkbox (multi-select toggle), slot, icon, name, price; drag from the market onto the pane, Delete/Escape/Ctrl+A (implantView.py)
+- [x] Booster slot conflict and side effects (boosterView.py): one booster per slot, listed by slot, on/off state, side effect, price and duration columns, drop from the market, Delete/Escape/Ctrl+A, refine: set_state, iter_side_effects
 - [x] Projected tab: fits (N copies each), modules with charges and spool, drones, fighters, environment effects, pyfa's columns and order, drops from the market, the fitting view and the fittings browser, Delete/Escape/Ctrl+A (builtinAdditionPanes/projectedView.py), refine: add_proj, add_fw_effect, add_proj_effect
 - [x] Projected item states and amounts (fitCommands/gui/projectedChangeStates.py), left click toggles, right click overheats modules, Alt takes similar items, double-click takes one copy or drone (Alt: all)
 - [x] Command tab: fleet booster fits (builtinAdditionPanes/commandView.py), refine: add_fleet, set_fleet. Fits are referenced by a stable id that survives deletes and moves
@@ -305,7 +305,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [x] Load EVE data from local dump (gyfa data.rs, pyfa eos/db gamedata)
 - [x] Skip unknown items on import with a status message (port.py)
 - [~] In-game icons, in progress (gui/bitmap_loader.py)
-- [~] Keyboard shortcuts (mainMenuBar.py, mainFrame.py registerMenu): Ctrl+T, W, Alt+W, Z, Y, C, V, O, S, P, I, K, G, Alt+G done; missing Ctrl+D (optimize price), Ctrl+B and Ctrl+E (ESI), Ctrl+F (focus market or fit search), Ctrl+Space (switch market and fittings browser), Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgUp/PgDn (next/previous tab), Ctrl+F4 and Ctrl+Alt+F4, Ctrl+Shift+Z (redo), Ctrl+1..9 (additions tab), Alt+1..9 (market item)
+- [~] Keyboard shortcuts (mainMenuBar.py, mainFrame.py registerMenu): Ctrl+T, W, Alt+W, Z, Y, Shift+Z, C, V, O, S, P, I, K, G, Alt+G, F (search box of the browser shown), Space (switch market and fittings browser), Tab, Shift+Tab, PgUp/PgDn (next/previous tab), F4 and Alt+F4 (close tab, close all), 1..9 (additions tab), Alt+1..9 (market item) done; missing Ctrl+D (optimize price), Ctrl+B and Ctrl+E (ESI)
 - [x] About dialog, version info (gui/aboutData.py)
 - [ ] Error dialog with details (gui/errorDialog.py)
 - [ ] Update notifications (gui/updateDialog.py, service/update.py)

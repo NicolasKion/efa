@@ -6,7 +6,9 @@
 
 use std::{path::PathBuf, rc::Rc};
 
-use gpui_kit::{AnyWindowHandle, App, AppContext, Context, Global, SharedString, Task, WeakEntity};
+use gpui_kit::{
+    AnyWindowHandle, App, AppContext, Context, Global, SharedString, Task, WeakEntity, Window,
+};
 
 use super::{Loaded, character_editor::CharacterEditor, load};
 use crate::{
@@ -24,6 +26,16 @@ impl Global for CurrentPreferences {}
 pub fn preferences(cx: &App) -> Preferences {
     cx.try_global::<CurrentPreferences>()
         .map_or_default(|p| p.0.clone())
+}
+
+/// Which context menu entries show in a menu opening now: the Context Menus preferences, or all
+/// of them while Ctrl is held, as in pyfa (gui/contextMenu.py).
+pub fn shown_menus(window: &Window, cx: &App) -> crate::preferences::ContextMenus {
+    if window.modifiers().control {
+        crate::preferences::ContextMenus::default()
+    } else {
+        preferences(cx).context_menus
+    }
 }
 
 /// New rolled values for a mutated module or drone stack of a saved fit.

@@ -81,6 +81,21 @@ fn misc_column_reads_module_numbers() {
 }
 
 #[test]
+fn charge_column_reads_charge_count_and_cycles() {
+    let Some((catalog, engine)) = setup() else {
+        return;
+    };
+    let stats = engine.compute(&fit(&catalog, VEXOR));
+    // A blaster fires one charge a cycle, so its charges and cycles agree.
+    let blaster = stats.modules[&(Slot::High, 0)];
+    let charges = blaster.charges.expect("the blaster holds charges");
+    assert!(charges > 0);
+    assert_eq!(blaster.charged_cycles, Some(charges));
+    // Nothing loaded, nothing counted.
+    assert_eq!(stats.modules[&(Slot::High, 2)].charges, None);
+}
+
+#[test]
 fn overheated_modules_get_a_burnout_time() {
     let Some((catalog, engine)) = setup() else {
         return;

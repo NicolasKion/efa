@@ -26,8 +26,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     App, AppContext, ClickEvent, ClipboardItem, Context, InteractiveElement, IntoElement,
-    Modifiers, ParentElement, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
-    prelude::FluentBuilder, px,
+    KeyDownEvent, Modifiers, ParentElement, StatefulInteractiveElement, Styled, WeakEntity, Window,
+    div, prelude::FluentBuilder, px,
 };
 
 use super::{
@@ -194,20 +194,10 @@ impl Gyfa {
             });
         let theme = cx.theme();
         let labels = self.saved.preferences.general.additions_labels;
-        let tabs = [
-            (AdditionsTab::Drones, "Drones"),
-            (AdditionsTab::Fighters, "Fighters"),
-            (AdditionsTab::Implants, "Implants"),
-            (AdditionsTab::Boosters, "Boosters"),
-            (AdditionsTab::Cargo, "Cargo"),
-            (AdditionsTab::Projected, "Projected"),
-            (AdditionsTab::Command, "Command"),
-            (AdditionsTab::Notes, "Notes"),
-        ]
-        .map(|(tab, label)| {
+        let tabs = AdditionsTab::ORDER.map(|tab| {
             (
                 tab,
-                label,
+                tab.label(),
                 tab_count(fit, tab, labels, self.character_implants()),
             )
         });
@@ -313,6 +303,39 @@ impl Gyfa {
         } else {
             vec![clicked]
         }
+    }
+
+    /// pyfa's list keys (implantView.py, boosterView.py kbEvent): Delete removes the selection
+    /// when the rows are `removable` as `kind`, Ctrl+A selects all `len` rows, Escape clears.
+    fn list_key(
+        &mut self,
+        event: &KeyDownEvent,
+        kind: AddKind,
+        len: usize,
+        removable: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let keystroke = &event.keystroke;
+        let m = keystroke.modifiers;
+        let plain = !(m.control || m.alt || m.shift || m.platform);
+        match keystroke.key.as_str() {
+            "delete" if plain && removable && !self.additions_selection.is_empty() => {
+                let rows = std::mem::take(&mut self.additions_selection);
+                self.additions_anchor = None;
+                self.apply(Action::RemoveAdditions(kind, rows), cx);
+            }
+            "a" if m.control && !m.alt && !m.shift => {
+                self.additions_selection = (0..len).collect();
+                cx.notify();
+            }
+            "escape" if plain => {
+                self.additions_selection.clear();
+                self.additions_anchor = None;
+                cx.notify();
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
     }
 
     /// Ask for a value and turn it into an action. Input that does not parse leaves the dialog
@@ -475,7 +498,7 @@ fn addition_menu(
         ));
     }
     let variations = catalog.variations_of(type_id);
-    if variations.len() > 1 && super::hub::preferences(cx).context_menus.variations {
+    if variations.len() > 1 && super::hub::shown_menus(window, cx).variations {
         let entries: Vec<(TypeId, String)> =
             variations.iter().map(|&v| (v, catalog.name(v))).collect();
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
@@ -522,7 +545,7 @@ fn addition_menu(
     {
         menu = super::characters::skills_submenu(menu, this, loaded, target, window, cx);
     }
-    if kind == AddKind::Cargo && super::hub::preferences(cx).context_menus.cargo_fill {
+    if kind == AddKind::Cargo && super::hub::shown_menus(window, cx).cargo_fill {
         let this = this.clone();
         menu = menu.item(
             entry(IconName::Inbox, format!("Fill Cargo With {category}")).on_click(
@@ -538,7 +561,7 @@ fn addition_menu(
             ),
         );
     }
-    misc_entries(menu.separator(), this, loaded, kind, Some(i), cx)
+    misc_entries(menu.separator(), this, loaded, kind, Some(i), window, cx)
 }
 
 /// pyfa's *`ItemMisc` entries: copy the selection or the whole tab, paste into it.
@@ -548,12 +571,10 @@ fn misc_entries(
     loaded: &Rc<Loaded>,
     kind: AddKind,
     clicked: Option<usize>,
+    window: &Window,
     cx: &App,
 ) -> PopupMenu {
-    if !super::hub::preferences(cx)
-        .context_menus
-        .additions_copy_paste
-    {
+    if !super::hub::shown_menus(window, cx).additions_copy_paste {
         return menu;
     }
     let noun = kind.noun();

@@ -45,9 +45,9 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, AppContext, ClickEvent, Context, Entity, FocusHandle, InteractiveElement,
-    IntoElement, MouseUpEvent, ParentElement, Render, ScrollHandle, ScrollStrategy, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Task, UniformListScrollHandle, WeakEntity,
-    Window, WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, size,
+    IntoElement, MouseButton, MouseUpEvent, ParentElement, Render, ScrollHandle, ScrollStrategy,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Task, UniformListScrollHandle,
+    WeakEntity, Window, WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, size,
 };
 
 pub use actions::{Action, AddKind, RowRef, Scope};
@@ -145,6 +145,31 @@ enum AdditionsTab {
 }
 
 impl AdditionsTab {
+    /// The tabs as the pane lists them, which Ctrl+1..9 count along.
+    const ORDER: [Self; 8] = [
+        Self::Drones,
+        Self::Fighters,
+        Self::Implants,
+        Self::Boosters,
+        Self::Cargo,
+        Self::Projected,
+        Self::Command,
+        Self::Notes,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Drones => "Drones",
+            Self::Fighters => "Fighters",
+            Self::Implants => "Implants",
+            Self::Boosters => "Boosters",
+            Self::Cargo => "Cargo",
+            Self::Projected => "Projected",
+            Self::Command => "Command",
+            Self::Notes => "Notes",
+        }
+    }
+
     /// Tabs pyfa disables for structures: they fly no drones, take no implants or boosters, give
     /// no fleet boosts and keep no notes.
     fn ship_only(self) -> bool {
@@ -726,6 +751,49 @@ impl Gyfa {
         self.changed(cx);
     }
 
+    /// Delete a fit after asking, as pyfa's fit row does (fitItem.py deleteBtnCB); holding
+    /// Shift deletes right away. Enter confirms like pyfa's Yes default, Escape cancels.
+    fn confirm_delete_fit(
+        &mut self,
+        index: usize,
+        shift: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if shift {
+            self.delete_fit(index, cx);
+            return;
+        }
+        let Some(fit) = self.saved.fits.get(index) else {
+            return;
+        };
+        // The list may change while the question is up, so find the fit again by what it is.
+        let (name, modified) = (fit.name.clone(), fit.modified);
+        let this = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let (this, name) = (this.clone(), name.clone());
+            alert
+                .confirm()
+                .title("Confirm Delete")
+                .description("Do you really want to delete this fit?")
+                .ok_text("Yes")
+                .cancel_text("No")
+                .on_ok(move |_, _, cx| {
+                    let _ = this.update(cx, |g, cx| {
+                        let found = g
+                            .saved
+                            .fits
+                            .iter()
+                            .position(|f| f.name == name && f.modified == modified);
+                        if let Some(index) = found {
+                            g.delete_fit(index, cx);
+                        }
+                    });
+                    true
+                })
+        });
+    }
+
     /// Keep `before` for undo and date the fit, when the edit changed it.
     fn record_edit(&mut self, index: usize, before: Fit) {
         if self.history.record(index, before, &self.saved.fits[index]) {
@@ -1025,6 +1093,14 @@ impl Gyfa {
                     this.changed(cx);
                 }
             }))
+            // chrome_tabs.py OnMiddleUp: a middle click closes the tab.
+            .on_mouse_up(
+                MouseButton::Middle,
+                cx.listener(move |this, _: &MouseUpEvent, _, cx| {
+                    cx.stop_propagation();
+                    this.close_fit(i, cx);
+                }),
+            )
             .on_drag(
                 TabDrag {
                     index: i,
