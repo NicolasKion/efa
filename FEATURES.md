@@ -1,7 +1,7 @@
 # Feature parity with pyfa
 
-Rough coverage: fitting, stats, additions, item stats, graphs, editors, context menus and the file formats are mostly there. What is left is mainly ESI/SSO, attribute overrides, alpha clones, Optimize Fit Price, EFS export, generic command links and a tail of smaller items (the [ ] and [~] lines).
-Biggest gaps: ESI/SSO (skills, fittings), attribute overrides, fighters in the DNA/XML/ESI/multibuy formats, alpha clones, global character and damage pattern.
+Rough coverage: fitting, stats, additions, item stats, graphs, editors, context menus and the file formats are mostly there. What is left is mainly attribute overrides, alpha clones, Optimize Fit Price, EFS export, generic command links and a tail of smaller items (the [ ] and [~] lines).
+Biggest gaps: attribute overrides, fighters in the DNA/XML/ESI/multibuy formats, alpha clones, global character and damage pattern.
 Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
 Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time, abstract target profiles for applied damage, lock/warp time formulas (all done graph-side in src/graphs).
 
@@ -186,7 +186,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Alpha clone skill caps (characterEditor.py clone choice, eos/saveddata/character.py alphaClone): the dump's sde/clonegrades.json is already read for the Omega markers (data.rs alpha_skill_caps), but characters have no clone setting and nothing caps their skills
 - [x] Character implants tab, with Apply Implant Set (characterEditor.py)
 - [x] Character security status, used where the fit does not set its own (characterEditor.py), refine: set_sec_status
-- [ ] Import skills from ESI (characterEditor.py "Get Skills" and the EVE SSO tab linking a character), needs SSO
+- [x] Import skills from ESI (characterEditor.py "Get Skills" and the EVE SSO tab linking a character), see ESI and SSO
 - [x] Import/export skills to clipboard, levels in digits or Roman numerals (characterEditor.py)
 - [x] Import character file (EVEMon XML) (mainMenuBar.py importCharacter)
 - [x] Export skills needed for fit as EVEMon .emp/.xml or text, by file extension (mainMenuBar.py exportSkillsNeeded)
@@ -220,7 +220,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] EFT .cfg legacy format (port.py importEftCfg); notes come from Description= lines, with | as line breaks
 - [~] DNA import/export (service/port/dna.py), chat links and the DNA: variant too; fighters are not exported and import into the drone bay
 - [~] XML import/export (EVE client format) (service/port/xml.py); notes are the description, exported cut to 400 characters with line breaks as <br>; fighters are not exported and import into the drone bay (Backup All Fittings loses them too)
-- [~] ESI JSON import/export (service/port/esi.py); notes are the description, exported cut to 400 characters; fighters (flag 158) are not exported and import into the drone bay
+- [~] ESI JSON import/export (service/port/esi.py); notes are the description, exported cut to 400 characters; fighters (flag 158) are not in the copied JSON (Export to EVE sends them) and import into the drone bay
 - [~] Multibuy export (service/port/multibuy.py), no Optimize Prices option, fighters left out
 - [ ] EFS stats JSON export (service/port/efs.py), the copy dialog's "EFS" format
 - [x] Ship stats export (service/port/shipstats.py), the copy dialog's "Stats" format
@@ -274,8 +274,8 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [~] Stat view layout (pyfaStatViewPreferences.py), each section shown or hidden
 - [x] Context menu toggles (pyfaContextMenuPreferences.py)
 - [~] Market and prices: source, system, search delay, price total composition (pyfaMarketPreferences.py); missing "Show market shortcuts" and the four meta button modes
-- [x] Network/proxy (pyfaNetworkPreferences.py), for price requests
-- [ ] ESI/SSO server and auto-login (pyfaEsiPreferences.py)
+- [x] Network/proxy (pyfaNetworkPreferences.py), for price and ESI requests
+- [~] ESI (pyfaEsiPreferences.py): Client ID, callback port and the callback URL to register with a copy button, the scopes to register; pyfa's login modes and server choice are not there
 - [ ] Database paths and resets (pyfaDatabasePreferences.py): show paths, Delete All Damage Pattern Profiles, Delete All Target Profiles, Delete All Prices
 - [ ] Logging (pyfaLoggingPreferences.py)
 - [ ] Update checks (pyfaUpdatePreferences.py, service/update.py)
@@ -284,11 +284,12 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 
 ## ESI and SSO
 
-- [ ] EVE SSO login, manage characters (gui/ssoLogin.py, service/esiAccess.py, service/esi.py)
-- [ ] Fetch skills from ESI (characterEditor.py)
-- [ ] Browse ESI fittings, import to local (gui/esiFittings.py)
-- [ ] Delete ESI fittings (esiFittings.py)
-- [ ] Export fit to EVE via ESI (esiFittings.py, mainMenuBar.py)
+- [x] EVE SSO login, manage characters (gui/ssoLogin.py, service/esiAccess.py, service/esi.py): the PKCE flow for native apps with a listener on localhost for the callback, access tokens checked against the SSO's keys (RS256, issuer, audience, expiry), refreshed shortly before they run out. Refresh tokens live in esi.json in the data directory, owner-only. gyfa ships no client ID: the user registers an app and pastes its ID in Preferences > ESI. Character > Manage ESI Characters lists them with Add and Remove, Character > Add ESI Character logs one in directly
+- [x] Fetch skills from ESI (characterEditor.py): the editor's EVE SSO tab links a character to a logged-in EVE character, Get Skills replaces its skills and also takes implants (esi-clones.read_implants.v1, which pyfa does not ask for) and security status; logging in from All 0 or All 5 makes a new character named after the EVE one and fills it in
+- [x] Browse ESI fittings, import to local (gui/esiFittings.py), Ctrl+B: a window with the character's fittings by ship, search, ship icons and the picked fitting's contents; several can be imported at once with Ctrl+click
+- [x] Delete ESI fittings (esiFittings.py), one, several or all, after a confirmation
+- [x] Export fit to EVE via ESI (esiFittings.py, mainMenuBar.py), Ctrl+E: charges, implants and boosters into the cargo as options, fighters in the fighter bay. The window keeps the fit as it was when opened
+- [ ] pyfa's SSO server mode and the Singularity test server (pyfaEsiPreferences.py)
 
 ## Prices
 
@@ -305,7 +306,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [x] Load EVE data from local dump (gyfa data.rs, pyfa eos/db gamedata)
 - [x] Skip unknown items on import with a status message (port.py)
 - [~] In-game icons, in progress (gui/bitmap_loader.py)
-- [~] Keyboard shortcuts (mainMenuBar.py, mainFrame.py registerMenu): Ctrl+T, W, Alt+W, Z, Y, C, V, O, S, P, I, K, G, Alt+G done; missing Ctrl+D (optimize price), Ctrl+B and Ctrl+E (ESI), Ctrl+F (focus market or fit search), Ctrl+Space (switch market and fittings browser), Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgUp/PgDn (next/previous tab), Ctrl+F4 and Ctrl+Alt+F4, Ctrl+Shift+Z (redo), Ctrl+1..9 (additions tab), Alt+1..9 (market item)
+- [~] Keyboard shortcuts (mainMenuBar.py, mainFrame.py registerMenu): Ctrl+T, W, Alt+W, Z, Y, C, V, O, S, P, I, K, G, Alt+G, B, E done; missing Ctrl+D (optimize price), Ctrl+F (focus market or fit search), Ctrl+Space (switch market and fittings browser), Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgUp/PgDn (next/previous tab), Ctrl+F4 and Ctrl+Alt+F4, Ctrl+Shift+Z (redo), Ctrl+1..9 (additions tab), Alt+1..9 (market item)
 - [x] About dialog, version info (gui/aboutData.py)
 - [ ] Error dialog with details (gui/errorDialog.py)
 - [ ] Update notifications (gui/updateDialog.py, service/update.py)

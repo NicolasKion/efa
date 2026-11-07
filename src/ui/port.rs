@@ -51,7 +51,7 @@ impl Gyfa {
         }
     }
 
-    fn add_imported(&mut self, imported: port::Imported) {
+    pub(super) fn add_imported(&mut self, imported: port::Imported) {
         let count = imported.fits.len();
         for (n, mut fit) in imported.fits.into_iter().enumerate() {
             self.new_fit_defaults(&mut fit);

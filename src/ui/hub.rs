@@ -61,6 +61,10 @@ pub struct Hub {
     pub characters: Rc<Characters>,
     /// The open character editor, which is brought forward instead of opening a second one.
     pub character_editor: Option<(AnyWindowHandle, WeakEntity<CharacterEditor>)>,
+    /// Characters logged in with EVE SSO, and a login under way.
+    pub esi: super::esi::EsiState,
+    /// Fits other windows (Browse ESI Fittings) want the main window to add as new tabs.
+    pub fit_imports: Vec<crate::port::Imported>,
 }
 
 impl Hub {
@@ -98,6 +102,8 @@ impl Hub {
             raw_hp: false,
             characters: Rc::new(Characters::load()),
             character_editor: None,
+            esi: super::esi::EsiState::load(),
+            fit_imports: Vec::new(),
         }
     }
 

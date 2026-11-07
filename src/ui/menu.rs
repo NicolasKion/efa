@@ -1,8 +1,7 @@
 //! The menu bar and its keyboard shortcuts, laid out like pyfa's (gui/mainMenuBar.py): File,
 //! Fit, Character, Global, Editors, Help.
 //!
-//! Left out: ESI fittings and character management (they need EVE SSO), attribute overrides and
-//! Optimize Fit Price. Entries that belong to windows built
+//! Left out: attribute overrides and Optimize Fit Price. Entries that belong to windows built
 //! elsewhere are marked "Hook:" below and stay disabled until those windows exist.
 
 use gpui_kit::component::{
@@ -43,6 +42,8 @@ gpui_kit::actions!(
         Graphs,
         HiddenGraphs,
         FittingWizard,
+        BrowseEsiFittings,
+        ExportToEve,
         Quit,
     ]
 );
@@ -66,6 +67,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-g", Graphs, Some(CONTEXT)),
         KeyBinding::new("ctrl-alt-g", HiddenGraphs, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-w", FittingWizard, Some(CONTEXT)),
+        KeyBinding::new("ctrl-b", BrowseEsiFittings, Some(CONTEXT)),
+        KeyBinding::new("ctrl-e", ExportToEve, Some(CONTEXT)),
     ]);
 }
 
@@ -118,6 +121,8 @@ impl Gyfa {
             .on_action(cx.listener(|g, _: &FittingWizard, window, cx| {
                 g.open_wizard(window, cx);
             }))
+            .on_action(cx.listener(|g, _: &BrowseEsiFittings, _, cx| g.open_esi_fittings(cx)))
+            .on_action(cx.listener(|g, _: &ExportToEve, _, cx| g.open_export_to_eve(cx)))
             .on_action(cx.listener(|_, _: &Quit, _, cx| cx.quit()))
     }
 
@@ -315,6 +320,24 @@ impl Gyfa {
                         Gyfa::confirm_restrictions_toggle,
                     )
                     .disabled(!has_fit),
+                )
+                .separator()
+                .item(command(
+                    &this,
+                    IconName::Inbox,
+                    "Browse ESI Fittings…",
+                    Some(Box::new(BrowseEsiFittings)),
+                    |g, _, cx| g.open_esi_fittings(cx),
+                ))
+                .item(
+                    command(
+                        &this,
+                        IconName::ArrowUp,
+                        "Export to EVE…",
+                        Some(Box::new(ExportToEve)),
+                        |g, _, cx| g.open_export_to_eve(cx),
+                    )
+                    .disabled(!has_ship),
                 )
                 .separator()
                 .item(
