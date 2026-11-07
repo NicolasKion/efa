@@ -88,6 +88,7 @@ fn a_hurricane_gets_a_sane_brawler() {
         tank: TankStyle::Buffer,
         layer: Layer::Shield,
         goal: Goal::Balanced,
+        search_tiers: wizard::SearchTiers::Bling,
         tank_fit: None,
         damage: DamageMods::Weapon,
         rigs: wizard::Rigs::Tank,
@@ -571,4 +572,25 @@ fn a_buffer_tank_can_aim_for_resists() {
         resists.resist,
         balanced.resist
     );
+}
+
+#[test]
+fn wider_search_tiers_try_faction_hardeners() {
+    let Some((catalog, engine, data)) = setup() else {
+        return;
+    };
+    let fit = ship(catalog, "Abaddon");
+    let (problem, outcomes) = best(catalog, engine, data, &fit, |c| {
+        c.tank = TankStyle::Buffer;
+        c.layer = Layer::Armor;
+        c.goal = wizard::Goal::Resists;
+        c.search_tiers = wizard::SearchTiers::Faction;
+    });
+    let faction = problem.candidates.iter().any(|c| {
+        catalog
+            .get(c.module.type_id)
+            .is_some_and(|t| t.meta_group == Some(4))
+    });
+    assert!(faction, "faction variations are tried");
+    assert!(!outcomes.is_empty(), "a tank is found");
 }

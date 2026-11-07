@@ -36,7 +36,7 @@ use crate::{
     theme::Palette,
     wizard::{
         self, Ammo, Category, Choices, DamageMods, Facts, Family, Goal, Layer, Pick, Prop, Rigs,
-        Setup, Tab, Tabs, TankStyle, Tier, Utility,
+        SearchTiers, Setup, Tab, Tabs, TankStyle, Tier, Utility,
         tank::{self, Found, Limit, Outcome, Progress},
     },
 };
@@ -77,6 +77,8 @@ enum Row {
     Style,
     Layer,
     Goal,
+    /// Which variations the tank search tries.
+    Tiers,
     Search,
     Results,
     /// A tank module, by its T1 item.
@@ -100,9 +102,13 @@ impl Row {
             Row::Weapon | Row::Ammo | Row::Prop | Row::Utility(_) | Row::Damage => {
                 Some(Tab::Loadout)
             }
-            Row::Style | Row::Layer | Row::Goal | Row::Search | Row::Results | Row::Module(_) => {
-                Some(Tab::Tank)
-            }
+            Row::Style
+            | Row::Layer
+            | Row::Goal
+            | Row::Tiers
+            | Row::Search
+            | Row::Results
+            | Row::Module(_) => Some(Tab::Tank),
             Row::Rigs | Row::Rig(_) => Some(Tab::Rigs),
         }
     }
@@ -531,7 +537,7 @@ impl WizardPanel {
             Tab::Tank => {
                 let mut left = vec![Row::Racks(tab), Row::Style];
                 if self.choices.tank != TankStyle::None {
-                    left.extend([Row::Layer, Row::Goal, Row::Search]);
+                    left.extend([Row::Layer, Row::Goal, Row::Tiers, Row::Search]);
                 }
                 left.extend(self.module_rows().into_iter().map(|(b, _)| Row::Module(b)));
                 let right = if self.choices.tank != TankStyle::None && !self.results.is_empty() {
@@ -665,6 +671,16 @@ impl WizardPanel {
                     .collect(),
                 Layer::ALL.iter().position(|&l| l == c.layer)?,
             ),
+            Row::Tiers if c.tank != TankStyle::None => (
+                SearchTiers::ALL
+                    .iter()
+                    .map(|t| (t.label().into(), true))
+                    .collect(),
+                SearchTiers::ALL
+                    .iter()
+                    .position(|&t| t == c.search_tiers)
+                    .unwrap_or(0),
+            ),
             Row::Goal if c.tank != TankStyle::None => {
                 let goals = Goal::for_style(c.tank);
                 (
@@ -741,6 +757,7 @@ impl WizardPanel {
                 Row::Prop => c.prop = Prop::ALL[i],
                 Row::Style => c.tank = TankStyle::ALL[i],
                 Row::Layer => c.layer = Layer::ALL[i],
+                Row::Tiers => c.search_tiers = SearchTiers::ALL[i],
                 Row::Goal => {
                     if let Some(&goal) = Goal::for_style(c.tank).get(i) {
                         c.goal = goal;
@@ -1154,6 +1171,18 @@ impl WizardPanel {
                          land hardest; EHP decides between equals."
                     }
                     _ => "Effective HP, favouring resists over plates when they are close.",
+                }
+                .into(),
+            ),
+            Row::Tiers => (
+                "Search tiers".into(),
+                match c.search_tiers {
+                    SearchTiers::Bling => "Each module at the tier your bling choices set.",
+                    SearchTiers::Faction => {
+                        "Also T2 and faction modules, and T1 and T2 rigs, so the search can \
+                         weigh them."
+                    }
+                    SearchTiers::All => "Also deadspace and officer modules. Expect big prices.",
                 }
                 .into(),
             ),
@@ -1850,7 +1879,7 @@ fn section_of(row: Row) -> &'static str {
         Row::Weapon | Row::Ammo => "Weapons",
         Row::Prop => "Propulsion",
         Row::Utility(_) => "Tackle & utility",
-        Row::Style | Row::Layer | Row::Goal | Row::Search | Row::Module(_) => "Tank",
+        Row::Style | Row::Layer | Row::Goal | Row::Tiers | Row::Search | Row::Module(_) => "Tank",
         Row::Results => "Results",
         Row::Damage => "Damage modules",
         Row::Rigs | Row::Rig(_) => "Rigs",

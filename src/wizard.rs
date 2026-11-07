@@ -354,6 +354,57 @@ impl Layer {
     }
 }
 
+/// Which variations the tank search tries for each module and rig.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SearchTiers {
+    /// The bling choices: one variation of each.
+    #[default]
+    Bling,
+    /// Also T2 and faction modules, and T1 and T2 rigs.
+    Faction,
+    /// Also deadspace and officer modules.
+    All,
+}
+
+impl SearchTiers {
+    pub const ALL: [Self; 3] = [Self::Bling, Self::Faction, Self::All];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Bling => "My bling",
+            Self::Faction => "Up to faction",
+            Self::All => "Everything",
+        }
+    }
+
+    /// The tiers to try for a module whose bling tier is `own`, beyond it.
+    pub fn module_tiers(self, own: bling::Tier) -> Vec<bling::Tier> {
+        use bling::Tier;
+        let extra: &[Tier] = match self {
+            Self::Bling => &[],
+            Self::Faction => &[Tier::T2, Tier::Faction],
+            Self::All => &[Tier::T2, Tier::Faction, Tier::Deadspace, Tier::Officer],
+        };
+        let mut tiers = vec![own];
+        for &t in extra {
+            if !tiers.contains(&t) {
+                tiers.push(t);
+            }
+        }
+        tiers
+    }
+
+    /// The rig tiers to try, given the rig bling tier `own`.
+    pub fn rig_tiers(self, own: bling::Tier) -> Vec<bling::Tier> {
+        use bling::Tier;
+        match self {
+            Self::Bling => vec![own],
+            _ if own == Tier::T2 => vec![Tier::T2, Tier::T1],
+            _ => vec![own, Tier::T2],
+        }
+    }
+}
+
 /// What a tank is tuned for. Active tanks pick from resists, repair or both; buffer and brick
 /// tanks from balanced or the most raw effective HP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -437,6 +488,8 @@ pub struct Choices {
     pub tank: TankStyle,
     pub layer: Layer,
     pub goal: Goal,
+    /// Which variations of each tank module and rig the search tries.
+    pub search_tiers: SearchTiers,
     /// The optimiser's pick for the tank; None lays out the usual tank for the style.
     pub tank_fit: Option<TankFit>,
     pub damage: DamageMods,
@@ -1089,6 +1142,7 @@ impl<'a> Setup<'a> {
                 Layer::Armor
             },
             goal: Goal::Balanced,
+            search_tiers: SearchTiers::Bling,
             tank_fit: None,
             damage: if drones || family.is_none() && facts.drone_bandwidth > 0.0 {
                 DamageMods::Drone

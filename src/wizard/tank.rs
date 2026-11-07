@@ -293,7 +293,13 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
         let mut next = Vec::new();
         for (state, _) in &beam {
             for (c, candidate) in problem.candidates.iter().enumerate() {
-                let count = state.modules.iter().filter(|&&m| m == c).count();
+                // Variations of one module share its limit, so a T2 and a faction damage
+                // control do not both go on.
+                let count = state
+                    .modules
+                    .iter()
+                    .filter(|&&m| problem.candidates[m].base == candidate.base)
+                    .count();
                 if count >= candidate.max {
                     continue;
                 }
@@ -682,19 +688,51 @@ impl Setup<'_> {
         }
         wanted
             .into_iter()
-            .filter_map(|(name, role, max)| {
-                let base = self.base(&name)?;
-                let type_id = self.pick(base, category_of(self.catalog, base), &choices.bling);
+            .filter_map(|(name, role, max)| Some((self.base(&name)?, role, max)))
+            .flat_map(|(base, role, max)| {
+                let category = category_of(self.catalog, base);
+                self.search_variations(base, category, choices)
+                    .into_iter()
+                    .map(move |type_id| (base, type_id, role, max))
+            })
+            .map(|(base, type_id, role, max)| {
                 let mut module = crate::fit::Module::new(self.catalog, type_id);
                 module.charge = self.charge_for(type_id);
-                Some(Candidate {
+                Candidate {
                     base,
                     module,
                     role,
                     max,
-                })
+                }
             })
             .collect()
+    }
+
+    /// The variations of `base` the search tries: the exact pick if the user made one,
+    /// otherwise one per tier the search tiers allow, each only once.
+    fn search_variations(
+        &self,
+        base: TypeId,
+        category: Category,
+        choices: &Choices,
+    ) -> Vec<TypeId> {
+        if let Some(exact) = choices.bling.exact(category, base) {
+            return vec![exact];
+        }
+        let own = choices.bling.tier_for(category);
+        let tiers = if category == Category::Rig {
+            choices.search_tiers.rig_tiers(own)
+        } else {
+            choices.search_tiers.module_tiers(own)
+        };
+        let mut found = Vec::new();
+        for tier in tiers {
+            let id = self.resolve(base, tier);
+            if !found.contains(&id) {
+                found.push(id);
+            }
+        }
+        found
     }
 
     /// The rigs worth trying for the style and layer.
@@ -729,12 +767,16 @@ impl Setup<'_> {
         let size = self.facts.size.label();
         names
             .into_iter()
-            .filter_map(|name| {
-                let base = self.base(&format!("{size} {name}"))?;
-                let type_id = self.pick(base, Category::Rig, &choices.bling);
-                (self.attr(type_id, attr::UPGRADE_COST) <= self.facts.calibration)
-                    .then_some(RigCandidate { base, type_id })
+            .filter_map(|name| self.base(&format!("{size} {name}")))
+            .flat_map(|base| {
+                self.search_variations(base, Category::Rig, choices)
+                    .into_iter()
+                    .map(move |type_id| (base, type_id))
             })
+            .filter(|&(_, type_id)| {
+                self.attr(type_id, attr::UPGRADE_COST) <= self.facts.calibration
+            })
+            .map(|(base, type_id)| RigCandidate { base, type_id })
             .collect()
     }
 }
