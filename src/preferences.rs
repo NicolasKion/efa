@@ -31,6 +31,10 @@ pub struct General {
     pub reopen_fits: bool,
     /// Tint fitting view rows by rack.
     pub color_by_slot: bool,
+    /// Set the fitting view's racks apart, pyfa's "Separate Racks".
+    pub rack_slots: bool,
+    /// Name each rack in its separator row, pyfa's "Show Rack Labels".
+    pub rack_labels: bool,
     /// Show a fit tab's full name and hull as a tooltip.
     pub tab_tooltips: bool,
     /// The fittings browser opens a fit in a new tab rather than in the current one.
@@ -52,6 +56,8 @@ impl Default for General {
             character_implants: true,
             reopen_fits: true,
             color_by_slot: false,
+            rack_slots: true,
+            rack_labels: true,
             tab_tooltips: true,
             open_fit_in_new_tab: false,
             ammo_change_all: false,

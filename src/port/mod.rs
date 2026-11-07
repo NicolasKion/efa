@@ -196,7 +196,7 @@ pub(crate) fn place(fit: &mut Fit, catalog: &Catalog, type_id: TypeId, count: u3
         return;
     }
     match t.kind {
-        Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low)) => {
+        Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low | Slot::Service)) => {
             for _ in 0..count {
                 fit.rack_mut(slot).push(Some(Module::new(catalog, type_id)));
             }

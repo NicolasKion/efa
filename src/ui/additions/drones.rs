@@ -22,6 +22,7 @@ use crate::{
         Action, AddKind, Gyfa, Loaded,
         columns::{ICON_W, STATE_W, text_width},
         fitting::{DragPreview, DragSource, Dragged},
+        stats::format::{capitalize, format_list},
         validation::flag,
         widgets::{color, icon, icon_box},
     },
@@ -284,22 +285,6 @@ fn round_to_prec(value: f64, digits: i32) -> f64 {
     let decimals = (digits - value.abs().log10().floor() as i32 - 1).max(0);
     let scale = 10f64.powi(decimals);
     (value * scale).round() / scale
-}
-
-/// "a", "a and b", "a, b and c".
-fn format_list(words: &[&str]) -> String {
-    match words {
-        [] => String::new(),
-        [one] => (*one).to_owned(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
-    }
-}
-
-fn capitalize(text: &str) -> String {
-    let mut chars = text.chars();
-    chars.next().map_or_else(String::new, |first| {
-        first.to_uppercase().chain(chars).collect()
-    })
 }
 
 /// Range then falloff, the way pyfa's max range column writes them.

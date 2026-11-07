@@ -44,6 +44,7 @@ fn armed(module: TypeId, charge: TypeId) -> Fit {
         charge: Some(charge),
         spool: None,
         mutation: None,
+        rah: None,
     }));
     fit
 }

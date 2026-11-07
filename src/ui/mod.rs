@@ -140,6 +140,17 @@ enum AdditionsTab {
     Command,
 }
 
+impl AdditionsTab {
+    /// Tabs pyfa disables for structures: they fly no drones, take no implants or boosters, give
+    /// no fleet boosts and keep no notes.
+    fn ship_only(self) -> bool {
+        matches!(
+            self,
+            Self::Drones | Self::Implants | Self::Boosters | Self::Command | Self::Notes
+        )
+    }
+}
+
 #[expect(
     clippy::struct_excessive_bools,
     reason = "independent view flags of one window, not a state machine"
@@ -195,6 +206,8 @@ pub struct Gyfa {
     additions_focus: FocusHandle,
     /// Takes the drones pane's keys: Delete, Escape, Ctrl+A.
     drones_focus: FocusHandle,
+    /// Takes the fitting view's keys: Delete, Escape, Ctrl+A.
+    fitting_focus: FocusHandle,
     collapsed_sections: HashSet<&'static str>,
     /// Undo and redo steps per fit.
     history: history::History,
@@ -325,6 +338,7 @@ impl Gyfa {
             additions_anchor: None,
             additions_focus: cx.focus_handle(),
             drones_focus: cx.focus_handle(),
+            fitting_focus: cx.focus_handle(),
             // Which sections show at all is a preference; bombing is off by default, as in pyfa.
             collapsed_sections: HashSet::new(),
             history: history::History::default(),

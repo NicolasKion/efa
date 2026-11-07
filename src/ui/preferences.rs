@@ -207,6 +207,30 @@ impl PreferencesWindow {
             .into_any_element()
     }
 
+    /// A checkbox under another one, greyed out while that one is off, as pyfa nests them.
+    fn check_enabled(
+        id: &'static str,
+        label: &'static str,
+        enabled: bool,
+        checked: bool,
+        apply: fn(&mut Saved, bool),
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .pl_6()
+            .child(
+                Checkbox::new(id)
+                    .label(label)
+                    .checked(checked)
+                    .disabled(!enabled)
+                    .on_click(cx.listener(move |this, value: &bool, _, cx| {
+                        let value = *value;
+                        this.set(cx, |s| apply(s, value));
+                    })),
+            )
+            .into_any_element()
+    }
+
     /// A group of radio buttons choosing one of `options`.
     fn choice<T: Copy + PartialEq + 'static>(
         id: &'static str,
@@ -257,6 +281,22 @@ impl PreferencesWindow {
                 None,
                 g.color_by_slot,
                 |s, v| s.preferences.general.color_by_slot = v,
+                cx,
+            ),
+            Self::check(
+                "rack-slots",
+                "Separate Racks",
+                None,
+                g.rack_slots,
+                |s, v| s.preferences.general.rack_slots = v,
+                cx,
+            ),
+            Self::check_enabled(
+                "rack-labels",
+                "Show Rack Labels",
+                g.rack_slots,
+                g.rack_labels,
+                |s, v| s.preferences.general.rack_labels = v,
                 cx,
             ),
             Self::check(

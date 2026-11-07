@@ -51,7 +51,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 
 ## Ship browser
 
-- [x] Fittings browser with pyfa's stages (gui/shipBrowser.py): ship groups, a group's ships, a ship's fits; ships are still in the market tree too
+- [x] Fittings browser with pyfa's stages (gui/shipBrowser.py): ship groups, a group's ships, a ship's fits; ships are still in the market tree too. Citadels, engineering complexes and refineries are listed with the ships, as in pyfa
 - [x] Ship group navigation with back (builtinShipBrowser/navigationPanel.py, categoryItem.py): Ship groups, Back, Recent Fits, hide empty groups, New fit on a ship's fits; pyfa has no forward either
 - [x] Race filter (builtinShipBrowser/raceSelector.py): toggles for the races in the group, under its ships; nothing picked shows all, as in pyfa. Race comes from the faction, else the skills' races, else the ship's own, like pyfa's Item.race
 - [x] Saved fits listed under each ship with "N fits" on ships and groups (builtinShipBrowser/shipItem.py, fitItem.py); a ship without fits starts one named "<ship> fit"
@@ -70,29 +70,29 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Remove module (double-click) (fittingView.py)
 - [x] Ship name header with icon and fit name editing (fittingView.py)
 - [x] Module table with attribute columns (builtinViewColumns/attributeDisplay.py)
-- [ ] Rack labels and rack separators prefs (pyfaGeneralPreferences.py)
+- [x] Rack labels and rack separators prefs (pyfaGeneralPreferences.py): "Separate Racks" and "Show Rack Labels", labels as section bands, separators as a gap and border
 - [x] Color rows by slot type (pyfaGeneralPreferences.py)
 - [x] Highlight modules with unmet skills or invalid fitting in red (fittingView.py), with the reasons on hover; drones, fighters, implants, boosters and the mode too. pyfa colors the row background and leaves skills out; gyfa uses red text for both
-- [ ] Drag and drop modules between slots, swap/rearrange (fittingView.py, fitCommands/gui/localModule)
+- [x] Drag and drop modules between slots, swap/rearrange (fittingView.py, fitCommands/gui/localModule)
 - [~] Shift/ctrl drag to copy module, drag module to cargo (fitCommands/gui/localModuleCargo), module/charge to and from cargo done with Ctrl to copy, copying between slots missing
-- [ ] Multi-select and bulk state change (fittingView.py)
-- [ ] Delete key removes selection (fittingView.py)
+- [x] Multi-select and bulk state change (fittingView.py): Shift/Ctrl selection, a state click takes the selection along, Alt every similar module, Ctrl switches them off
+- [x] Delete key removes selection, Ctrl+A selects all, Escape clears (fittingView.py)
 - [x] Column: ship/item icon and charge icon (baseIcon.py, ammoIcon.py)
 - [x] Column: CPU, PG per module (attributeDisplay.py), refine: item get_attr
 - [x] Column: capacitor usage per module (capacitorUse.py), refine: item get_attr
 - [x] Column: optimal + falloff range (maxRange.py), refine: item get_attr
-- [ ] Column: misc info per module type (dps, rep amount, web strength, etc.) (misc.py), refine: item stats get_stat_dmg, get_stat_rps
-- [ ] Column: heat damage / overload info (heat.py)
+- [x] Column: misc info per module type (tracking, neut, web, ewar, damage mods, reps, mining, ancillaries, RAH resists, command bursts, charges, subsystem slots) with pyfa's tooltips (misc.py), refine: item attrs and switched item stats; doomsdays show raw volley without pyfa's "over Ns"
+- [x] Column: heat, estimated time until an overheated module burns out (heat.py), pyfa's simulation on refine's attributes
 - [x] Column: price (price.py)
 - [~] Column: charge name and remaining charges/reload (ammo.py), name and icon only, refine: get_charge_count, get_charged_cycle_count
 - [x] Column: drone EHP and drone regen (droneEhp.py, droneRegen.py), refine: item stats get_stat_ehp, get_stat_erps
 - [x] Column: fighter abilities (abilities.py), refine: iter_abilities
 - [x] Column: booster side effects (sideEffects.py), refine: iter_side_effects
 - [x] Column: projection range (projectionRange.py), refine places the projector that far from the target's surface
-- [ ] Column: target resists, damp scan res (targetResists.py, dampScanRes.py)
-- [ ] Strategic cruiser subsystem slot changes reflected live (fittingView.py), refine: get_stat_*_slots handles it
-- [ ] T3 destroyer stance/mode switching (builtinContextMenus/shipModeChange.py), refine: set_stance
-- [ ] Ship row context menu (fittingView.py)
+- [x] Column: target resists, damp scan res (targetResists.py, dampScanRes.py): pyfa shows these in the graphs' target list only, where gyfa has them too
+- [x] Strategic cruiser subsystem slot changes reflected live (fittingView.py), refine: get_stat_*_slots handles it
+- [x] T3 destroyer stance/mode switching (builtinContextMenus/shipModeChange.py), refine: set_stance
+- [x] Ship row context menu (fittingView.py)
 
 ## Context menu actions
 
@@ -101,9 +101,9 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Remove item (builtinContextMenus/itemRemove.py)
 - [ ] Charge picker grouped by damage type/range with ammo stats (moduleAmmoChange.py)
 - [x] Change charge in all modules of the same type (pyfaGeneralPreferences.py), Ctrl/Alt does the other
-- [ ] Item variations: swap to T2/faction/deadspace variant (builtinContextMenus/itemVariationChange.py)
-- [ ] Fill all slots with module (builtinContextMenus/moduleFill.py)
-- [ ] Fill rack / item fill (builtinContextMenus/itemFill.py)
+- [x] Item variations: swap to T2/faction/deadspace variant (builtinContextMenus/itemVariationChange.py)
+- [x] Fill all slots with module (builtinContextMenus/moduleFill.py)
+- [x] Fill rack / item fill (builtinContextMenus/itemFill.py)
 - [~] Change item amount (drones, cargo, charges) (builtinContextMenus/itemAmountChange.py), cargo, fighters and projected fits, drones and fighters done
 - [x] Show item stats (builtinContextMenus/itemStats.py)
 - [ ] Jump to market group (itemMarketJump.py)
@@ -111,10 +111,10 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Projection range (builtinContextMenus/itemProjectionRange.py), refine: projector coordinates
 - [x] Mutate item / mutaplasmid apply and revert, modules and drones (builtinContextMenus/itemMutations.py), refine: mutate, FullMAttr::set_value; rolls are edited in the stats window
 - [x] Export mutated module (builtinContextMenus/moduleMutatedExport.py)
-- [ ] Spool-up percentage for spooling modules (builtinContextMenus/moduleSpool.py), refine: set_spool_override, set_default_spool
-- [ ] Reactive armor hardener pattern (builtinContextMenus/moduleRahPattern.py), refine: set_rah_incoming_dps
+- [x] Spool-up percentage for spooling modules (builtinContextMenus/moduleSpool.py), refine: set_spool_override, set_default_spool
+- [x] Reactive armor hardener pattern (builtinContextMenus/moduleRahPattern.py): Fit Pattern, Do Not Adapt or any damage pattern, kept with the module; refine: set_rah_incoming_dps (one per fit, and a fit holds one hardener)
 - [x] Factor in reload time toggle (builtinContextMenus/factorReload.py), refine: StatTimeOptions reload
-- [ ] Resist mode for EHP display (builtinContextMenus/resistMode.py)
+- [x] Resist mode (builtinContextMenus/resistMode.py): in pyfa this is the graphs' target resist mode, done there
 - [x] Set damage pattern from a market charge (builtinContextMenus/ammoToDmgPattern.py)
 - [x] Damage pattern switcher with user patterns (builtinContextMenus/damagePatternChange.py)
 - [~] Target profile switcher/adder/editor (builtinContextMenus/targetProfile/): switcher, editor, and the graph window's adder and "Edit Target Profile"
@@ -304,5 +304,5 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [x] Help links: wiki, forums (mainMenuBar.py)
 - [ ] Dev tools window (gui/devTools.py)
 - [ ] Ammo service: best ammo per range (service/ammo.py)
-- [ ] Structures and services fitting (eos service slots), refine: add_service, get_stat_service_slots
-- [ ] Faction warfare system effects (no pyfa equivalent beyond env effects), refine: add_fw_effect
+- [x] Structures and services fitting (eos service slots): citadels, engineering complexes and refineries from the market, structure modules and rigs, a service rack with online/offline, EFT in and out, Citadel System Security, drones/implants/boosters/command/notes tabs disabled like pyfa; refine: add_service, get_stat_service_slots, set_sec_zone. pyfa does not model fuel, neither does gyfa
+- [x] Faction warfare system effects: pyfa's FW/Insurgency environment effects, in the Projected tab's environment menu, refine: add_fw_effect

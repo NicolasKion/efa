@@ -510,6 +510,7 @@ impl Engine {
         for &subsystem in &fit.subsystems {
             f.add_subsystem(ItemTypeId::from_i32(subsystem));
         }
+        super::add_services(&mut f, fit);
         let mut drones = Vec::new();
         for stack in &fit.drones {
             let mut first = None;

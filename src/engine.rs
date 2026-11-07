@@ -1,6 +1,7 @@
 //! The bridge to refine. Each recalculation builds a fresh solar system from the [`Fit`], which
 //! keeps refine's state from ever drifting from what the UI shows.
 
+mod column;
 mod graph;
 mod inspect;
 mod pane;
@@ -23,9 +24,10 @@ use rc::{
 
 use crate::{
     data::{Slot, TypeId},
-    fit::{DroneStack, Fit, Module, ModuleState, Mutation},
+    fit::{DroneStack, Fit, Module, ModuleState, Mutation, RahPattern, SystemSecurity},
 };
 
+pub use column::{ModuleMisc, RackHeat, ShipHeat, misc_attr};
 pub use inspect::{AttrValue, FitItem, Inspection, ModOp, Modifier, Source, SourceKind};
 pub use pane::{
     CalcOptions, CapDetail, FirepowerDetail, Mining, MiningRate, Misc, Outgoing, SpoolRange, Tank,
@@ -90,6 +92,8 @@ pub struct ModuleInfo {
     pub falloff: Option<f64>,
     /// Cycles to full spool, for modules that spool up.
     pub spool_max: Option<u32>,
+    /// Expected seconds until an overheated module burns out.
+    pub burnout: Option<f64>,
 }
 
 /// What the Boosters tab shows for a booster, after skills.
@@ -233,6 +237,7 @@ pub struct Stats {
     pub low: Slots,
     pub rig: Slots,
     pub subsystem: Slots,
+    pub service: Slots,
     pub turret: Slots,
     pub launcher: Slots,
     pub drones_launched: Slots,
@@ -246,6 +251,8 @@ pub struct Stats {
     pub weapon_dps: f64,
     pub drone_dps: f64,
     pub modules: HashMap<(Slot, usize), ModuleInfo>,
+    /// What the Miscellanea column shows, per module and subsystem.
+    pub module_misc: HashMap<FitItem, ModuleMisc>,
     /// Per-drone numbers, by drone stack.
     pub drones: Vec<DroneInfo>,
     /// Cargo hold size after bonuses, in m³.
@@ -292,6 +299,20 @@ pub struct Stats {
     pub validation: Validation,
 }
 
+impl Stats {
+    /// A rack's slots, used and in total.
+    pub fn slots(&self, slot: Slot) -> Slots {
+        match slot {
+            Slot::High => self.high,
+            Slot::Mid => self.mid,
+            Slot::Low => self.low,
+            Slot::Rig => self.rig,
+            Slot::Subsystem => self.subsystem,
+            Slot::Service => self.service,
+        }
+    }
+}
+
 impl Engine {
     /// Load refine's data from a Phobos-layout dump. The adapted data is cached in `cache_dir`, so
     /// only the first start after a data update pays for converting it.
@@ -336,6 +357,7 @@ impl Engine {
     ) -> Stats {
         let mut stats = Stats::default();
         let mut sol = SolOwned::new(&self.src);
+        sol.set_sec_zone(sec_zone(fit.system_security));
         if let Some(spool) = options.default_spool {
             sol.set_default_spool(rc::Spool::SpoolScale(rc::UnitInterval::from_f64_clamped(
                 spool,
@@ -348,6 +370,7 @@ impl Engine {
         let Local {
             ship_id,
             module_ids,
+            subsystem_ids,
             drone_ids,
             booster_ids,
             fighter_ids,
@@ -361,7 +384,8 @@ impl Engine {
 
         stats.incoming = pane::incoming_mix(&mut f, &fit.damage_profile);
         let incoming = pane::dps_profile(stats.incoming);
-        f.set_rah_incoming_dps(Some(incoming));
+        let rah = rah_incoming(&mut f, fit, incoming);
+        f.set_rah_incoming_dps(Some(rah));
 
         fit_stats(&mut f, &mut stats, incoming, options);
         stats.validation = validate::validate(&mut f, &refs);
@@ -430,19 +454,25 @@ impl Engine {
                 optimal: get(attr::OPTIMAL).filter(|&v| v > 0.0),
                 falloff: get(attr::FALLOFF).filter(|&v| v > 0.0),
                 spool_max,
+                burnout: None,
             };
             stats.modules.insert((slot, i), info);
+            stats
+                .module_misc
+                .insert(FitItem::Module(slot, i), column::module_misc(&mut sol, id));
         }
+        for (i, &id) in subsystem_ids.iter().enumerate() {
+            stats
+                .module_misc
+                .insert(FitItem::Subsystem(i), column::module_misc(&mut sol, id));
+        }
+        burnout(&mut sol, fit, ship_id, &module_ids, &mut stats);
 
         let cap_users: Vec<(ItemId, f64)> = module_ids
             .iter()
             .filter(|&&(slot, i, _)| {
-                let m = match slot {
-                    Slot::High => &fit.high,
-                    Slot::Mid => &fit.mid,
-                    _ => &fit.low,
-                };
-                m.get(i)
+                fit.rack(slot)
+                    .get(i)
                     .and_then(Option::as_ref)
                     .is_some_and(|m| matches!(m.state, ModuleState::Active | ModuleState::Overload))
             })
@@ -456,10 +486,132 @@ impl Engine {
     }
 }
 
+/// pyfa's heat column: how long each overheated module lasts before it burns out.
+fn burnout(
+    sol: &mut SolOwned,
+    fit: &Fit,
+    ship_id: ItemId,
+    module_ids: &[(Slot, usize, ItemId)],
+    stats: &mut Stats,
+) {
+    const RACKS: [Slot; 3] = [Slot::High, Slot::Mid, Slot::Low];
+    let overheated = |slot: Slot, i: usize| {
+        fit.rack(slot)
+            .get(i)
+            .and_then(Option::as_ref)
+            .is_some_and(|m| m.state == ModuleState::Overload)
+    };
+    if !module_ids.iter().any(|&(slot, i, _)| overheated(slot, i)) {
+        return;
+    }
+    let (generation, attenuation) = column::ship_heat(sol, ship_id);
+    // Share of the ship's slots doing something: pyfa counts the empty and offline ones out, and
+    // rig slots in.
+    let total: u32 = RACKS
+        .iter()
+        .map(|&slot| stats.slots(slot).total.unwrap_or(0))
+        .sum();
+    let busy = RACKS
+        .iter()
+        .flat_map(|&slot| fit.rack(slot).iter().flatten())
+        .filter(|m| m.state != ModuleState::Offline)
+        .count();
+    let all = total + stats.rig.total.unwrap_or(0);
+    let ship = ShipHeat {
+        generation,
+        slot_factor: if all > 0 {
+            busy as f64 / f64::from(all)
+        } else {
+            0.0
+        },
+    };
+    let mut heat = HashMap::new();
+    for &(slot, i, id) in module_ids {
+        if RACKS.contains(&slot) {
+            heat.insert((slot, i), column::module_heat(sol, id));
+        }
+    }
+    for (n, &slot) in RACKS.iter().enumerate() {
+        let hot: Vec<usize> = heat
+            .keys()
+            .filter(|&&(s, i)| s == slot && overheated(s, i))
+            .map(|&(_, i)| i)
+            .collect();
+        let rack = RackHeat {
+            attenuation: attenuation[n],
+            absorption: hot.iter().map(|&i| heat[&(slot, i)].0).sum(),
+            overheated: hot.clone(),
+        };
+        for i in hot {
+            let (_, hp, heat_damage) = heat[&(slot, i)];
+            let Some(info) = stats.modules.get_mut(&(slot, i)) else {
+                continue;
+            };
+            let Some(misc) = stats.module_misc.get(&FitItem::Module(slot, i)) else {
+                continue;
+            };
+            // pyfa steps the simulation by rate of fire first, but times the result by
+            // duration first.
+            let seconds = |a: i32| misc.attr(a).filter(|&v| v > 0.0).map(|ms| ms / 1000.0);
+            let (speed, duration) = (seconds(attr::RATE_OF_FIRE), seconds(attr::DURATION));
+            let (Some(step), Some(cycle)) = (speed.or(duration), duration.or(speed)) else {
+                continue;
+            };
+            info.burnout = ship
+                .burn_cycles(&rack, i, step, hp, heat_damage)
+                .map(|cycles| cycles * cycle);
+        }
+    }
+}
+
+/// The solar system's security, which some structure bonuses depend on.
+fn sec_zone(security: SystemSecurity) -> rc::SecZone {
+    match security {
+        SystemSecurity::HighSec => rc::SecZone::HiSec(rc::SecZoneCorruption::None),
+        SystemSecurity::LowSec => rc::SecZone::LowSec(rc::SecZoneCorruption::None),
+        SystemSecurity::NullSec => rc::SecZone::NullSec,
+        SystemSecurity::WSpace => rc::SecZone::WSpace,
+    }
+}
+
+/// Put a structure's services into the fit, with each one's position.
+fn add_services(f: &mut rc::Fit<'_>, fit: &Fit) -> Vec<(usize, ItemId)> {
+    fit.services
+        .iter()
+        .enumerate()
+        .filter_map(|(i, service)| {
+            let service = service.as_ref()?;
+            let state = match service.state {
+                ModuleState::Offline => rc::ServiceState::Offline,
+                ModuleState::Online | ModuleState::Active | ModuleState::Overload => {
+                    rc::ServiceState::Online
+                }
+            };
+            let id = f
+                .add_service(ItemTypeId::from_i32(service.type_id), state)
+                .get_item_id();
+            Some((i, id))
+        })
+        .collect()
+}
+
+/// What the reactive armor hardener adapts to: the fit's incoming damage, unless the hardener has
+/// a pattern of its own. refine takes one pattern per fit, and a fit holds one hardener at most,
+/// so the first override found decides. Not adapting is no damage at all: with nothing taken, the
+/// hardener has no reason to shift.
+fn rah_incoming(f: &mut rc::Fit<'_>, fit: &Fit, incoming: rc::DpsProfile) -> rc::DpsProfile {
+    match fit.modules().find_map(|m| m.rah.as_ref()) {
+        None => incoming,
+        Some(RahPattern::DoNotAdapt) => pane::dps_profile([0.0; 4]),
+        Some(RahPattern::Pattern(profile)) => pane::dps_profile(pane::incoming_mix(f, profile)),
+    }
+}
+
 /// The fit's own items as built into a solar system, for reading back.
 struct Local {
     ship_id: ItemId,
     module_ids: Vec<(Slot, usize, ItemId)>,
+    subsystem_ids: Vec<ItemId>,
     /// The first drone of each stack.
     drone_ids: Vec<Option<ItemId>>,
     booster_ids: Vec<ItemId>,
@@ -518,17 +670,23 @@ fn build_local(
     f.set_sec_status(rc::FitSecStatus::from_f64_clamped(
         fit.sec_status.unwrap_or(pilot.sec_status),
     ));
+    for (i, id) in add_services(f, fit) {
+        module_ids.push((Slot::Service, i, id));
+        refs.insert(id, ItemRef::Module(Slot::Service, i));
+    }
     for (i, rig) in fit.rigs.iter().enumerate() {
         if let Some(rig) = rig {
             let id = f.add_rig(ItemTypeId::from_i32(*rig)).get_item_id();
             refs.insert(id, ItemRef::Rig(i));
         }
     }
+    let mut subsystem_ids = Vec::with_capacity(fit.subsystems.len());
     for (i, &subsystem) in fit.subsystems.iter().enumerate() {
         let id = f
             .add_subsystem(ItemTypeId::from_i32(subsystem))
             .get_item_id();
         refs.insert(id, ItemRef::Subsystem(i));
+        subsystem_ids.push(id);
     }
     let mut drone_ids: Vec<Option<ItemId>> = Vec::with_capacity(fit.drones.len());
     for (stack_index, stack) in fit.drones.iter().enumerate() {
@@ -573,6 +731,7 @@ fn build_local(
     Some(Local {
         ship_id,
         module_ids,
+        subsystem_ids,
         drone_ids,
         booster_ids,
         fighter_ids,
@@ -592,6 +751,7 @@ fn fit_stats(
     stats.low = slots(s.get_stat_low_slots());
     stats.rig = slots(s.get_stat_rig_slots());
     stats.subsystem = slots(s.get_stat_subsystem_slots());
+    stats.service = slots(s.get_stat_service_slots());
     stats.turret = slots(s.get_stat_turret_slots());
     stats.launcher = slots(s.get_stat_launcher_slots());
     stats.drones_launched = slots(s.get_stat_launched_drones());

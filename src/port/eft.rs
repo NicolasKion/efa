@@ -45,11 +45,12 @@ pub struct RackSizes {
     pub mid: usize,
     pub low: usize,
     pub rig: usize,
+    pub service: usize,
 }
 
-/// The fit as pyfa's EFT export: racks low to high then rigs and subsystems one blank line
-/// apart, and drones, implants and boosters, cargo, and mutated items' rolls each two blank lines
-/// apart.
+/// The fit as pyfa's EFT export: racks low to high then rigs, subsystems and services one blank
+/// line apart, and drones, implants and boosters, cargo, and mutated items' rolls each two blank
+/// lines apart.
 pub fn export(fit: &Fit, catalog: &Catalog, options: &Options, sizes: Option<RackSizes>) -> String {
     let sizes = sizes.unwrap_or_default();
     let mut blocks = Blocks::default();
@@ -87,6 +88,7 @@ pub fn export(fit: &Fit, catalog: &Catalog, options: &Options, sizes: Option<Rac
         padded(&fit.high, sizes.high, "High"),
         rigs,
         fit.subsystems.iter().map(|&s| catalog.name(s)).collect(),
+        padded(&fit.services, sizes.service, "Service"),
     ]
     .into_iter()
     .filter(|rack| !rack.is_empty())
@@ -325,7 +327,7 @@ pub fn import_config(catalog: &Catalog, ship_name: &str, text: &str) -> Result<I
             (ConfigKind::Module { charge }, Kind::Module(slot)) => {
                 let charge = charge.and_then(|c| catalog.find(c)).map(|c| c.id);
                 match slot {
-                    Slot::High | Slot::Mid | Slot::Low => {
+                    Slot::High | Slot::Mid | Slot::Low | Slot::Service => {
                         fit.rack_mut(slot).push(Some(Module {
                             charge,
                             ..Module::new(catalog, t.id)

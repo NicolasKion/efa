@@ -33,7 +33,14 @@ pub mod category {
     pub const MATERIAL: i32 = 4;
     pub const COMMODITY: i32 = 17;
     pub const DEPLOYABLE: i32 = 22;
+    /// Upwell structures, and the modules, rigs and services they fit.
+    pub const STRUCTURE: i32 = 65;
+    pub const STRUCTURE_MODULE: i32 = 66;
 }
+
+/// Structures pyfa fits: citadels, engineering complexes and refineries (service/market.py
+/// `FIT_GROUPS`). Sovereignty and FLEX structures are left out, as pyfa does.
+pub const FIT_STRUCTURE_GROUPS: [i32; 3] = [1657, 1404, 1406];
 
 const GROUP_BOOSTER: i32 = 303;
 /// Tactical destroyer modes.
@@ -55,6 +62,7 @@ mod effect {
     pub const MID: i32 = 13;
     pub const RIG: i32 = 2663;
     pub const SUBSYSTEM: i32 = 3772;
+    pub const SERVICE: i32 = 6306;
     /// Every fittable module has this, and the data files it under active effects.
     pub const ONLINE: i32 = 16;
 }
@@ -113,6 +121,8 @@ pub enum Slot {
     Low,
     Rig,
     Subsystem,
+    /// An Upwell structure's service modules.
+    Service,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -189,11 +199,18 @@ pub struct ItemType {
 }
 
 impl ItemType {
+    /// Whether this is an Upwell structure rather than a ship.
+    pub fn is_structure(&self) -> bool {
+        self.category_id == category::STRUCTURE
+    }
+
     /// The word pyfa puts into menu labels for this kind of item.
     pub fn category_label(&self) -> &'static str {
         match self.kind {
+            Kind::Ship if self.is_structure() => "Citadel",
             Kind::Ship => "Ship",
             Kind::Module(Slot::Subsystem) => "Subsystem",
+            Kind::Module(Slot::Service) => "Service",
             Kind::Module(_) => "Module",
             Kind::Charge => "Charge",
             Kind::Drone => "Drone",
@@ -263,7 +280,7 @@ pub struct Catalog {
 
 /// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
 /// instead of loaded.
-const CACHE_FORMAT: u32 = 4;
+const CACHE_FORMAT: u32 = 5;
 const CACHE_FILE: &str = "catalog.bin";
 
 /// The cache on disk: the key it was built for, then the catalog.
@@ -354,11 +371,15 @@ impl Catalog {
                 category_id,
                 category::COMMODITY | category::MATERIAL | category::DEPLOYABLE
             ) || CONTAINER_GROUPS.contains(&t.group_id);
+            let fit_structure =
+                category_id == category::STRUCTURE && FIT_STRUCTURE_GROUPS.contains(&t.group_id);
             if !cargo_only
+                && !fit_structure
                 && !matches!(
                     category_id,
                     category::SHIP
                         | category::MODULE
+                        | category::STRUCTURE_MODULE
                         | category::CHARGE
                         | category::DRONE
                         | category::IMPLANT
@@ -398,7 +419,7 @@ impl Catalog {
             };
 
             let kind = match category_id {
-                category::SHIP => Kind::Ship,
+                category::SHIP | category::STRUCTURE => Kind::Ship,
                 category::CHARGE => Kind::Charge,
                 category::DRONE => Kind::Drone,
                 category::FIGHTER => Kind::Fighter,
@@ -407,11 +428,22 @@ impl Catalog {
                 category::MODULE if t.group_id == GROUP_SHIP_MODIFIERS => Kind::Mode,
                 category::IMPLANT => Kind::Implant,
                 category::SUBSYSTEM => Kind::Module(Slot::Subsystem),
-                category::MODULE if has_effect(effect::HIGH) => Kind::Module(Slot::High),
-                category::MODULE if has_effect(effect::MID) => Kind::Module(Slot::Mid),
-                category::MODULE if has_effect(effect::LOW) => Kind::Module(Slot::Low),
-                category::MODULE if has_effect(effect::RIG) => Kind::Module(Slot::Rig),
+                category::MODULE | category::STRUCTURE_MODULE if has_effect(effect::HIGH) => {
+                    Kind::Module(Slot::High)
+                }
+                category::MODULE | category::STRUCTURE_MODULE if has_effect(effect::MID) => {
+                    Kind::Module(Slot::Mid)
+                }
+                category::MODULE | category::STRUCTURE_MODULE if has_effect(effect::LOW) => {
+                    Kind::Module(Slot::Low)
+                }
+                category::MODULE | category::STRUCTURE_MODULE if has_effect(effect::RIG) => {
+                    Kind::Module(Slot::Rig)
+                }
                 category::MODULE if has_effect(effect::SUBSYSTEM) => Kind::Module(Slot::Subsystem),
+                category::STRUCTURE_MODULE if has_effect(effect::SERVICE) => {
+                    Kind::Module(Slot::Service)
+                }
                 _ if cargo_only => Kind::Cargo,
                 _ => Kind::Other,
             };

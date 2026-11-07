@@ -1029,6 +1029,11 @@ fn market_menu(
     };
     let category = t.category_label();
     let has_fit = g.fit().is_some_and(|f| f.ship.is_some());
+    let structure = g
+        .fit()
+        .and_then(|f| f.ship)
+        .and_then(|s| loaded.catalog.get(s))
+        .is_some_and(crate::data::ItemType::is_structure);
     let on = |f: fn(&mut Gyfa, TypeId, &mut Window, &mut Context<Gyfa>)| {
         let this = this.clone();
         move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
@@ -1105,8 +1110,11 @@ fn market_menu(
             });
         }
     };
-    menu =
-        menu.item(entry(IconName::Inbox, format!("Add {category} to Cargo")).on_click(to_cargo(1)));
+    // pyfa offers structures only charges for their cargo.
+    if !structure || t.kind == Kind::Charge {
+        menu = menu
+            .item(entry(IconName::Inbox, format!("Add {category} to Cargo")).on_click(to_cargo(1)));
+    }
     if goes_to_cargo(t.kind) && g.saved.preferences.context_menus.cargo_fill {
         menu = menu.item(
             entry(IconName::Inbox, format!("Fill Cargo With {category}"))
@@ -1146,7 +1154,7 @@ fn market_menu(
             }),
         );
     }
-    if shown.project && loaded.catalog.projection.projectable.contains(&id) {
+    if shown.project && !structure && loaded.catalog.projection.projectable.contains(&id) {
         menu = menu.item(
             entry(IconName::Globe, format!("Project {category} onto Fit")).on_click(on(
                 |g, id, _, cx| {

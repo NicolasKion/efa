@@ -171,6 +171,7 @@ fn slot_word(slot: Slot) -> &'static str {
         Slot::Low => "low",
         Slot::Rig => "rig",
         Slot::Subsystem => "subsystem",
+        Slot::Service => "service",
     }
 }
 

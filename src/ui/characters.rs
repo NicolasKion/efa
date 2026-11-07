@@ -481,7 +481,11 @@ pub(super) fn skills_submenu(
         return menu;
     }
     skills.sort_by(|a, b| a.1.cmp(&b.1));
+    let structure = ship
+        .and_then(|s| catalog.get(s))
+        .is_some_and(crate::data::ItemType::is_structure);
     let noun = match target {
+        SkillTarget::Ship if structure => "Citadel",
         SkillTarget::Ship => "Ship",
         SkillTarget::Module(..) => "Module",
         SkillTarget::Charge { .. } => "Charge",

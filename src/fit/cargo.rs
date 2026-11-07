@@ -65,7 +65,7 @@ impl Fit {
     /// its base item: cargo holds no mutations, as in pyfa.
     fn fitted(&self, (slot, i): (Slot, usize)) -> Option<(TypeId, Option<TypeId>)> {
         match slot {
-            Slot::High | Slot::Mid | Slot::Low => {
+            Slot::High | Slot::Mid | Slot::Low | Slot::Service => {
                 let m = self.rack(slot).get(i)?.as_ref()?;
                 Some((m.base_type(), m.charge))
             }
@@ -76,7 +76,7 @@ impl Fit {
 
     fn clear_position(&mut self, (slot, i): (Slot, usize)) {
         match slot {
-            Slot::High | Slot::Mid | Slot::Low => {
+            Slot::High | Slot::Mid | Slot::Low | Slot::Service => {
                 let rack = self.rack_mut(slot);
                 if let Some(position) = rack.get_mut(i) {
                     *position = None;
@@ -122,6 +122,7 @@ impl Fit {
                 .and_then(|m| m.spool)
                 .filter(|_| t.is_some_and(|t| t.spools)),
             mutation: None,
+            rah: old.as_ref().and_then(|m| m.rah.clone()),
         };
         let mut to_cargo = None;
         let mut from_cargo = None;

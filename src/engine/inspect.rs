@@ -223,6 +223,7 @@ impl Engine {
         pilot: &Pilot,
     ) -> Option<(rc::FitId, HashMap<ItemId, FitItem>)> {
         let mut places = HashMap::new();
+        sol.set_sec_zone(super::sec_zone(fit.system_security));
         let mut f = sol.add_fit();
         pilot.board(&mut f);
         let ship = fit.ship?;
@@ -264,6 +265,9 @@ impl Engine {
                 places.insert(id, FitItem::Rig(i));
             }
         }
+        for (i, id) in super::add_services(&mut f, fit) {
+            places.insert(id, FitItem::Module(Slot::Service, i));
+        }
         for (i, &subsystem) in fit.subsystems.iter().enumerate() {
             let id = f
                 .add_subsystem(ItemTypeId::from_i32(subsystem))
@@ -299,8 +303,9 @@ impl Engine {
             }
             places.insert(item.get_item_id(), FitItem::Booster(booster.type_id));
         }
-        let incoming = pane::incoming_mix(&mut f, &fit.damage_profile);
-        f.set_rah_incoming_dps(Some(pane::dps_profile(incoming)));
+        let incoming = pane::dps_profile(pane::incoming_mix(&mut f, &fit.damage_profile));
+        let rah = super::rah_incoming(&mut f, fit, incoming);
+        f.set_rah_incoming_dps(Some(rah));
         Some((f.get_fit_id(), places))
     }
 }

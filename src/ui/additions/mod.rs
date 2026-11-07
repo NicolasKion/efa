@@ -37,7 +37,7 @@ use super::{
     widgets::{entry, icon_label, item_entry},
 };
 use crate::{
-    data::{Catalog, Kind, TypeId},
+    data::{Catalog, ItemType, Kind, TypeId},
     engine::FitItem,
     fit::{Fit, split_count},
     preferences::AdditionsLabels,
@@ -171,6 +171,15 @@ impl Gyfa {
             return div().into_any_element();
         };
         let fit = &self.saved.fits[current];
+        // pyfa greys out the tabs a structure has no use for.
+        let structure = fit
+            .ship
+            .and_then(|s| loaded.catalog.get(s))
+            .is_some_and(ItemType::is_structure);
+        let enabled = move |tab: AdditionsTab| !(structure && tab.ship_only());
+        if !enabled(self.additions_tab) {
+            self.additions_tab = AdditionsTab::Fighters;
+        }
         let theme = cx.theme();
         let labels = self.saved.preferences.general.additions_labels;
         let tabs = [
@@ -199,6 +208,7 @@ impl Gyfa {
             .border_color(theme.border)
             .children(tabs.into_iter().map(|(tab, label, count)| {
                 let selected = self.additions_tab == tab;
+                let on = enabled(tab);
                 let text = if tab == AdditionsTab::Notes {
                     if labels == AdditionsLabels::None {
                         label.to_owned()
@@ -220,13 +230,16 @@ impl Gyfa {
                             .text_color(theme.tab_active_foreground)
                     })
                     .when(!selected, |t| t.text_color(theme.tab_foreground))
+                    .when(!on, |t| t.text_color(theme.muted_foreground).opacity(0.5))
                     .child(text)
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.additions_tab = tab;
-                        this.additions_selection.clear();
-                        this.additions_anchor = None;
-                        cx.notify();
-                    }))
+                    .when(on, |t| {
+                        t.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.additions_tab = tab;
+                            this.additions_selection.clear();
+                            this.additions_anchor = None;
+                            cx.notify();
+                        }))
+                    })
             }));
 
         let content = match self.additions_tab {

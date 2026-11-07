@@ -192,6 +192,7 @@ mod tests {
                 charge: Some(9),
                 spool: None,
                 mutation: None,
+                rah: None,
             })
         };
         let fit = Fit {

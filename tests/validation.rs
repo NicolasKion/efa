@@ -148,6 +148,7 @@ fn modules_past_the_rack_are_too_many() {
             charge: None,
             spool: None,
             mutation: None,
+            rah: None,
         }));
     }
     let validation = engine.validate(&fit, engine.all5());

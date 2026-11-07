@@ -81,6 +81,7 @@ fn charges_for_a_fit() {
             charge: None,
             spool: None,
             mutation: None,
+            rah: None,
         })],
         ..Fit::new("test")
     };

@@ -119,6 +119,23 @@ pub fn grouped(val: f64, decimals: usize) -> String {
     out
 }
 
+/// "a", "a and b", "a, b and c", like pyfa's formatList.
+pub fn format_list(words: &[&str]) -> String {
+    match words {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// The first letter in upper case, the rest left alone.
+pub fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
 /// Seconds the way pyfa's capacitor view writes them: 1m40s, or 45s.
 pub fn minutes_seconds(secs: f64) -> String {
     let secs = secs.max(0.0) as u64;
