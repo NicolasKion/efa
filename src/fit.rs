@@ -184,6 +184,9 @@ pub struct Fit {
     /// red.
     #[serde(default)]
     pub ignore_restrictions: bool,
+    /// Racks whose modules of one type act as one: shown as a single row, edited together.
+    #[serde(default)]
+    pub grouped: std::collections::BTreeSet<Slot>,
 }
 
 /// The kind of system a structure sits in, pyfa's "Citadel System Security". pyfa assumes null
@@ -231,6 +234,23 @@ impl Fit {
             name: name.into(),
             ..Self::default()
         }
+    }
+
+    /// Positions of the module at `slot`/`i` and, in a grouped rack, every other module of its
+    /// type. Empty when nothing is there.
+    pub fn group(&self, slot: Slot, i: usize) -> Vec<usize> {
+        let rack = self.rack(slot);
+        let Some(Some(m)) = rack.get(i) else {
+            return Vec::new();
+        };
+        if !self.grouped.contains(&slot) {
+            return vec![i];
+        }
+        rack.iter()
+            .enumerate()
+            .filter(|(_, o)| o.as_ref().is_some_and(|o| o.type_id == m.type_id))
+            .map(|(j, _)| j)
+            .collect()
     }
 
     /// The modules of a rack. Rigs and subsystems are not modules; they read as the low rack.

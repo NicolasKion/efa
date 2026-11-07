@@ -40,6 +40,7 @@ const MENU_MAX_H: f32 = 480.;
 enum Row {
     /// A rack's label, pyfa's "Show Rack Labels".
     Header {
+        slot: Slot,
         label: &'static str,
         icon_id: Option<i32>,
         total: u32,
@@ -221,6 +222,7 @@ impl Gyfa {
         };
         match row {
             Row::Header {
+                slot,
                 label,
                 icon_id,
                 total,
@@ -235,6 +237,9 @@ impl Gyfa {
                         .text_color(theme.muted_foreground)
                         .child(total.to_string()),
                 )
+                .when(matches!(slot, Slot::High | Slot::Mid | Slot::Low), |row| {
+                    row.child(self.group_toggle(slot, cx))
+                })
                 .context_menu(ship_menu_builder(Self::weak(cx), ship))
                 .into_any_element(),
             Row::Separator => base
@@ -352,6 +357,41 @@ impl Gyfa {
         }
     }
 
+    /// The rack header's switch for grouping its modules by type.
+    fn group_toggle(&self, slot: Slot, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let grouped = self.fit().is_some_and(|f| f.grouped.contains(&slot));
+        let tip = if grouped {
+            "Modules of a type are grouped and change together. Click to ungroup."
+        } else {
+            "Group modules of a type, so changing one changes them all"
+        };
+        div()
+            .id(SharedString::from(format!("group-{slot:?}")))
+            .ml_auto()
+            .mr_1()
+            .p_0p5()
+            .rounded_sm()
+            .when(grouped, |d| d.bg(theme.accent))
+            .hover(|d| d.bg(theme.table_hover))
+            .child(
+                UiIcon::new(AssetIcon::Group)
+                    .size(px(14.))
+                    .text_color(if grouped {
+                        theme.accent_foreground
+                    } else {
+                        theme.muted_foreground
+                    }),
+            )
+            .tooltip(move |window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new(tip).build(window, cx)
+            })
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                cx.stop_propagation();
+                this.apply(Action::ToggleGrouped(slot), cx);
+            }))
+    }
+
     #[expect(clippy::too_many_arguments, reason = "one row needs all of these")]
     fn module_cells(
         &self,
@@ -377,6 +417,7 @@ impl Gyfa {
         let prices = &self.prices;
         let misc_text = misc.map(|(text, _)| text.as_str());
         let text = |col: Col| col.text(catalog, prices, m, &info, misc_text);
+        let group = self.fit().map_or(1, |f| f.group(slot, i).len());
         base.child(
             div()
                 .id(SharedString::from(format!("state-{slot:?}-{i}")))
@@ -424,6 +465,7 @@ impl Gyfa {
                 .when(m.state == ModuleState::Offline, |d| {
                     d.text_color(theme.muted_foreground)
                 })
+                .when(group > 1, |d| d.child(format!("{group}x ")))
                 .children(text(Col::Name)),
         )
         .children(
@@ -1439,14 +1481,15 @@ fn fitting_rows(fit: &Fit, stats: &Stats, style: RackStyle) -> Vec<Row> {
                 label: &'static str,
                 icon_id: Option<i32>,
                 slots: crate::engine::Slots,
-                filled: Vec<bool>| {
+                filled: Vec<Cell>| {
         let total = slots.total.unwrap_or(0);
-        if total == 0 && !filled.contains(&true) {
+        if total == 0 && !filled.iter().any(|&c| c != Cell::Empty) {
             return;
         }
         set_apart(
             rows,
             Row::Header {
+                slot,
                 label,
                 icon_id,
                 total,
@@ -1454,14 +1497,14 @@ fn fitting_rows(fit: &Fit, stats: &Stats, style: RackStyle) -> Vec<Row> {
         );
         let positions = filled.len().max(total as usize);
         for pos in 0..positions {
-            if filled.get(pos).copied().unwrap_or(false) {
-                rows.push(Row::Item(match slot {
+            match filled.get(pos).copied().unwrap_or(Cell::Empty) {
+                Cell::Item => rows.push(Row::Item(match slot {
                     Slot::Rig => RowRef::Rig(pos),
                     Slot::Subsystem => RowRef::Subsystem(pos),
                     Slot::High | Slot::Mid | Slot::Low | Slot::Service => RowRef::Module(slot, pos),
-                }));
-            } else {
-                rows.push(Row::Empty(slot, pos));
+                })),
+                Cell::Empty => rows.push(Row::Empty(slot, pos)),
+                Cell::Grouped => {}
             }
         }
     };
@@ -1476,7 +1519,7 @@ fn fitting_rows(fit: &Fit, stats: &Stats, style: RackStyle) -> Vec<Row> {
             label,
             icon_id,
             slots,
-            fit.rack(slot).iter().map(Option::is_some).collect(),
+            rack_cells(fit, slot),
         );
     }
     rack(
@@ -1485,7 +1528,7 @@ fn fitting_rows(fit: &Fit, stats: &Stats, style: RackStyle) -> Vec<Row> {
         "Rig Slots",
         Some(icon::RIG),
         stats.rig,
-        fit.rigs.iter().map(Option::is_some).collect(),
+        fit.rigs.iter().map(|r| Cell::of(r.is_some())).collect(),
     );
     rack(
         &mut rows,
@@ -1493,7 +1536,7 @@ fn fitting_rows(fit: &Fit, stats: &Stats, style: RackStyle) -> Vec<Row> {
         "Subsystem Slots",
         Some(icon::SUBSYSTEM),
         stats.subsystem,
-        vec![true; fit.subsystems.len()],
+        vec![Cell::Item; fit.subsystems.len()],
     );
     rack(
         &mut rows,
@@ -1501,13 +1544,45 @@ fn fitting_rows(fit: &Fit, stats: &Stats, style: RackStyle) -> Vec<Row> {
         "Service Slots",
         None,
         stats.service,
-        fit.services.iter().map(Option::is_some).collect(),
+        rack_cells(fit, Slot::Service),
     );
     if let Some(mode) = fit.mode {
         set_apart(&mut rows, Row::ModeHeader);
         rows.push(Row::Mode(mode));
     }
     rows
+}
+
+/// What a rack position shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Cell {
+    Empty,
+    Item,
+    /// In a grouped rack, a module the first of its type stands for.
+    Grouped,
+}
+
+impl Cell {
+    fn of(filled: bool) -> Self {
+        if filled { Self::Item } else { Self::Empty }
+    }
+}
+
+/// A module rack's positions; in a grouped rack only the first module of each type shows.
+fn rack_cells(fit: &Fit, slot: Slot) -> Vec<Cell> {
+    let grouped = fit.grouped.contains(&slot);
+    let mut seen = Vec::new();
+    fit.rack(slot)
+        .iter()
+        .map(|m| match m {
+            None => Cell::Empty,
+            Some(m) if grouped && seen.contains(&m.type_id) => Cell::Grouped,
+            Some(m) => {
+                seen.push(m.type_id);
+                Cell::Item
+            }
+        })
+        .collect()
 }
 
 /// Published charges that fit a module type, by name.

@@ -746,7 +746,10 @@ mod tests {
         );
         assert_eq!(
             text(Slot::Mid, 1),
-            ("-2".to_owned(), "Warp core strength modification".to_owned())
+            (
+                "-2".to_owned(),
+                "Warp core strength modification".to_owned()
+            )
         );
         assert_eq!(text(Slot::Low, 0).1, "Assault ability duration");
     }

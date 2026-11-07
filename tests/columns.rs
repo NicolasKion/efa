@@ -65,7 +65,11 @@ fn misc_column_reads_module_numbers() {
         Some(-60.0)
     );
     // Turrets track; remote repairers and miners work out a rate even while passive.
-    assert!(misc(&stats, Slot::High, 0).attr(misc_attr::TRACKING_SPEED).is_some());
+    assert!(
+        misc(&stats, Slot::High, 0)
+            .attr(misc_attr::TRACKING_SPEED)
+            .is_some()
+    );
     assert!(misc(&stats, Slot::High, 2).reps[2] > 0.0);
     assert!(misc(&stats, Slot::High, 3).mining.0 > 0.0);
     // Void loaded: the charge is read too, here its missing explosion radius stays out.
@@ -148,7 +152,11 @@ fn structures_fit_services() {
     assert!(fit.add(&catalog, plant.id));
     assert_eq!(fit.services.iter().flatten().count(), 1);
     let stats = engine.compute(&fit);
-    assert!(stats.service.total.is_some_and(|n| n >= 1), "{:?}", stats.service);
+    assert!(
+        stats.service.total.is_some_and(|n| n >= 1),
+        "{:?}",
+        stats.service
+    );
     assert_eq!(stats.service.used, 1);
 
     // Services go in and out of EFT text in their own section.

@@ -116,6 +116,8 @@ pub enum Action {
     CargoToModule(TypeId, (Slot, usize), Transfer),
     SetDamageProfile(DamageProfile),
     SetTargetProfile(Option<crate::target_profile::TargetProfile>),
+    /// Group a rack's modules by type, or stop grouping them.
+    ToggleGrouped(Slot),
 }
 
 /// The additions pane's tabs that list items.
@@ -229,6 +231,8 @@ impl Gyfa {
         };
         let stats = self.stats.as_ref();
         let fit = &mut self.saved.fits[current];
+        // In a grouped rack, whatever happens to a module happens to its whole group.
+        let action = with_groups(fit, action);
         let mut structural = false;
         match action {
             Action::CycleState {
@@ -236,6 +240,7 @@ impl Gyfa {
                 others,
                 offline,
             } => {
+                let group = fit.group(slot, i);
                 let Some(Some(m)) = fit.rack_mut(slot).get_mut(i) else {
                     return;
                 };
@@ -254,9 +259,18 @@ impl Gyfa {
                         _ => ModuleState::Offline,
                     }
                 };
-                m.state = next;
-                for m in modules_mut(fit, &others) {
+                let rows: Vec<RowRef> = group
+                    .into_iter()
+                    .map(|j| RowRef::Module(slot, j))
+                    .chain(others)
+                    .collect();
+                for m in modules_mut(fit, &rows) {
                     m.state = next.min(highest_state(&loaded.catalog, m.type_id));
+                }
+            }
+            Action::ToggleGrouped(slot) => {
+                if !fit.grouped.remove(&slot) {
+                    fit.grouped.insert(slot);
                 }
             }
             Action::SetCharge(rows, charge) => {
@@ -596,6 +610,46 @@ fn highest_state(catalog: &crate::data::Catalog, type_id: TypeId) -> ModuleState
         Some(t) if t.overloadable => ModuleState::Overload,
         Some(t) if t.activatable => ModuleState::Active,
         _ => ModuleState::Online,
+    }
+}
+
+/// `action` with each module row it names widened to the module's group.
+fn with_groups(fit: &crate::fit::Fit, action: Action) -> Action {
+    let widen = |rows: Vec<RowRef>| -> Vec<RowRef> {
+        let mut out: Vec<RowRef> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let members = match row {
+                RowRef::Module(slot, i) => fit
+                    .group(slot, i)
+                    .into_iter()
+                    .map(|j| RowRef::Module(slot, j))
+                    .collect(),
+                RowRef::Rig(_) | RowRef::Subsystem(_) => vec![row],
+            };
+            for member in members {
+                if !out.contains(&member) {
+                    out.push(member);
+                }
+            }
+        }
+        out
+    };
+    match action {
+        Action::CycleState {
+            main,
+            others,
+            offline,
+        } => Action::CycleState {
+            main,
+            others: widen(others),
+            offline,
+        },
+        Action::SetRah(rows, pattern) => Action::SetRah(widen(rows), pattern),
+        Action::SetCharge(rows, charge) => Action::SetCharge(widen(rows), charge),
+        Action::SetSpool(rows, cycles) => Action::SetSpool(widen(rows), cycles),
+        Action::Remove(rows) => Action::Remove(widen(rows)),
+        Action::SwapType(rows, type_id) => Action::SwapType(widen(rows), type_id),
+        other => other,
     }
 }
 
