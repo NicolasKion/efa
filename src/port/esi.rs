@@ -176,6 +176,13 @@ fn items(fit: &Fit, catalog: &Catalog) -> Vec<Item> {
             type_id: d.type_id,
         });
     }
+    for f in &fit.fighters {
+        items.push(Item {
+            flag: flag::FIGHTER_BAY,
+            quantity: f.size(catalog),
+            type_id: f.type_id,
+        });
+    }
     items
 }
 
@@ -197,22 +204,11 @@ pub fn export(fit: &Fit, catalog: &Catalog) -> Result<String, String> {
     serde_json::to_string(&esi).map_err(|e| e.to_string())
 }
 
-/// The body for saving the fit in the game (pyfa's Export to EVE): flags by name, fighters in
-/// the fighter bay, and what `options` asks for in the cargo hold.
+/// The body for saving the fit in the game (pyfa's Export to EVE): flags by name, and what
+/// `options` asks for in the cargo hold.
 pub fn upload(fit: &Fit, catalog: &Catalog, options: UploadOptions) -> Result<String, String> {
     let ship = fit.ship.ok_or("the fit has no ship")?;
     let mut items = items(fit, catalog);
-    for f in &fit.fighters {
-        let amount = f
-            .amount
-            .or_else(|| catalog.projection.squadron_size(f.type_id))
-            .unwrap_or(1);
-        items.push(Item {
-            flag: flag::FIGHTER_BAY,
-            quantity: amount,
-            type_id: f.type_id,
-        });
-    }
     let mut extra: Vec<(TypeId, u32)> = Vec::new();
     let mut add = |type_id: TypeId, count: u32| match extra.iter_mut().find(|(t, _)| *t == type_id)
     {

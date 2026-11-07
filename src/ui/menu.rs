@@ -1,11 +1,12 @@
 //! The menu bar and its keyboard shortcuts, laid out like pyfa's (gui/mainMenuBar.py): File,
 //! Fit, Character, Global, Editors, Help.
 //!
-//! Left out: attribute overrides and Optimize Fit Price. Entries that belong to windows built
+//! Left out: Optimize Fit Price. Entries that belong to windows built
 //! elsewhere are marked "Hook:" below and stay disabled until those windows exist.
 
+use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
-    ActiveTheme, IconName, Sizable, WindowExt,
+    ActiveTheme, Icon as UiIcon, IconName, Sizable, WindowExt,
     button::{Button, ButtonVariants},
     h_flex,
     menu::{DropdownMenu, PopupMenu, PopupMenuItem},
@@ -369,6 +370,7 @@ impl Gyfa {
                 })
         };
 
+        let overrides_on = self.saved.overrides.enabled;
         let global = {
             let this = this.clone();
             Box::new(move |menu: PopupMenu| {
@@ -378,6 +380,29 @@ impl Gyfa {
                     "Preferences",
                     Some(Box::new(OpenPreferences)),
                     |g, _, cx| g.open_preferences(cx),
+                ))
+                .separator()
+                .item(command(
+                    &this,
+                    UiIcon::new(AssetIcon::SlidersHorizontal),
+                    "Attribute Overrides",
+                    None,
+                    |g, _, cx| g.open_overrides(cx),
+                ))
+                .item(command(
+                    &this,
+                    UiIcon::new(if overrides_on {
+                        AssetIcon::ToggleRight
+                    } else {
+                        AssetIcon::ToggleLeft
+                    }),
+                    if overrides_on {
+                        "Turn Overrides Off"
+                    } else {
+                        "Turn Overrides On"
+                    },
+                    None,
+                    |g, _, cx| g.toggle_overrides(cx),
                 ))
             }) as Box<dyn Fn(PopupMenu) -> PopupMenu>
         };

@@ -23,7 +23,8 @@ impl Default for Options {
     }
 }
 
-/// The fit as DNA: subsystems, modules by type with counts, drones, then loaded charges and
+/// The fit as DNA: subsystems, modules by type with counts, drones, fighter squadrons by size,
+/// then loaded charges and
 /// charges in cargo. Cargo that is not a charge stays out, since the game would try to fit it.
 pub fn export(fit: &Fit, catalog: &Catalog, options: &Options) -> String {
     let Some(ship) = fit.ship else {
@@ -51,7 +52,13 @@ pub fn export(fit: &Fit, catalog: &Catalog, options: &Options) -> String {
         }
     }
     let drones = fit.drones.iter().map(|d| (d.type_id, d.count));
-    for (type_id, count) in modules.into_iter().chain(drones).chain(charges) {
+    let fighters = fit.fighters.iter().map(|f| (f.type_id, f.size(catalog)));
+    for (type_id, count) in modules
+        .into_iter()
+        .chain(drones)
+        .chain(fighters)
+        .chain(charges)
+    {
         parts.push(format!("{type_id};{count}"));
     }
     let dna = format!("{}::", parts.join(":"));

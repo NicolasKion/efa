@@ -1,7 +1,7 @@
 # Feature parity with pyfa
 
-Rough coverage: fitting, stats, additions, item stats, graphs, editors, context menus and the file formats are mostly there. What is left is mainly attribute overrides, alpha clones, Optimize Fit Price, EFS export, generic command links and a tail of smaller items (the [ ] and [~] lines).
-Biggest gaps: attribute overrides, fighters in the DNA/XML/ESI/multibuy formats, alpha clones, global character and damage pattern.
+Rough coverage: fitting, stats, additions, item stats, graphs, editors, context menus, the file formats and ESI/SSO are mostly there. What is left is mainly alpha clones, Optimize Fit Price, EFS export, generic command links and a tail of smaller items (the [ ] and [~] lines).
+Biggest gaps: alpha clones, global character and damage pattern.
 Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
 Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time, abstract target profiles for applied damage, lock/warp time formulas (all done graph-side in src/graphs).
 
@@ -214,17 +214,17 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] EFT export to clipboard (service/port/eft.py exportEft)
 - [x] EFT import of cargo, charges and mutated items' blocks (eft.py), pyfa's /offline and several fits per paste
 - [x] EFT export options: implants, boosters, cargo, mutations, loaded charges (eft.py, gui/copySelectDialog.py), in pyfa's layout with empty slots up to the ship's count
-- [~] Import from clipboard with format autodetect (port.py importAuto), item lists go to the additions tabs or fit a single module; a list of fighters goes to cargo instead of the Fighters tab, and ESI dynamic item links are not fetched
+- [~] Import from clipboard with format autodetect (port.py importAuto), item lists go to the additions tabs (fighters to the Fighters tab) or fit a single module; ESI dynamic item links are not fetched
 - [ ] Renamed item conversions on import (service/conversions/, applied in service/market.py getItem): old item names in EFT and other text formats are not mapped to today's names, so they are skipped as unknown
 - [x] Import from file dialog, multiple files (port.py importFitsThreaded)
 - [x] EFT .cfg legacy format (port.py importEftCfg); notes come from Description= lines, with | as line breaks
-- [~] DNA import/export (service/port/dna.py), chat links and the DNA: variant too; fighters are not exported and import into the drone bay
-- [~] XML import/export (EVE client format) (service/port/xml.py); notes are the description, exported cut to 400 characters with line breaks as <br>; fighters are not exported and import into the drone bay (Backup All Fittings loses them too)
-- [~] ESI JSON import/export (service/port/esi.py); notes are the description, exported cut to 400 characters; fighters (flag 158) are not in the copied JSON (Export to EVE sends them) and import into the drone bay
-- [~] Multibuy export (service/port/multibuy.py), no Optimize Prices option, fighters left out
+- [x] DNA import/export (service/port/dna.py), chat links and the DNA: variant too; fighters as `typeid;size`
+- [~] XML import/export (EVE client format) (service/port/xml.py); notes are the description, exported cut to 400 characters with line breaks as <br>; fighters as "fighter bay" hardware with the squadron size
+- [~] ESI JSON import/export (service/port/esi.py); notes are the description, exported cut to 400 characters; fighters with flag 158 and the squadron size
+- [~] Multibuy export (service/port/multibuy.py), no Optimize Prices option
 - [ ] EFS stats JSON export (service/port/efs.py), the copy dialog's "EFS" format
 - [x] Ship stats export (service/port/shipstats.py), the copy dialog's "Stats" format
-- [x] Mutated item (muta) format (service/port/muta.py): pasting one mutated item fits it into the current fit, drone copy/paste carries mutations; ESI dynamic item links are not fetched (no ESI)
+- [x] Mutated item (muta) format (service/port/muta.py): pasting one mutated item fits it into the current fit, drone copy/paste carries mutations; ESI dynamic item links are not fetched
 - [x] HTML export of all fits (pyfaHTMLExportPreferences.py), full and minimal
 - [x] Export item stats to CSV (gui/itemStats.py)
 - [x] Export implants/boosters/charges lists (builtinContextMenus/additionsExportAll.py)
@@ -280,7 +280,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [ ] Logging (pyfaLoggingPreferences.py)
 - [ ] Update checks (pyfaUpdatePreferences.py, service/update.py)
 - [x] HTML export path (pyfaHTMLExportPreferences.py)
-- [ ] Attribute overrides editor (gui/propertyEditor.py, eos/saveddata/override.py, mainMenuBar.py Global > Attribute Overrides and Turn Overrides On/Off): per type and attribute values applied to every item of that type while overrides are on, kept with the saved data; refine: set_value on items if exposed
+- [x] Attribute overrides editor (gui/propertyEditor.py, eos/saveddata/override.py, mainMenuBar.py Global > Attribute Overrides and Turn Overrides On/Off): a window to search a type or pick an overridden one, type a base value per attribute, reset one or all of a type, clear all, and import/export pyfa's override CSV; overrides and the on/off switch are saved; while on they replace the type's base value for every item of it, in projected and command fits, graphs and item stats too, and the item stats window marks them. refine has no API for base values, so the engine's adapted data is patched on load and rebuilt in the background when overrides change. The search leaves out skills; pyfa searches everything
 
 ## ESI and SSO
 
@@ -318,4 +318,4 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [x] Ammo service: flat and structured ammo lists, best ammo per range (service/ammo.py), in the Charge menus and the Application Profile graph
 - [x] Structures and services fitting (eos service slots): citadels, engineering complexes and refineries from the market, structure modules and rigs, a service rack with online/offline, EFT in and out, Citadel System Security, drones/implants/boosters/command/notes tabs disabled like pyfa; refine: add_service, get_stat_service_slots, set_sec_zone. pyfa does not model fuel, neither does gyfa
 - [x] Faction warfare system effects: pyfa's FW/Insurgency environment effects, in the Projected tab's environment menu, refine: add_fw_effect
-- [x] Fitting wizard (gyfa extra, no pyfa counterpart): Ctrl+Shift+W or Fit > Fitting Wizard opens one dialog with weapons sized to the hull and ranked by its bonuses, tier and ammo, propulsion, tackle and utility, tank, damage modules and rigs, defaults picked from the ship's bonuses and slots; the preview shows what goes in each rack and the CPU, powergrid and calibration it takes, "Make it fit" steps modules down to meta and drops the least wanted ones, and Apply fills the free slots (or cleared racks) as one undo step
+- [x] Fitting wizard (gyfa extra, no pyfa counterpart): Ctrl+Shift+W or Fit > Fitting Wizard opens one dialog laid out like the preferences: sections for weapons (sized to the hull, ranked by its mastery and bonuses), propulsion, tackle and utility, tank, and damage modules and rigs, defaults picked from the ship's mastery, bonuses and slots. A global bling tier (T1, compact, T2, faction, deadspace, officer) sets where every module starts, and each module row has its own variant dropdown with tier, meta level and price, e.g. a Quad LiF Restrained MWD; the last choices are saved for the next fit. The tank section picks a style (buffer, active, brick, none), shield or armor, and for active tanks a goal (max resists, max repair, balanced); Find best searches tanks for the free slots and rigs off the UI thread (plates, extenders, multispectrum and damage-type hardeners and membranes, the reactive armor hardener, damage control, repairers, boosters, ancillaries, amplifiers, resist and repair rigs) against the fit's damage pattern within the CPU, powergrid and calibration left, and shows the best five as cards to pick from. The preview shows each rack, CPU, powergrid and calibration, the new modules' price, EHP, resists per layer, sustained repair, capacitor and DPS; "Make it fit" steps modules down to meta and drops the least wanted ones, and Apply fills the free slots (or cleared racks) as one undo step

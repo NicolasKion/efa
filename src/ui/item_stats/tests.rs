@@ -63,6 +63,7 @@ fn ship_attributes_are_grouped_like_pyfa() {
         catalog: &catalog,
         own: info,
         fitted: false,
+        overridden: &[],
         raw: false,
     };
     let tree = attributes::tree(&describe, category::SHIP, &values);

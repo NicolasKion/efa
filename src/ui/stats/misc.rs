@@ -223,17 +223,7 @@ pub(super) fn targeting(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
     } else {
         format!("{} m³", format::amount(capacity, 4, 0, 9))
     };
-    let used: f64 = p
-        .fit
-        .cargo
-        .iter()
-        .filter_map(|&(id, count)| {
-            p.loaded
-                .catalog
-                .get(id)
-                .map(|t| t.volume * f64::from(count))
-        })
-        .sum();
+    let used: f64 = p.fit.hold_volume(&p.loaded.catalog, p.implants_in_cargo);
     let mut cargo_hover = format!(
         "Cargohold: {}m³ / {}m³",
         format::grouped(used, 2),

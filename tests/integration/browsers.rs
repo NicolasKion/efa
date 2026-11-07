@@ -121,3 +121,26 @@ fn ships_by_group_with_races_and_omega() {
             .all(|(_, ships)| !ships.is_empty())
     );
 }
+
+#[test]
+fn off_market_boosters_get_a_group_of_their_own() {
+    let Some(catalog) = catalog() else { return };
+    let booster = catalog
+        .find("Limited Synth Blue Pill Booster")
+        .expect("in the catalog");
+    assert_eq!(
+        booster.market_group,
+        Some(gyfa::data::MARKET_SPECIAL_BOOSTERS)
+    );
+    let group = &catalog.market_groups[&gyfa::data::MARKET_SPECIAL_BOOSTERS];
+    assert!(group.types.contains(&booster.id));
+    assert!(
+        catalog.search("synth blue pill", 50).contains(&booster.id),
+        "found by search"
+    );
+    // Accelerators stay out of it.
+    let accelerator = catalog
+        .find("Standard Cerebral Accelerator")
+        .expect("in the catalog");
+    assert!(!group.types.contains(&accelerator.id));
+}
