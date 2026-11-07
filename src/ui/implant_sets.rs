@@ -47,11 +47,15 @@ const CONTEXT: &str = "ImplantSetEditor";
 const EDITOR_W: f32 = 1100.;
 const EDITOR_H: f32 = 700.;
 const LIST_W: f32 = 230.;
+/// The set list's width in a narrow window.
+const LIST_NARROW_W: f32 = 180.;
+/// Below this window width the implant list folds away behind a button.
+const NARROW_W: f32 = 960.;
 /// Wide enough for the longest hardwiring names.
 const TREE_W: f32 = 420.;
 const TREE_ICON: f32 = 20.;
-const SLOT_ROW_H: f32 = 46.;
-const SLOT_ICON: f32 = 32.;
+const SLOT_ROW_H: f32 = 38.;
+const SLOT_ICON: f32 = 26.;
 /// What a new set is called until it is renamed.
 const NEW_SET: &str = "New Implant Set";
 
@@ -283,6 +287,10 @@ pub struct ImplantSetEditor {
     pirate_sets: Rc<[(SharedString, Rc<[TypeId]>)]>,
     notice: Option<SharedString>,
     focus: FocusHandle,
+    /// The implant list is open in a narrow window, where it is folded away by default.
+    tree_open: bool,
+    /// The window is narrow, as of the last frame.
+    narrow: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -338,6 +346,8 @@ impl ImplantSetEditor {
             folded: HashSet::new(),
             notice: None,
             focus,
+            tree_open: false,
+            narrow: false,
             _subscriptions: subscriptions,
         }
     }
@@ -608,6 +618,7 @@ impl ImplantSetEditor {
     // The set list.
 
     fn list_column(&self, sets: &[ImplantSet], cx: &mut Context<Self>) -> AnyElement {
+        let width = if self.narrow { LIST_NARROW_W } else { LIST_W };
         let query = self.list_search.read(cx).value().to_string();
         let entries: Vec<ListEntry> = sets
             .iter()
@@ -654,7 +665,7 @@ impl ImplantSetEditor {
         };
         let theme = cx.theme();
         v_flex()
-            .w(px(LIST_W))
+            .w(px(width))
             .flex_none()
             .h_full()
             .gap_2()
@@ -731,8 +742,8 @@ impl ImplantSetEditor {
             .flex_1()
             .min_w_0()
             .h_full()
-            .gap_4()
-            .p_4()
+            .gap_2()
+            .p_3()
             .drag_over::<Dragged>(|style, dragged, _, cx| {
                 if matches!(dragged.source, DragSource::Market) {
                     style.bg(cx.theme().drop_target.opacity(0.25))
@@ -801,26 +812,39 @@ impl ImplantSetEditor {
             SLOTS.end(),
             format::currency(total)
         );
+        let toggle = self.narrow.then(|| {
+            Button::new("set-tree-toggle")
+                .small()
+                .ghost()
+                .icon(UiIcon::new(AssetIcon::ListTree))
+                .when(self.tree_open, |b| b.selected(true))
+                .tooltip("Show or hide the implant list")
+                .on_click(cx.listener(|e, _, _, cx| {
+                    e.tree_open = !e.tree_open;
+                    cx.notify();
+                }))
+        });
         let header = h_flex()
-            .gap_3()
+            .gap_2()
             .child(
                 v_flex()
                     .flex_1()
                     .min_w_0()
                     .child(
                         div()
-                            .text_lg()
                             .font_weight(FontWeight::SEMIBOLD)
+                            .truncate()
                             .child(set.name.clone()),
                     )
-                    .child(div().text_xs().text_color(muted).child(summary)),
+                    .child(div().text_xs().text_color(muted).truncate().child(summary)),
             )
+            .children(toggle)
             .child(
                 Button::new("set-apply")
                     .small()
                     .primary()
                     .icon(UiIcon::new(AssetIcon::Check))
-                    .label("Apply to fit")
+                    .label("Apply")
                     .disabled(!has_fit || set.implants.is_empty())
                     .tooltip("Put these implants on the current fit")
                     .on_click(cx.listener(|e, _, _, cx| e.apply_to_fit(cx))),
@@ -1338,7 +1362,8 @@ impl ImplantSetEditor {
 }
 
 impl Render for ImplantSetEditor {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.narrow = window.viewport_size().width < px(NARROW_W);
         let sets = self.sets(cx).to_vec();
         // Another window may have removed or renamed the set this one was showing.
         if self
@@ -1355,7 +1380,7 @@ impl Render for ImplantSetEditor {
             .and_then(|name| sets.iter().find(|s| &s.name == name));
         let list = self.list_column(&sets, cx);
         let middle = self.set_column(selected, !sets.is_empty(), cx);
-        let tree = self.tree_column(cx);
+        let tree = (!self.narrow || self.tree_open).then(|| self.tree_column(cx));
         let theme = cx.theme();
         h_flex()
             .size_full()
@@ -1377,7 +1402,7 @@ impl Render for ImplantSetEditor {
             .text_sm()
             .child(list)
             .child(middle)
-            .child(tree)
+            .children(tree)
     }
 }
 

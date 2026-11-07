@@ -6,10 +6,11 @@ use std::{collections::HashMap, rc::Rc};
 
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon as UiIcon, Sizable,
+    ActiveTheme, Disableable, Icon as UiIcon, Selectable, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
+    menu::{DropdownMenu, PopupMenuItem},
     v_flex,
 };
 use gpui_kit::{
@@ -36,7 +37,11 @@ use crate::{
 const EDITOR_W: f32 = 1100.;
 const EDITOR_H: f32 = 700.;
 const LIST_W: f32 = 230.;
+/// The preset list's width in a narrow window.
+const LIST_NARROW_W: f32 = 180.;
 const TREE_W: f32 = 340.;
+/// Below this window width the market folds away behind a button.
+const NARROW_W: f32 = 900.;
 const QUANTITY_W: f32 = 84.;
 const VOLUME_W: f32 = 110.;
 
@@ -215,6 +220,8 @@ pub struct CargoPresetEditor {
     quantities: HashMap<TypeId, (Entity<InputState>, Subscription)>,
     focus: FocusHandle,
     notice: Option<SharedString>,
+    /// The market column is open in a narrow window, where it is folded away by default.
+    market_open: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -251,6 +258,7 @@ impl CargoPresetEditor {
             quantities: HashMap::new(),
             focus,
             notice: None,
+            market_open: false,
             _subscriptions: subscriptions,
         }
     }
@@ -502,7 +510,12 @@ impl CargoPresetEditor {
         cx.stop_propagation();
     }
 
-    fn list_column(&self, presets: &[CargoPreset], cx: &mut Context<Self>) -> AnyElement {
+    fn list_column(
+        &self,
+        presets: &[CargoPreset],
+        narrow: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let query = self.list_search.read(cx).value().to_string();
         let entries: Vec<ListEntry> = presets
             .iter()
@@ -539,7 +552,7 @@ impl CargoPresetEditor {
         };
         let theme = cx.theme();
         v_flex()
-            .w(px(LIST_W))
+            .w(px(if narrow { LIST_NARROW_W } else { LIST_W }))
             .flex_none()
             .h_full()
             .gap_2()
@@ -588,58 +601,6 @@ impl CargoPresetEditor {
                     ),
             )
             .into_any_element()
-    }
-
-    /// The policy as a segmented control, with what the chosen one does.
-    fn policy_control(policy: CargoPolicy, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let segments: Vec<AnyElement> = CargoPolicy::ALL
-            .into_iter()
-            .map(|value| {
-                let selected = value == policy;
-                div()
-                    .id(SharedString::from(format!("policy-{}", value.label())))
-                    .px_3()
-                    .py_1()
-                    .rounded(px(5.))
-                    .text_xs()
-                    .when(selected, |d| {
-                        d.bg(theme.primary)
-                            .text_color(theme.primary_foreground)
-                            .font_weight(FontWeight::MEDIUM)
-                    })
-                    .when(!selected, |d| {
-                        d.text_color(theme.muted_foreground)
-                            .hover(|s| s.bg(theme.secondary).text_color(theme.foreground))
-                    })
-                    .child(value.label())
-                    .on_click(cx.listener(move |e, _: &ClickEvent, _, cx| {
-                        e.edit_current(cx, |p| p.policy = value);
-                    }))
-                    .into_any_element()
-            })
-            .collect();
-        v_flex()
-            .gap_1p5()
-            .child(caption("When applied", cx))
-            .child(
-                h_flex().child(
-                    h_flex()
-                        .gap_0p5()
-                        .p_0p5()
-                        .rounded(px(7.))
-                        .border_1()
-                        .border_color(theme.border)
-                        .bg(theme.background)
-                        .children(segments),
-                ),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(policy.explanation()),
-            )
     }
 
     /// The quantity field of an item, made on first use and kept in step with the preset while
@@ -691,7 +652,7 @@ impl CargoPresetEditor {
         let row = h_flex()
             .id(SharedString::from(format!("preset-item-{type_id}")))
             .gap_3()
-            .h(px(editor_kit::ROW_HEIGHT + 6.))
+            .h(px(editor_kit::ROW_HEIGHT + 2.))
             .flex_none()
             .px_2()
             .rounded(px(4.))
@@ -784,46 +745,104 @@ impl CargoPresetEditor {
             .gyfa
             .upgrade()
             .is_some_and(|g| g.read(cx).fit().is_some());
+        let narrow = window.viewport_size().width < px(NARROW_W);
         let theme = cx.theme();
+        let policy = preset.policy;
+        // Everything but applying sits behind the gear: the column is for the items.
+        let settings = Button::new("preset-settings")
+            .ghost()
+            .small()
+            .icon(UiIcon::new(AssetIcon::Settings2))
+            .tooltip("When applied, and adding the fit's cargo")
+            .dropdown_menu({
+                let this = cx.entity().downgrade();
+                move |menu, _, _| {
+                    let mut menu = menu.label("When applied");
+                    for value in CargoPolicy::ALL {
+                        let this = this.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new(format!(
+                                "{}: {}",
+                                value.label(),
+                                value.explanation()
+                            ))
+                            .checked(value == policy)
+                            .on_click(move |_, _, cx| {
+                                let _ = this.update(cx, |e, cx| {
+                                    e.edit_current(cx, |p| p.policy = value);
+                                });
+                            }),
+                        );
+                    }
+                    let this = this.clone();
+                    menu.separator().item(
+                        PopupMenuItem::new("Add from fit's cargo")
+                            .disabled(!has_fit)
+                            .on_click(move |_, _, cx| {
+                                let _ = this.update(cx, CargoPresetEditor::add_fit_cargo);
+                            }),
+                    )
+                }
+            });
+        let market = narrow.then(|| {
+            Button::new("preset-market")
+                .small()
+                .ghost()
+                .icon(UiIcon::new(AssetIcon::Store))
+                .when(self.market_open, |b| b.selected(true))
+                .tooltip("Show or hide the market")
+                .on_click(cx.listener(|e, _, _, cx| {
+                    e.market_open = !e.market_open;
+                    cx.notify();
+                }))
+        });
         let header = h_flex()
-            .gap_3()
+            .gap_2()
             .child(
                 v_flex()
                     .flex_1()
                     .min_w_0()
                     .child(
                         div()
-                            .text_lg()
                             .font_weight(FontWeight::SEMIBOLD)
                             .truncate()
                             .child(preset.name.clone()),
                     )
                     .child(
-                        div()
+                        h_flex()
+                            .gap_1p5()
                             .text_xs()
                             .text_color(theme.muted_foreground)
-                            .child(format!(
+                            .child(
+                                div()
+                                    .id("preset-policy")
+                                    .px_1p5()
+                                    .rounded(px(4.))
+                                    .bg(theme.secondary)
+                                    .text_color(theme.foreground)
+                                    .child(policy.label())
+                                    .tooltip(move |window, cx| {
+                                        gpui_kit::component::tooltip::Tooltip::new(
+                                            policy.explanation(),
+                                        )
+                                        .build(window, cx)
+                                    }),
+                            )
+                            .child(div().truncate().child(format!(
                                 "{}, {units} units, {} m³",
                                 item_count(items.len()),
                                 amount(volume)
-                            )),
+                            ))),
                     ),
             )
-            .child(
-                Button::new("preset-from-fit")
-                    .small()
-                    .icon(UiIcon::new(AssetIcon::PackagePlus))
-                    .label("Add from fit's cargo")
-                    .disabled(!has_fit)
-                    .tooltip("Add every stack in the current fit's cargo")
-                    .on_click(cx.listener(|e, _, _, cx| e.add_fit_cargo(cx))),
-            )
+            .children(market)
+            .child(settings)
             .child(
                 Button::new("preset-apply")
                     .small()
                     .primary()
                     .icon(UiIcon::new(AssetIcon::PackageCheck))
-                    .label("Apply to fit")
+                    .label("Apply")
                     .disabled(!has_fit || preset.items.is_empty())
                     .tooltip("Put this preset into the current fit's cargo")
                     .on_click(cx.listener(|e, _, _, cx| e.apply_to_fit(cx))),
@@ -848,8 +867,8 @@ impl CargoPresetEditor {
             .flex_1()
             .min_w_0()
             .h_full()
-            .gap_4()
-            .p_4()
+            .gap_2()
+            .p_3()
             .drag_over::<Dragged>(|style, dragged, _, cx| {
                 if matches!(dragged.source, DragSource::Market) {
                     style.bg(cx.theme().drop_target)
@@ -865,12 +884,11 @@ impl CargoPresetEditor {
                 }
             }))
             .child(header)
-            .child(Self::policy_control(preset.policy, cx))
             .child(
                 v_flex()
                     .flex_1()
                     .min_h_0()
-                    .gap_1p5()
+                    .gap_1()
                     .child(
                         h_flex()
                             .gap_3()
@@ -936,7 +954,8 @@ impl Render for CargoPresetEditor {
                 .retain(|t, _| preset.items.iter().any(|&(i, _)| i == *t));
         }
         let loaded = Rc::clone(&self.loaded);
-        let list = self.list_column(&presets, cx);
+        let narrow = window.viewport_size().width < px(NARROW_W);
+        let list = self.list_column(&presets, narrow, cx);
         let middle = self.preset_column(preset, window, cx);
         let tree = self.tree.render(
             &loaded,
@@ -944,6 +963,7 @@ impl Render for CargoPresetEditor {
             |e: &mut Self| &mut e.tree,
             |e: &mut Self, t, _, cx| e.add_item(t, 1, cx),
         );
+        let show_market = !narrow || self.market_open;
         let theme = cx.theme();
         h_flex()
             .size_full()
@@ -957,7 +977,7 @@ impl Render for CargoPresetEditor {
             .text_sm()
             .child(list)
             .child(middle)
-            .child(
+            .when(show_market, |row| row.child(
                 v_flex()
                     .w(px(TREE_W))
                     .flex_none()
@@ -989,7 +1009,7 @@ impl Render for CargoPresetEditor {
                             .text_color(theme.muted_foreground)
                             .child("Drag an item onto the preset, or double-click it. Drag one back here to remove it."),
                     ),
-            )
+            ))
     }
 }
 
