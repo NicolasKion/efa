@@ -2,17 +2,18 @@
 
 use std::rc::Rc;
 
+use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
-    ActiveTheme, Sizable,
+    ActiveTheme, Disableable, Icon as UiIcon, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
     menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Context, InteractiveElement, IntoElement, KeyDownEvent,
-    ParentElement, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
-    prelude::FluentBuilder, px,
+    AnyElement, App, ClickEvent, Context, Div, FontWeight, InteractiveElement, IntoElement,
+    KeyDownEvent, ParentElement, SharedString, StatefulInteractiveElement, Styled, WeakEntity,
+    Window, div, prelude::FluentBuilder, px,
 };
 
 use super::{
@@ -29,9 +30,11 @@ use crate::graphs::{
     snapshot::Ship,
     snapshot::{EwarKind, FitSnapshot},
 };
+use crate::icons::Icon;
 use crate::ui::{
     profile_editor::open_target_profile_editor,
     profile_menus::{FirstProfile, PickProfile, target_profile_menu},
+    widgets::icon_box,
 };
 
 /// A weapon type with its name and the charges it takes, each with its name.
@@ -82,7 +85,12 @@ impl Target {
     }
 }
 
-const ROW_H: f32 = 22.;
+const ROW_H: f32 = 28.;
+/// The line sample's column, and the ship icon's.
+const SWATCH_W: f32 = 36.;
+const ICON: f32 = 20.;
+/// A value column.
+const COL_W: f32 = 80.;
 
 fn is_delete(event: &KeyDownEvent) -> bool {
     let key = &event.keystroke;
@@ -150,17 +158,144 @@ fn resists_text(resists: &[f64; 4]) -> String {
         .join("/")
 }
 
+/// The column names over a list's rows.
 fn header(cols: &[Column], first: &'static str, cx: &App) -> impl IntoElement {
+    let theme = cx.theme();
     h_flex()
+        .flex_none()
+        .h(px(26.))
+        .px_3()
+        .gap_2()
+        .border_b_1()
+        .border_color(theme.border)
+        .text_xs()
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme.muted_foreground)
+        .child(div().flex_none().w(px(SWATCH_W + ICON)).mr_2())
+        .child(div().flex_1().child(first))
+        .children(cols.iter().map(|c| value_cell().child(c.header())))
+}
+
+/// A right-aligned value column.
+fn value_cell() -> Div {
+    h_flex()
+        .flex_none()
+        .w(px(COL_W))
+        .justify_end()
+        .whitespace_nowrap()
+        .overflow_hidden()
+}
+
+/// A list card's title bar: its icon, name and count, then its buttons.
+fn title_bar(
+    icon: AssetIcon,
+    title: &'static str,
+    count: usize,
+    actions: [AnyElement; 2],
+    cx: &App,
+) -> impl IntoElement {
+    let theme = cx.theme();
+    h_flex()
+        .flex_none()
+        .gap_2()
+        .pl_3()
+        .pr_2()
+        .py_1p5()
+        .border_b_1()
+        .border_color(theme.border)
+        .child(
+            UiIcon::new(icon)
+                .size(px(14.))
+                .text_color(theme.muted_foreground),
+        )
+        .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
+        .child(
+            div()
+                .px_1p5()
+                .rounded_full()
+                .bg(theme.secondary)
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(count.to_string()),
+        )
+        .child(div().flex_1())
+        .children(actions)
+}
+
+/// What an empty list says, in place of its rows.
+fn empty_state(icon: AssetIcon, title: &'static str, hint: &'static str, cx: &App) -> Div {
+    let theme = cx.theme();
+    v_flex()
+        .flex_1()
+        .items_center()
+        .justify_center()
+        .gap_1()
+        .py_4()
+        .child(
+            UiIcon::new(icon)
+                .size(px(20.))
+                .text_color(theme.muted_foreground),
+        )
+        .child(div().font_weight(FontWeight::MEDIUM).child(title))
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(hint),
+        )
+}
+
+/// A list's card: a hairline border on the sidebar color, like the settings cards.
+fn card(cx: &App) -> Div {
+    let theme = cx.theme();
+    v_flex()
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .rounded(px(8.))
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.sidebar)
+        .overflow_hidden()
+}
+
+/// A ship's icon, or `fallback` drawn in its place for what has no ship.
+fn ship_icon(g: &GraphsWindow, fit: Option<usize>, fallback: AssetIcon, cx: &App) -> AnyElement {
+    let ship = fit.and_then(|i| g.fits.get(i)).and_then(|f| f.ship);
+    match (ship, &g.loaded) {
+        (Some(ship), Some(loaded)) => {
+            icon_box(&loaded.catalog, &loaded.icons, Icon::Type(ship), ICON)
+                .rounded(px(3.))
+                .overflow_hidden()
+                .into_any_element()
+        }
+        _ => h_flex()
+            .flex_none()
+            .size(px(ICON))
+            .justify_center()
+            .child(
+                UiIcon::new(fallback)
+                    .size(px(14.))
+                    .text_color(cx.theme().muted_foreground),
+            )
+            .into_any_element(),
+    }
+}
+
+/// A list row's frame: hover and selection like the fittings browser's rows.
+fn row_frame(id: SharedString, selected: bool, cx: &App) -> gpui_kit::Stateful<Div> {
+    let theme = cx.theme();
+    h_flex()
+        .id(id)
+        .flex_none()
         .h(px(ROW_H))
+        .mx_1()
         .px_2()
         .gap_2()
-        .bg(cx.theme().table_head)
+        .rounded(px(5.))
         .text_xs()
-        .text_color(cx.theme().table_head_foreground)
-        .child(div().w(px(56.)))
-        .child(div().flex_1().child(first))
-        .children(cols.iter().map(|c| div().w(px(84.)).child(c.header())))
+        .when(selected, |r| r.bg(theme.list_active))
+        .when(!selected, |r| r.hover(|s| s.bg(theme.list_hover)))
 }
 
 pub fn sources(g: &mut GraphsWindow, cx: &mut Context<GraphsWindow>) -> AnyElement {
@@ -171,7 +306,35 @@ pub fn sources(g: &mut GraphsWindow, cx: &mut Context<GraphsWindow>) -> AnyEleme
         .map(|i| source_row(g, i, cols, &this, &fits, &tabs, cx))
         .collect();
     let empty = rows.is_empty();
-    v_flex()
+    let add = {
+        let (this, fits, tabs) = (this.clone(), Rc::clone(&fits), Rc::clone(&tabs));
+        Button::new("graph-add-fit")
+            .ghost()
+            .xsmall()
+            .icon(AssetIcon::Plus)
+            .label("Add")
+            .dropdown_menu(move |menu, window, cx| {
+                source_menu(menu, &this, &fits, &tabs, None, window, cx)
+            })
+            .into_any_element()
+    };
+    let remove = Button::new("graph-remove-fit")
+        .ghost()
+        .xsmall()
+        .icon(AssetIcon::Trash)
+        .tooltip("Remove the selected fit (Delete)")
+        .disabled(g.selected_source.is_none_or(|i| i >= g.sources.len()))
+        .on_click(cx.listener(|g, _: &ClickEvent, _, cx| {
+            if let Some(i) = g.selected_source.take()
+                && i < g.sources.len()
+            {
+                g.sources.remove(i);
+                g.recompute(cx);
+                cx.notify();
+            }
+        }))
+        .into_any_element();
+    let body = v_flex()
         .id("graph-sources")
         .track_focus(&g.sources_focus)
         .on_key_down(cx.listener(|g, event: &KeyDownEvent, _, cx| {
@@ -185,25 +348,32 @@ pub fn sources(g: &mut GraphsWindow, cx: &mut Context<GraphsWindow>) -> AnyEleme
             }
         }))
         .flex_1()
-        .h_full()
-        .border_1()
-        .border_color(cx.theme().border)
+        .min_h_0()
+        .py_1()
         .overflow_y_scroll()
-        .child(header(cols, "Fit", cx))
         .children(rows)
         .when(empty, |list| {
-            list.child(
-                div()
-                    .p_2()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Right-click to add fits to graph"),
-            )
+            list.child(empty_state(
+                AssetIcon::Rocket,
+                "No fits yet",
+                "Add a fit with the Add button above, or right-click here.",
+                cx,
+            ))
         })
         .child(div().flex_1().min_h(px(ROW_H)).id("graph-sources-rest"))
         .context_menu(move |menu, window, cx| {
             source_menu(menu, &this, &fits, &tabs, None, window, cx)
-        })
+        });
+    card(cx)
+        .child(title_bar(
+            AssetIcon::Rocket,
+            "Fits",
+            g.sources.len(),
+            [add, remove],
+            cx,
+        ))
+        .child(header(cols, "Fit", cx))
+        .child(body)
         .into_any_element()
 }
 
@@ -401,15 +571,14 @@ fn source_row(
     let source = g.sources[i].clone();
     let snap = g.snapshot(source.fit);
     let name = g.source_name(&source);
-    let theme = cx.theme();
-    let color = source.color.color(theme);
+    let color = source.color.color(cx.theme());
     let selected = g.selected_source == Some(i);
     let picker = {
         let this = this.clone();
         Button::new(SharedString::from(format!("src-color-{i}")))
             .ghost()
             .xsmall()
-            .w(px(56.))
+            .w(px(SWATCH_W))
             .tooltip("Line color")
             .child(canvas::swatch(color, LineStyle::Solid))
             .dropdown_menu(move |menu, _, _| {
@@ -429,25 +598,16 @@ fn source_row(
                 })
             })
     };
-    h_flex()
-        .id(SharedString::from(format!("src-row-{i}")))
-        .h(px(ROW_H))
-        .px_2()
-        .gap_2()
-        .text_xs()
-        .when(i % 2 == 1, |r| r.bg(theme.table_even))
-        .when(selected, |r| r.bg(theme.table_active))
-        .hover(|s| s.bg(theme.table_hover))
+    let icon = ship_icon(g, Some(source.fit), AssetIcon::Rocket, cx);
+    row_frame(SharedString::from(format!("src-row-{i}")), selected, cx)
         .child(picker)
-        .child(div().flex_1().truncate().child(name))
+        .child(icon)
+        .child(div().flex_1().min_w_0().truncate().text_sm().child(name))
         .children(cols.iter().map(|&c| {
-            div()
-                .w(px(84.))
-                .truncate()
-                .child(snap.as_ref().map_or_else(String::new, |s| match c {
-                    Column::DampScanRes => damp_scan_res(s),
-                    _ => ship_column(c, &s.ship),
-                }))
+            value_cell().child(snap.as_ref().map_or_else(String::new, |s| match c {
+                Column::DampScanRes => damp_scan_res(s),
+                _ => ship_column(c, &s.ship),
+            }))
         }))
         .on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
             if event.click_count() >= 2 {
@@ -478,7 +638,34 @@ pub fn targets(g: &mut GraphsWindow, cx: &mut Context<GraphsWindow>) -> AnyEleme
     let rows: Vec<AnyElement> = (0..g.targets.len())
         .map(|i| target_row(g, i, &cols, &this, &fits, &tabs, ignore_resists, cx))
         .collect();
-    v_flex()
+    let empty = rows.is_empty();
+    let add = {
+        let (this, fits, tabs) = (this.clone(), Rc::clone(&fits), Rc::clone(&tabs));
+        Button::new("graph-add-target")
+            .ghost()
+            .xsmall()
+            .icon(AssetIcon::Plus)
+            .label("Add")
+            .dropdown_menu(move |menu, window, cx| {
+                target_menu(menu, &this, &fits, &tabs, None, window, cx)
+            })
+            .into_any_element()
+    };
+    let remove = Button::new("graph-remove-target")
+        .ghost()
+        .xsmall()
+        .icon(AssetIcon::Trash)
+        .tooltip("Remove the selected target (Delete)")
+        .disabled(g.selected_target.is_none_or(|i| i >= g.targets.len()))
+        .on_click(cx.listener(|g, _: &ClickEvent, _, cx| {
+            if let Some(i) = g.selected_target {
+                g.remove_target(i);
+                g.recompute(cx);
+                cx.notify();
+            }
+        }))
+        .into_any_element();
+    let body = v_flex()
         .id("graph-targets")
         .track_focus(&g.targets_focus)
         .on_key_down(cx.listener(|g, event: &KeyDownEvent, _, cx| {
@@ -491,16 +678,32 @@ pub fn targets(g: &mut GraphsWindow, cx: &mut Context<GraphsWindow>) -> AnyEleme
             }
         }))
         .flex_1()
-        .h_full()
-        .border_1()
-        .border_color(cx.theme().border)
+        .min_h_0()
+        .py_1()
         .overflow_y_scroll()
-        .child(header(&cols, "Target", cx))
         .children(rows)
+        .when(empty, |list| {
+            list.child(empty_state(
+                AssetIcon::Crosshair,
+                "No targets",
+                "Add a fit or a target profile with the Add button above.",
+                cx,
+            ))
+        })
         .child(div().flex_1().min_h(px(ROW_H)).id("graph-targets-rest"))
         .context_menu(move |menu, window, cx| {
             target_menu(menu, &this, &fits, &tabs, None, window, cx)
-        })
+        });
+    card(cx)
+        .child(title_bar(
+            AssetIcon::Crosshair,
+            "Targets",
+            g.targets.len(),
+            [add, remove],
+            cx,
+        ))
+        .child(header(&cols, "Target", cx))
+        .child(body)
         .into_any_element()
 }
 
@@ -627,13 +830,12 @@ fn target_row(
         TargetKind::Fit(fit) => g.snapshot(fit),
         TargetKind::Profile(_) => None,
     };
-    let theme = cx.theme();
     // A target's swatch shows its shade of the first fit's color.
     let base = g
         .sources
         .first()
         .map_or(LineColor::Blue, |s| s.color)
-        .color(theme);
+        .color(cx.theme());
     let color = target.lightness.apply(base);
     let selected = g.selected_target == Some(i);
     let picker = {
@@ -641,7 +843,7 @@ fn target_row(
         Button::new(SharedString::from(format!("tgt-style-{i}")))
             .ghost()
             .xsmall()
-            .w(px(56.))
+            .w(px(SWATCH_W))
             .tooltip("Line lightness and style")
             .child(canvas::swatch(color, target.style))
             .dropdown_menu(move |menu, window, cx| {
@@ -695,21 +897,16 @@ fn target_row(
         }
     };
     let name = g.target_name(&target);
-    h_flex()
-        .id(SharedString::from(format!("tgt-row-{i}")))
-        .h(px(ROW_H))
-        .px_2()
-        .gap_2()
-        .text_xs()
-        .when(i % 2 == 1, |r| r.bg(theme.table_even))
-        .when(selected, |r| r.bg(theme.table_active))
-        .hover(|s| s.bg(theme.table_hover))
+    let fit = match target.kind {
+        TargetKind::Fit(fit) => Some(fit),
+        TargetKind::Profile(_) => None,
+    };
+    let icon = ship_icon(g, fit, AssetIcon::Target, cx);
+    row_frame(SharedString::from(format!("tgt-row-{i}")), selected, cx)
         .child(picker)
-        .child(div().flex_1().truncate().child(name))
-        .children(
-            cols.iter()
-                .map(|&c| div().w(px(84.)).truncate().child(value(c))),
-        )
+        .child(icon)
+        .child(div().flex_1().min_w_0().truncate().text_sm().child(name))
+        .children(cols.iter().map(|&c| value_cell().child(value(c))))
         .on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
             if event.click_count() >= 2 {
                 g.remove_target(i);

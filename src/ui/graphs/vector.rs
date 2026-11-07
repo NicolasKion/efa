@@ -4,9 +4,9 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui_kit::component::{ActiveTheme, v_flex};
 use gpui_kit::{
-    AnyElement, Bounds, Context, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
-    MouseMoveEvent, ParentElement, PathBuilder, Pixels, Point, SharedString, Styled, canvas, div,
-    point, px,
+    AnyElement, Bounds, Context, FontWeight, InteractiveElement, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, ParentElement, PathBuilder, Pixels, Point, SharedString,
+    Styled, canvas, div, point, px,
 };
 
 use super::GraphsWindow;
@@ -79,7 +79,7 @@ pub fn render(
     cx: &mut Context<GraphsWindow>,
 ) -> AnyElement {
     let theme = cx.theme();
-    let (ring, arrow) = (theme.border, theme.primary);
+    let (ring, cross, arrow) = (theme.border, theme.border.opacity(0.5), theme.primary);
     let (length, angle) = (
         if vector.direction_only {
             1.0
@@ -111,6 +111,24 @@ pub fn render(
             if let Ok(path) = circle.build() {
                 window.paint_path(path, ring);
             }
+            // Faint crosshairs, so headings are easy to judge.
+            for (from, to) in [
+                (
+                    point(center.x - radius, center.y),
+                    point(center.x + radius, center.y),
+                ),
+                (
+                    point(center.x, center.y - radius),
+                    point(center.x, center.y + radius),
+                ),
+            ] {
+                let mut line = PathBuilder::stroke(px(1.));
+                line.move_to(from);
+                line.line_to(to);
+                if let Ok(path) = line.build() {
+                    window.paint_path(path, cross);
+                }
+            }
             let rad = angle.to_radians();
             let tip = point(
                 center.x + radius * (length * rad.cos()) as f32,
@@ -122,8 +140,8 @@ pub fn render(
             if let Ok(path) = line.build() {
                 window.paint_path(path, arrow);
             }
-            let dot = Bounds::centered_at(tip, gpui_kit::size(px(5.), px(5.)));
-            window.paint_quad(gpui_kit::fill(dot, arrow));
+            let dot = Bounds::centered_at(tip, gpui_kit::size(px(7.), px(7.)));
+            window.paint_quad(gpui_kit::fill(dot, arrow).corner_radii(px(3.5)));
         },
     )
     .size(px(SIZE));
@@ -135,12 +153,13 @@ pub fn render(
     };
     v_flex()
         .items_center()
-        .gap_1()
+        .gap_1p5()
         .text_xs()
-        .child(label)
+        .child(div().font_weight(FontWeight::MEDIUM).child(label))
         .child(
             div()
                 .id(SharedString::from(format!("vector-{which:?}")))
+                .cursor_crosshair()
                 .child(dial)
                 .on_mouse_down(
                     MouseButton::Left,

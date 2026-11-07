@@ -6,25 +6,17 @@
 
 mod canvas;
 mod lists;
+mod panel;
 mod style;
 mod vector;
+mod view;
 
 use std::{cell::Cell, collections::HashMap, rc::Rc};
 
-use gpui_kit::component::{
-    ActiveTheme, Sizable,
-    button::{Button, ButtonVariants},
-    checkbox::Checkbox,
-    h_flex,
-    input::{Input, InputEvent, InputState},
-    menu::{DropdownMenu, PopupMenu, PopupMenuItem},
-    v_flex,
-};
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::{
-    AnyElement, AnyWindowHandle, App, AppContext, Bounds, Context, Entity, FocusHandle, Global,
-    InteractiveElement, IntoElement, ParentElement, Pixels, Point, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, WindowBounds,
-    WindowOptions, div, prelude::FluentBuilder, px, size,
+    AnyWindowHandle, App, AppContext, Bounds, Context, Entity, FocusHandle, Global, Pixels, Point,
+    SharedString, Subscription, WeakEntity, Window, WindowBounds, WindowOptions, px, size,
 };
 
 use self::{
@@ -41,9 +33,7 @@ use crate::{
     fit::Fit,
     graphs::{
         ammo::{self, AmmoQuality, AmmoStyle, WeaponGroup},
-        defs::{
-            Checkbox as CheckboxKey, Graph, InputDef, Param, Spec, Unit, XDef, YDef, conditions_met,
-        },
+        defs::{Checkbox as CheckboxKey, Graph, InputDef, Param, Spec, XDef, YDef, conditions_met},
         plot::{self, Options, Request, TargetData},
         profiles::TargetProfile,
         settings::GraphSettings,
@@ -77,7 +67,7 @@ pub fn open(hub: Entity<Hub>, fit: Option<usize>, hidden: bool, cx: &mut App) {
         return;
     }
     let options = WindowOptions {
-        window_bounds: Some(WindowBounds::centered(size(px(1000.), px(860.)), cx)),
+        window_bounds: Some(WindowBounds::centered(size(px(1180.), px(900.)), cx)),
         app_id: Some("gyfa".into()),
         ..Default::default()
     };
@@ -678,9 +668,9 @@ impl GraphsWindow {
         }
         // pyfa just draws nothing in these cases; say why instead.
         self.status = if self.sources.is_empty() {
-            Some("Right-click the fit list to add fits.".into())
+            Some("Add a fit with the Add button over the fit list, or right-click it.".into())
         } else if self.graph.has_targets() && self.targets.is_empty() {
-            Some("Right-click the target list to add targets.".into())
+            Some("Add a target with the Add button over the target list.".into())
         } else if self.graph.has_segments() && lines.is_empty() {
             Some("No turrets or launchers with charges to compare.".into())
         } else if req.y.param == Param::Damage
@@ -842,416 +832,6 @@ fn parse_number(text: &str) -> Option<f64> {
         .parse::<f64>()
         .ok()
         .filter(|v| v.is_finite())
-}
-
-impl Render for GraphsWindow {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let root = v_flex()
-            .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .text_sm();
-        if self.loaded.is_none() {
-            return root
-                .items_center()
-                .justify_center()
-                .child("Loading EVE data…")
-                .into_any_element();
-        }
-        let mark = self.hover_mark.or(self.pinned_mark);
-        root.child(self.graph_selector(cx))
-            .child(div().flex_1().min_h(px(220.)).child(canvas::render(
-                &self.lines,
-                &self.frame,
-                mark,
-                &self.plot_bounds,
-                cx,
-            )))
-            .child(div().h(px(1.)).bg(cx.theme().border))
-            .child(self.controls(window, cx))
-            .child(
-                h_flex()
-                    .h(px(200.))
-                    .gap_2()
-                    .px_2()
-                    .pb_2()
-                    .child(lists::sources(self, cx))
-                    .when(self.graph.has_targets(), |row| {
-                        row.child(lists::targets(self, cx))
-                    }),
-            )
-            .when_some(self.status.clone(), |root, status| {
-                root.child(
-                    div()
-                        .px_2()
-                        .pb_1()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(status),
-                )
-            })
-            .into_any_element()
-    }
-}
-
-impl GraphsWindow {
-    fn graph_selector(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let this = cx.entity().downgrade();
-        let current = self.graph;
-        let graphs: Vec<Graph> = Graph::ALL
-            .into_iter()
-            .chain(self.include_hidden.then_some(Graph::EcmBurstDamps))
-            .collect();
-        h_flex().p_2().child(
-            Button::new("graph-select")
-                .outline()
-                .small()
-                .w_full()
-                .label(current.name())
-                .dropdown_menu(move |menu, _, _| {
-                    graphs.iter().fold(menu, |menu, &graph| {
-                        let this = this.clone();
-                        menu.item(
-                            PopupMenuItem::new(graph.name())
-                                .checked(graph == current)
-                                .on_click(move |_, window, cx| {
-                                    let _ = this.update(cx, |g, cx| g.set_graph(graph, window, cx));
-                                }),
-                        )
-                    })
-                }),
-        )
-    }
-
-    fn axis_button(
-        id: &'static str,
-        labels: Vec<String>,
-        current: usize,
-        pick: fn(&mut Self, usize, &mut Window, &mut Context<Self>),
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let this = cx.entity().downgrade();
-        let label = labels.get(current).cloned().unwrap_or_default();
-        Button::new(id)
-            .outline()
-            .small()
-            .w(px(260.))
-            .label(label)
-            .dropdown_menu(move |menu, _, _| {
-                labels.iter().enumerate().fold(menu, |menu, (i, text)| {
-                    let this = this.clone();
-                    menu.item(
-                        PopupMenuItem::new(text.clone())
-                            .checked(i == current)
-                            .on_click(move |_, window, cx| {
-                                let _ = this.update(cx, |g, cx| pick(g, i, window, cx));
-                            }),
-                    )
-                })
-            })
-    }
-
-    fn controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let _ = window;
-        let x_defs = self.x_defs();
-        let y_defs = self.y_defs();
-        let x_labels: Vec<String> = x_defs
-            .iter()
-            .map(|x| axis_choice(x.label, x.unit))
-            .collect();
-        let y_labels: Vec<String> = y_defs
-            .iter()
-            .map(|y| axis_choice(y.selector_label(), y.unit))
-            .collect();
-        let (x, y) = (self.x.min(x_defs.len() - 1), self.y.min(y_defs.len() - 1));
-        let this = cx.entity().downgrade();
-
-        let axes = v_flex()
-            .gap_1()
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(div().w(px(48.)).child("Axis Y:"))
-                    .child(Self::axis_button(
-                        "axis-y",
-                        y_labels,
-                        y,
-                        |g, i, w, cx| {
-                            let x = g.x;
-                            g.set_axes(x, i, w, cx);
-                        },
-                        cx,
-                    )),
-            )
-            .when(!self.graph.has_segments(), |axes| {
-                axes.child(
-                    h_flex()
-                        .gap_2()
-                        .child(div().w(px(48.)).child("Axis X:"))
-                        .child(Self::axis_button(
-                            "axis-x",
-                            x_labels,
-                            x,
-                            |g, i, w, cx| {
-                                let y = g.y;
-                                g.set_axes(i, y, w, cx);
-                            },
-                            cx,
-                        )),
-                )
-            })
-            .when(self.graph.has_segments(), |axes| {
-                let style = AmmoStyle::ALL
-                    .iter()
-                    .position(|&s| s == self.settings.ammo_style)
-                    .unwrap_or(0);
-                let quality = AmmoQuality::ALL
-                    .iter()
-                    .position(|&q| q == self.settings.ammo_quality)
-                    .unwrap_or(0);
-                axes.child(
-                    h_flex()
-                        .gap_2()
-                        .child(div().w(px(48.)).child("Style:"))
-                        .child(Self::axis_button(
-                            "ammo-style",
-                            AmmoStyle::ALL
-                                .iter()
-                                .map(|s| s.label().to_owned())
-                                .collect(),
-                            style,
-                            |g, i, _, cx| {
-                                g.settings.ammo_style = AmmoStyle::ALL[i];
-                                g.settings_changed(cx);
-                            },
-                            cx,
-                        )),
-                )
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .child(div().w(px(48.)).child("Ammo Meta:"))
-                        .child(Self::axis_button(
-                            "ammo-quality",
-                            AmmoQuality::ALL
-                                .iter()
-                                .map(|q| q.label().to_owned())
-                                .collect(),
-                            quality,
-                            |g, i, _, cx| {
-                                g.settings.ammo_quality = AmmoQuality::ALL[i];
-                                g.settings_changed(cx);
-                            },
-                            cx,
-                        )),
-                )
-            })
-            .child(
-                Checkbox::new("show-legend")
-                    .label("Show legend")
-                    .checked(self.settings.show_legend)
-                    .on_click(cx.listener(|g, checked: &bool, _, cx| {
-                        g.settings.show_legend = *checked;
-                        g.settings_changed(cx);
-                    })),
-            )
-            .child(
-                Checkbox::new("show-y0")
-                    .label("Always show Y = 0")
-                    .checked(self.settings.show_y0)
-                    .on_click(cx.listener(|g, checked: &bool, _, cx| {
-                        g.settings.show_y0 = *checked;
-                        g.settings_changed(cx);
-                    })),
-            );
-
-        let (x_spec, y_spec) = {
-            let (x, y) = (self.x_def(), self.y_def());
-            ((x.param, x.unit), (y.param, y.unit))
-        };
-        let mut inputs = v_flex().gap_1();
-        if let Some(main) = &self.main_input {
-            inputs = inputs.child(field_row(main, true));
-        }
-        for field in &self.fields {
-            inputs = inputs.child(field_row(field, false));
-        }
-        for def in self.graph.checkboxes() {
-            if !conditions_met(def.conditions, x_spec, y_spec) {
-                continue;
-            }
-            let key = def.key;
-            inputs = inputs.child(
-                Checkbox::new(SharedString::from(format!("graph-cb-{key:?}")))
-                    .label(def.label)
-                    .checked(self.checkbox(key))
-                    .on_click(cx.listener(move |g, checked: &bool, _, cx| {
-                        g.checkboxes.insert(key, *checked);
-                        g.recompute(cx);
-                        cx.notify();
-                    })),
-            );
-        }
-
-        let vectors = h_flex()
-            .gap_3()
-            .when_some(self.graph.src_vector(), |row, def| {
-                row.child(vector::render(
-                    &self.atk_vector,
-                    Which::Attacker,
-                    def.label,
-                    cx,
-                ))
-            })
-            .when_some(self.graph.tgt_vector(), |row, def| {
-                row.child(vector::render(
-                    &self.tgt_vector,
-                    Which::Target,
-                    def.label,
-                    cx,
-                ))
-            });
-
-        let options_menu = self.graph.has_options().then(|| {
-            let settings = self.settings;
-            let graph = self.graph;
-            Button::new("graph-options")
-                .ghost()
-                .xsmall()
-                .label("☰")
-                .dropdown_menu(move |menu, window, cx| {
-                    options_menu(menu, graph, settings, &this, window, cx)
-                })
-        });
-
-        h_flex()
-            .items_start()
-            .gap_4()
-            .p_2()
-            .child(axes)
-            .child(inputs.flex_1())
-            .child(vectors)
-            .children(options_menu)
-            .on_mouse_up(
-                gpui_kit::MouseButton::Left,
-                cx.listener(|g, _, _, _| g.drag_vector = None),
-            )
-    }
-}
-
-/// pyfa's axis choice text: "Distance (km)".
-fn axis_choice(label: &str, unit: Unit) -> String {
-    match unit.label() {
-        Some(unit) => format!("{label} ({unit})"),
-        None => label.to_owned(),
-    }
-}
-
-fn field_row(field: &Field, main: bool) -> AnyElement {
-    let def = field.def;
-    let label = match def.unit.label() {
-        Some(unit) => format!("{}, {unit}", def.label),
-        None => def.label.to_owned(),
-    };
-    let tooltip = if main { def.main_tooltip } else { def.tooltip };
-    h_flex()
-        .gap_2()
-        .child(div().w(px(110.)).child(Input::new(&field.state).xsmall()))
-        .child(
-            div()
-                .id(SharedString::from(format!(
-                    "field-{:?}-{:?}",
-                    def.param, def.unit
-                )))
-                .child(label)
-                .when_some(tooltip, |d, tip| {
-                    d.tooltip(move |window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(tip).build(window, cx)
-                    })
-                }),
-        )
-        .into_any_element()
-}
-
-fn options_menu(
-    menu: PopupMenu,
-    graph: Graph,
-    settings: GraphSettings,
-    this: &gpui_kit::WeakEntity<GraphsWindow>,
-    window: &mut Window,
-    cx: &mut Context<PopupMenu>,
-) -> PopupMenu {
-    let toggle = |label: &'static str, checked: bool, f: fn(&mut GraphSettings)| {
-        let this = this.clone();
-        PopupMenuItem::new(label)
-            .checked(checked)
-            .on_click(move |_, _, cx| {
-                let _ = this.update(cx, |g, cx| {
-                    f(&mut g.settings);
-                    g.settings_changed(cx);
-                });
-            })
-    };
-    let mut menu = menu;
-    match graph {
-        Graph::DamageStats => {
-            menu = menu
-                .item(toggle(
-                    "Apply Projected Items",
-                    settings.apply_projected,
-                    |s| s.apply_projected = !s.apply_projected,
-                ))
-                .item(toggle(
-                    "Ignore Target Resists",
-                    settings.ignore_resists,
-                    |s| s.ignore_resists = !s.ignore_resists,
-                ));
-        }
-        Graph::ApplicationProfile => {
-            return menu
-                .item(toggle(
-                    "Ignore Target Resists",
-                    settings.ammo_ignore_resists,
-                    |s| s.ammo_ignore_resists = !s.ammo_ignore_resists,
-                ))
-                .item(toggle(
-                    "Apply Projected Effects",
-                    settings.ammo_apply_projected,
-                    |s| s.ammo_apply_projected = !s.ammo_apply_projected,
-                ));
-        }
-        _ => {}
-    }
-    menu = menu
-        .item(toggle(
-            "Ignore Lock Range",
-            settings.ignore_lock_range,
-            |s| s.ignore_lock_range = !s.ignore_lock_range,
-        ))
-        .item(toggle(
-            "Ignore Drone Control Range",
-            settings.ignore_dcr,
-            |s| s.ignore_dcr = !s.ignore_dcr,
-        ));
-    if graph == Graph::DamageStats {
-        let this = this.clone();
-        menu = menu.submenu("Drone Mode", window, cx, move |menu, _, _| {
-            plot::DroneMode::ALL.iter().fold(menu, |menu, &mode| {
-                let this = this.clone();
-                menu.item(
-                    PopupMenuItem::new(mode.label())
-                        .checked(settings.drone_mode == mode)
-                        .on_click(move |_, _, cx| {
-                            let _ = this.update(cx, |g, cx| {
-                                g.settings.drone_mode = mode;
-                                g.settings_changed(cx);
-                            });
-                        }),
-                )
-            })
-        });
-    }
-    menu
 }
 
 #[cfg(test)]
