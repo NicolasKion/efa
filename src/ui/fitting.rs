@@ -366,6 +366,10 @@ impl Efa {
                                     .truncate()
                                     .children(self.prices.get(id).map(short)),
                             )
+                            // And after it, so the name takes the same room as a module's.
+                            .children(
+                                [Col::Charge, Col::Heat].map(|col| self.column_layout.cell(col)),
+                            )
                     }
                 };
                 // pyfa's red rows: whatever breaks a fitting rule or needs skills the
@@ -523,7 +527,7 @@ impl Efa {
             m.charge,
             |cell, charge| {
                 cell.child(icon_box(catalog, &loaded.icons, Icon::Type(charge), 20.))
-                    .child(div().truncate().children(text(Col::Charge)))
+                    .child(div().min_w_0().truncate().children(text(Col::Charge)))
             },
         )))
         .child(
@@ -1274,7 +1278,9 @@ fn charge_submenu(
         cx,
         move |menu, window, cx| {
             let catalog = &loaded.catalog;
-            let mut menu = menu.scrollable(true).max_h(px(MENU_MAX_H));
+            let mut menu = menu
+                .scrollable(true)
+                .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H));
             match &structure {
                 ChargeMenu::Turret(families) => {
                     menu = menu.label("─ Long Range ─");
@@ -1343,9 +1349,10 @@ fn spool_submenu(
         icon_label(IconName::RefreshCw, "Spoolup Cycles"),
         window,
         cx,
-        move |menu, _, _| {
+        move |menu, window, _| {
             let menu = (0..=max).fold(
-                menu.scrollable(true).max_h(px(MENU_MAX_H)),
+                menu.scrollable(true)
+                    .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H)),
                 |menu, cycles| {
                     let label = if cycles == max {
                         format!("{cycles} (default)")
@@ -1464,8 +1471,10 @@ fn variations_submenu(
         icon_label(IconName::Replace, "Variations"),
         window,
         cx,
-        move |menu, _, _| {
-            let mut menu = menu.scrollable(true).max_h(px(MENU_MAX_H));
+        move |menu, window, _| {
+            let mut menu = menu
+                .scrollable(true)
+                .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H));
             for (group, members) in &groups {
                 menu = menu.label(group.clone());
                 for (id, name) in members {

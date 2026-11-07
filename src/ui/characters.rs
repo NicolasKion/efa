@@ -309,8 +309,10 @@ impl Efa {
             .disabled(!has_fit)
             .dropdown_menu({
                 let this = this.clone();
-                move |menu, _, _| {
-                    let mut menu = menu.scrollable(true).max_h(px(MENU_MAX_H));
+                move |menu, window, _| {
+                    let mut menu = menu
+                        .scrollable(true)
+                        .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H));
                     for (id, name) in &choices {
                         let (this, id) = (this.clone(), *id);
                         menu = menu.item(
@@ -514,7 +516,9 @@ pub(super) fn skills_submenu(
         window,
         cx,
         move |menu, window, cx| {
-            let mut menu = menu.scrollable(true).max_h(px(MENU_MAX_H));
+            let mut menu = menu
+                .scrollable(true)
+                .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H));
             for (skill, name) in &skills {
                 let skill = *skill;
                 let level = characters.level(character, skill);

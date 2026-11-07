@@ -209,6 +209,9 @@ pub struct Efa {
     saved: Saved,
     stats: Option<Stats>,
     browser_tab: BrowserTab,
+    /// Whether the browser column shows the stats, which it does in place of the stats pane
+    /// while the window is too narrow for that pane.
+    side_stats: bool,
     additions_tab: AdditionsTab,
     search: Entity<InputState>,
     search_text: String,
@@ -299,7 +302,7 @@ impl Efa {
         let results_filter =
             cx.new(|cx| InputState::new(window, cx).placeholder("Filter these items"));
         let name_input = cx.new(|cx| InputState::new(window, cx).placeholder("Fit name"));
-        let notes_input = cx.new(|cx| TextareaState::new(window, cx).rows(6).placeholder("Notes"));
+        let notes_input = cx.new(|cx| TextareaState::new(window, cx).rows(2).placeholder("Notes"));
         let subscriptions = vec![
             cx.subscribe(&search, |this, input, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
@@ -385,6 +388,7 @@ impl Efa {
             saved,
             stats: None,
             browser_tab: BrowserTab::Market,
+            side_stats: false,
             additions_tab: AdditionsTab::Drones,
             search,
             search_text: String::new(),
@@ -982,11 +986,11 @@ impl Efa {
     fn open_import_dialog(window: &mut Window, cx: &mut Context<Self>) {
         let text = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .rows(16)
+                .rows(4)
                 .placeholder("[Vexor, My Vexor]\nDrone Damage Amplifier II\n…")
         });
         let this = cx.entity().downgrade();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, window, _| {
             let (text, this) = (text.clone(), this.clone());
             // The OK button and Enter both submit; it closes the dialog itself when done.
             let submit: crate::ui::widgets::Submit = {
@@ -1013,7 +1017,11 @@ impl Efa {
                 .child(
                     v_flex()
                         .gap_3()
-                        .child(Textarea::new(&text).h(px(320.)))
+                        .child(Textarea::new(&text).h(widgets::dialog_fill_h(
+                            window,
+                            IMPORT_TEXT_H,
+                            IMPORT_AROUND,
+                        )))
                         .child(
                             h_flex().justify_end().child(
                                 Button::new("import-eft")
@@ -1120,7 +1128,7 @@ impl Efa {
             h_flex()
                 .min_w_0()
                 .gap_1p5()
-                .child(div().truncate().child(fit.name.clone()))
+                .child(div().min_w_0().truncate().child(fit.name.clone()))
                 .when_some(hull, |row, hull| {
                     row.child(
                         div()
@@ -1358,6 +1366,7 @@ impl Efa {
     /// listed next shows in full.
     fn show_in_market(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.browser_tab = BrowserTab::Market;
+        self.side_stats = false;
         self.search_text.clear();
         self.search_debounce = None;
         self.search
@@ -1370,6 +1379,7 @@ impl Efa {
     /// Show one ship's fits in the fittings browser, pyfa's shipJump.
     pub(super) fn jump_to_fittings(&mut self, ship: TypeId, cx: &mut Context<Self>) {
         self.browser_tab = BrowserTab::Fittings;
+        self.side_stats = false;
         self.ship_browser.go(crate::ship_browser::Stage::Fits(ship));
         cx.notify();
     }
@@ -1405,6 +1415,14 @@ fn load(overrides: &crate::overrides::Values) -> Result<Loaded, String> {
     })
 }
 
+/// The import dialog's text area, and what the dialog takes around it.
+const IMPORT_TEXT_H: f32 = 320.;
+const IMPORT_AROUND: f32 = 180.;
+
+/// Below this window width the stats pane moves into the browser column as a tab, so the fit
+/// keeps room enough to read.
+const NARROW_WIDTH: f32 = 900.;
+
 impl Render for Efa {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let root = v_flex()
@@ -1437,16 +1455,22 @@ impl Render for Efa {
             .size_full()
             .child(self.fit_tabs(&loaded, cx))
             .child(if self.fit().is_some() {
-                v_resizable("center")
-                    .child(resizable_panel().child(self.fitting_view(&loaded, window, cx)))
+                // Under the tabs: the split fills what they leave, not the whole column.
+                div()
+                    .flex_1()
+                    .min_h_0()
                     .child(
-                        // The additions drawer keeps its height as the window resizes; the
-                        // fitting view above takes the change and scrolls.
-                        resizable_panel()
-                            .size(px(200.))
-                            .size_range(px(80.)..px(600.))
-                            .fixed()
-                            .child(self.additions(&loaded, window, cx)),
+                        v_resizable("center")
+                            .child(resizable_panel().child(self.fitting_view(&loaded, window, cx)))
+                            .child(
+                                // The additions drawer keeps its height as the window resizes;
+                                // the fitting view above takes the change and scrolls.
+                                resizable_panel()
+                                    .size(px(200.))
+                                    .size_range(px(80.)..px(600.))
+                                    .fixed()
+                                    .child(self.additions(&loaded, window, cx)),
+                            ),
                     )
                     .into_any_element()
             } else {
@@ -1483,6 +1507,7 @@ impl Render for Efa {
             self.window_title = title;
         }
 
+        let narrow = window.viewport_size().width < px(NARROW_WIDTH);
         root.capture_any_mouse_up(cx.listener(|g, _: &MouseUpEvent, _, cx| {
             // A tab let go anywhere, dropped or not, ends the drag; the zone goes away.
             if g.tab_dragging {
@@ -1509,21 +1534,24 @@ impl Render for Efa {
                                 resizable_panel()
                                     .size(px(280.))
                                     .size_range(px(200.)..px(520.))
-                                    .child(self.browser(&loaded, cx)),
+                                    .child(self.browser(&loaded, narrow, cx)),
                             )
                             .child(resizable_panel().child(center)),
                     ),
                 )
-                // pyfa's stats pane is as wide as its content and does not resize.
-                .child(
-                    div()
-                        .flex_none()
-                        .w(px(stats::PANE_WIDTH))
-                        .h_full()
-                        .border_l_1()
-                        .border_color(cx.theme().border)
-                        .child(self.stats_panel(&loaded, cx)),
-                ),
+                // pyfa's stats pane is as wide as its content and does not resize. A narrow
+                // window has no room for it next to the fit; it is a browser tab there.
+                .when(!narrow, |row| {
+                    row.child(
+                        div()
+                            .flex_none()
+                            .w(px(stats::PANE_WIDTH))
+                            .h_full()
+                            .border_l_1()
+                            .border_color(cx.theme().border)
+                            .child(self.stats_panel(&loaded, cx)),
+                    )
+                }),
         )
         .into_any_element()
     }

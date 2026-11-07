@@ -210,6 +210,7 @@ impl Efa {
             .child(
                 div()
                     .flex_1()
+                    .min_w_0()
                     .truncate()
                     .when(!active, |d| d.text_color(theme.muted_foreground))
                     .child(catalog.name(type_id)),
@@ -340,9 +341,10 @@ fn item_entries(
             icon_label(IconName::Replace, "Variations"),
             window,
             cx,
-            move |menu, _, _| {
+            move |menu, window, _| {
                 entries.iter().fold(
-                    menu.scrollable(true).max_h(px(MENU_MAX_H)),
+                    menu.scrollable(true)
+                        .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H)),
                     |menu, (v, name)| {
                         let (this, v) = (this.clone(), *v);
                         menu.item(
@@ -390,7 +392,9 @@ fn apply_set_entry(
         window,
         cx,
         move |menu, window, cx| {
-            let mut menu = menu.scrollable(true).max_h(px(MENU_MAX_H));
+            let mut menu = menu
+                .scrollable(true)
+                .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H));
             for set in precalc.iter() {
                 let first = set.grades.first().and_then(|(_, ids)| ids.first().copied());
                 if let [(_, implants)] = set.grades.as_slice() {
@@ -419,9 +423,10 @@ fn apply_set_entry(
                     icon_label(IconName::Star, "Saved Sets"),
                     window,
                     cx,
-                    move |menu, _, _| {
+                    move |menu, window, _| {
                         saved.iter().fold(
-                            menu.scrollable(true).max_h(px(MENU_MAX_H)),
+                            menu.scrollable(true)
+                                .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H)),
                             |menu, set| {
                                 menu.item(set_item(&this, &loaded, &set.name, &set.implants))
                             },

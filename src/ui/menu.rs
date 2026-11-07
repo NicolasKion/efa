@@ -17,7 +17,7 @@ use gpui_kit::{
     SharedString, Styled, WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
-use super::{AdditionsTab, BrowserTab, Efa, actions::Action};
+use super::{AdditionsTab, BrowserTab, Efa, actions::Action, widgets};
 use crate::prices::optimize;
 
 /// Key context of a fit window, so text fields keep their own Ctrl+C, Ctrl+V and Ctrl+Z.
@@ -239,6 +239,10 @@ impl Efa {
 
     /// Ctrl+F, mainFrame.py toggleSearchBox: the search box of whichever browser shows.
     fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.side_stats {
+            self.side_stats = false;
+            cx.notify();
+        }
         let input = match self.browser_tab {
             BrowserTab::Market => &self.search,
             BrowserTab::Fittings => &self.fit_search,
@@ -252,6 +256,7 @@ impl Efa {
             BrowserTab::Market => BrowserTab::Fittings,
             BrowserTab::Fittings => BrowserTab::Market,
         };
+        self.side_stats = false;
         cx.notify();
     }
 
@@ -322,7 +327,7 @@ impl Efa {
                     .ghost()
                     .small()
                     .label(label)
-                    .dropdown_menu(move |menu, _, _| build(menu.min_w(px(220.))))
+                    .dropdown_menu(move |menu, window, _| build(fit_window(menu, window)))
             };
 
         let file = {
@@ -551,8 +556,8 @@ impl Efa {
                 .ghost()
                 .small()
                 .label("Character")
-                .dropdown_menu(move |menu, _, cx| {
-                    Self::character_menu(menu.min_w(px(220.)), &this, cx)
+                .dropdown_menu(move |menu, window, cx| {
+                    Self::character_menu(fit_window(menu, window), &this, cx)
                 })
         };
 
@@ -684,7 +689,10 @@ impl Efa {
             .when_some(self.status.clone(), |bar, status| {
                 bar.child(
                     div()
+                        .flex_1()
+                        .min_w_0()
                         .ml_4()
+                        .truncate()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
                         .child(status),
@@ -710,6 +718,13 @@ impl Efa {
             )
         });
     }
+}
+
+/// A menu bar menu, which scrolls when the window is too short to show it whole.
+fn fit_window(menu: PopupMenu, window: &Window) -> PopupMenu {
+    menu.min_w(px(220.))
+        .scrollable(true)
+        .max_h(widgets::menu_max_h(window, f32::MAX))
 }
 
 #[cfg(test)]

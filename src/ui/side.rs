@@ -96,17 +96,43 @@ enum GroupIcon {
 }
 
 impl Efa {
-    pub(super) fn browser(&mut self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The market and fittings browsers. In a `narrow` window the stats pane is a third tab
+    /// here instead of a column of its own.
+    pub(super) fn browser(
+        &mut self,
+        loaded: &Loaded,
+        narrow: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let stats_shown = narrow && self.side_stats;
         let content = match self.browser_tab {
+            // The stats are laid out for their own pane's width; narrower, they scroll sideways.
+            _ if stats_shown => div()
+                .id("side-stats")
+                .size_full()
+                .overflow_x_scroll()
+                .child(
+                    div()
+                        .h_full()
+                        .min_w(px(super::stats::PANE_WIDTH))
+                        .child(self.stats_panel(loaded, cx)),
+                )
+                .into_any_element(),
             BrowserTab::Market => self.market(loaded, cx).into_any_element(),
             BrowserTab::Fittings => self.fittings(loaded, cx).into_any_element(),
         };
         let theme = cx.theme();
-        let tab = |id: &'static str, label: &'static str, which: BrowserTab| {
-            let selected = self.browser_tab == which;
+        let tab = |id: &'static str, label: &'static str, which: Option<BrowserTab>| {
+            let selected = match which {
+                Some(which) => !stats_shown && self.browser_tab == which,
+                None => stats_shown,
+            };
             div()
                 .id(id)
-                .px_3()
+                .min_w_0()
+                .truncate()
+                .when(narrow, Styled::px_2)
+                .when(!narrow, Styled::px_3)
                 .py_1()
                 .rounded(px(4.))
                 .when(selected, |t| {
@@ -118,7 +144,13 @@ impl Efa {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _: &MouseDownEvent, _, cx| {
-                        this.browser_tab = which;
+                        match which {
+                            Some(which) => {
+                                this.browser_tab = which;
+                                this.side_stats = false;
+                            }
+                            None => this.side_stats = true,
+                        }
                         cx.notify();
                     }),
                 )
@@ -132,8 +164,9 @@ impl Efa {
                     .p_1()
                     .border_b_1()
                     .border_color(theme.border)
-                    .child(tab("tab-market", "Market", BrowserTab::Market))
-                    .child(tab("tab-fittings", "Fittings", BrowserTab::Fittings)),
+                    .child(tab("tab-market", "Market", Some(BrowserTab::Market)))
+                    .child(tab("tab-fittings", "Fittings", Some(BrowserTab::Fittings)))
+                    .when(narrow, |bar| bar.child(tab("tab-stats", "Stats", None))),
             )
             .child(content)
     }
@@ -382,7 +415,7 @@ impl Efa {
                         .child(LucideIcon::new(name).size(px(14.))),
                 ),
             })
-            .child(div().truncate().child(name))
+            .child(div().flex_1().min_w_0().truncate().child(name))
             // A click lists the entry's items and opens it; a second click closes it again.
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 if branch && (!selected || !this.expanded_groups.remove(&id)) {
@@ -959,6 +992,7 @@ impl Efa {
             Stage::Search(query) => format!("Search: {}", query.trim()),
             Stage::Recent => "Recent fits".to_owned(),
         };
+        let title = div().min_w_0().truncate().child(title);
         let row = h_flex()
             .id("fittings-title")
             .gap_2()
@@ -1072,10 +1106,11 @@ impl Efa {
                         .map(|b| icon_box(&loaded.catalog, &loaded.icons, Icon::Bracket(b), 16.)),
                 ),
             )
-            .child(div().flex_1().truncate().child(name))
+            .child(div().flex_1().min_w_0().truncate().child(name))
             .when(count > 0, |row| {
                 row.child(
                     div()
+                        .flex_none()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(fits_label(count)),
@@ -1115,6 +1150,7 @@ impl Efa {
                     .child(
                         div()
                             .text_xs()
+                            .truncate()
                             .text_color(cx.theme().muted_foreground)
                             .child(fits_label(count)),
                     ),
@@ -1181,6 +1217,7 @@ impl Efa {
             })
             .child(
                 v_flex()
+                    .flex_1()
                     .min_w_0()
                     .child(div().truncate().child(fit.name.clone()))
                     .child(
@@ -1287,7 +1324,7 @@ fn heading_row(title: &str, cx: &App) -> AnyElement {
         .text_color(cx.theme().muted_foreground)
         .border_b_1()
         .border_color(cx.theme().border)
-        .child(title.to_owned())
+        .child(div().min_w_0().truncate().child(title.to_owned()))
         .into_any_element()
 }
 

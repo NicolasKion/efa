@@ -710,9 +710,10 @@ fn fighter_menu(
             icon_label(IconName::Replace, "Variations"),
             window,
             cx,
-            move |menu, _, _| {
+            move |menu, window, _| {
                 entries.iter().fold(
-                    menu.scrollable(true).max_h(px(MENU_MAX_H)),
+                    menu.scrollable(true)
+                        .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H)),
                     |menu, (v, name)| {
                         let (this, v) = (this.clone(), *v);
                         menu.item(

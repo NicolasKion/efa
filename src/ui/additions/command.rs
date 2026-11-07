@@ -340,7 +340,9 @@ fn command_view_menu(
         window,
         cx,
         move |menu, window, cx| {
-            let menu = menu.scrollable(true).max_h(px(MENU_MAX_H));
+            let menu = menu
+                .scrollable(true)
+                .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H));
             if boosters.len() < GROUP_BY_SHIP_FROM {
                 return boosters.iter().fold(menu, |menu, (i, ship, name)| {
                     menu.item(PopupMenuItem::new(format!("({ship}) {name}")).on_click(pick(*i)))

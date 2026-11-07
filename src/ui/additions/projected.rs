@@ -1009,9 +1009,10 @@ fn projected_item_menu(
                 icon_label(IconName::Replace, "Variations"),
                 window,
                 cx,
-                move |menu, _, _| {
+                move |menu, window, _| {
                     entries.iter().fold(
-                        menu.scrollable(true).max_h(px(MENU_MAX_H)),
+                        menu.scrollable(true)
+                            .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H)),
                         |menu, (v, name)| {
                             let v = *v;
                             menu.item(
@@ -1181,7 +1182,9 @@ fn charge_submenu(
         cx,
         move |menu, window, cx| {
             let catalog = &loaded.catalog;
-            let mut menu = menu.scrollable(true).max_h(px(MENU_MAX_H));
+            let mut menu = menu
+                .scrollable(true)
+                .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H));
             let ladder = |menu: PopupMenu,
                           title: String,
                           charges: Vec<TypeId>,
@@ -1253,9 +1256,10 @@ fn spool_submenu(
         icon_label(IconName::RefreshCw, "Spoolup Cycles"),
         window,
         cx,
-        move |menu, _, _| {
+        move |menu, window, _| {
             let menu = (0..=max).fold(
-                menu.scrollable(true).max_h(px(MENU_MAX_H)),
+                menu.scrollable(true)
+                    .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H)),
                 |menu, cycles| {
                     let label = if cycles == max {
                         format!("{cycles} (default)")
@@ -1303,7 +1307,9 @@ fn env_level(
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
-    let mut menu = menu.scrollable(true).max_h(px(MENU_MAX_H));
+    let mut menu = menu
+        .scrollable(true)
+        .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H));
     for (name, group) in &level.groups {
         let (this, group) = (this.clone(), Rc::new(group.clone()));
         menu = menu.submenu(name.clone(), window, cx, move |menu, window, cx| {

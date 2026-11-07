@@ -7,7 +7,7 @@ use gpui_kit::component::{
     IconName,
     menu::{PopupMenu, PopupMenuItem},
 };
-use gpui_kit::{App, ClipboardItem, Context, WeakEntity, Window, px};
+use gpui_kit::{App, ClipboardItem, Context, WeakEntity, Window};
 
 use super::{
     Efa, Loaded,
@@ -65,9 +65,10 @@ pub(super) fn mutation_entries(
         item_label(&loaded, Some(first), "Apply Mutaplasmid"),
         window,
         cx,
-        move |menu, _, _| {
+        move |menu, window, _| {
             mutaplasmids.iter().fold(
-                menu.scrollable(true).max_h(px(MENU_MAX_H)),
+                menu.scrollable(true)
+                    .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H)),
                 |menu, (id, name)| {
                     let (this, target, id) = (this.clone(), target.clone(), *id);
                     menu.item(item_entry(&loaded, id, name.clone()).on_click(

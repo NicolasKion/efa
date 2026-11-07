@@ -293,6 +293,7 @@ impl Efa {
             .child(
                 div()
                     .flex_1()
+                    .min_w_0()
                     .truncate()
                     .child(name_text(catalog, type_id, count)),
             )

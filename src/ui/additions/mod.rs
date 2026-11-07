@@ -201,7 +201,11 @@ impl Efa {
                 tab_count(fit, tab, labels, self.character_implants()),
             )
         });
+        // The tabs scroll sideways when the drawer is too narrow for them all.
         let tab_bar = h_flex()
+            .id("additions-tabs")
+            .flex_none()
+            .overflow_x_scroll()
             .gap_1()
             .p_1()
             .bg(theme.tab_bar)
@@ -224,6 +228,8 @@ impl Efa {
                 };
                 div()
                     .id(label)
+                    .flex_none()
+                    .whitespace_nowrap()
                     .px_3()
                     .py_0p5()
                     .rounded(px(4.))
@@ -511,9 +517,10 @@ fn addition_menu(
             icon_label(IconName::Replace, "Variations"),
             window,
             cx,
-            move |menu, _, _| {
+            move |menu, window, _| {
                 entries.iter().fold(
-                    menu.scrollable(true).max_h(px(MENU_MAX_H)),
+                    menu.scrollable(true)
+                        .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H)),
                     |menu, (v, name)| {
                         let (this, v) = (this.clone(), *v);
                         menu.item(

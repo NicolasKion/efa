@@ -64,6 +64,9 @@ const SPEED_ICON: i32 = 1389;
 /// Room pyfa adds to a column's widest text when sizing it.
 const AUTO_PADDING: f32 = 24.;
 const NAME_MIN: f32 = 80.;
+/// A row's gap between cells and its padding on both sides, as `gap_1` and `px_1` set them.
+const ROW_GAP: f32 = 4.;
+const ROW_PADDING: f32 = 8.;
 const MIN_WIDTH: f32 = 28.;
 const HANDLE_W: f32 = 6.;
 const HEADER_ICON: f32 = 18.;
@@ -190,6 +193,23 @@ impl Layout {
             layout.widths[col.index()] = widest + AUTO_PADDING;
         }
         layout
+    }
+
+    /// The narrowest a row can be: below it the list scrolls sideways.
+    fn min_width(&self) -> f32 {
+        let columns: f32 = Col::ALL
+            .iter()
+            .map(|&col| {
+                if col == Col::Name && !self.name_fixed {
+                    NAME_MIN
+                } else {
+                    self.widths[col.index()]
+                }
+            })
+            .sum();
+        // Each row: padding on both sides, and a gap between the state, the icon and the cells.
+        let gaps = ROW_GAP * (Col::ALL.len() + 1) as f32;
+        STATE_W + ICON_W + columns + gaps + ROW_PADDING
     }
 
     fn cell(&self, col: Col) -> Div {
@@ -548,12 +568,20 @@ impl Efa {
             .on_drop(cx.listener(|g, dragged: &Dragged, window, cx| {
                 g.drop_on_drones(None, dragged, window.modifiers(), cx);
             }));
-        v_flex()
+        // Narrower than its columns, the list scrolls sideways instead of cutting them off.
+        div()
+            .id("drones-scroll-x")
             .flex_1()
             .min_h_0()
+            .overflow_x_scroll()
             .bg(theme.background)
-            .child(Self::drone_header(loaded, layout, cx))
-            .child(list)
+            .child(
+                v_flex()
+                    .h_full()
+                    .min_w(px(layout.min_width()))
+                    .child(Self::drone_header(loaded, layout, cx))
+                    .child(list),
+            )
             .into_any_element()
     }
 
