@@ -54,8 +54,7 @@ impl Gyfa {
     ) {
         let Some(loaded) = self.loaded() else { return };
         let gyfa = cx.entity();
-        // Worked out here: the editor is built while this view is being updated, so it cannot
-        // read the view itself yet.
+        // Worked out here, while this view can still be read directly.
         let select = select.or_else(|| self.saved.implant_sets.first().map(|s| s.name.clone()));
         // A window of its own, like pyfa's editors, so it can sit beside the fit.
         let options = WindowOptions {
@@ -63,14 +62,21 @@ impl Gyfa {
             app_id: Some("gyfa".into()),
             ..Default::default()
         };
-        let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-            window.set_window_title("gyfa: Implant Set Editor");
-            cx.new(|cx| ImplantSetEditor::new(&gyfa, loaded, select, window, cx))
+        // Opened once this update is over: the new window draws right away, and drawing reads
+        // this view, which gpui does not allow while it is being updated.
+        cx.defer(move |cx| {
+            let weak = gyfa.downgrade();
+            let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+                window.set_window_title("gyfa: Implant Set Editor");
+                cx.new(|cx| ImplantSetEditor::new(&gyfa, loaded, select, window, cx))
+            });
+            if let Err(e) = opened {
+                Gyfa::app_update(&weak, cx, |g, cx| {
+                    g.status = Some(format!("Could not open the implant set editor: {e}").into());
+                    cx.notify();
+                });
+            }
         });
-        if let Err(e) = opened {
-            self.status = Some(format!("Could not open the implant set editor: {e}").into());
-            cx.notify();
-        }
     }
 
     /// Ask for a name, save the fit's applied implants under it, then show the set in the
