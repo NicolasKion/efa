@@ -17,9 +17,11 @@ use gpui_kit::{
 
 use super::{
     Action, Gyfa, Loaded, RowRef, Scope,
+    actions::MutaTarget,
     characters::skills_submenu,
     columns::{Col, ICON_W, STATE_W},
     item_stats::{StatsOf, stats_entry},
+    mutations::{copy_entry, mutation_entries},
     validation::flag,
     widgets::{color, entry, icon, icon_box, icon_label, item_entry, item_label, short},
 };
@@ -344,7 +346,8 @@ impl Gyfa {
         };
         let layout = self.column_layout;
         let prices = &self.prices;
-        let text = |col: Col| col.text(catalog, prices, m, &info);
+        let expanded = self.saved.preferences.general.expanded_mutant_names;
+        let text = |col: Col| col.text(catalog, prices, m, &info, expanded);
         let group = self.fit().map_or(1, |f| f.group(slot, i).len());
         base.child(
             div()
@@ -679,12 +682,18 @@ fn item_menu(
         t.category_label(),
         StatsOf::Fitted(fitted),
     ));
-    if t.market_group.is_some() {
+    // A mutated module has no market group of its own; pyfa jumps to its base item's.
+    let mutation = snapshot.module.as_ref().and_then(|m| m.mutation.as_ref());
+    let market_type = mutation.map_or(type_id, |m| m.base);
+    if catalog
+        .get(market_type)
+        .is_some_and(|t| t.market_group.is_some())
+    {
         menu = menu.item(
             entry(IconName::Search, "Module Market Group").on_click(handler(
                 this,
                 move |g, _, window, cx| {
-                    g.jump_to_market(type_id, window, cx);
+                    g.jump_to_market(market_type, window, cx);
                 },
             )),
         );
@@ -699,6 +708,10 @@ fn item_menu(
     if variations.len() > 1 && shown.variations {
         menu = variations_submenu(menu, this, loaded, item, type_id, variations, window, cx);
     }
+    if let RowRef::Module(..) = item {
+        let target = MutaTarget::Modules(vec![item]);
+        menu = mutation_entries(menu, this, loaded, type_id, mutation, &target, window, cx);
+    }
     let rack = match item {
         RowRef::Module(slot, _) => slot,
         RowRef::Rig(_) => Slot::Rig,
@@ -710,17 +723,25 @@ fn item_menu(
             entry(IconName::Plus, format!("Fill With {}", t.category_label())).on_click(handler(
                 this,
                 move |g, _, _, cx| {
-                    g.apply(Action::FillRack(slot, type_id), cx);
+                    let action = match item {
+                        RowRef::Module(slot, i) => Action::FillClone(slot, i),
+                        RowRef::Rig(_) | RowRef::Subsystem(_) => Action::FillRack(slot, type_id),
+                    };
+                    g.apply(action, cx);
                 },
             )),
         );
+    }
+    if let Some(mutation) = mutation {
+        menu = menu.item(copy_entry(loaded, mutation));
     }
 
     menu = skills_submenu(
         menu,
         this,
         loaded,
-        SkillTarget::Module(rack, type_id),
+        // Skills see the base item; the mutation only moves numbers.
+        SkillTarget::Module(rack, market_type),
         window,
         cx,
     );
@@ -752,7 +773,7 @@ fn item_menu(
     if let Some(charge) = charge {
         let target = SkillTarget::Charge {
             slot: rack,
-            module: type_id,
+            module: market_type,
             charge,
         };
         menu = skills_submenu(menu, this, loaded, target, window, cx);

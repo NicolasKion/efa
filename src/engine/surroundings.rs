@@ -12,7 +12,7 @@ use rc::{
     ModRack, SolOwned, stats::StatSlot,
 };
 
-use super::{DroneInfo, Engine, Slots, drone_info, module_state};
+use super::{DroneInfo, Engine, Slots, add_fit_drone, add_fit_module, drone_info, module_state};
 use crate::fit::{
     Fit, ModuleState,
     fighters::Fighter,
@@ -183,20 +183,12 @@ impl Engine {
         ] {
             for (i, m) in list.iter().enumerate() {
                 let Some(m) = m else { continue };
-                if let Ok(mut module) = f.add_module(
+                if let Ok(module) = add_fit_module(
+                    &mut f,
                     rack,
                     rc::AddMode::Replace(rc::RackPos::from_usize_clamped(i)),
-                    ItemTypeId::from_i32(m.type_id),
-                    module_state(m.state),
+                    m,
                 ) {
-                    if let Some(cycles) = m.spool {
-                        module.set_spool_override(Some(rc::Spool::Cycles(rc::Count::from_u32(
-                            cycles,
-                        ))));
-                    }
-                    if let Some(charge) = m.charge {
-                        module.set_charge_type_id(ItemTypeId::from_i32(charge));
-                    }
                     modules.push(module.get_item_id());
                 }
             }
@@ -221,7 +213,7 @@ impl Engine {
                 } else {
                     MinionState::InBay
                 };
-                let drone = f.add_drone(ItemTypeId::from_i32(stack.type_id), state, None, None);
+                let drone = add_fit_drone(&mut f, stack, state);
                 if i < stack.active {
                     drones.push(drone.get_item_id());
                 }

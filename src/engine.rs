@@ -23,7 +23,7 @@ use rc::{
 
 use crate::{
     data::{Slot, TypeId},
-    fit::{Fit, ModuleState},
+    fit::{DroneStack, Fit, Module, ModuleState, Mutation},
 };
 
 pub use inspect::{AttrValue, FitItem, Inspection, ModOp, Modifier, Source, SourceKind};
@@ -493,26 +493,18 @@ fn build_local(
         for (i, m) in modules.iter().enumerate() {
             let Some(m) = m else { continue };
             // Each module goes to its own position; heat spreads by position.
-            match f.add_module(
+            match add_fit_module(
+                f,
                 rack,
                 AddMode::Replace(rc::RackPos::from_usize_clamped(i)),
-                ItemTypeId::from_i32(m.type_id),
-                module_state(m.state),
+                m,
             ) {
                 Ok(mut module) => {
                     let id = module.get_item_id();
                     module_ids.push((slot, i, id));
                     refs.insert(id, ItemRef::Module(slot, i));
-                    if let Some(cycles) = m.spool {
-                        module.set_spool_override(Some(rc::Spool::Cycles(rc::Count::from_u32(
-                            cycles,
-                        ))));
-                    }
-                    if let Some(charge) = m.charge {
-                        let charge = module
-                            .set_charge_type_id(ItemTypeId::from_i32(charge))
-                            .get_item_id();
-                        refs.insert(charge, ItemRef::Module(slot, i));
+                    if let Some(charge) = module.get_charge() {
+                        refs.insert(charge.get_item_id(), ItemRef::Module(slot, i));
                     }
                 }
                 Err(e) => problems.push(format!("module {}: {e}", m.type_id)),
@@ -547,14 +539,7 @@ fn build_local(
             } else {
                 MinionState::InBay
             };
-            let id = f
-                .add_drone(
-                    ItemTypeId::from_i32(stack.type_id),
-                    minion_state,
-                    None,
-                    None,
-                )
-                .get_item_id();
+            let id = add_fit_drone(f, stack, minion_state).get_item_id();
             refs.insert(id, ItemRef::Drone(stack_index));
             first.get_or_insert(id);
         }
@@ -774,6 +759,72 @@ fn drone_info(sol: &mut SolOwned, id: ItemId) -> DroneInfo {
         );
     }
     info
+}
+
+/// The type refine is given for a fit's module or drone: the base item, which the mutation then
+/// turns into the abyssal one.
+fn added_type(type_id: TypeId, mutation: Option<&Mutation>) -> ItemTypeId {
+    ItemTypeId::from_i32(mutation.map_or(type_id, |m| m.base))
+}
+
+/// Add a fit's module at a rack position the way every build does: the base item, mutated, with
+/// its spool and charge.
+fn add_fit_module<'a>(
+    f: &'a mut rc::Fit<'_>,
+    rack: ModRack,
+    mode: AddMode,
+    m: &Module,
+) -> Result<rc::Module<'a>, rc::err::ModuleAddError> {
+    let mut module = f.add_module(
+        rack,
+        mode,
+        added_type(m.type_id, m.mutation.as_ref()),
+        module_state(m.state),
+    )?;
+    if let Some(mutation) = &m.mutation
+        && let Ok(applied) = module.mutate(ItemTypeId::from_i32(mutation.mutaplasmid))
+    {
+        roll(applied, mutation);
+    }
+    if let Some(cycles) = m.spool {
+        module.set_spool_override(Some(rc::Spool::Cycles(rc::Count::from_u32(cycles))));
+    }
+    if let Some(charge) = m.charge {
+        module.set_charge_type_id(ItemTypeId::from_i32(charge));
+    }
+    Ok(module)
+}
+
+/// Add one drone of a stack, mutated like the stack is.
+fn add_fit_drone<'a>(
+    f: &'a mut rc::Fit<'_>,
+    stack: &DroneStack,
+    state: MinionState,
+) -> rc::Drone<'a> {
+    let mut drone = f.add_drone(
+        added_type(stack.type_id, stack.mutation.as_ref()),
+        state,
+        None,
+        None,
+    );
+    if let Some(mutation) = &stack.mutation
+        && let Ok(applied) = drone.mutate(ItemTypeId::from_i32(mutation.mutaplasmid))
+    {
+        roll(applied, mutation);
+    }
+    drone
+}
+
+/// Set a fresh mutation's attributes to the rolled values.
+fn roll(applied: rc::Mutation<'_>, mutation: &Mutation) {
+    let rc::Mutation::Effective(mut effective) = applied else {
+        return;
+    };
+    for (&attr, &value) in &mutation.attrs {
+        if let Ok(mut full) = effective.get_full_mattr(AttrId::Eve(EveAttrId::from_i32(attr))) {
+            let _ = full.set_value(Some(rc::Value::from_f64_clamped(value)));
+        }
+    }
 }
 
 fn module_state(state: ModuleState) -> rc::ModuleState {

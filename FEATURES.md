@@ -2,7 +2,7 @@
 
 Rough coverage: the core loop works (pick ship, add modules/charges/drones/implants/boosters, see the main stats, EFT in/out), plus the pyfa layout with in-game icons and the main module columns, which is maybe 20-25% of pyfa's surface.
 Biggest gaps: fleet effects beyond command fits, ESI/SSO, and most context menus.
-Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, mutations, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
+Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
 Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time, abstract target profiles for applied damage, lock/warp time formulas (all done graph-side in src/graphs).
 
 Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API that likely covers the calculation.
@@ -109,8 +109,8 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [ ] Jump to market group (itemMarketJump.py)
 - [x] Project item onto fit (builtinContextMenus/itemProject.py), refine: add_proj from a hidden capsule fit per projected item
 - [x] Projection range (builtinContextMenus/itemProjectionRange.py), refine: projector coordinates
-- [ ] Mutate item / mutaplasmid apply and edit (builtinContextMenus/itemMutations.py), refine: set_mutator_type_id, mutate, set_roll
-- [ ] Export mutated module (builtinContextMenus/moduleMutatedExport.py)
+- [x] Mutate item / mutaplasmid apply and revert, modules and drones (builtinContextMenus/itemMutations.py), refine: mutate, FullMAttr::set_value; rolls are edited in the stats window
+- [x] Export mutated module (builtinContextMenus/moduleMutatedExport.py)
 - [ ] Spool-up percentage for spooling modules (builtinContextMenus/moduleSpool.py), refine: set_spool_override, set_default_spool
 - [ ] Reactive armor hardener pattern (builtinContextMenus/moduleRahPattern.py), refine: set_rah_incoming_dps
 - [x] Factor in reload time toggle (builtinContextMenus/factorReload.py), refine: StatTimeOptions reload
@@ -204,8 +204,8 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] EFT import via paste dialog (service/port/eft.py)
 - [x] EFT import from file on CLI (service/port/port.py importFitFromFiles)
 - [x] EFT export to clipboard (service/port/eft.py exportEft)
-- [~] EFT import of cargo and charges (eft.py), pyfa's /offline and several fits per paste; no mutations
-- [~] EFT export options: implants, boosters, cargo, mutations, loaded charges (eft.py, gui/copySelectDialog.py), in pyfa's layout with empty slots up to the ship's count; no mutations yet
+- [x] EFT import of cargo, charges and mutated items' blocks (eft.py), pyfa's /offline and several fits per paste
+- [x] EFT export options: implants, boosters, cargo, mutations, loaded charges (eft.py, gui/copySelectDialog.py), in pyfa's layout with empty slots up to the ship's count
 - [x] Import from clipboard with format autodetect (port.py importAuto), item lists go to the additions tabs or fit a single module
 - [x] Import from file dialog, multiple files (port.py importFitsThreaded)
 - [x] EFT .cfg legacy format (port.py importEftCfg); notes come from Description= lines, with | as line breaks
@@ -215,7 +215,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [~] Multibuy export (service/port/multibuy.py), no Optimize Prices
 - [ ] EFS stats JSON export (service/port/efs.py)
 - [x] Ship stats export (service/port/shipstats.py)
-- [ ] Mutated item (muta) format (service/port/muta.py)
+- [x] Mutated item (muta) format (service/port/muta.py): pasting one mutated item fits it into the current fit, drone copy/paste carries mutations; ESI dynamic item links are not fetched (no ESI)
 - [x] HTML export of all fits (pyfaHTMLExportPreferences.py), full and minimal
 - [x] Export item stats to CSV (gui/itemStats.py)
 - [ ] Export implants/boosters/charges lists (builtinContextMenus/additionsExportAll.py)
@@ -232,7 +232,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Affected by tree with item and attribute views, real names toggle, expand all (builtinItemStatsViews/itemAffectedBy.py), refine: iter_modifiers (Modification, Affector)
 - [x] Properties: the type's raw facts, shown always where pyfa needs debug mode (builtinItemStatsViews/itemProperties.py)
 - [x] Compare variations side by side, sortable, raw toggle, highlight on double-click (builtinItemStatsViews/itemCompare.py)
-- [ ] Mutations with roll sliders (builtinItemStatsViews/itemMutator.py, attributeSlider.py), refine: get_mutation, set_roll, mutate_raw. Not yet: gyfa has no mutated items
+- [x] Mutations with roll sliders (builtinItemStatsViews/itemMutator.py, attributeSlider.py): worst to best, a field for exact values, Reset defaults, Random stats, Revert changes; letting go of a slider is one undo step in the main window, where pyfa commits on close
 - [x] Price in item stats: in the Compare tab, and in the window header (gui/itemStats.py)
 
 ## Graphs
@@ -260,7 +260,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 ## Preferences
 
 - [x] Preferences dialog (gui/preferenceDialog.py), its own window, changes apply to every window right away
-- [~] General: theme, language, tooltips, rack layout, omega icons, mutated names, tab info (pyfaGeneralPreferences.py), theme follows Omarchy live; character implants by default, slot colors, reopen fits, tab tooltips, ship browser tooltips, Omega icons, open in new tab, ammo change all and tab info done
+- [~] General: theme, language, tooltips, rack layout, omega icons, mutated names, tab info (pyfaGeneralPreferences.py), theme follows Omarchy live; character implants by default, slot colors, reopen fits, tab tooltips, ship browser tooltips, Omega icons, open in new tab, ammo change all, mutated names and tab info done
 - [x] Engine: strict skills, factor in reload, global default spool (pyfaEnginePreferences.py), refine: set_default_spool, set_default_optional_reloads
 - [~] Stat view layout (pyfaStatViewPreferences.py), each section shown or hidden
 - [x] Context menu toggles (pyfaContextMenuPreferences.py)

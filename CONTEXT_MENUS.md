@@ -2,7 +2,7 @@
 
 152 menu entries in 35 right-click contexts (pyfa ContextMenu registry plus 4 hand-built menus).
 gyfa progress is tracked per line below; fitting rows have Shift/Ctrl selection and Ctrl/Alt "all similar" now.
-Biggest gaps: market item actions (9), module extras (variations, mutaplasmids, spool, RAH, fill, skills), generic links, ship menu (tactical mode, sec status), additions copy/paste, stats-pane and graph options.
+Biggest gaps: market item actions (9), module extras (RAH), generic links, ship menu (tactical mode, sec status), additions copy/paste, stats-pane and graph options.
 
 Legend: `[x]` in gyfa, `[~]` partial, `[ ]` missing. Line format: label | when it shows | what it does | pyfa file (in gui/builtinContextMenus/ unless a path is given).
 
@@ -26,9 +26,9 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 - [x] {Module} Market Group | item has a market group (mutated: base item's) | jumps market browser to the item | itemMarketJump.py
 - [x] Remove {Module} | always | removes selection (multi); Ctrl/Alt removes all similar. GuiRemoveLocalModuleCommand | itemRemove.py
 - [x] Variations | item has 2+ variations, not hidden (pref metaSwap) | submenu of meta variants grouped by meta group (disabled header rows), sorted by meta level; unfittable ones disabled. Swaps selection modules with identical variation set; Ctrl/Alt all similar. GuiChangeLocalModuleMetasCommand | itemVariationChange.py
-- [ ] Apply Mutaplasmid / Revert to {base} | item has mutaplasmids or is mutated | not mutated: submenu of mutaplasmids (Glorified sorted after base name); mutated: plain entry reverting to base item. GuiConvertMutatedLocalModuleCommand / GuiRevertMutatedLocalModuleCommand | itemMutations.py
+- [x] Apply Mutaplasmid / Revert to {base} | item has mutaplasmids or is mutated | not mutated: submenu of mutaplasmids (Glorified sorted after base name); mutated: plain entry reverting to base item. GuiConvertMutatedLocalModuleCommand / GuiRevertMutatedLocalModuleCommand | itemMutations.py
 - [x] Fill With {Module} | always (pref moduleFill) | clones the module into all free slots of that rack. GuiFillWithClonedLocalModulesCommand | moduleFill.py
-- [ ] Copy Module to Clipboard | module is mutated | copies EFT mutant block (item, mutaplasmid, attrs) | moduleMutatedExport.py
+- [x] Copy Module to Clipboard | module is mutated | copies EFT mutant block (item, mutaplasmid, attrs) | moduleMutatedExport.py
 - [x] Change {Module} Skills | some skill modifies a non-zero attr of the item (pref changeAffectingSkills) | submenu per affecting skill, each with "Not Learned", "Level 0".."Level 5" (checked current); changes character skill level and refreshes fit | skillAffectors.py. gyfa lists the skill's current level after its name and greys the levels out for All 0/All 5, which ignore changes in pyfa too; no visibility pref yet
 
 ### fittingCharge
@@ -58,7 +58,7 @@ Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 - [x] Change Drone Quantity | row clicked | dialog "New Amount", sets stack size. GuiChangeLocalDroneAmountCommand | itemAmountChange.py
 - [x] Split Drone Stack | stack amount > 1 | dialog for amount, splits into a new stack. GuiSplitLocalDroneStackCommand | droneSplitStack.py
 - [x] Variations | 2+ variations | variation submenu, swaps selected drones with same variation set. GuiChangeLocalDroneMetasCommand | itemVariationChange.py
-- [ ] Apply Mutaplasmid / Revert to {base} | drone has mutaplasmids or is mutated | as modules. GuiConvertMutatedLocalDroneCommand / GuiRevertMutatedLocalDroneCommand | itemMutations.py. Not yet: needs mutaplasmid data in the catalog, mutated items in the fit model and EFT, and the stats window to edit rolls; best done with modules
+- [x] Apply Mutaplasmid / Revert to {base} | drone has mutaplasmids or is mutated | as modules. GuiConvertMutatedLocalDroneCommand / GuiRevertMutatedLocalDroneCommand | itemMutations.py
 - [x] Change Drone Skills | skills affect drone | skill level submenu | skillAffectors.py
 
 ### droneItemMisc

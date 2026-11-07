@@ -130,6 +130,23 @@ fn export_lines(catalog: &Catalog, kind: AddKind, rows: &[(TypeId, u32)]) -> Str
         .join("\n")
 }
 
+/// Rows of a tab as text for the clipboard; drones bring their mutations along, as in pyfa.
+fn copy_text(catalog: &Catalog, fit: &Fit, kind: AddKind, picked: &[usize]) -> String {
+    if kind == AddKind::Drones {
+        let stacks: Vec<_> = picked
+            .iter()
+            .filter_map(|&i| fit.drones.get(i).cloned())
+            .collect();
+        return crate::port::eft::export_drones(catalog, &stacks);
+    }
+    let rows = kind.rows(fit);
+    let picked: Vec<(TypeId, u32)> = picked
+        .iter()
+        .filter_map(|&r| rows.get(r).copied())
+        .collect();
+    export_lines(catalog, kind, &picked)
+}
+
 /// Items from pasted lines that belong in the tab; anything else is skipped.
 fn parse_lines(catalog: &Catalog, kind: AddKind, text: &str) -> Vec<(TypeId, u32)> {
     text.lines()
@@ -313,6 +330,12 @@ fn addition_menu(
         return menu;
     };
     let category = t.category_label();
+    let mutation = (kind == AddKind::Drones)
+        .then(|| {
+            this.upgrade()
+                .and_then(|g| g.read(cx).fit()?.drones.get(i)?.mutation.clone())
+        })
+        .flatten();
     let targeted = |make: fn(Vec<usize>) -> Action| {
         let this = this.clone();
         move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
@@ -330,14 +353,20 @@ fn addition_menu(
         AddKind::Cargo => StatsOf::Type(type_id),
     };
     let mut menu = menu.item(stats_entry(this, category, stats_of));
-    if t.market_group
+    // A mutated drone has no market group of its own; pyfa jumps to its base drone's.
+    let market_type = mutation.as_ref().map_or(type_id, |m| m.base);
+    if catalog
+        .get(market_type)
+        .and_then(|t| t.market_group)
         .is_some_and(|g| catalog.market_groups.contains_key(&g))
     {
         let this = this.clone();
         menu = menu.item(
             entry(IconName::Search, format!("{category} Market Group")).on_click(
                 move |_, window, cx| {
-                    Gyfa::app_update(&this, cx, |g, cx| g.jump_to_market(type_id, window, cx));
+                    Gyfa::app_update(&this, cx, |g, cx| {
+                        g.jump_to_market(market_type, window, cx);
+                    });
                 },
             ),
         );
@@ -421,8 +450,21 @@ fn addition_menu(
             },
         );
     }
+    if kind == AddKind::Drones {
+        let target = super::actions::MutaTarget::Drones(i);
+        menu = super::mutations::mutation_entries(
+            menu,
+            this,
+            loaded,
+            type_id,
+            mutation.as_ref(),
+            &target,
+            window,
+            cx,
+        );
+    }
     if kind == AddKind::Drones
-        && let Some(target) = super::characters::stack_target(loaded, type_id)
+        && let Some(target) = super::characters::stack_target(loaded, market_type)
     {
         menu = super::characters::skills_submenu(menu, this, loaded, target, window, cx);
     }
@@ -476,13 +518,8 @@ fn misc_entries(
             entry(IconName::Copy, format!("Copy Selected {noun}")).on_click(move |_, _, cx| {
                 Gyfa::app_update(&this, cx, |g, cx| {
                     let Some(fit) = g.fit() else { return };
-                    let rows = kind.rows(fit);
-                    let picked: Vec<(TypeId, u32)> = g
-                        .addition_targets(i)
-                        .into_iter()
-                        .filter_map(|r| rows.get(r).copied())
-                        .collect();
-                    let text = export_lines(&loaded.catalog, kind, &picked);
+                    let picked = g.addition_targets(i);
+                    let text = copy_text(&loaded.catalog, fit, kind, &picked);
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 });
             }),
@@ -494,7 +531,8 @@ fn misc_entries(
             move |_, _, cx| {
                 Gyfa::app_update(&this, cx, |g, cx| {
                     let Some(fit) = g.fit() else { return };
-                    let text = export_lines(&loaded.catalog, kind, &kind.rows(fit));
+                    let all: Vec<usize> = (0..kind.rows(fit).len()).collect();
+                    let text = copy_text(&loaded.catalog, fit, kind, &all);
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 });
             },
@@ -507,6 +545,15 @@ fn misc_entries(
                 let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
                     return;
                 };
+                if kind == AddKind::Drones {
+                    let stacks = crate::port::eft::parse_drones(&loaded.catalog, &text);
+                    if !stacks.is_empty() {
+                        Gyfa::app_update(&this, cx, |g, cx| {
+                            g.apply(Action::AddDroneStacks(stacks), cx);
+                        });
+                    }
+                    return;
+                }
                 let items = parse_lines(&loaded.catalog, kind, &text);
                 if !items.is_empty() {
                     Gyfa::app_update(&this, cx, |g, cx| {

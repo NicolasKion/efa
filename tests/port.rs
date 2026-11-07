@@ -163,6 +163,7 @@ fn eft_options_leave_things_out() {
         implants: false,
         boosters: false,
         cargo: false,
+        mutations: false,
     };
     let exported = eft::export(&tengu, &catalog, &bare, None);
     for gone in ["Scourge", "Snake", "Blue Pill", "Nanite"] {

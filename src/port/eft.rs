@@ -3,14 +3,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{Imported, sort_cargo};
+use super::{Imported, muta::Blocks, sort_cargo};
 use crate::{
     data::{Catalog, Kind, Slot},
     fit::{DroneStack, Fit, Module, ModuleState},
 };
 
-/// pyfa's EFT export options, with its defaults. pyfa's "Mutated Attributes" has nothing to do
-/// until gyfa has mutated items.
+/// pyfa's EFT export options, with its defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 #[expect(
@@ -22,6 +21,8 @@ pub struct Options {
     pub implants: bool,
     pub boosters: bool,
     pub cargo: bool,
+    /// pyfa's "Mutated Attributes": mutated items point at a block with their rolls.
+    pub mutations: bool,
 }
 
 impl Default for Options {
@@ -31,6 +32,7 @@ impl Default for Options {
             implants: true,
             boosters: true,
             cargo: true,
+            mutations: true,
         }
     }
 }
@@ -46,23 +48,29 @@ pub struct RackSizes {
 }
 
 /// The fit as pyfa's EFT export: racks low to high then rigs and subsystems one blank line
-/// apart, and drones, implants and boosters, and cargo each two blank lines apart.
+/// apart, and drones, implants and boosters, cargo, and mutated items' rolls each two blank lines
+/// apart.
 pub fn export(fit: &Fit, catalog: &Catalog, options: &Options, sizes: Option<RackSizes>) -> String {
     let sizes = sizes.unwrap_or_default();
-    let module_line = |m: &Option<Module>, empty: &str| match m {
+    let mut blocks = Blocks::default();
+    let mut module_line = |m: &Option<Module>, empty: &str| match m {
         None => format!("[Empty {empty} slot]"),
         Some(m) => {
-            let mut line = catalog.name(m.type_id);
+            // Mutated modules go by their base item; the block says what became of it.
+            let mut line = catalog.name(m.base_type());
             if let Some(charge) = m.charge.filter(|_| options.loaded_charges) {
                 line = format!("{line}, {}", catalog.name(charge));
             }
             if m.state == ModuleState::Offline {
                 line.push_str(" /offline");
             }
+            if let Some(mutation) = m.mutation.as_ref().filter(|_| options.mutations) {
+                line.push_str(&blocks.add(catalog, mutation));
+            }
             line
         }
     };
-    let padded = |rack: &[Option<Module>], size: usize, empty: &str| -> Vec<String> {
+    let mut padded = |rack: &[Option<Module>], size: usize, empty: &str| -> Vec<String> {
         let mut lines: Vec<String> = rack.iter().map(|m| module_line(m, empty)).collect();
         lines.extend((rack.len()..size).map(|_| format!("[Empty {empty} slot]")));
         lines
@@ -90,9 +98,11 @@ pub fn export(fit: &Fit, catalog: &Catalog, options: &Options, sizes: Option<Rac
         sections.push(racks.join("\n\n"));
     }
     if !fit.drones.is_empty() {
-        sections.push(stack_lines(
+        sections.push(drone_lines(
             catalog,
-            fit.drones.iter().map(|d| (d.type_id, d.count)),
+            &fit.drones,
+            options.mutations,
+            &mut blocks,
         ));
     }
     if !fit.fighters.is_empty() {
@@ -121,11 +131,71 @@ pub fn export(fit: &Fit, catalog: &Catalog, options: &Options, sizes: Option<Rac
     if options.cargo && !fit.cargo.is_empty() {
         sections.push(stack_lines(catalog, sort_cargo(catalog, &fit.cargo)));
     }
+    if !blocks.is_empty() {
+        sections.push(blocks.render());
+    }
 
     let ship = fit
         .ship
         .map_or_else(|| "No ship".to_owned(), |s| catalog.name(s));
     format!("[{ship}, {}]\n\n{}", fit.name, sections.join("\n\n\n"))
+}
+
+/// Drone stacks as EFT lines: mutated ones by their base drone, pointing at their block when
+/// `mutations` is on.
+pub fn drone_lines(
+    catalog: &Catalog,
+    drones: &[DroneStack],
+    mutations: bool,
+    blocks: &mut Blocks,
+) -> String {
+    drones
+        .iter()
+        .map(|d| {
+            let mut line = format!("{} x{}", catalog.name(d.base_type()), d.count);
+            if let Some(mutation) = d.mutation.as_ref().filter(|_| mutations) {
+                line.push_str(&blocks.add(catalog, mutation));
+            }
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Drone stacks as pyfa's drone list export writes them: the lines, then the mutation blocks.
+pub fn export_drones(catalog: &Catalog, drones: &[DroneStack]) -> String {
+    let mut blocks = Blocks::default();
+    let lines = drone_lines(catalog, drones, true, &mut blocks);
+    if blocks.is_empty() {
+        lines
+    } else {
+        format!("{lines}\n\n\n{}", blocks.render())
+    }
+}
+
+/// Drone stacks from pasted lines like "Hobgoblin II x5 [1]", with their mutation blocks, the
+/// way pyfa's drone import reads them. Lines that are no drone are skipped.
+pub fn parse_drones(catalog: &Catalog, text: &str) -> Vec<DroneStack> {
+    let mut lines: Vec<String> = text.lines().map(|l| l.trim().to_owned()).collect();
+    let mutations = super::muta::take_blocks(catalog, &mut lines);
+    lines
+        .iter()
+        .filter(|l| !l.is_empty())
+        .filter_map(|line| {
+            let (line, reference) = super::muta::split_reference(line);
+            let (name, count) = crate::fit::split_count(line);
+            let t = catalog.find(name).filter(|t| t.kind == Kind::Drone)?;
+            let mut stack = DroneStack::new(t.id, count.unwrap_or(1), 0);
+            if let Some((result, mutation)) = reference
+                .and_then(|r| mutations.get(&r))
+                .and_then(|p| p.mutation(catalog))
+            {
+                stack.type_id = result;
+                stack.mutation = Some(mutation);
+            }
+            Some(stack)
+        })
+        .collect()
 }
 
 fn stack_lines(catalog: &Catalog, stacks: impl IntoIterator<Item = (i32, u32)>) -> String {
@@ -236,11 +306,9 @@ pub fn import_config(catalog: &Catalog, ship_name: &str, text: &str) -> Result<I
                 });
             }
             (ConfigKind::Drones { active }, Kind::Drone) => {
-                fit.drones.push(DroneStack {
-                    type_id: t.id,
-                    count: entry.count,
-                    active: if active { entry.count } else { 0 },
-                });
+                let launched = if active { entry.count } else { 0 };
+                fit.drones
+                    .push(DroneStack::new(t.id, entry.count, launched));
             }
             (ConfigKind::Cargo, _) => fit.add_cargo(t.id, entry.count),
             (ConfigKind::Implant { active }, Kind::Implant) => {
@@ -259,14 +327,8 @@ pub fn import_config(catalog: &Catalog, ship_name: &str, text: &str) -> Result<I
                 match slot {
                     Slot::High | Slot::Mid | Slot::Low => {
                         fit.rack_mut(slot).push(Some(Module {
-                            type_id: t.id,
-                            state: if t.activatable {
-                                ModuleState::Active
-                            } else {
-                                ModuleState::Online
-                            },
                             charge,
-                            spool: None,
+                            ..Module::new(catalog, t.id)
                         }));
                     }
                     Slot::Rig => fit.rigs.push(Some(t.id)),

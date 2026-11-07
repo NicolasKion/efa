@@ -42,6 +42,8 @@ pub struct General {
     pub ship_browser_tooltips: bool,
     /// Mark hulls and items an Alpha clone cannot use.
     pub omega_icons: bool,
+    /// Name mutated items after their mutaplasmid and base item rather than the abyssal type.
+    pub expanded_mutant_names: bool,
 }
 
 impl Default for General {
@@ -56,6 +58,7 @@ impl Default for General {
             additions_labels: AdditionsLabels::Active,
             ship_browser_tooltips: true,
             omega_icons: false,
+            expanded_mutant_names: false,
         }
     }
 }

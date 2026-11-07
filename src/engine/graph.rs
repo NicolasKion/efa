@@ -15,7 +15,7 @@ use rc::{
     },
 };
 
-use super::{CalcOptions, Engine, Pilot, module_state};
+use super::{CalcOptions, Engine, Pilot};
 use crate::{
     data::{Catalog, Hardpoint},
     fit::{Fit, ModuleState},
@@ -483,20 +483,14 @@ impl Engine {
         ] {
             for (i, m) in modules.iter().enumerate() {
                 let Some(m) = m else { continue };
-                let Ok(mut module) = f.add_module(
+                let Ok(module) = super::add_fit_module(
+                    &mut f,
                     rack,
                     AddMode::Replace(rc::RackPos::from_usize_clamped(i)),
-                    ItemTypeId::from_i32(m.type_id),
-                    module_state(m.state),
+                    m,
                 ) else {
                     continue;
                 };
-                if let Some(cycles) = m.spool {
-                    module.set_spool_override(Some(Spool::Cycles(Count::from_u32(cycles))));
-                }
-                if let Some(charge) = m.charge {
-                    module.set_charge_type_id(ItemTypeId::from_i32(charge));
-                }
                 placed.push(Placed {
                     id: module.get_item_id(),
                     type_id: m.type_id,
@@ -525,9 +519,7 @@ impl Engine {
                 } else {
                     MinionState::InBay
                 };
-                let id = f
-                    .add_drone(ItemTypeId::from_i32(stack.type_id), state, None, None)
-                    .get_item_id();
+                let id = super::add_fit_drone(&mut f, stack, state).get_item_id();
                 first.get_or_insert(id);
             }
             if let Some(id) = first {

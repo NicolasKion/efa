@@ -15,6 +15,7 @@ use crate::{
     ship_browser::Race,
 };
 
+pub mod muta;
 pub mod projection;
 
 pub type TypeId = i32;
@@ -256,11 +257,13 @@ pub struct Catalog {
     /// Published ships by group, groups by name and ships by race and name, the fittings
     /// browser's first two stages.
     pub ship_groups: Vec<(i32, Vec<TypeId>)>,
+    /// What each mutaplasmid takes, gives and rolls.
+    pub mutaplasmids: muta::Mutaplasmids,
 }
 
 /// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
 /// instead of loaded.
-const CACHE_FORMAT: u32 = 3;
+const CACHE_FORMAT: u32 = 4;
 const CACHE_FILE: &str = "catalog.bin";
 
 /// The cache on disk: the key it was built for, then the catalog.
@@ -307,6 +310,8 @@ impl Catalog {
         let meta_groups: HashMap<String, SdeMetaGroup> = read(dir, "sde/metagroups.json")?;
         let graphics: HashMap<String, SdeGraphic> = read(dir, "sde/graphics.json")?;
         let clone_grades: HashMap<String, SdeCloneGrade> = read(dir, "sde/clonegrades.json")?;
+        let muta = muta::Source::read(dir)?;
+        let stand_ins = muta.stand_ins();
         let icon_files: HashMap<i32, String> = icons
             .into_iter()
             .filter_map(|(id, icon)| Some((id.parse().ok()?, icon.icon_file?)))
@@ -365,6 +370,8 @@ impl Catalog {
                 continue;
             }
 
+            // Abyssal types read the attributes they lack from a type they are made from.
+            let stand_in = stand_ins.get(&id).and_then(|b| dogma.get(&b.to_string()));
             let dogma = dogma.get(&id.to_string());
             let has_effect = |wanted: i32| {
                 dogma.is_some_and(|d| d.effects.iter().any(|e| e.effect_id == wanted))
@@ -382,7 +389,7 @@ impl Catalog {
                 })
             };
             let attr = |wanted: i32| {
-                dogma.and_then(|d| {
+                [dogma, stand_in].into_iter().flatten().find_map(|d| {
                     d.attributes
                         .iter()
                         .find(|a| a.attribute_id == wanted)
@@ -515,6 +522,15 @@ impl Catalog {
         }
 
         let projection = projection.finish(dir);
+        let mutaplasmids = muta.finish(
+            dir,
+            &types
+                .iter()
+                .filter(|(_, t)| t.kind == Kind::Cargo)
+                .map(|(&id, t)| (id, t.name.clone()))
+                .collect(),
+            &dogma,
+        );
 
         // Published names win when two types share one, which happens with old unpublished copies.
         let mut by_name = HashMap::with_capacity(types.len());
@@ -635,6 +651,7 @@ impl Catalog {
             required_skills,
             projection,
             ship_groups,
+            mutaplasmids,
         })
     }
 

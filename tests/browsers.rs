@@ -80,6 +80,7 @@ fn charges_for_a_fit() {
             state: ModuleState::Active,
             charge: None,
             spool: None,
+            mutation: None,
         })],
         ..Fit::new("test")
     };

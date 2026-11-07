@@ -132,6 +132,14 @@ impl ExportWindow {
                         s.eft.loaded_charges = v;
                     },
                 ),
+                (
+                    "Mutated Attributes",
+                    "Export mutated modules' stats",
+                    s.eft.mutations,
+                    |s, v| {
+                        s.eft.mutations = v;
+                    },
+                ),
                 ("Implants", "Export implants", s.eft.implants, |s, v| {
                     s.eft.implants = v;
                 }),

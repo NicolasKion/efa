@@ -16,7 +16,7 @@ use super::{
 use crate::{
     data::{Catalog, Slot},
     engine::{ModuleInfo, Stats},
-    fit::{Fit, Module},
+    fit::{Fit, Module, mutation::display_name},
     icons::Icon,
     prices::Prices,
 };
@@ -97,21 +97,24 @@ impl Col {
         }
     }
 
-    /// What a module's cell shows in this column.
+    /// What a module's cell shows in this column. `expanded` names mutated modules after their
+    /// mutaplasmid and base item.
     pub fn text(
         self,
         catalog: &Catalog,
         prices: &Prices,
         m: &Module,
         info: &ModuleInfo,
+        expanded: bool,
     ) -> Option<String> {
         match self {
-            Self::Name => Some(match (m.spool, info.spool_max) {
-                (Some(cycles), Some(max)) => {
-                    format!("{} ({cycles}/{max} cycles)", catalog.name(m.type_id))
-                }
-                _ => catalog.name(m.type_id),
-            }),
+            Self::Name => {
+                let name = display_name(catalog, m.type_id, m.mutation.as_ref(), expanded);
+                Some(match (m.spool, info.spool_max) {
+                    (Some(cycles), Some(max)) => format!("{name} ({cycles}/{max} cycles)"),
+                    _ => name,
+                })
+            }
             Self::Powergrid => info.powergrid.map(short),
             Self::Cpu => info.cpu.map(short),
             Self::Capacitor => info.cap_per_sec.map(|v| format!("{:+.1}/s", -v)),
@@ -220,6 +223,7 @@ impl Gyfa {
         stats: &Stats,
         window: &Window,
     ) -> Layout {
+        let expanded = self.saved.preferences.general.expanded_mutant_names;
         let mut layout = Layout::default();
         let modules: Vec<(&Module, ModuleInfo)> = [Slot::High, Slot::Mid, Slot::Low]
             .into_iter()
@@ -244,7 +248,7 @@ impl Gyfa {
             };
             let widest = modules
                 .iter()
-                .filter_map(|(m, info)| col.text(&loaded.catalog, &self.prices, m, info))
+                .filter_map(|(m, info)| col.text(&loaded.catalog, &self.prices, m, info, expanded))
                 .map(|text| text_width(window, &text))
                 .fold(header, f32::max);
             let extra = if col == Col::Charge {

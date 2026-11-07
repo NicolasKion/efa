@@ -6,7 +6,7 @@ use std::fmt::Write;
 use super::{Bay, Imported, charge_count, escape_xml, new_fit, place, subsystem_flag};
 use crate::{
     data::{Catalog, Kind, Slot},
-    fit::Fit,
+    fit::{DroneStack, Fit, Mutation},
 };
 
 /// pyfa cuts descriptions to this many characters.
@@ -32,37 +32,39 @@ pub fn export(fits: &[&Fit], catalog: &Catalog) -> String {
                 Some((_, n)) => *n += count,
                 None => charges.push((name, count)),
             };
-        let mut hardware = |type_id: i32, slot: String| {
+        let mut hardware = |type_id: i32, slot: String, mutation: Option<&Mutation>| {
             let _ = writeln!(
                 out,
-                "\t\t<hardware slot=\"{slot}\" type=\"{}\"/>",
-                escape_xml(&catalog.name(type_id))
+                "\t\t<hardware slot=\"{slot}\" type=\"{}\"{}/>",
+                escape_xml(&catalog.name(type_id)),
+                mutant_attrs(catalog, mutation)
             );
         };
         for (slot, label) in [(Slot::Low, "low"), (Slot::Mid, "med"), (Slot::High, "hi")] {
             for (n, m) in fit.rack(slot).iter().flatten().enumerate() {
-                hardware(m.type_id, format!("{label} slot {n}"));
+                hardware(m.type_id, format!("{label} slot {n}"), m.mutation.as_ref());
                 if let Some(charge) = m.charge {
                     add_charge(
                         catalog.name(charge),
-                        charge_count(catalog, m.type_id, charge),
+                        charge_count(catalog, m.base_type(), charge),
                     );
                 }
             }
         }
         for (n, &rig) in fit.rigs.iter().flatten().enumerate() {
-            hardware(rig, format!("rig slot {n}"));
+            hardware(rig, format!("rig slot {n}"), None);
         }
         for &subsystem in &fit.subsystems {
             let n = subsystem_flag(catalog, subsystem) - 125;
-            hardware(subsystem, format!("subsystem slot {n}"));
+            hardware(subsystem, format!("subsystem slot {n}"), None);
         }
         for d in &fit.drones {
             let _ = writeln!(
                 out,
-                "\t\t<hardware qty=\"{}\" slot=\"drone bay\" type=\"{}\"/>",
+                "\t\t<hardware qty=\"{}\" slot=\"drone bay\" type=\"{}\"{}/>",
                 d.count,
-                escape_xml(&catalog.name(d.type_id))
+                escape_xml(&catalog.name(d.type_id)),
+                mutant_attrs(catalog, d.mutation.as_ref())
             );
         }
         for &(type_id, count) in &fit.cargo {
@@ -79,6 +81,18 @@ pub fn export(fits: &[&Fit], catalog: &Catalog) -> String {
     }
     out.push_str("</fittings>\n");
     out
+}
+
+/// pyfa's extra attributes on a mutated item's hardware: what it was made from and its rolls.
+fn mutant_attrs(catalog: &Catalog, mutation: Option<&Mutation>) -> String {
+    mutation.map_or_else(String::new, |m| {
+        format!(
+            " base_type=\"{}\" mutaplasmid=\"{}\" mutated_attrs=\"{}\"",
+            escape_xml(&catalog.name(m.base)),
+            escape_xml(&catalog.name(m.mutaplasmid)),
+            escape_xml(&m.render_attrs(catalog))
+        )
+    })
 }
 
 /// Notes as the game's description: cut like pyfa does, line breaks as <br>.
@@ -164,6 +178,28 @@ fn hardware(fit: &mut Fit, catalog: &Catalog, tag: &Tag, unknown: &mut Vec<Strin
     } else {
         Bay::Fitted
     };
+    // A mutated item names its base item, the mutaplasmid and the rolls.
+    let mutant = tag
+        .attr("mutaplasmid")
+        .and_then(|m| catalog.find(&m))
+        .filter(|_| bay == Bay::Fitted)
+        .and_then(|m| {
+            let attrs = tag
+                .attr("mutated_attrs")
+                .map_or_default(|a| super::muta::parse_attrs(catalog, &a));
+            Mutation::with_values(catalog, t.id, m.id, attrs)
+        });
+    if let Some((type_id, mutation)) = mutant {
+        if t.kind == Kind::Drone {
+            fit.add_drone_stack(DroneStack {
+                mutation: Some(mutation),
+                ..DroneStack::new(type_id, count, 0)
+            });
+        } else {
+            fit.add_mutated(catalog, type_id, mutation);
+        }
+        return;
+    }
     place(fit, catalog, t.id, count, bay);
 }
 

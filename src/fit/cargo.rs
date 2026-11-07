@@ -61,12 +61,13 @@ impl Fit {
         self.cargo = merged;
     }
 
-    /// The item at a position and its loaded charge, if anything is there.
+    /// The item at a position and its loaded charge, if anything is there. A mutated module is
+    /// its base item: cargo holds no mutations, as in pyfa.
     fn fitted(&self, (slot, i): (Slot, usize)) -> Option<(TypeId, Option<TypeId>)> {
         match slot {
             Slot::High | Slot::Mid | Slot::Low => {
                 let m = self.rack(slot).get(i)?.as_ref()?;
-                Some((m.type_id, m.charge))
+                Some((m.base_type(), m.charge))
             }
             Slot::Rig => self.rigs.get(i).copied().flatten().map(|r| (r, None)),
             Slot::Subsystem => self.subsystems.get(i).map(|&s| (s, None)),
@@ -120,10 +121,13 @@ impl Fit {
                 .as_ref()
                 .and_then(|m| m.spool)
                 .filter(|_| t.is_some_and(|t| t.spools)),
+            mutation: None,
         };
         let mut to_cargo = None;
         let mut from_cargo = None;
-        if let Some((old_type, charge)) = old.as_ref().and_then(|m| Some((m.type_id, m.charge?))) {
+        if let Some((old_type, charge)) =
+            old.as_ref().and_then(|m| Some((m.base_type(), m.charge?)))
+        {
             let before = charges_per_module(catalog, old_type, charge);
             let fits = catalog
                 .get(charge)
@@ -214,7 +218,7 @@ impl Fit {
                 let Some(Some(module)) = self.rack(slot).get(i) else {
                     return false;
                 };
-                let (module_type, old_charge) = (module.type_id, module.charge);
+                let (module_type, old_charge) = (module.base_type(), module.charge);
                 let fits = catalog.get(module_type).is_some_and(|m| t.fits_in(m));
                 if old_charge == Some(type_id) || !fits {
                     return false;

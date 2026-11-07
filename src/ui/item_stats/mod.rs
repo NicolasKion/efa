@@ -10,6 +10,7 @@ mod attributes;
 mod compare;
 mod format;
 mod menu;
+mod mutator;
 #[cfg(test)]
 mod tests;
 mod text;
@@ -250,6 +251,7 @@ pub fn open(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Traits,
+    Mutations,
     Description,
     Attributes,
     Compare,
@@ -264,6 +266,7 @@ impl Tab {
     fn label(self) -> &'static str {
         match self {
             Self::Traits => "Traits",
+            Self::Mutations => "Mutations",
             Self::Description => "Description",
             Self::Attributes => "Attributes",
             Self::Compare => "Compare",
@@ -308,6 +311,8 @@ pub struct ItemStats {
     req_open: Openness,
     dep_open: Openness,
     compare: compare::State,
+    /// The Mutations tab's sliders, built once it is first shown.
+    mutator: Option<mutator::Panel>,
     focus: FocusHandle,
     /// An icon was not on disk yet while drawing.
     icon_missing: Cell<bool>,
@@ -370,6 +375,7 @@ impl ItemStats {
             req_open: Openness::new(true),
             dep_open: Openness::new(false),
             compare: compare::State::default(),
+            mutator: None,
             focus,
             icon_missing: Cell::new(false),
             icon_polls: 0,
@@ -472,6 +478,9 @@ impl ItemStats {
         if info.is_some_and(|i| i.traits.is_some()) {
             tabs.push(Tab::Traits);
         }
+        if self.mutation().is_some() {
+            tabs.push(Tab::Mutations);
+        }
         if info.is_some_and(|i| i.description.is_some()) {
             tabs.push(Tab::Description);
         }
@@ -510,6 +519,21 @@ impl ItemStats {
             self.icon_missing.set(true);
             slot
         }
+    }
+
+    /// A mutated item's attributes, which the abyssal type mostly leaves to its base item: the
+    /// base item's, with the abyssal type's own on top where the base has none, as refine and
+    /// pyfa merge them.
+    fn mutated_info(&self, data: &ItemData) -> Option<TypeInfo> {
+        let base = data.type_info(self.mutation()?.base)?;
+        let mut merged = data.type_info(self.type_id).cloned().unwrap_or_default();
+        for &(attr, value) in &base.attrs {
+            match merged.attrs.binary_search_by_key(&attr, |&(a, _)| a) {
+                Ok(at) => merged.attrs[at].1 = value,
+                Err(at) => merged.attrs.insert(at, (attr, value)),
+            }
+        }
+        Some(merged)
     }
 
     /// Attribute values as the Attributes tab lists them.
@@ -744,7 +768,8 @@ impl ItemStats {
 
     fn attributes_tab(&self, data: &ItemData, cx: &mut Context<Self>) -> AnyElement {
         let catalog = &self.loaded.catalog;
-        let info = data.type_info(self.type_id);
+        let merged = self.mutated_info(data);
+        let info = merged.as_ref().or_else(|| data.type_info(self.type_id));
         let values = self.values(info);
         let describe = attributes::Describe {
             data,
@@ -976,7 +1001,7 @@ impl ItemStats {
 }
 
 impl Render for ItemStats {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let root = v_flex()
             .size_full()
             .bg(cx.theme().background)
@@ -1018,6 +1043,10 @@ impl Render for ItemStats {
                     .and_then(|i| i.description.as_deref())
                     .map_or_default(text::description_html);
                 Self::html_tab("description", html)
+            }
+            Tab::Mutations => {
+                self.sync_mutator(window, cx);
+                self.mutations_tab(&data, window, cx)
             }
             Tab::Attributes => self.attributes_tab(&data, cx),
             Tab::Compare => self.compare_tab(&data, cx),

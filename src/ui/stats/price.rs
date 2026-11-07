@@ -191,6 +191,7 @@ mod tests {
                 state: ModuleState::Online,
                 charge: Some(9),
                 spool: None,
+                mutation: None,
             })
         };
         let fit = Fit {
@@ -198,11 +199,7 @@ mod tests {
             high: vec![module(2), None],
             low: vec![module(2)],
             rigs: vec![Some(3), None],
-            drones: vec![DroneStack {
-                type_id: 4,
-                count: 3,
-                active: 1,
-            }],
+            drones: vec![DroneStack::new(4, 3, 1)],
             implants: vec![5],
             boosters: vec![Booster::new(6)],
             cargo: vec![(7, 10)],

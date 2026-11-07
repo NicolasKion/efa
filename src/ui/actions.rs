@@ -11,7 +11,9 @@ use gpui_kit::{ClickEvent, Context, Modifiers};
 use super::Gyfa;
 use crate::{
     data::{Slot, TypeId},
-    fit::{DamageProfile, ImplantSource, Module, ModuleState, cargo::Transfer, trim_rack},
+    fit::{
+        DamageProfile, ImplantSource, Module, ModuleState, Mutation, cargo::Transfer, trim_rack,
+    },
 };
 
 /// A row of the fitting view that holds something.
@@ -59,8 +61,19 @@ pub enum Action {
     Remove(Vec<RowRef>),
     /// Swap items for another type, keeping their state and charge.
     SwapType(Vec<RowRef>, TypeId),
+    /// Add pasted drone stacks: plain ones join stacks of their drone, mutated ones stand alone.
+    AddDroneStacks(Vec<crate::fit::DroneStack>),
+    /// Add a mutated module or drone, as a pasted mutated item comes in.
+    AddMutated(TypeId, Mutation),
+    /// Apply a mutaplasmid to modules or to a drone stack.
+    Mutate(MutaTarget, TypeId),
+    /// Turn mutated modules or a drone stack back into their base item.
+    Revert(MutaTarget),
     /// Put copies of a module into every free slot of its rack.
     FillRack(Slot, TypeId),
+    /// Copy a fitted module, charge, state and mutation included, into every free slot of its
+    /// rack, pyfa's "Fill With Module" on a fitted one.
+    FillClone(Slot, usize),
     /// Put an item at a rack position, replacing what is there.
     Place(Slot, usize, TypeId),
     /// Swap two positions of the same rack; either may be empty.
@@ -107,6 +120,13 @@ pub enum Action {
     SetTargetProfile(Option<crate::target_profile::TargetProfile>),
     /// Group a rack's modules by type, or stop grouping them.
     ToggleGrouped(Slot),
+}
+
+/// What a mutaplasmid is applied to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MutaTarget {
+    Modules(Vec<RowRef>),
+    Drones(usize),
 }
 
 /// The additions pane's tabs that list items.
@@ -306,26 +326,16 @@ impl Gyfa {
                 structural = true;
             }
             Action::Place(slot, i, type_id) => {
-                let Some(t) = loaded.catalog.get(type_id) else {
+                if loaded.catalog.get(type_id).is_none() {
                     return;
-                };
+                }
                 match slot {
                     Slot::High | Slot::Mid | Slot::Low => {
                         let rack = fit.rack_mut(slot);
                         if rack.len() <= i {
                             rack.resize_with(i + 1, || None);
                         }
-                        let initial = if t.activatable {
-                            ModuleState::Active
-                        } else {
-                            ModuleState::Online
-                        };
-                        rack[i] = Some(Module {
-                            type_id,
-                            state: initial,
-                            charge: None,
-                            spool: None,
-                        });
+                        rack[i] = Some(Module::new(&loaded.catalog, type_id));
                     }
                     Slot::Rig => {
                         if fit.rigs.len() <= i {
@@ -389,6 +399,44 @@ impl Gyfa {
                     }
                 }
             }
+            Action::AddDroneStacks(stacks) => {
+                for stack in stacks {
+                    if stack.mutation.is_some() {
+                        fit.add_drone_stack(stack);
+                    } else {
+                        fit.add_drones(stack.type_id, stack.count);
+                    }
+                }
+            }
+            Action::AddMutated(type_id, mutation) => {
+                if !fit.add_mutated(&loaded.catalog, type_id, mutation) {
+                    return;
+                }
+            }
+            Action::Mutate(target, mutaplasmid) => match target {
+                MutaTarget::Modules(rows) => {
+                    for m in modules_mut(fit, &rows) {
+                        m.mutate(&loaded.catalog, mutaplasmid);
+                    }
+                }
+                MutaTarget::Drones(i) => {
+                    if let Some(stack) = fit.drones.get_mut(i) {
+                        stack.mutate(&loaded.catalog, mutaplasmid);
+                    }
+                }
+            },
+            Action::Revert(target) => match target {
+                MutaTarget::Modules(rows) => {
+                    for m in modules_mut(fit, &rows) {
+                        m.revert();
+                    }
+                }
+                MutaTarget::Drones(i) => {
+                    if let Some(stack) = fit.drones.get_mut(i) {
+                        stack.revert();
+                    }
+                }
+            },
             Action::FillRack(slot, type_id) => {
                 let used = match slot {
                     Slot::Rig => fit.rigs.iter().flatten().count(),
@@ -407,6 +455,15 @@ impl Gyfa {
                     }
                     *fit = next;
                     base = after;
+                }
+            }
+            Action::FillClone(slot, i) => {
+                let Some(Some(template)) = fit.rack(slot).get(i).cloned() else {
+                    return;
+                };
+                let used = fit.rack(slot).iter().flatten().count();
+                for _ in 0..free(slot, used, stats) {
+                    fit.place_module(slot, template.clone());
                 }
             }
             Action::SetDronesActive(i, n) => fit.drones[i].active = n.min(fit.drones[i].count),
@@ -463,9 +520,9 @@ impl Gyfa {
                     let moved_active = stack.active.saturating_sub(stack.count);
                     stack.active -= moved_active;
                     let split = crate::fit::DroneStack {
-                        type_id: stack.type_id,
                         count: amount,
                         active: moved_active,
+                        ..stack.clone()
                     };
                     fit.drones.insert(i + 1, split);
                 }
