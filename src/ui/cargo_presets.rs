@@ -42,6 +42,10 @@ const LIST_NARROW_W: f32 = 180.;
 const TREE_W: f32 = 340.;
 /// Below this window width the market folds away behind a button.
 const NARROW_W: f32 = 900.;
+/// Below this window width the rows drop their volume column; the header still has the total.
+const COMPACT_W: f32 = 640.;
+/// The preset's column keeps this much beside an open market in a narrow window.
+const PRESET_MIN_W: f32 = 260.;
 const QUANTITY_W: f32 = 84.;
 const VOLUME_W: f32 = 110.;
 
@@ -648,6 +652,7 @@ impl CargoPresetEditor {
         let catalog = &loaded.catalog;
         let unit = catalog.get(type_id).map_or(0.0, |t| t.volume);
         let picked = self.picked == Some(type_id);
+        let compact = self.compact(window);
         let theme = cx.theme();
         let row = h_flex()
             .id(SharedString::from(format!("preset-item-{type_id}")))
@@ -681,14 +686,16 @@ impl CargoPresetEditor {
                     .flex_none()
                     .child(Input::new(&input).small()),
             )
-            .child(
-                div()
-                    .w(px(VOLUME_W))
-                    .flex_none()
-                    .text_right()
-                    .text_color(theme.muted_foreground)
-                    .child(format!("{} m³", amount(unit * f64::from(count)))),
-            )
+            .when(!compact, |row| {
+                row.child(
+                    div()
+                        .w(px(VOLUME_W))
+                        .flex_none()
+                        .text_right()
+                        .text_color(theme.muted_foreground)
+                        .child(format!("{} m³", amount(unit * f64::from(count)))),
+                )
+            })
             .child(
                 Button::new(SharedString::from(format!("preset-remove-{type_id}")))
                     .ghost()
@@ -710,6 +717,13 @@ impl CargoPresetEditor {
                 .into_any_element(),
             None => row.into_any_element(),
         }
+    }
+
+    /// Whether the preset's rows drop their volume column: in a small window, or beside an
+    /// open market in a narrow one.
+    fn compact(&self, window: &Window) -> bool {
+        let width = window.viewport_size().width;
+        width < px(COMPACT_W) || (width < px(NARROW_W) && self.market_open)
     }
 
     fn preset_column(
@@ -746,6 +760,7 @@ impl CargoPresetEditor {
             .upgrade()
             .is_some_and(|g| g.read(cx).fit().is_some());
         let narrow = window.viewport_size().width < px(NARROW_W);
+        let compact = self.compact(window);
         let theme = cx.theme();
         let policy = preset.policy;
         // Everything but applying sits behind the gear: the column is for the items.
@@ -865,7 +880,7 @@ impl CargoPresetEditor {
         v_flex()
             .id("preset-column")
             .flex_1()
-            .min_w_0()
+            .min_w(px(if narrow { PRESET_MIN_W } else { 0. }))
             .h_full()
             .gap_2()
             .p_3()
@@ -895,13 +910,15 @@ impl CargoPresetEditor {
                             .px_2()
                             .child(div().flex_1().child(caption("Items", cx)))
                             .child(div().w(px(QUANTITY_W)).child(caption("Quantity", cx)))
-                            .child(
-                                div()
-                                    .w(px(VOLUME_W))
-                                    .flex()
-                                    .justify_end()
-                                    .child(caption("Volume", cx)),
-                            )
+                            .when(!compact, |row| {
+                                row.child(
+                                    div()
+                                        .w(px(VOLUME_W))
+                                        .flex()
+                                        .justify_end()
+                                        .child(caption("Volume", cx)),
+                                )
+                            })
                             .child(div().w(px(22.))),
                     )
                     .child(
@@ -964,6 +981,8 @@ impl Render for CargoPresetEditor {
             |e: &mut Self, t, _, cx| e.add_item(t, 1, cx),
         );
         let show_market = !narrow || self.market_open;
+        // Narrow, an open market takes the list's place while a preset is open.
+        let show_list = !narrow || !self.market_open || preset.is_none();
         let theme = cx.theme();
         h_flex()
             .size_full()
@@ -975,12 +994,12 @@ impl Render for CargoPresetEditor {
             .bg(theme.background)
             .text_color(theme.foreground)
             .text_sm()
-            .child(list)
+            .when(show_list, |row| row.child(list))
             .child(middle)
             .when(show_market, |row| row.child(
                 v_flex()
-                    .w(px(TREE_W))
-                    .flex_none()
+                    .when(narrow, |d| d.flex_1().min_w_0().max_w(px(TREE_W)))
+                    .when(!narrow, |d| d.w(px(TREE_W)).flex_none())
                     .h_full()
                     .gap_2()
                     .p_3()
