@@ -13,15 +13,16 @@ use gpui_kit::component::{
     ActiveTheme, Disableable, Icon as UiIcon, IconName, Sizable, WindowExt,
     button::{Button, ButtonVariants},
     h_flex,
+    input::{Input, InputEvent, InputState},
     menu::{DropdownMenu, PopupMenuItem},
     switch::Switch,
     tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext, ClickEvent, Context, Div, FocusHandle, FontWeight,
+    AnyElement, App, AppContext, ClickEvent, Context, Div, Entity, FocusHandle, FontWeight,
     InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Task, WeakEntity, Window, div,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window, div,
     prelude::FluentBuilder, px,
 };
 
@@ -165,6 +166,10 @@ pub(super) struct WizardPanel {
     palette: Palette,
     title: SharedString,
     tab: Tab,
+    /// Custom budgets, typed as "75m" or "1.5b", next to the presets.
+    budget_each: Entity<InputState>,
+    budget_total: Entity<InputState>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl Gyfa {
@@ -221,6 +226,38 @@ impl Gyfa {
         let prices = Rc::clone(&self.prices);
         let title = format!("Fitting Wizard: {}", loaded.catalog.name(facts.ship)).into();
         let panel = cx.new(|cx| {
+            let input = |cx: &mut Context<WizardPanel>, window: &mut Window| {
+                cx.new(|cx| InputState::new(window, cx).placeholder("Custom"))
+            };
+            let budget_each = input(cx, window);
+            let budget_total = input(cx, window);
+            // Typing a custom budget sets it; text that is not an amount leaves it as it was.
+            let on_type = |cx: &mut Context<WizardPanel>,
+                           field: &Entity<InputState>,
+                           set: fn(&mut Choices, Option<u64>)| {
+                cx.subscribe(
+                    field,
+                    move |this: &mut WizardPanel, input, event: &InputEvent, cx| {
+                        if !matches!(event, InputEvent::Change) {
+                            return;
+                        }
+                        let text = input.read(cx).value().to_string();
+                        let amount = if text.trim().is_empty() {
+                            None
+                        } else {
+                            match Budget::parse(&text) {
+                                Some(isk) => Some(isk),
+                                None => return,
+                            }
+                        };
+                        this.change(Some(Tab::Tank), cx, |c| set(c, amount));
+                    },
+                )
+            };
+            let subscriptions = vec![
+                on_type(cx, &budget_each, |c, v| c.budget.each = v),
+                on_type(cx, &budget_total, |c, v| c.budget.total = v),
+            ];
             let mut panel = WizardPanel {
                 gyfa,
                 loaded,
@@ -247,6 +284,9 @@ impl Gyfa {
                 palette,
                 title,
                 tab,
+                budget_each,
+                budget_total,
+                _subscriptions: subscriptions,
             };
             panel.replan();
             panel
@@ -383,6 +423,51 @@ impl WizardPanel {
             cx.notify();
             return;
         }
+        // Prices first, for every module and rig the search may try, so budgets and the price
+        // column go by real numbers rather than whatever happened to be fetched already.
+        let types: std::collections::HashSet<TypeId> = problem
+            .candidates
+            .iter()
+            .map(|c| c.module.type_id)
+            .chain(problem.rigs.iter().map(|r| r.type_id))
+            .collect();
+        self.generation += 1;
+        let generation = self.generation;
+        self.note = Some("Fetching prices...".into());
+        cx.notify();
+        let wizard = cx.entity().downgrade();
+        Gyfa::app_update(&self.gyfa, cx, move |g, cx| {
+            g.with_prices_for(types, cx, move |g, cx| {
+                let prices = Rc::clone(&g.prices);
+                // The wizard may be the one asking, so it is updated once this is over.
+                cx.defer(move |cx| {
+                    let _ = wizard.update(cx, |w, cx| {
+                        if w.generation == generation {
+                            w.prices = prices;
+                            w.run_search(cx);
+                        }
+                    });
+                });
+            });
+        });
+    }
+
+    /// The search itself, once prices are in.
+    fn run_search(&mut self, cx: &mut Context<Self>) {
+        if self.search.is_some() {
+            return;
+        }
+        let Some(problem) = self.setup().tank_problem(
+            &self.loaded.engine,
+            &self.pilot,
+            &self.fit,
+            &self.choices,
+            &self.prices,
+        ) else {
+            self.note = None;
+            cx.notify();
+            return;
+        };
         self.generation += 1;
         let generation = self.generation;
         let engine = Arc::clone(&self.loaded.engine);
@@ -695,7 +780,7 @@ impl WizardPanel {
                 Budget::EACH
                     .iter()
                     .position(|&b| b == c.budget.each)
-                    .unwrap_or(0),
+                    .unwrap_or(usize::MAX),
             ),
             Row::BudgetTotal if c.tank != TankStyle::None => (
                 Budget::TOTAL
@@ -705,7 +790,7 @@ impl WizardPanel {
                 Budget::TOTAL
                     .iter()
                     .position(|&b| b == c.budget.total)
-                    .unwrap_or(0),
+                    .unwrap_or(usize::MAX),
             ),
             // Switches rather than one choice: each group is on or off.
             Row::Tiers if c.tank != TankStyle::None => (
@@ -895,6 +980,10 @@ impl WizardPanel {
     }
 
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // Keys typed into a text field are the field's, not the wizard's shortcuts.
+        if !self.focus.is_focused(window) {
+            return;
+        }
         let keystroke = &event.keystroke;
         if keystroke.modifiers.alt {
             return;
@@ -1223,8 +1312,8 @@ impl WizardPanel {
             ),
             Row::BudgetEach => (
                 "Per module".into(),
-                "The most any one tank module or rig may cost. Items without a price yet are \
-                 still tried."
+                "The most any one tank module or rig may cost. With a budget set, items the \
+                 market has no price for are left out."
                     .into(),
             ),
             Row::BudgetTotal => (
@@ -1341,6 +1430,20 @@ impl WizardPanel {
                 }
             }
             Row::Results => {}
+            Row::BudgetEach | Row::BudgetTotal => {
+                out.push(self.segmented(row, cx));
+                let field = if row == Row::BudgetEach {
+                    &self.budget_each
+                } else {
+                    &self.budget_total
+                };
+                out.push(
+                    div()
+                        .w(px(96.))
+                        .child(Input::new(field).small())
+                        .into_any_element(),
+                );
+            }
             _ => out.push(self.segmented(row, cx)),
         }
         out.extend(self.variant_button(row, cx));

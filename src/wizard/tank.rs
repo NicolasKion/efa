@@ -649,12 +649,12 @@ impl Setup<'_> {
             .iter()
             .flatten()
             .any(|m| category_of(self.catalog, m.type_id) == Category::Repairer);
-        // Anything over the per-module budget is left out; what has no price yet stays.
-        let affordable = |id: TypeId| {
-            choices
-                .budget
-                .each
-                .is_none_or(|max| prices.get(id).is_none_or(|price| price <= max as f64))
+        // Anything over the per-module budget is left out. With a budget set, so is anything
+        // without a price: the market has none of it, and it could cost anything.
+        let budgeted = choices.budget.each.is_some() || choices.budget.total.is_some();
+        let affordable = |id: TypeId| match prices.get(id) {
+            Some(price) => choices.budget.each.is_none_or(|max| price <= max as f64),
+            None => !budgeted,
         };
         let mut candidates = self.tank_candidates(choices, weakest);
         candidates.retain(|c| affordable(c.module.type_id));

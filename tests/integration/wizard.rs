@@ -701,3 +701,16 @@ fn a_picked_result_is_fitted_as_found() {
     got.sort_unstable();
     assert_eq!(got, want, "the rigs the search found go on");
 }
+
+#[test]
+fn budgets_read_like_eve_amounts() {
+    use wizard::Budget;
+    assert_eq!(Budget::parse("75m"), Some(75_000_000));
+    assert_eq!(Budget::parse("1.5b"), Some(1_500_000_000));
+    assert_eq!(Budget::parse("250k"), Some(250_000));
+    assert_eq!(Budget::parse("2,000,000 ISK"), Some(2_000_000));
+    assert_eq!(Budget::parse(""), None);
+    assert_eq!(Budget::parse("lots"), None);
+    assert_eq!(Budget::label(Some(1_500_000_000)), "1.5B");
+    assert_eq!(Budget::label(Some(75_000_000)), "75M");
+}

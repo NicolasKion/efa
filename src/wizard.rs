@@ -381,14 +381,37 @@ impl Budget {
         Some(5_000_000_000),
     ];
 
+    /// An amount of ISK as typed: "75m", "1.5b", "250k" or a plain number, commas and "isk"
+    /// allowed. None for anything else, an empty text included.
+    pub fn parse(text: &str) -> Option<u64> {
+        let text = text.trim().to_lowercase().replace([',', '_', ' '], "");
+        let text = text.strip_suffix("isk").unwrap_or(&text);
+        let (number, scale) = match text.chars().last()? {
+            'k' => (&text[..text.len() - 1], 1e3),
+            'm' => (&text[..text.len() - 1], 1e6),
+            'b' => (&text[..text.len() - 1], 1e9),
+            't' => (&text[..text.len() - 1], 1e12),
+            _ => (text, 1.0),
+        };
+        let value: f64 = number.parse().ok()?;
+        (value.is_finite() && value > 0.0).then(|| (value * scale).round() as u64)
+    }
+
     /// A budget as a short label: "Any", "50M", "1B".
     pub fn label(limit: Option<u64>) -> String {
         match limit {
             None => "Any".to_owned(),
-            Some(isk) if isk >= 1_000_000_000 => format!("{}B", isk / 1_000_000_000),
-            Some(isk) => format!("{}M", isk / 1_000_000),
+            Some(isk) if isk >= 1_000_000_000 => {
+                trim_zeros(&format!("{:.2}", isk as f64 / 1e9)) + "B"
+            }
+            Some(isk) => trim_zeros(&format!("{:.2}", isk as f64 / 1e6)) + "M",
         }
     }
+}
+
+/// "1.50" as "1.5", "2.00" as "2".
+fn trim_zeros(text: &str) -> String {
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
 /// A group of variations the tank search can try: the switches on the Tank tab.
