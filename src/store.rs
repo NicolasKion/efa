@@ -47,6 +47,9 @@ pub struct Saved {
     /// Height of the market tree over the results pane, in pixels, once the user dragged it.
     #[serde(default)]
     pub market_split: Option<f32>,
+    /// The fitting wizard's last bling choices, which the next fit starts from.
+    #[serde(default)]
+    pub wizard: crate::wizard::Bling,
 }
 
 /// What besides ship and fittings the price total includes, with pyfa's defaults.
