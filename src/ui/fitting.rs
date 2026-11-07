@@ -157,10 +157,18 @@ impl Gyfa {
             .h(px(ROW_HEIGHT))
             .px_1()
             .gap_1()
-            .when(n % 2 == 1, |r| r.bg(theme.table_even))
             .when_some(slot_tint, Styled::bg)
-            .when(selected, |r| r.bg(theme.table_active))
-            .hover(|s| s.bg(theme.table_hover));
+            .when(selected, |r| r.bg(theme.table_active));
+        // Rack headers are section bands, set off from the rack above; only real rows highlight.
+        let base = if matches!(row, Row::Header { .. }) {
+            base.when(n > 0, Styled::mt_2)
+                .bg(theme.secondary)
+                .border_t_1()
+                .border_b_1()
+                .border_color(theme.border)
+        } else {
+            base.hover(|s| s.bg(theme.table_hover))
+        };
         match row {
             Row::Header {
                 label,
@@ -174,10 +182,11 @@ impl Gyfa {
                     Icon::Id(icon_id),
                     18.,
                 )))
+                .child(div().font_weight(FontWeight::SEMIBOLD).child(label))
                 .child(
                     div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(format!("— {total} {label} —")),
+                        .text_color(theme.muted_foreground)
+                        .child(total.to_string()),
                 )
                 .context_menu(ship_menu_builder(Self::weak(cx), ship))
                 .into_any_element(),
