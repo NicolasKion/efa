@@ -370,8 +370,7 @@ impl Gyfa {
         };
         div()
             .id(SharedString::from(format!("group-{slot:?}")))
-            .ml_auto()
-            .mr_1()
+            .ml_1()
             .p_0p5()
             .rounded_sm()
             .when(grouped, |d| d.bg(theme.accent))
