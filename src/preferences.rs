@@ -84,11 +84,17 @@ impl AdditionsLabels {
 pub struct Engine {
     /// Spool-up assumed for modules without their own setting, as a fraction of full spool.
     pub default_spool: f64,
+    /// Lowering a skill unlearns the skills that need it higher, pyfa's "Enforce strict skill
+    /// level requirements".
+    pub strict_skill_levels: bool,
 }
 
 impl Default for Engine {
     fn default() -> Self {
-        Self { default_spool: 1.0 }
+        Self {
+            default_spool: 1.0,
+            strict_skill_levels: true,
+        }
     }
 }
 

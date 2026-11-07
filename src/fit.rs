@@ -162,6 +162,10 @@ pub struct Fit {
     /// Fleet boosters, pyfa's command fits.
     #[serde(default)]
     pub command: Vec<projected::CommandFit>,
+    /// pyfa's "Disable Fitting Restrictions": anything goes on, and what breaks the rules shows
+    /// red.
+    #[serde(default)]
+    pub ignore_restrictions: bool,
 }
 
 /// Incoming damage that effective HP, effective repair rates and the reactive armor hardener

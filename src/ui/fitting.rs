@@ -20,11 +20,12 @@ use super::{
     characters::skills_submenu,
     columns::{Col, ICON_W, STATE_W},
     item_stats::{StatsOf, stats_entry},
+    validation::flag,
     widgets::{color, entry, icon, icon_box, icon_label, item_entry, item_label, short},
 };
 use crate::{
     data::{Catalog, Hardpoint, ItemType, Kind, Slot, TypeId},
-    engine::{FitItem, ModuleInfo, SkillTarget, Stats},
+    engine::{FitItem, ItemRef, ModuleInfo, SkillTarget, Stats},
     fit::{Fit, Module, ModuleState},
     icons::Icon,
 };
@@ -182,6 +183,9 @@ impl Gyfa {
                 .context_menu(ship_menu_builder(Self::weak(cx), ship))
                 .into_any_element(),
             Row::Mode(mode) => base
+                .when_some(self.problems_of(loaded, ItemRef::Mode), |row, why| {
+                    flag(row, why, theme.danger)
+                })
                 .child(div().w(px(STATE_W)).flex_none())
                 .child(icon_box(catalog, &loaded.icons, Icon::Type(mode), 22.))
                 .child(
@@ -223,23 +227,7 @@ impl Gyfa {
                             return div().into_any_element();
                         };
                         let info = stats.modules.get(&(slot, i)).copied().unwrap_or_default();
-                        let total = match slot {
-                            Slot::High => stats.high.total,
-                            Slot::Mid => stats.mid.total,
-                            _ => stats.low.total,
-                        };
-                        let cells = self.module_cells(base, loaded, (slot, i), m, info, cx);
-                        // Fits from before slots were enforced can hold more than the ship has.
-                        if i >= total.unwrap_or(0) as usize {
-                            cells.text_color(cx.theme().danger).tooltip(|window, cx| {
-                                gpui_kit::component::tooltip::Tooltip::new(
-                                    "The ship has no slot for this module",
-                                )
-                                .build(window, cx)
-                            })
-                        } else {
-                            cells
-                        }
+                        self.module_cells(base, loaded, (slot, i), m, info, cx)
                     }
                     RowRef::Rig(i) | RowRef::Subsystem(i) => {
                         let id = match item {
@@ -267,6 +255,12 @@ impl Gyfa {
                             )
                     }
                 };
+                // pyfa's red rows: whatever breaks a fitting rule or needs skills the
+                // character lacks, with the reasons on hover.
+                let danger = cx.theme().danger;
+                let base = base.when_some(self.problems_of(loaded, item.into()), |row, why| {
+                    flag(row, why, danger)
+                });
                 let dragged = Dragged::of(loaded, DragSource::Row(item), self.row_type(item));
                 let base = drop_target(base, DropOn::Item(item), cx);
                 let base = match dragged {

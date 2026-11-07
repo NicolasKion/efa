@@ -285,9 +285,7 @@ impl Characters {
         }
     }
 
-    /// Set a skill's level the way pyfa's `changeLevel` does: prerequisites are trained up to
-    /// what it needs, and with strict skill levels skills that need it higher are unlearned.
-    /// None, or a level past V, unlearns it. Built-in characters do not change.
+    /// [`Characters::change_level_with`] with strict skill levels, pyfa's default.
     pub fn change_level(
         &mut self,
         id: CharacterId,
@@ -296,13 +294,33 @@ impl Characters {
         keep: Keep,
         catalog: &Catalog,
     ) {
+        self.change_level_with(id, skill, level, keep, true, catalog);
+    }
+
+    /// Set a skill's level the way pyfa's `changeLevel` does: prerequisites are trained up to
+    /// what it needs, and with `strict` skill levels skills that need it higher are unlearned.
+    /// None, or a level past V, unlearns it. Built-in characters do not change.
+    pub fn change_level_with(
+        &mut self,
+        id: CharacterId,
+        skill: TypeId,
+        level: Option<u8>,
+        keep: Keep,
+        strict: bool,
+        catalog: &Catalog,
+    ) {
         let Some(c) = self.get_mut(id) else { return };
+        let set = Setter {
+            keep,
+            strict,
+            catalog,
+        };
         match level.filter(|&l| l <= MAX_LEVEL) {
-            None => set_level(c, skill, None, keep, catalog),
+            None => set.level(c, skill, None),
             // Like pyfa, not learned counts as 0 here, so Level 0 leaves such a skill alone.
             Some(level) if c.level(skill).unwrap_or(0) != level => {
-                train_prerequisites(c, skill, keep, catalog);
-                set_level(c, skill, Some(level), keep, catalog);
+                set.prerequisites(c, skill);
+                set.level(c, skill, Some(level));
             }
             Some(_) => {}
         }
@@ -409,26 +427,40 @@ fn builtin(catalog: &Catalog, level: u8) -> Character {
     }
 }
 
-/// pyfa's Skill.setLevel with strict skill levels on, its default: a skill that needs this one
-/// higher than its new level is unlearned, and so on down.
-fn set_level(c: &mut Character, skill: TypeId, level: Option<u8>, keep: Keep, catalog: &Catalog) {
-    c.write(skill, level, keep);
-    for (dependent, needed) in dependents(catalog, skill) {
-        if level.is_none_or(|l| l < needed) {
-            set_level(c, dependent, None, keep, catalog);
-        }
-    }
+/// How a level change goes about it.
+struct Setter<'a> {
+    keep: Keep,
+    /// pyfa's "Enforce strict skill level requirements".
+    strict: bool,
+    catalog: &'a Catalog,
 }
 
-/// pyfa's _trainSkillReqs: raise each prerequisite to what the skill needs, and theirs in turn.
-fn train_prerequisites(c: &mut Character, skill: TypeId, keep: Keep, catalog: &Catalog) {
-    let Some(required) = catalog.required_skills.get(&skill) else {
-        return;
-    };
-    for &(prerequisite, needed) in required {
-        if c.level(prerequisite).unwrap_or(0) < needed {
-            set_level(c, prerequisite, Some(needed), keep, catalog);
-            train_prerequisites(c, prerequisite, keep, catalog);
+impl Setter<'_> {
+    /// pyfa's Skill.setLevel: with strict skill levels, a skill that needs this one higher than
+    /// its new level is unlearned, and so on down.
+    fn level(&self, c: &mut Character, skill: TypeId, level: Option<u8>) {
+        c.write(skill, level, self.keep);
+        if !self.strict {
+            return;
+        }
+        for (dependent, needed) in dependents(self.catalog, skill) {
+            if level.is_none_or(|l| l < needed) {
+                self.level(c, dependent, None);
+            }
+        }
+    }
+
+    /// pyfa's _trainSkillReqs: raise each prerequisite to what the skill needs, and theirs in
+    /// turn.
+    fn prerequisites(&self, c: &mut Character, skill: TypeId) {
+        let Some(required) = self.catalog.required_skills.get(&skill) else {
+            return;
+        };
+        for &(prerequisite, needed) in required {
+            if c.level(prerequisite).unwrap_or(0) < needed {
+                self.level(c, prerequisite, Some(needed));
+                self.prerequisites(c, prerequisite);
+            }
         }
     }
 }

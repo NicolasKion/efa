@@ -20,8 +20,8 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [~] Reorder tabs by drag, tab tooltips (chrome_tabs.py), tooltips with the fit and hull behind a preference
 - [ ] Open fit in new tab vs same tab (builtinContextMenus/fitOpenNewTab.py)
 - [x] Undo/redo for every fit change (gui/fitCommands/, mainMenuBar.py): one history per fit, every action and market add, Ctrl+Z/Ctrl+Y
-- [ ] Disable fitting restrictions toggle (fitCommands/gui/fitRestrictionToggle.py), refine: validate_fast/validate_verbose with ValOptions
-- [ ] Fit validation messages (over CPU/PG/slots/skills/max group fitted/rig size etc.) (eos/saveddata/fit.py), refine: validate_verbose
+- [x] Disable fitting restrictions toggle (fitCommands/gui/fitRestrictionToggle.py), per fit in the Fit menu: with restrictions on, modules the ship cannot take are refused (ship group, rig size, max group or type fitted, hardpoints, capital size, subsystem slot); a full rack refuses either way; turning them back on takes off what does not fit, as one undo step
+- [x] Fit validation messages (over CPU/PG/slots/skills/max group fitted/rig size etc.) (eos/saveddata/fit.py), refine: validate_verbose; per item in the row tooltips, overuse of CPU, powergrid and the like in the stats pane
 - [ ] System security zone per fit (builtinContextMenus/fitSystemSecurity.py), refine: set_sec_zone
 - [ ] Pilot security status per fit (builtinContextMenus/fitPilotSecurity.py), refine: set_sec_status
 - [x] Per-fit character selection, stored on the fit; old fits fly All 5 and new fits get the character picked last (gui/characterSelection.py)
@@ -70,7 +70,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Module table with attribute columns (builtinViewColumns/attributeDisplay.py)
 - [ ] Rack labels and rack separators prefs (pyfaGeneralPreferences.py)
 - [x] Color rows by slot type (pyfaGeneralPreferences.py)
-- [ ] Highlight modules with unmet skills or invalid fitting in red (fittingView.py), refine: validate_verbose skill_reqs
+- [x] Highlight modules with unmet skills or invalid fitting in red (fittingView.py), with the reasons on hover; drones, fighters, implants, boosters and the mode too. pyfa colors the row background and leaves skills out; gyfa uses red text for both
 - [ ] Drag and drop modules between slots, swap/rearrange (fittingView.py, fitCommands/gui/localModule)
 - [~] Shift/ctrl drag to copy module, drag module to cargo (fitCommands/gui/localModuleCargo), module/charge to and from cargo done with Ctrl to copy, copying between slots missing
 - [ ] Multi-select and bulk state change (fittingView.py)
@@ -184,7 +184,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Export skills needed for fit as EVEMon .emp/.xml or text, by file extension (mainMenuBar.py exportSkillsNeeded)
 - [x] Missing skills icon with tooltip and menu (gui/characterSelection.py); the condensed tooltip, pyfa's default
 - [ ] Global character vs per-fit character pref (pyfaGeneralPreferences.py)
-- [ ] Enforce strict skill requirements pref (pyfaEnginePreferences.py), refine: ValOptions skill_reqs
+- [x] Enforce strict skill requirements pref (pyfaEnginePreferences.py): lowering a skill unlearns the skills that need it higher, in the character editor and the Change Skills menus
 - [x] Implant set editor: new, rename, copy, delete, add from search, remove, clipboard import/export (gui/setEditor.py, builtinViews/implantEditor.py, service/implantSet.py)
 - [x] Precalculated implant sets (service/precalcImplantSet.py, db_update.py processImplantSets)
 
@@ -259,7 +259,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 
 - [x] Preferences dialog (gui/preferenceDialog.py), its own window, changes apply to every window right away
 - [~] General: theme, language, tooltips, rack layout, omega icons, mutated names, tab info (pyfaGeneralPreferences.py), theme follows Omarchy live; character implants by default, slot colors, reopen fits, tab tooltips, open in new tab, ammo change all and tab info done
-- [~] Engine: strict skills, factor in reload, global default spool (pyfaEnginePreferences.py), reload and default spool done, refine: set_default_spool, set_default_optional_reloads
+- [x] Engine: strict skills, factor in reload, global default spool (pyfaEnginePreferences.py), refine: set_default_spool, set_default_optional_reloads
 - [~] Stat view layout (pyfaStatViewPreferences.py), each section shown or hidden
 - [x] Context menu toggles (pyfaContextMenuPreferences.py)
 - [~] Market and prices: source, search delay, meta buttons, price total composition (pyfaMarketPreferences.py), all but the meta buttons and market view modes
