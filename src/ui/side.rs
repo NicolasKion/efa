@@ -412,11 +412,10 @@ impl Gyfa {
         let can_filter_ship = room.is_some();
         let room = room.filter(|_| self.fits_ship_only);
         let text = TextFilter::new(&self.results_filter_text, Jargon::global());
-        let mut meta = self.meta_filter;
+        let meta = self.meta_filter;
         let filtered = results.as_ref().map_or_default(|(_, sections)| {
-            filter_results(catalog, sections, text.as_ref(), room.as_ref(), &mut meta)
+            filter_results(catalog, sections, text.as_ref(), room.as_ref(), meta)
         });
-        self.meta_filter = meta;
         let key = results.map(|(key, _)| key);
         if jump
             && let Some(target) = self.market_highlight
@@ -555,6 +554,7 @@ impl Gyfa {
                             this.results_filter
                                 .update(cx, |input, cx| input.set_value("", window, cx));
                             this.fits_ship_only = false;
+                            this.meta_filter.clear();
                             cx.notify();
                         })),
                 )
@@ -562,10 +562,12 @@ impl Gyfa {
             .into_any_element()
     }
 
-    /// pyfa's meta group toggles, over the results. A click shows one category, Ctrl+click
-    /// adds or removes one; categories the results do not hold are greyed out.
+    /// Meta group toggles over the results. A click switches one on or off, Ctrl+click shows
+    /// only that one; with none pressed everything shows. Categories the results do not hold
+    /// are greyed out, unless pressed, so they can still be switched off.
     fn meta_buttons(&self, present: &HashSet<MetaCategory>, cx: &mut Context<Self>) -> AnyElement {
         h_flex()
+            .flex_wrap()
             .gap_1()
             .p_1()
             .border_b_1()
@@ -578,7 +580,7 @@ impl Gyfa {
                         .label(category.label())
                         .toggled(self.meta_filter.is_on(category))
                         .selected(self.meta_filter.is_on(category))
-                        .disabled(!present.contains(&category))
+                        .disabled(!present.contains(&category) && !self.meta_filter.is_on(category))
                         .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                             let ctrl = event.modifiers().control;
                             this.meta_filter.click(category, ctrl);
@@ -914,9 +916,10 @@ impl Gyfa {
                 .into_any_element()
             }
             Stage::Ships(group) => row
-                .children(crate::brackets::ship_bracket(*group).map(|b| {
-                    icon_box(&loaded.catalog, &loaded.icons, Icon::Bracket(b), 16.)
-                }))
+                .children(
+                    crate::brackets::ship_bracket(*group)
+                        .map(|b| icon_box(&loaded.catalog, &loaded.icons, Icon::Bracket(b), 16.)),
+                )
                 .child(title)
                 .into_any_element(),
             _ => row.child(title).into_any_element(),
@@ -995,9 +998,8 @@ impl Gyfa {
             .hover(|s| s.bg(cx.theme().list_hover))
             .child(
                 div().w(px(16.)).flex_none().children(
-                    crate::brackets::ship_bracket(group).map(|b| {
-                        icon_box(&loaded.catalog, &loaded.icons, Icon::Bracket(b), 16.)
-                    }),
+                    crate::brackets::ship_bracket(group)
+                        .map(|b| icon_box(&loaded.catalog, &loaded.icons, Icon::Bracket(b), 16.)),
                 ),
             )
             .child(div().flex_1().truncate().child(name))

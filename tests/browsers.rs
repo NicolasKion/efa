@@ -57,14 +57,14 @@ fn search_lists_variations_together() {
 fn meta_buttons_sort_items() {
     let Some(catalog) = catalog() else { return };
     let meta = |name: &str| MetaCategory::of_item(catalog.find(name).expect("in the catalog"));
-    assert_eq!(meta("Small Armor Repairer II"), MetaCategory::Normal);
+    assert_eq!(meta("Small Armor Repairer II"), MetaCategory::Tech2);
     assert_eq!(
         meta("Imperial Navy Small Armor Repairer"),
         MetaCategory::Faction
     );
     assert_eq!(
         meta("Corpii C-Type Small Armor Repairer"),
-        MetaCategory::Complex
+        MetaCategory::Deadspace
     );
 }
 

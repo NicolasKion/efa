@@ -18,28 +18,41 @@ use jargon::{Jargon, Query};
 /// Items pyfa remembers as recently used.
 pub const RECENT_LIMIT: usize = 20;
 
-/// pyfa's meta group buttons, in its order. Each covers several of the game's meta groups.
+/// The meta group buttons over the market results. Each covers one or more of the game's meta
+/// groups; pyfa lumps Tech I, II and III into one "Normal" button, gyfa splits them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MetaCategory {
-    /// Tech I, II and III, and anything else without a button of its own.
-    Normal,
+    /// Tech I, including meta and compact variants, and anything without a button of its own.
+    Tech1,
+    /// Tech II, including structure Tech II.
+    Tech2,
+    Tech3,
     /// Faction, storyline and structure faction: meta groups 4, 3 and 52.
     Faction,
-    /// Deadspace.
-    Complex,
+    /// Deadspace and abyssal.
+    Deadspace,
     Officer,
 }
 
 impl MetaCategory {
-    pub const ALL: [Self; 4] = [Self::Normal, Self::Faction, Self::Complex, Self::Officer];
+    pub const ALL: [Self; 6] = [
+        Self::Tech1,
+        Self::Tech2,
+        Self::Tech3,
+        Self::Faction,
+        Self::Deadspace,
+        Self::Officer,
+    ];
 
-    /// Which button a meta group falls under, as pyfa's `META_MAP` sorts them.
+    /// Which button a meta group falls under.
     pub fn of(meta_group: Option<i32>) -> Self {
         match meta_group {
+            Some(2 | 53) => Self::Tech2,
+            Some(14) => Self::Tech3,
             Some(3 | 4 | 52) => Self::Faction,
-            Some(6) => Self::Complex,
+            Some(6 | 15) => Self::Deadspace,
             Some(5) => Self::Officer,
-            _ => Self::Normal,
+            _ => Self::Tech1,
         }
     }
 
@@ -49,9 +62,11 @@ impl MetaCategory {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Normal => "Normal",
+            Self::Tech1 => "T1",
+            Self::Tech2 => "T2",
+            Self::Tech3 => "T3",
             Self::Faction => "Faction",
-            Self::Complex => "Complex",
+            Self::Deadspace => "Deadspace",
             Self::Officer => "Officer",
         }
     }
@@ -61,16 +76,10 @@ impl MetaCategory {
     }
 }
 
-/// Which meta buttons are pressed. All of them to start with, as in pyfa.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Which meta buttons are pressed. None pressed shows everything, which is where it starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MetaFilter {
-    on: [bool; 4],
-}
-
-impl Default for MetaFilter {
-    fn default() -> Self {
-        Self { on: [true; 4] }
-    }
+    on: [bool; MetaCategory::ALL.len()],
 }
 
 impl MetaFilter {
@@ -78,43 +87,37 @@ impl MetaFilter {
         self.on[category.index()]
     }
 
+    /// Whether any button is pressed, so the list is filtered at all.
+    pub fn active(self) -> bool {
+        self.on.contains(&true)
+    }
+
     pub fn allows(self, t: &ItemType) -> bool {
-        self.is_on(MetaCategory::of_item(t))
+        !self.active() || self.is_on(MetaCategory::of_item(t))
     }
 
-    /// A click on a button: on its own it shows just that category; with Ctrl it toggles the
-    /// one button, but never turns the last one off.
+    /// A click on a button switches it on or off. With Ctrl it shows only that category, or
+    /// everything again when it already was the only one.
     pub fn click(&mut self, category: MetaCategory, ctrl: bool) {
-        if !ctrl {
-            self.on = [false; 4];
-            self.on[category.index()] = true;
-            return;
-        }
         let i = category.index();
-        let others = self.on.iter().enumerate().any(|(j, &on)| on && j != i);
-        if self.on[i] && !others {
-            return;
+        if ctrl {
+            let only = self.on[i] && self.on.iter().filter(|&&on| on).count() == 1;
+            self.on = [false; MetaCategory::ALL.len()];
+            self.on[i] = !only;
+        } else {
+            self.on[i] = !self.on[i];
         }
-        self.on[i] = !self.on[i];
     }
 
+    /// Make sure items of `category` show, e.g. after jumping to one.
     pub fn enable(&mut self, category: MetaCategory) {
-        self.on[category.index()] = true;
+        if self.active() {
+            self.on[category.index()] = true;
+        }
     }
 
-    /// pyfa's default for a list the buttons filter down to nothing: press the leftmost button
-    /// that would show something. Returns whether anything changed.
-    pub fn show_something(&mut self, present: &HashSet<MetaCategory>) -> bool {
-        if present.iter().any(|&c| self.is_on(c)) {
-            return false;
-        }
-        match MetaCategory::ALL.into_iter().find(|c| present.contains(c)) {
-            Some(c) => {
-                self.enable(c);
-                true
-            }
-            None => false,
-        }
+    pub fn clear(&mut self) {
+        *self = Self::default();
     }
 }
 
@@ -316,7 +319,7 @@ pub fn filter_results(
     sections: &[Section],
     text: Option<&TextFilter>,
     room: Option<&ShipRoom>,
-    meta: &mut MetaFilter,
+    meta: MetaFilter,
 ) -> Filtered {
     let kept: Vec<(Option<&String>, Vec<&ItemType>)> = sections
         .iter()
@@ -339,7 +342,6 @@ pub fn filter_results(
             .collect(),
         ..Filtered::default()
     };
-    meta.show_something(&filtered.present);
     for (title, items) in kept {
         let shown: Vec<TypeId> = items
             .into_iter()
@@ -404,41 +406,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn meta_groups_map_to_pyfa_buttons() {
-        assert_eq!(MetaCategory::of(None), MetaCategory::Normal);
-        assert_eq!(MetaCategory::of(Some(1)), MetaCategory::Normal);
-        assert_eq!(MetaCategory::of(Some(2)), MetaCategory::Normal);
-        assert_eq!(MetaCategory::of(Some(14)), MetaCategory::Normal);
+    fn meta_groups_map_to_buttons() {
+        assert_eq!(MetaCategory::of(None), MetaCategory::Tech1);
+        assert_eq!(MetaCategory::of(Some(1)), MetaCategory::Tech1);
+        assert_eq!(MetaCategory::of(Some(2)), MetaCategory::Tech2);
+        assert_eq!(MetaCategory::of(Some(14)), MetaCategory::Tech3);
         assert_eq!(MetaCategory::of(Some(4)), MetaCategory::Faction);
         assert_eq!(MetaCategory::of(Some(52)), MetaCategory::Faction);
-        assert_eq!(MetaCategory::of(Some(6)), MetaCategory::Complex);
+        assert_eq!(MetaCategory::of(Some(6)), MetaCategory::Deadspace);
         assert_eq!(MetaCategory::of(Some(5)), MetaCategory::Officer);
     }
 
     #[test]
-    fn plain_click_shows_one_ctrl_click_toggles() {
+    fn buttons_toggle_and_none_pressed_shows_all() {
         let mut filter = MetaFilter::default();
+        assert!(!filter.active());
+        filter.click(MetaCategory::Tech2, false);
         filter.click(MetaCategory::Faction, false);
-        assert!(filter.is_on(MetaCategory::Faction));
-        assert!(!filter.is_on(MetaCategory::Normal));
+        assert!(filter.is_on(MetaCategory::Tech2) && filter.is_on(MetaCategory::Faction));
+        // Every button can be switched off again.
+        filter.click(MetaCategory::Tech2, false);
+        filter.click(MetaCategory::Faction, false);
+        assert!(!filter.active());
+        // Ctrl shows only one, and a second Ctrl click on it shows everything.
+        filter.click(MetaCategory::Tech1, false);
         filter.click(MetaCategory::Officer, true);
-        assert!(filter.is_on(MetaCategory::Officer));
-        filter.click(MetaCategory::Faction, true);
-        assert!(!filter.is_on(MetaCategory::Faction));
-        // The last button stays on.
+        assert!(filter.is_on(MetaCategory::Officer) && !filter.is_on(MetaCategory::Tech1));
         filter.click(MetaCategory::Officer, true);
-        assert!(filter.is_on(MetaCategory::Officer));
-    }
-
-    #[test]
-    fn an_empty_list_presses_the_leftmost_useful_button() {
-        let mut filter = MetaFilter::default();
-        filter.click(MetaCategory::Officer, false);
-        let present: HashSet<_> = [MetaCategory::Complex, MetaCategory::Faction].into();
-        assert!(filter.show_something(&present));
-        assert!(filter.is_on(MetaCategory::Faction));
-        assert!(!filter.is_on(MetaCategory::Complex));
-        assert!(!filter.show_something(&present));
+        assert!(!filter.active());
     }
 
     #[test]
@@ -647,11 +642,11 @@ mod tests {
         ];
         let jargon = Jargon::default();
         let mut meta = MetaFilter::default();
-        let all = filter_results(&catalog, &sections, None, None, &mut meta);
+        let all = filter_results(&catalog, &sections, None, None, meta);
         assert_eq!((all.count, all.total, all.rows.len()), (3, 3, 5));
 
         let text = TextFilter::new("scourge", &jargon);
-        let some = filter_results(&catalog, &sections, text.as_ref(), None, &mut meta);
+        let some = filter_results(&catalog, &sections, text.as_ref(), None, meta);
         assert_eq!(
             some.rows,
             [
@@ -662,18 +657,18 @@ mod tests {
         );
 
         meta.click(MetaCategory::Faction, false);
-        let faction_only = filter_results(&catalog, &sections, text.as_ref(), None, &mut meta);
+        let faction_only = filter_results(&catalog, &sections, text.as_ref(), None, meta);
         assert_eq!(faction_only.count, 1);
-        assert!(faction_only.present.contains(&MetaCategory::Normal));
+        assert!(faction_only.present.contains(&MetaCategory::Tech1));
 
-        // Buttons that would empty the list give way, as in pyfa.
+        // A button that hides everything stays pressed; the pane offers to clear it.
         let inferno = TextFilter::new("inferno", &jargon);
-        let pressed = filter_results(&catalog, &sections, inferno.as_ref(), None, &mut meta);
-        assert_eq!(pressed.count, 1);
-        assert!(meta.is_on(MetaCategory::Normal));
+        let hidden = filter_results(&catalog, &sections, inferno.as_ref(), None, meta);
+        assert_eq!(hidden.count, 0);
+        assert!(meta.is_on(MetaCategory::Faction));
 
         let none = TextFilter::new("nothing like this", &jargon);
-        let empty = filter_results(&catalog, &sections, none.as_ref(), None, &mut meta);
+        let empty = filter_results(&catalog, &sections, none.as_ref(), None, meta);
         assert_eq!(empty.rows, [] as [ResultRow; 0]);
         assert_eq!(empty.total, 3);
     }
