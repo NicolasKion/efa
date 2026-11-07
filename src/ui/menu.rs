@@ -94,6 +94,7 @@ macro_rules! numbered {
 
 /// Bind pyfa's shortcuts. Call once at startup.
 pub fn init(cx: &mut App) {
+    super::implant_sets::bind_keys(cx);
     cx.bind_keys([
         KeyBinding::new("ctrl-t", NewTab, Some(CONTEXT)),
         KeyBinding::new("ctrl-w", CloseTab, Some(CONTEXT)),

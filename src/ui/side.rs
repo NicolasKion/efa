@@ -1334,7 +1334,7 @@ fn fits_label(count: usize) -> String {
 }
 
 /// Hover text as lines in a box that wraps.
-fn text_tooltip(lines: Vec<String>, window: &mut Window, cx: &mut App) -> AnyView {
+pub(super) fn text_tooltip(lines: Vec<String>, window: &mut Window, cx: &mut App) -> AnyView {
     Tooltip::element(move |_, _| {
         v_flex()
             .max_w(px(TOOLTIP_W))
@@ -1350,7 +1350,7 @@ fn text_tooltip(lines: Vec<String>, window: &mut Window, cx: &mut App) -> AnyVie
 }
 
 /// A market item's hover text: name, Omega, price and the start of its description.
-fn item_tooltip(
+pub(super) fn item_tooltip(
     loaded: &Rc<Loaded>,
     id: TypeId,
     price: Option<f64>,

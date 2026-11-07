@@ -136,6 +136,74 @@ fn pirate_sets_are_precalculated() {
 }
 
 #[test]
+fn an_implant_goes_into_its_own_slot_in_a_set() {
+    let Some(catalog) = catalog() else { return };
+    let mut set = ImplantSet::new("Speed");
+    let basic = id(catalog, "Ocular Filter - Basic");
+    let snake = id(catalog, "High-grade Snake Alpha");
+    assert!(set.add(catalog, basic));
+    assert_eq!(set.in_slot(catalog, 1), Some(basic));
+    // The Snake Alpha is a slot 1 implant too, so it replaces the filter.
+    assert!(set.add(catalog, snake));
+    assert_eq!(set.implants, vec![snake]);
+    assert!(!set.add(catalog, snake), "already in the set");
+    assert!(set.remove(snake));
+    assert!(!set.remove(snake));
+    assert_eq!(set.in_slot(catalog, 1), None);
+}
+
+#[test]
+fn a_whole_pirate_set_fills_its_slots() {
+    let Some(catalog) = catalog() else { return };
+    let sets = implant_set::precalculated(catalog);
+    let snake = sets.iter().find(|s| s.name == "Snake").expect("Snake");
+    let high = snake
+        .grades
+        .iter()
+        .find(|g| implant_set::grade_name(snake, g) == "High-grade Snake")
+        .expect("high grade");
+    let mut set = ImplantSet::new("Snakes");
+    set.add(catalog, id(catalog, "Ocular Filter - Basic"));
+    assert_eq!(set.add_all(catalog, &high.1), 6);
+    let slots: Vec<u8> = set
+        .implants
+        .iter()
+        .map(|&t| gyfa::fit::implant_slot(catalog, t))
+        .collect();
+    assert_eq!(slots, vec![1, 2, 3, 4, 5, 6]);
+}
+
+#[test]
+fn the_implant_tree_has_every_slot_by_kind() {
+    let Some(catalog) = catalog() else { return };
+    let tree = implant_set::by_slot(catalog);
+    let slots: Vec<u8> = tree.iter().map(|s| s.slot).collect();
+    assert_eq!(slots, (1..=10).collect::<Vec<u8>>());
+    let group = |slot: u8, name: &str| {
+        tree[usize::from(slot) - 1]
+            .groups
+            .iter()
+            .find(|g| g.name == name)
+            .unwrap_or_else(|| panic!("{name} in slot {slot}"))
+            .implants
+            .clone()
+    };
+    assert!(group(1, "Attribute Enhancers").contains(&id(catalog, "Ocular Filter - Basic")));
+    let snake = group(1, "Snake set");
+    assert_eq!(
+        snake.first(),
+        Some(&id(catalog, "Low-grade Snake Alpha")),
+        "low grade first"
+    );
+    assert!(group(6, "Snake set").contains(&id(catalog, "High-grade Snake Omega")));
+    assert!(
+        group(8, "Armor Implants")
+            .iter()
+            .all(|&t| gyfa::fit::implant_slot(catalog, t) == 8)
+    );
+}
+
+#[test]
 fn sets_round_trip_through_the_clipboard_format() {
     let Some(catalog) = catalog() else { return };
     let mut set = ImplantSet::new("Brawl");
