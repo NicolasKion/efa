@@ -1,6 +1,6 @@
 //! pyfa's Mutations tab (gui/builtinItemStatsViews/itemMutator.py, attributeSlider.py): one
-//! slider per rolled attribute, the worst roll on the left and the best on the right, with the
-//! value to type in exactly.
+//! slider per rolled attribute with the value to type in exactly. The sliders look like the
+//! game's: the base value in the middle, worse rolls to the red left, better to the green right.
 //!
 //! Moving a slider updates this window's numbers right away; letting go hands the rolls to the
 //! main window, which applies them to the fit as one undoable edit.
@@ -14,9 +14,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, AppContext, ClickEvent, Context, Entity, FontWeight, InteractiveElement,
+    AnyElement, App, AppContext, ClickEvent, Context, Entity, FontWeight, InteractiveElement,
     IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    Window, div, px,
+    Window, div, px, relative,
 };
 
 use super::{ItemStats, Target, format};
@@ -59,13 +59,36 @@ struct Row {
     input: Entity<InputState>,
 }
 
-/// Where on a slider from `worse` to `better` a value sits, in steps.
-fn position(worse: f64, better: f64, value: f64) -> f32 {
-    let span = better - worse;
-    if span == 0.0 {
-        return 0.0;
+/// Where a value sits on a slider with `base` in the middle, `worse` at the left end and
+/// `better` at the right, in steps. Each half covers its own side, so the two can differ in size.
+fn position(worse: f64, base: f64, better: f64, value: f64) -> f32 {
+    let half = |from: f64, to: f64| {
+        let span = to - from;
+        if span == 0.0 {
+            0.0
+        } else {
+            ((value - from) / span).clamp(0.0, 1.0)
+        }
+    };
+    // Which side of the base the value is on, judged by the better direction.
+    let up = (better - base) * (value - base) > 0.0
+        || ((better - base) == 0.0 && (base - worse) * (value - base) > 0.0);
+    let fraction = if up {
+        0.5 + half(base, better) * 0.5
+    } else {
+        0.5 - half(base, worse) * 0.5
+    };
+    fraction as f32 * STEPS
+}
+
+/// The value at `position` steps along such a slider; the inverse of [`position`].
+fn value_at(worse: f64, base: f64, better: f64, position: f32) -> f64 {
+    let fraction = f64::from(position / STEPS).clamp(0.0, 1.0);
+    if fraction >= 0.5 {
+        base + (better - base) * (fraction - 0.5) * 2.0
+    } else {
+        base + (worse - base) * (0.5 - fraction) * 2.0
     }
-    (((value - worse) / span).clamp(0.0, 1.0) as f32) * STEPS
 }
 
 /// A value as the field shows it: converted for its unit, with up to five decimals as pyfa's
@@ -78,13 +101,16 @@ fn shown(unit: Option<&str>, value: f64) -> String {
 
 impl Row {
     fn position(&self, value: f64) -> f32 {
-        position(self.worse, self.better, value)
+        position(self.worse, self.limits.base, self.better, value)
     }
 
     fn value_at(&self, position: f32) -> f64 {
-        let quality = f64::from(position / STEPS).clamp(0.0, 1.0);
-        self.limits
-            .clamp(self.worse + (self.better - self.worse) * quality)
+        self.limits.clamp(value_at(
+            self.worse,
+            self.limits.base,
+            self.better,
+            position,
+        ))
     }
 
     fn shown(&self, value: f64) -> String {
@@ -190,7 +216,7 @@ impl ItemStats {
                 .attr(attr)
                 .and_then(|a| data.unit(a))
                 .map(|u| u.name.clone());
-            let at = position(worse, better, value);
+            let at = position(worse, limits.base, better, value);
             let slider = cx.new(|_| {
                 SliderState::new()
                     .min(0.)
@@ -431,7 +457,7 @@ impl ItemStats {
                     .child(
                         h_flex()
                             .gap_2()
-                            .child(div().flex_1().child(Slider::new(&row.slider)))
+                            .child(div().flex_1().child(game_slider(row, good, bad, cx)))
                             .child(div().w(px(110.)).child(Input::new(&row.input).small()))
                             .child(
                                 div()
@@ -521,9 +547,89 @@ impl ItemStats {
     }
 }
 
+/// A slider drawn like the game's mutation bars: a red half and a green half meeting at the base
+/// value, filled from the middle to the handle. The stock slider on top does the dragging, with
+/// its own track made invisible.
+fn game_slider(row: &Row, good: gpui_kit::Hsla, bad: gpui_kit::Hsla, cx: &App) -> AnyElement {
+    let at = row.slider.read(cx).value().start() / STEPS;
+    let fill = if at >= 0.5 { good } else { bad };
+    let (left, width) = if at >= 0.5 {
+        (0.5, at - 0.5)
+    } else {
+        (at, 0.5 - at)
+    };
+    let track = h_flex().absolute().inset_0().items_center().child(
+        div()
+            .relative()
+            .w_full()
+            .h(px(6.))
+            .rounded_full()
+            .overflow_hidden()
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top_0()
+                    .h_full()
+                    .w(relative(0.5))
+                    .bg(bad.opacity(0.25)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(relative(0.5))
+                    .top_0()
+                    .h_full()
+                    .w(relative(0.5))
+                    .bg(good.opacity(0.25)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(relative(left))
+                    .top_0()
+                    .h_full()
+                    .w(relative(width))
+                    .bg(fill),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(relative(0.5))
+                    .top_0()
+                    .h_full()
+                    .w(px(1.))
+                    .bg(cx.theme().foreground.opacity(0.6)),
+            ),
+    );
+    div()
+        .relative()
+        .w_full()
+        .child(track)
+        .child(
+            Slider::new(&row.slider)
+                .bg(gpui_kit::transparent_black())
+                .text_color(cx.theme().foreground),
+        )
+        .into_any_element()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base_sits_in_the_middle() {
+        // A roll range like 0.8x to 1.1x of a base of 100, where lower is better.
+        let (worse, base, better) = (110.0, 100.0, 80.0);
+        assert!((position(worse, base, better, base) - STEPS / 2.0).abs() < 1e-3);
+        assert!(position(worse, base, better, worse).abs() < 1e-3);
+        assert!((position(worse, base, better, better) - STEPS).abs() < 1e-3);
+        for value in [110.0, 105.0, 100.0, 90.0, 80.0] {
+            let back = value_at(worse, base, better, position(worse, base, better, value));
+            assert!((back - value).abs() < 1e-6, "{value}");
+        }
+    }
 
     #[test]
     fn units_convert_both_ways() {
