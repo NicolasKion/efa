@@ -815,26 +815,46 @@ impl Gyfa {
         let this = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _, _| {
             let (text, this) = (text.clone(), this.clone());
-            dialog.title("Import Fits").w(px(560.)).child(
-                v_flex()
-                    .gap_3()
-                    .child(Textarea::new(&text).h(px(320.)))
-                    .child(
-                        h_flex().justify_end().child(
-                            Button::new("import-eft")
-                                .primary()
-                                .label("Import")
-                                .on_click(move |_, window, cx| {
-                                    let value = text.read(cx).value().to_string();
-                                    let _ = this.update(cx, |this, cx| {
-                                        this.import(&value);
-                                        this.changed(cx);
-                                    });
-                                    window.close_dialog(cx);
-                                }),
+            // The OK button and Enter both submit; it closes the dialog itself when done.
+            let submit: crate::ui::widgets::Submit = {
+                let (text, this) = (text.clone(), this.clone());
+                Rc::new(move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                    let value = text.read(cx).value().to_string();
+                    let _ = this.update(cx, |this, cx| {
+                        this.import(&value);
+                        this.changed(cx);
+                    });
+                    window.close_dialog(cx);
+                })
+            };
+            dialog
+                .on_ok({
+                    let submit = Rc::clone(&submit);
+                    move |e, w, cx| {
+                        submit(e, w, cx);
+                        false
+                    }
+                })
+                .title("Import Fits")
+                .w(px(560.))
+                .child(
+                    v_flex()
+                        .gap_3()
+                        .child(Textarea::new(&text).h(px(320.)))
+                        .child(
+                            h_flex().justify_end().child(
+                                Button::new("import-eft")
+                                    .primary()
+                                    .label("Import")
+                                    .on_click({
+                                        let submit = Rc::clone(&submit);
+                                        move |e: &ClickEvent, w: &mut Window, cx: &mut App| {
+                                            submit(e, w, cx);
+                                        }
+                                    }),
+                            ),
                         ),
-                    ),
-            )
+                )
         });
     }
 

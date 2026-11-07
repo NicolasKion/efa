@@ -566,37 +566,60 @@ pub(super) fn name_dialog(
         let (input, error, hub, on_ok) =
             (input.clone(), error.clone(), hub.clone(), Rc::clone(&on_ok));
         let message = error.read(cx).clone();
-        dialog.title(title).w(px(360.)).child(
-            v_flex()
-                .gap_3()
-                .child(prompt)
-                .child(Input::new(&input))
-                .when_some(message, |col, message| {
-                    col.child(div().text_sm().text_color(cx.theme().danger).child(message))
-                })
-                .child(
-                    h_flex().justify_end().child(
-                        Button::new("character-name-ok")
-                            .primary()
-                            .label("OK")
-                            .on_click(move |_, window, cx| {
-                                let name = input.read(cx).value().trim().to_owned();
-                                let problem = hub
-                                    .upgrade()
-                                    .and_then(|h| h.read(cx).characters.name_problem(&name));
-                                if let Some(problem) = problem {
-                                    error.update(cx, |e, cx| {
-                                        *e = Some(problem.into());
-                                        cx.notify();
-                                    });
-                                    window.refresh();
-                                    return;
-                                }
-                                window.close_dialog(cx);
-                                on_ok(name, cx);
-                            }),
+        // The OK button and Enter both submit; it closes the dialog itself when done.
+        let submit: crate::ui::widgets::Submit = {
+            let (input, error, hub, on_ok) =
+                (input.clone(), error.clone(), hub.clone(), on_ok.clone());
+            Rc::new(
+                move |_: &gpui_kit::ClickEvent, window: &mut Window, cx: &mut App| {
+                    let name = input.read(cx).value().trim().to_owned();
+                    let problem = hub
+                        .upgrade()
+                        .and_then(|h| h.read(cx).characters.name_problem(&name));
+                    if let Some(problem) = problem {
+                        error.update(cx, |e, cx| {
+                            *e = Some(problem.into());
+                            cx.notify();
+                        });
+                        window.refresh();
+                        return;
+                    }
+                    window.close_dialog(cx);
+                    on_ok(name, cx);
+                },
+            )
+        };
+        dialog
+            .on_ok({
+                let submit = Rc::clone(&submit);
+                move |e, w, cx| {
+                    submit(e, w, cx);
+                    false
+                }
+            })
+            .title(title)
+            .w(px(360.))
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(prompt)
+                    .child(Input::new(&input))
+                    .when_some(message, |col, message| {
+                        col.child(div().text_sm().text_color(cx.theme().danger).child(message))
+                    })
+                    .child(
+                        h_flex().justify_end().child(
+                            Button::new("character-name-ok")
+                                .primary()
+                                .label("OK")
+                                .on_click({
+                                    let submit = Rc::clone(&submit);
+                                    move |e: &gpui_kit::ClickEvent, w: &mut Window, cx: &mut App| {
+                                        submit(e, w, cx);
+                                    }
+                                }),
+                        ),
                     ),
-                ),
-        )
+            )
     });
 }

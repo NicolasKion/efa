@@ -329,25 +329,48 @@ impl CharacterEditor {
         let this = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _, _| {
             let (input, this) = (input.clone(), this.clone());
-            dialog.title("Set Security Status").w(px(320.)).child(
-                v_flex()
-                    .gap_3()
-                    .child("Security Status is used in some CONCORD hull calculations")
-                    .child(Input::new(&input))
-                    .child(h_flex().justify_end().child(
-                        Button::new("sec-status-ok").primary().label("OK").on_click(
-                            move |_, window, cx| {
-                                let Ok(value) = input.read(cx).value().trim().parse::<f64>() else {
-                                    return;
-                                };
-                                window.close_dialog(cx);
-                                let _ = this.update(cx, |e, cx| {
-                                    e.edit(cx, |c, _| c.set_sec_status(id, value));
-                                });
-                            },
+            // The OK button and Enter both submit; it closes the dialog itself when done.
+            let submit: crate::ui::widgets::Submit = {
+                let (input, this) = (input.clone(), this.clone());
+                Rc::new(move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                    let Ok(value) = input.read(cx).value().trim().parse::<f64>() else {
+                        return;
+                    };
+                    window.close_dialog(cx);
+                    let _ = this.update(cx, |e, cx| {
+                        e.edit(cx, |c, _| c.set_sec_status(id, value));
+                    });
+                })
+            };
+            dialog
+                .on_ok({
+                    let submit = Rc::clone(&submit);
+                    move |e, w, cx| {
+                        submit(e, w, cx);
+                        false
+                    }
+                })
+                .title("Set Security Status")
+                .w(px(320.))
+                .child(
+                    v_flex()
+                        .gap_3()
+                        .child("Security Status is used in some CONCORD hull calculations")
+                        .child(Input::new(&input))
+                        .child(
+                            h_flex().justify_end().child(
+                                Button::new("sec-status-ok")
+                                    .primary()
+                                    .label("OK")
+                                    .on_click({
+                                        let submit = Rc::clone(&submit);
+                                        move |e: &ClickEvent, w: &mut Window, cx: &mut App| {
+                                            submit(e, w, cx);
+                                        }
+                                    }),
+                            ),
                         ),
-                    )),
-            )
+                )
         });
     }
 

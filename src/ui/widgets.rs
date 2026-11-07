@@ -11,6 +11,10 @@ use std::rc::Rc;
 use gpui_kit::component::{IconName, menu::PopupMenuItem};
 
 use super::Loaded;
+
+/// What a dialog's OK button and Enter both run. It closes the dialog itself when it is done,
+/// and leaves it open to show a problem otherwise.
+pub type Submit = Rc<dyn Fn(&gpui_kit::ClickEvent, &mut gpui_kit::Window, &mut gpui_kit::App)>;
 use crate::{
     data::{Catalog, TypeId},
     icons::{Icon, Icons},

@@ -94,23 +94,43 @@ impl Gyfa {
         let apply = Rc::new(apply);
         window.open_dialog(cx, move |dialog, _, _| {
             let (input, this, apply) = (input.clone(), this.clone(), Rc::clone(&apply));
-            dialog.title(title).w(px(340.)).child(
-                v_flex()
-                    .gap_3()
-                    .child(prompt)
-                    .child(Input::new(&input))
-                    .child(h_flex().justify_end().child(
-                        Button::new("input-ok").primary().label("OK").on_click(
-                            move |_, window, cx| {
-                                let Ok(value) = input.read(cx).value().trim().parse::<T>() else {
-                                    return;
-                                };
-                                window.close_dialog(cx);
-                                Gyfa::app_update(&this, cx, |g, cx| apply(g, value, cx));
-                            },
-                        ),
-                    )),
-            )
+            // The OK button and Enter both submit; it closes the dialog itself when done.
+            let submit: crate::ui::widgets::Submit = {
+                let (input, this, apply) = (input.clone(), this.clone(), apply.clone());
+                Rc::new(
+                    move |_: &ClickEvent, window: &mut Window, cx: &mut gpui_kit::App| {
+                        let Ok(value) = input.read(cx).value().trim().parse::<T>() else {
+                            return;
+                        };
+                        window.close_dialog(cx);
+                        Gyfa::app_update(&this, cx, |g, cx| apply(g, value, cx));
+                    },
+                )
+            };
+            dialog
+                .on_ok({
+                    let submit = Rc::clone(&submit);
+                    move |e, w, cx| {
+                        submit(e, w, cx);
+                        false
+                    }
+                })
+                .title(title)
+                .w(px(340.))
+                .child(
+                    v_flex()
+                        .gap_3()
+                        .child(prompt)
+                        .child(Input::new(&input))
+                        .child(h_flex().justify_end().child(
+                            Button::new("input-ok").primary().label("OK").on_click({
+                                let submit = Rc::clone(&submit);
+                                move |e: &ClickEvent, w: &mut Window, cx: &mut gpui_kit::App| {
+                                    submit(e, w, cx);
+                                }
+                            }),
+                        )),
+                )
         });
     }
 

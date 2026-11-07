@@ -710,39 +710,58 @@ impl<K: Kind> Editor<K> {
         window.open_dialog(cx, move |dialog, _, cx| {
             let (input, error, editor) = (input.clone(), error.clone(), editor.clone());
             let problem = error.read(cx).clone();
-            dialog.title(title.clone()).w(px(380.)).child(
-                v_flex()
-                    .gap_3()
-                    .child(message.clone())
-                    .child(Input::new(&input))
-                    .when_some(problem, |col, problem| {
-                        col.child(div().text_sm().text_color(cx.theme().danger).child(problem))
-                    })
-                    .child(
-                        h_flex().justify_end().child(
-                            Button::new("profile-name-ok")
-                                .primary()
-                                .label("OK")
-                                .on_click(move |_, window, cx| {
-                                    let name = input.read(cx).value().trim().to_owned();
-                                    let problem = editor
-                                        .upgrade()
-                                        .and_then(|e| e.read(cx).name_problem(&name, cx));
-                                    if let Some(problem) = problem {
-                                        error.update(cx, |e, cx| {
-                                            *e = Some(problem.into());
-                                            cx.notify();
-                                        });
-                                        window.refresh();
-                                        return;
-                                    }
-                                    window.close_dialog(cx);
-                                    let _ = editor
-                                        .update(cx, |e, cx| e.named(naming, name, window, cx));
-                                }),
+            // The OK button and Enter both submit; it closes the dialog itself when done.
+            let submit: crate::ui::widgets::Submit = {
+                let (input, error, editor) = (input.clone(), error.clone(), editor.clone());
+                Rc::new(move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                    let name = input.read(cx).value().trim().to_owned();
+                    let problem = editor
+                        .upgrade()
+                        .and_then(|e| e.read(cx).name_problem(&name, cx));
+                    if let Some(problem) = problem {
+                        error.update(cx, |e, cx| {
+                            *e = Some(problem.into());
+                            cx.notify();
+                        });
+                        window.refresh();
+                        return;
+                    }
+                    window.close_dialog(cx);
+                    let _ = editor.update(cx, |e, cx| e.named(naming, name, window, cx));
+                })
+            };
+            dialog
+                .on_ok({
+                    let submit = Rc::clone(&submit);
+                    move |e, w, cx| {
+                        submit(e, w, cx);
+                        false
+                    }
+                })
+                .title(title.clone())
+                .w(px(380.))
+                .child(
+                    v_flex()
+                        .gap_3()
+                        .child(message.clone())
+                        .child(Input::new(&input))
+                        .when_some(problem, |col, problem| {
+                            col.child(div().text_sm().text_color(cx.theme().danger).child(problem))
+                        })
+                        .child(
+                            h_flex().justify_end().child(
+                                Button::new("profile-name-ok")
+                                    .primary()
+                                    .label("OK")
+                                    .on_click({
+                                        let submit = Rc::clone(&submit);
+                                        move |e: &ClickEvent, w: &mut Window, cx: &mut App| {
+                                            submit(e, w, cx);
+                                        }
+                                    }),
+                            ),
                         ),
-                    ),
-            )
+                )
         });
     }
 
