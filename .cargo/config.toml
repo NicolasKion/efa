@@ -1,0 +1,4 @@
+# Several builds often run at once here (worktrees for parallel work), so none may take every
+# core. Linking the test binaries is the expensive part; they live in one binary for that reason.
+[build]
+jobs = 8
