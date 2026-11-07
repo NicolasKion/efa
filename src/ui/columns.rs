@@ -150,10 +150,22 @@ impl Col {
                 .get(m.type_id)
                 .filter(|&p| p > 0.0)
                 .map(stats::format::currency),
-            Self::Charge => m.charge.map(|c| catalog.name(c)),
+            Self::Charge => m
+                .charge
+                .map(|c| charge_text(&catalog.name(c), info.charges, info.charged_cycles)),
             Self::Misc => misc.map(str::to_owned),
             Self::Heat => info.burnout.map(burnout_text),
         }
+    }
+}
+
+/// pyfa's ammo column (builtinViewColumns/ammo.py): the charge's name with how many the module
+/// holds, and how many cycles they last when that differs.
+fn charge_text(name: &str, charges: Option<u32>, cycles: Option<u32>) -> String {
+    match (charges.filter(|&n| n > 0), cycles) {
+        (Some(n), Some(c)) if c != 0 && c != n => format!("{name} ({n}, {c} cycles)"),
+        (Some(n), _) => format!("{name} ({n})"),
+        (None, _) => name.to_owned(),
     }
 }
 
@@ -432,5 +444,32 @@ impl Gyfa {
                     ))
             }))
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::charge_text;
+
+    #[test]
+    fn charge_text_follows_pyfa() {
+        assert_eq!(
+            charge_text("Scourge Light Missile", Some(40), Some(40)),
+            "Scourge Light Missile (40)"
+        );
+        assert_eq!(
+            charge_text("Multifrequency S", Some(1), Some(4000)),
+            "Multifrequency S (1, 4000 cycles)"
+        );
+        assert_eq!(
+            charge_text("Optimal Range Script", Some(1), None),
+            "Optimal Range Script (1)"
+        );
+        assert_eq!(
+            charge_text("Cap Booster 800", Some(1), Some(0)),
+            "Cap Booster 800 (1)"
+        );
+        assert_eq!(charge_text("Nothing", Some(0), Some(3)), "Nothing");
+        assert_eq!(charge_text("Unknown", None, None), "Unknown");
     }
 }

@@ -8,7 +8,9 @@ use gyfa::{
     fit::Fit,
     item_data::ItemData,
     wizard::{
-        self, Ammo, Choices, DamageMods, Facts, Family, HullSize, Prop, Setup, Tank, Tier, Utility,
+        self, Ammo, Bling, Category, Choices, DamageMods, Facts, Family, Goal, HullSize, Layer,
+        Prop, Setup, TankStyle, Tier, Utility,
+        tank::{self, Progress},
     },
 };
 
@@ -80,14 +82,17 @@ fn a_hurricane_gets_a_sane_brawler() {
     );
     let choices = Choices {
         family: Some(ac),
-        tier: Tier::T2,
         ammo: Ammo::Faction,
         prop: Prop::Microwarpdrive,
         utilities: vec![Utility::Scram, Utility::Web],
-        tank: Tank::ShieldBuffer,
+        tank: TankStyle::Buffer,
+        layer: Layer::Shield,
+        goal: Goal::Balanced,
+        tank_fit: None,
         damage: DamageMods::Weapon,
         rigs: wizard::Rigs::Tank,
         clear: false,
+        bling: Bling::default(),
     };
     let picks = wizard.plan(&fit, &choices);
     let highs = names(catalog, &picks, Slot::High);
@@ -145,10 +150,7 @@ fn a_vexor_picks_drone_damage_amplifiers() {
     let wizard = Setup::new(catalog, data, &facts, &families);
     let choices = wizard.defaults();
     assert_eq!(choices.damage, DamageMods::Drone);
-    assert!(matches!(
-        choices.tank,
-        Tank::ArmorBuffer | Tank::ArmorActive
-    ));
+    assert_eq!(choices.layer, Layer::Armor);
     let picks = wizard.plan(&fit, &choices);
     let lows = names(catalog, &picks, Slot::Low);
     assert!(
@@ -233,11 +235,9 @@ fn masteries_decide_the_weapons() {
             .all(|f| f.kind == wizard::WeaponKind::Missile)
     );
     let wizard = Setup::new(catalog, data, &facts, &families);
-    assert!(
-        matches!(
-            wizard.defaults().tank,
-            wizard::Tank::ShieldBuffer | wizard::Tank::ShieldActive
-        ),
+    assert_eq!(
+        wizard.defaults().layer,
+        Layer::Shield,
         "the Raven's mastery asks for shield tanking"
     );
 }
@@ -265,4 +265,208 @@ fn battleships_can_take_a_grappler() {
     let frigate = ship(catalog, "Rifter");
     let (facts, _) = hull(catalog, engine, data, &frigate);
     assert!(!wizard::Utility::Grappler.fits(facts.size));
+}
+
+/// The optimiser's best tanks for the choices.
+fn best(
+    catalog: &Catalog,
+    engine: &Engine,
+    data: &ItemData,
+    fit: &Fit,
+    edit: impl FnOnce(&mut Choices),
+) -> (tank::Problem, Vec<tank::Outcome>) {
+    let (facts, families) = hull(catalog, engine, data, fit);
+    let wizard = Setup::new(catalog, data, &facts, &families);
+    let mut choices = wizard.defaults();
+    edit(&mut choices);
+    let problem = wizard
+        .tank_problem(engine, engine.all5(), fit, &choices)
+        .expect("a tank to search for");
+    let outcomes = tank::optimise(engine, &problem, &Progress::default(), 5);
+    (problem, outcomes)
+}
+
+#[test]
+fn an_abaddon_active_tank_beats_the_naive_one() {
+    let Some((catalog, engine, data)) = setup() else {
+        return;
+    };
+    let fit = ship(catalog, "Abaddon");
+    let (problem, outcomes) = best(catalog, engine, data, &fit, |c| {
+        c.tank = TankStyle::Active;
+        c.layer = Layer::Armor;
+        c.goal = Goal::Balanced;
+    });
+    let found = outcomes.first().expect("a tank");
+    let names: Vec<String> = found.types.iter().map(|&t| catalog.name(t)).collect();
+    assert!(
+        names.iter().any(|n| n.contains("Armor Repairer")),
+        "{names:?}"
+    );
+    assert!(
+        names
+            .iter()
+            .any(|n| n.contains("Reactive Armor Hardener") || n.contains("Multispectrum")),
+        "{names:?}"
+    );
+    // What the wizard used to fit: two repairers, a membrane and a damage control.
+    let by = |name: &str| {
+        problem
+            .candidates
+            .iter()
+            .find(|c| catalog.name(c.base) == name)
+            .expect(name)
+    };
+    let repairer = by("Large Armor Repairer I");
+    let membrane = by("Multispectrum Energized Membrane I");
+    let control = by("Damage Control I");
+    let naive = [repairer, membrane, repairer, control];
+    let pump: Vec<_> = problem
+        .rigs
+        .iter()
+        .filter(|r| catalog.name(r.base).contains("Auxiliary Nano Pump"))
+        .copied()
+        .collect();
+    let rigs = vec![pump[0]; problem.rig_positions.len()];
+    // As much of it as the CPU and powergrid take.
+    let naive = (1..=naive.len())
+        .rev()
+        .find_map(|n| tank::score(engine, &problem, &naive[..n], &rigs))
+        .expect("some of the naive tank fits");
+    assert!(
+        found.score > naive.score,
+        "found {names:?} at {}, naive at {}",
+        found.score,
+        naive.score
+    );
+}
+
+#[test]
+fn a_drake_buffer_takes_extenders_over_amplifiers() {
+    let Some((catalog, engine, data)) = setup() else {
+        return;
+    };
+    let fit = ship(catalog, "Drake");
+    let (_, outcomes) = best(catalog, engine, data, &fit, |c| {
+        c.tank = TankStyle::Buffer;
+        c.layer = Layer::Shield;
+        c.goal = wizard::Goal::Ehp;
+    });
+    let found = outcomes.first().expect("a tank");
+    let names: Vec<String> = found.types.iter().map(|&t| catalog.name(t)).collect();
+    assert!(
+        names.iter().any(|n| n.contains("Shield Extender")),
+        "{names:?}"
+    );
+    assert!(!names.iter().any(|n| n.contains("Amplifier")), "{names:?}");
+    assert!(
+        outcomes.windows(2).all(|w| w[0].ehp >= w[1].ehp),
+        "best EHP first"
+    );
+}
+
+#[test]
+fn a_brick_abaddon_gets_plates() {
+    let Some((catalog, engine, data)) = setup() else {
+        return;
+    };
+    let fit = ship(catalog, "Abaddon");
+    let (problem, outcomes) = best(catalog, engine, data, &fit, |c| {
+        c.tank = TankStyle::Brick;
+        c.layer = Layer::Armor;
+    });
+    let found = outcomes.first().expect("a tank");
+    assert_eq!(found.modules.len(), problem.positions.len());
+    assert!(
+        found
+            .types
+            .iter()
+            .all(|&t| catalog.name(t).contains("Plates")),
+        "{:?}",
+        found
+            .types
+            .iter()
+            .map(|&t| catalog.name(t))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn bling_picks_the_variation() {
+    let Some((catalog, engine, data)) = setup() else {
+        return;
+    };
+    let fit = ship(catalog, "Hurricane");
+    let (facts, families) = hull(catalog, engine, data, &fit);
+    let wizard = Setup::new(catalog, data, &facts, &families);
+    let mut choices = wizard.defaults();
+    let mwd = catalog.find("50MN Microwarpdrive I").expect("exists").id;
+    let restrained = catalog
+        .find("50MN Quad LiF Restrained Microwarpdrive")
+        .expect("exists")
+        .id;
+    assert!(wizard.variants(mwd).contains(&restrained));
+    choices
+        .bling
+        .choose(Category::Propulsion, mwd, restrained, Tier::Meta);
+    choices
+        .bling
+        .categories
+        .insert(Category::Tackle, Tier::Faction);
+    let picks = wizard.plan(&fit, &choices);
+    let mids = names(catalog, &picks, Slot::Mid);
+    assert!(
+        mids.iter()
+            .any(|n| n == "50MN Quad LiF Restrained Microwarpdrive"),
+        "{mids:?}"
+    );
+    assert!(
+        mids.iter()
+            .any(|n| n.contains("Warp Scrambler") && !n.ends_with(" II")),
+        "a faction scram: {mids:?}"
+    );
+    // A found tank goes on as it was found.
+    let (_, outcomes) = best(catalog, engine, data, &fit, |c| {
+        c.tank = TankStyle::Buffer;
+        c.layer = Layer::Shield;
+    });
+    choices.tank = TankStyle::Buffer;
+    choices.layer = Layer::Shield;
+    choices.tank_fit = Some(outcomes[0].tank_fit());
+    let picks = wizard.plan(&fit, &choices);
+    let fitted: Vec<TypeId> = picks
+        .iter()
+        .filter(|p| p.slot == Slot::Mid)
+        .map(|p| p.type_id)
+        .collect();
+    assert!(
+        outcomes[0].types.iter().all(|t| fitted.contains(t)),
+        "the found tank is planned"
+    );
+}
+
+#[test]
+fn a_buffer_tank_mixes_in_resists() {
+    let Some((catalog, engine, data)) = setup() else {
+        return;
+    };
+    let fit = ship(catalog, "Abaddon");
+    let (_, outcomes) = best(catalog, engine, data, &fit, |c| {
+        c.tank = TankStyle::Buffer;
+        c.layer = Layer::Armor;
+        c.goal = wizard::Goal::Balanced;
+    });
+    let found = outcomes.first().expect("a tank");
+    let names: Vec<String> = found.types.iter().map(|&t| catalog.name(t)).collect();
+    assert!(
+        names.iter().any(|n| n.contains("Plates")),
+        "some buffer: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Membrane")
+            || n.contains("Coating")
+            || n.contains("Hardener")
+            || n.contains("Damage Control")),
+        "resist modules too: {names:?}"
+    );
 }

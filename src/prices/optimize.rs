@@ -167,11 +167,7 @@ pub fn value(fit: &Fit, catalog: &Catalog, price: impl Fn(TypeId) -> Option<f64>
         .drones
         .iter()
         .map(|d| (d.type_id, d.count))
-        .chain(
-            fit.fighters
-                .iter()
-                .map(|f| (f.type_id, f.amount.unwrap_or(1))),
-        )
+        .chain(fit.fighters.iter().map(|f| (f.type_id, f.size(catalog))))
         .chain(fit.cargo.iter().copied())
         .map(|(t, n)| each(t, n))
         .sum::<f64>();

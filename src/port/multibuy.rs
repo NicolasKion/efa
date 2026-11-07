@@ -61,6 +61,9 @@ pub fn amounts(fit: &Fit, catalog: &Catalog, options: &Options) -> Vec<(TypeId, 
     for d in &fit.drones {
         add(d.type_id, d.count);
     }
+    for f in &fit.fighters {
+        add(f.type_id, f.size(catalog));
+    }
     if options.cargo {
         for &(type_id, count) in &fit.cargo {
             add(type_id, count);

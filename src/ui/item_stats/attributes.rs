@@ -32,6 +32,8 @@ pub struct Describe<'a> {
     pub own: Option<&'a TypeInfo>,
     /// Fitted items have a base value column.
     pub fitted: bool,
+    /// Attributes whose base value comes from an attribute override.
+    pub overridden: &'a [i32],
     pub raw: bool,
 }
 
@@ -306,10 +308,13 @@ impl Builder<'_> {
                 return None;
             }
         }
-        let shown_name = match (d.raw, info.and_then(|i| i.display_name.as_deref())) {
+        let mut shown_name = match (d.raw, info.and_then(|i| i.display_name.as_deref())) {
             (false, Some(display)) => label.unwrap_or(display).to_owned(),
             _ => name.to_owned(),
         };
+        if d.overridden.contains(&value.id) {
+            shown_name.push_str(" (overridden)");
+        }
         let icon = match info {
             Some(info) => info.icon.map(Icon::Id),
             None => Some(Icon::Id(UNKNOWN_ICON)),

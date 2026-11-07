@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     data::{Catalog, Kind, Slot, TypeId},
-    fit::{Booster, Fit, Module, split_count},
+    fit::{Booster, Fit, Module, fighters::Fighter, split_count},
 };
 
 /// Fits read from text, and names in it that matched no item.
@@ -186,7 +186,8 @@ pub(crate) enum Bay {
 }
 
 /// Put `count` of an item where it belongs on a fit built from a flat list, the way pyfa's
-/// importers do: modules into racks in order, charges and anything unfittable into cargo.
+/// importers do: modules into racks in order, drones and fighters into their bays, charges and
+/// anything unfittable into cargo.
 pub(crate) fn place(fit: &mut Fit, catalog: &Catalog, type_id: TypeId, count: u32, bay: Bay) {
     let Some(t) = catalog.get(type_id) else {
         return;
@@ -203,7 +204,11 @@ pub(crate) fn place(fit: &mut Fit, catalog: &Catalog, type_id: TypeId, count: u3
         }
         Kind::Module(Slot::Rig) => fit.rigs.extend((0..count).map(|_| Some(type_id))),
         Kind::Module(Slot::Subsystem) => fit.subsystems.extend((0..count).map(|_| type_id)),
-        Kind::Drone | Kind::Fighter => fit.add_drones(type_id, count),
+        Kind::Drone => fit.add_drones(type_id, count),
+        // Formats without a fighter section write one squadron per entry, its size as the count.
+        Kind::Fighter => fit
+            .fighters
+            .push(Fighter::with_size(catalog, type_id, count)),
         Kind::Implant => {
             fit.add_implant(catalog, type_id);
         }

@@ -87,6 +87,9 @@ pub enum Action {
     Place(Slot, usize, TypeId),
     /// Swap two positions of the same rack; either may be empty.
     Swap(RowRef, RowRef),
+    /// Copy a fitted module or rig, charge, state and mutation included, into an empty
+    /// position of its rack, pyfa's Ctrl-drag.
+    Clone(RowRef, RowRef),
     SetDronesActive(usize, u32),
     AddCargo(TypeId, u32),
     AddDrones(TypeId, u32),
@@ -249,7 +252,10 @@ impl Gyfa {
         // a rack checks each copy as it goes.
         let checked = matches!(
             action,
-            Action::Place(..) | Action::SwapType(..) | Action::CargoToModule(..)
+            Action::Place(..)
+                | Action::SwapType(..)
+                | Action::CargoToModule(..)
+                | Action::Clone(..)
         );
         let pilot = self.pilot(&loaded);
         let mut refused: Option<String> = None;
@@ -396,6 +402,36 @@ impl Gyfa {
                 }
                 structural = true;
             }
+            Action::Clone(from, to) => match (from, to) {
+                (RowRef::Module(slot_a, i), RowRef::Module(slot_b, j))
+                    if slot_a == slot_b && i != j =>
+                {
+                    let rack = fit.rack_mut(slot_a);
+                    let Some(Some(module)) = rack.get(i).cloned() else {
+                        return;
+                    };
+                    if rack.get(j).is_some_and(Option::is_some) {
+                        return;
+                    }
+                    if rack.len() <= j {
+                        rack.resize_with(j + 1, || None);
+                    }
+                    rack[j] = Some(module);
+                }
+                (RowRef::Rig(i), RowRef::Rig(j)) if i != j => {
+                    let Some(Some(rig)) = fit.rigs.get(i).copied() else {
+                        return;
+                    };
+                    if fit.rigs.get(j).is_some_and(Option::is_some) {
+                        return;
+                    }
+                    if fit.rigs.len() <= j {
+                        fit.rigs.resize(j + 1, None);
+                    }
+                    fit.rigs[j] = Some(rig);
+                }
+                _ => return,
+            },
             Action::SwapType(rows, type_id) => {
                 for row in rows {
                     match row {

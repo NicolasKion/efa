@@ -102,7 +102,7 @@ impl Gyfa {
                 let items = port::parse_items(&loaded.catalog, &text)
                     .filter(|_| self.saved.current.is_some());
                 if let Some(items) = items {
-                    self.paste_items(&loaded.catalog, items, cx);
+                    self.paste_items(&loaded.catalog, &text, items, cx);
                 } else {
                     self.status = Some(format!("Import failed: {e}").into());
                     cx.notify();
@@ -112,11 +112,13 @@ impl Gyfa {
     }
 
     /// Items pasted onto the current fit, routed like pyfa's additions import: all drones go to
-    /// drones, all implants to implants, all boosters to boosters, a single module is fitted, and
-    /// anything else lands in cargo.
+    /// drones, all implants to implants, all boosters to boosters, a single module is fitted,
+    /// all fighters become squadrons, and anything else lands in cargo. `text` is what `items` came
+    /// from, which fighters read again so a line without a count stays a full squadron.
     fn paste_items(
         &mut self,
         catalog: &Catalog,
+        text: &str,
         items: Vec<(TypeId, u32)>,
         cx: &mut Context<Self>,
     ) {
@@ -126,6 +128,11 @@ impl Gyfa {
             && matches!(kind_of(type_id), Some(Kind::Module(_)))
         {
             self.add_item(type_id, cx);
+            return;
+        }
+        if all(|k| k == Kind::Fighter) {
+            self.status = None;
+            self.add_fighter_squadrons(super::additions::fighters::parse_lines(catalog, text), cx);
             return;
         }
         let (kind, tab) = if all(|k| k == Kind::Drone) {

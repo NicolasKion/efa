@@ -6,10 +6,15 @@
 
 use std::{path::PathBuf, rc::Rc};
 
-use gpui_kit::{AnyWindowHandle, App, AppContext, Context, Global, SharedString, WeakEntity};
+use gpui_kit::{
+    AnyWindowHandle, App, AppContext, Context, Global, SharedString, Task, WeakEntity, Window,
+};
 
 use super::{Loaded, character_editor::CharacterEditor, load};
-use crate::{character::Characters, preferences::Preferences, prices::Prices, store::Saved};
+use crate::{
+    character::Characters, engine::Overridden, overrides::Overrides, preferences::Preferences,
+    prices::Prices, store::Saved,
+};
 
 /// The current preferences for code that has no window to ask, such as menu builders. The hub
 /// keeps it in step with its saved state.
@@ -21,6 +26,16 @@ impl Global for CurrentPreferences {}
 pub fn preferences(cx: &App) -> Preferences {
     cx.try_global::<CurrentPreferences>()
         .map_or_default(|p| p.0.clone())
+}
+
+/// Which context menu entries show in a menu opening now: the Context Menus preferences, or all
+/// of them while Ctrl is held, as in pyfa (gui/contextMenu.py).
+pub fn shown_menus(window: &Window, cx: &App) -> crate::preferences::ContextMenus {
+    if window.modifiers().control {
+        crate::preferences::ContextMenus::default()
+    } else {
+        preferences(cx).context_menus
+    }
 }
 
 /// New rolled values for a mutated module or drone stack of a saved fit.
@@ -61,12 +76,18 @@ pub struct Hub {
     pub characters: Rc<Characters>,
     /// The open character editor, which is brought forward instead of opening a second one.
     pub character_editor: Option<(AnyWindowHandle, WeakEntity<CharacterEditor>)>,
+    /// The engine data being rebuilt for changed attribute overrides.
+    overrides_task: Option<Task<()>>,
 }
 
 impl Hub {
     pub fn new(data_dir: PathBuf, import: Option<String>, cx: &mut Context<Self>) -> Self {
+        let mut saved = Saved::load();
+        let overrides = saved.overrides.active();
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
-            let result = cx.background_spawn(async move { load(&data_dir) }).await;
+            let result = cx
+                .background_spawn(async move { load(&data_dir, &overrides) })
+                .await;
             let _ = this.update(cx, |hub, cx| {
                 hub.loading = match result {
                     Ok(loaded) => {
@@ -76,11 +97,12 @@ impl Hub {
                     }
                     Err(e) => HubLoading::Failed(e.into()),
                 };
+                // Overrides changed while the data was loading.
+                hub.refresh_overrides(cx);
                 cx.notify();
             });
         })
         .detach();
-        let mut saved = Saved::load();
         if !saved.preferences.general.reopen_fits {
             saved.open.clear();
             saved.current = None;
@@ -98,6 +120,7 @@ impl Hub {
             raw_hp: false,
             characters: Rc::new(Characters::load()),
             character_editor: None,
+            overrides_task: None,
         }
     }
 
@@ -141,9 +164,12 @@ impl Hub {
             }
             (open, current)
         };
+        // Only the overrides window changes overrides, through the hub, so a window's copy may
+        // be behind.
         self.saved = Saved {
             open,
             current,
+            overrides: std::mem::take(&mut self.saved.overrides),
             ..saved.clone()
         };
         if let Err(e) = self.saved.save() {
@@ -163,6 +189,57 @@ impl Hub {
         }
         self.sync_preferences(cx);
         cx.notify();
+    }
+
+    /// Change the attribute overrides or switch them, save, and recalculate every window with
+    /// them once the engine's data is rebuilt.
+    pub fn edit_overrides(&mut self, edit: impl FnOnce(&mut Overrides), cx: &mut Context<Self>) {
+        let before = self.saved.overrides.clone();
+        edit(&mut self.saved.overrides);
+        if self.saved.overrides == before {
+            return;
+        }
+        self.update_saved(|_| {}, cx);
+        self.refresh_overrides(cx);
+    }
+
+    /// Rebuild the engine's data away from the UI thread if the overrides in effect changed, and
+    /// bump the generation when it lands so every window recalculates.
+    fn refresh_overrides(&mut self, cx: &mut Context<Self>) {
+        let HubLoading::Ready(loaded) = &self.loading else {
+            return;
+        };
+        let values = self.saved.overrides.active();
+        if loaded.engine.overrides() == values {
+            self.overrides_task = None;
+            return;
+        }
+        let (data_dir, cache_dir) = (loaded.data_dir.clone(), loaded.cache_dir.clone());
+        // A newer change replaces a rebuild still running.
+        self.overrides_task = Some(cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let built = cx
+                .background_spawn(async move {
+                    let data = Overridden::load(&data_dir, &cache_dir, &values);
+                    (values, data)
+                })
+                .await;
+            let _ = this.update(cx, |hub, cx| {
+                hub.overrides_task = None;
+                let (values, data) = built;
+                let HubLoading::Ready(loaded) = &hub.loading else {
+                    return;
+                };
+                match data {
+                    Ok(data) if values == hub.saved.overrides.active() => {
+                        loaded.engine.set_overrides(data);
+                        hub.generation += 1;
+                        cx.notify();
+                    }
+                    Ok(_) => hub.refresh_overrides(cx),
+                    Err(e) => eprintln!("attribute overrides: {e}"),
+                }
+            });
+        }));
     }
 
     fn sync_preferences(&self, cx: &mut Context<Self>) {

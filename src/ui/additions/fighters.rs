@@ -20,7 +20,11 @@ use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, drones::format_amount, price_text};
 use crate::{
     data::{Catalog, Kind, TypeId, projection::FighterClass},
     engine::{FighterInfo, ItemRef, Slots, Stats, drone_attr},
-    fit::{Fit, fighters::Fighter, split_count},
+    fit::{
+        Fit,
+        fighters::{self, Fighter},
+        split_count,
+    },
     icons::Icon,
     ui::{
         Gyfa, Loaded,
@@ -31,15 +35,6 @@ use crate::{
     },
 };
 
-/// pyfa's `FIGHTER_ORDER`, by the group a fighter is in.
-const FIGHTER_ORDER: [&str; 6] = [
-    "Light Fighter",
-    "Structure Light Fighter",
-    "Heavy Fighter",
-    "Structure Heavy Fighter",
-    "Support Fighter",
-    "Structure Support Fighter",
-];
 const NUMBER_W: f32 = 64.;
 const SPEED_ICON: i32 = 1389;
 const HEADER_ICON: f32 = 18.;
@@ -54,10 +49,7 @@ fn display_order(catalog: &Catalog, fighters: &[Fighter], stats: Option<&Stats>)
             .get(fighter.type_id)
             .and_then(|t| catalog.group_names.get(&t.group_id))
             .map_or("", String::as_str);
-        let rank = FIGHTER_ORDER
-            .iter()
-            .position(|&o| o == group)
-            .unwrap_or(FIGHTER_ORDER.len());
+        let rank = fighters::group_rank(catalog, fighter.type_id);
         let mut abilities: Vec<i32> = if group == "Support Fighter" {
             Vec::new()
         } else {
@@ -95,18 +87,17 @@ fn export_lines(
 }
 
 /// Fighters from pasted lines; anything that is not a fighter is skipped.
-fn parse_lines(catalog: &Catalog, text: &str) -> Vec<Fighter> {
+pub(in crate::ui) fn parse_lines(catalog: &Catalog, text: &str) -> Vec<Fighter> {
     text.lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('['))
         .filter_map(|line| {
             let (name, count) = split_count(line);
             let t = catalog.find(name).filter(|t| t.kind == Kind::Fighter)?;
-            let mut fighter = Fighter::new(t.id);
-            if let Some(n) = count {
-                fighter.set_amount(n, catalog.projection.squadron_size(t.id));
-            }
-            Some(fighter)
+            Some(count.map_or_else(
+                || Fighter::new(t.id),
+                |n| Fighter::with_size(catalog, t.id, n),
+            ))
         })
         .collect()
 }

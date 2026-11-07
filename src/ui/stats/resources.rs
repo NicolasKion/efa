@@ -56,17 +56,7 @@ pub(super) fn section(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
             }),
     );
 
-    let cargo_used: f64 = p
-        .fit
-        .cargo
-        .iter()
-        .filter_map(|&(id, count)| {
-            p.loaded
-                .catalog
-                .get(id)
-                .map(|t| t.volume * f64::from(count))
-        })
-        .sum();
+    let cargo_used: f64 = p.fit.hold_volume(&p.loaded.catalog, p.implants_in_cargo);
     let bay = if p.additions_tab == AdditionsTab::Cargo {
         (
             "cargo",

@@ -9,8 +9,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, ClickEvent, ClipboardItem, Context, InteractiveElement, IntoElement,
-    MouseButton, MouseDownEvent, ParentElement, SharedString, StatefulInteractiveElement, Styled,
-    WeakEntity, Window, div, prelude::FluentBuilder, px,
+    KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, SharedString,
+    StatefulInteractiveElement, Styled, WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
 use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, export_lines, parse_lines, price_text};
@@ -95,11 +95,17 @@ impl Gyfa {
                 .into_any_element(),
         );
 
+        let len = rows.len();
+        let own = source == ImplantSource::Fit;
         let list = v_flex()
             .id("implants-list")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_focus(&self.additions_focus)
+            .on_key_down(cx.listener(move |g, event: &KeyDownEvent, _, cx| {
+                g.list_key(event, AddKind::Implants, len, own, cx);
+            }))
             .children(content)
             .drag_over::<Dragged>(|style, _, _, cx| style.bg(cx.theme().drop_target))
             .on_drop(cx.listener(|g, dragged: &Dragged, _, cx| {
@@ -216,7 +222,8 @@ impl Gyfa {
                     .truncate()
                     .children(price_text(&self.prices, type_id, 1)),
             )
-            .on_click(cx.listener(move |g, event: &ClickEvent, _, cx| {
+            .on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
+                window.focus(&g.additions_focus, cx);
                 if event.click_count() >= 2 && own {
                     g.apply(Action::RemoveAdditions(AddKind::Implants, vec![i]), cx);
                 } else {
@@ -297,6 +304,7 @@ fn implant_menu(
         loaded,
         &snapshot,
         clicked_type.map(|(i, _)| i),
+        window,
         cx,
     )
 }
@@ -323,7 +331,7 @@ fn item_entries(
     };
     let mut menu = menu.item(remove);
     let variations = catalog.variations_of(type_id);
-    if variations.len() > 1 && crate::ui::hub::preferences(cx).context_menus.variations {
+    if variations.len() > 1 && crate::ui::hub::shown_menus(window, cx).variations {
         let entries: Vec<(TypeId, String)> =
             variations.iter().map(|&v| (v, catalog.name(v))).collect();
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
@@ -462,12 +470,10 @@ fn copy_paste_entries(
     loaded: &Rc<Loaded>,
     snapshot: &Snapshot,
     clicked: Option<usize>,
+    window: &Window,
     cx: &App,
 ) -> PopupMenu {
-    if !crate::ui::hub::preferences(cx)
-        .context_menus
-        .additions_copy_paste
-    {
+    if !crate::ui::hub::shown_menus(window, cx).additions_copy_paste {
         return menu;
     }
     let kind = AddKind::Implants;

@@ -119,6 +119,13 @@ pub fn export(fit: &Fit, catalog: &Catalog) -> Result<String, String> {
             type_id: d.type_id,
         });
     }
+    for f in &fit.fighters {
+        items.push(EsiItem {
+            flag: flag::FIGHTER_BAY,
+            quantity: f.size(catalog),
+            type_id: f.type_id,
+        });
+    }
     if items.is_empty() {
         return Err("cannot export a fit without items".to_owned());
     }
