@@ -88,7 +88,7 @@ fn a_hurricane_gets_a_sane_brawler() {
         tank: TankStyle::Buffer,
         layer: Layer::Shield,
         goal: Goal::Balanced,
-        search_tiers: wizard::SearchTiers::Bling,
+        search_tiers: wizard::SearchTiers::default(),
         budget: wizard::Budget::default(),
         tank_fit: None,
         damage: DamageMods::Weapon,
@@ -597,7 +597,8 @@ fn wider_search_tiers_try_faction_hardeners() {
         c.tank = TankStyle::Buffer;
         c.layer = Layer::Armor;
         c.goal = wizard::Goal::Resists;
-        c.search_tiers = wizard::SearchTiers::Faction;
+        c.search_tiers =
+            wizard::SearchTiers::of(&[wizard::SearchGroup::T2, wizard::SearchGroup::Faction]);
     });
     let faction = problem.candidates.iter().any(|c| {
         catalog
@@ -619,7 +620,8 @@ fn a_tank_budget_caps_the_price() {
     let mut choices = wizard.defaults();
     choices.tank = TankStyle::Buffer;
     choices.layer = Layer::Armor;
-    choices.search_tiers = wizard::SearchTiers::Faction;
+    choices.search_tiers =
+        wizard::SearchTiers::of(&[wizard::SearchGroup::T2, wizard::SearchGroup::Faction]);
     // Faction items cost 100M each, everything else 1M.
     let prices = gyfa::prices::Prices::fixed(catalog.types.values().map(|t| {
         let price = if t.meta_group == Some(4) { 100e6 } else { 1e6 };
@@ -664,7 +666,7 @@ fn a_picked_result_is_fitted_as_found() {
     choices.tank = TankStyle::Buffer;
     choices.layer = Layer::Armor;
     choices.goal = wizard::Goal::Resists;
-    choices.search_tiers = wizard::SearchTiers::All;
+    choices.search_tiers = wizard::SearchTiers::everything();
     let problem = wizard
         .tank_problem(
             engine,

@@ -36,7 +36,7 @@ use crate::{
     theme::Palette,
     wizard::{
         self, Ammo, Budget, Category, Choices, DamageMods, Facts, Family, Goal, Layer, Pick, Prop,
-        Rigs, SearchTiers, Setup, Tab, Tabs, TankStyle, Tier, Utility,
+        Rigs, SearchGroup, Setup, Tab, Tabs, TankStyle, Tier, Utility,
         tank::{self, Found, Limit, Outcome, Progress},
     },
 };
@@ -707,15 +707,13 @@ impl WizardPanel {
                     .position(|&b| b == c.budget.total)
                     .unwrap_or(0),
             ),
+            // Switches rather than one choice: each group is on or off.
             Row::Tiers if c.tank != TankStyle::None => (
-                SearchTiers::ALL
+                SearchGroup::ALL
                     .iter()
-                    .map(|t| (t.label().into(), true))
+                    .map(|g| (g.label().into(), true))
                     .collect(),
-                SearchTiers::ALL
-                    .iter()
-                    .position(|&t| t == c.search_tiers)
-                    .unwrap_or(0),
+                0,
             ),
             Row::Goal if c.tank != TankStyle::None => {
                 let goals = Goal::for_style(c.tank);
@@ -793,7 +791,7 @@ impl WizardPanel {
                 Row::Prop => c.prop = Prop::ALL[i],
                 Row::Style => c.tank = TankStyle::ALL[i],
                 Row::Layer => c.layer = Layer::ALL[i],
-                Row::Tiers => c.search_tiers = SearchTiers::ALL[i],
+                Row::Tiers => c.search_tiers.toggle(SearchGroup::ALL[i]),
                 Row::BudgetEach => c.budget.each = Budget::EACH[i],
                 Row::BudgetTotal => c.budget.total = Budget::TOTAL[i],
                 Row::Goal => {
@@ -970,7 +968,11 @@ impl WizardPanel {
             .into_iter()
             .enumerate()
             .map(|(i, (label, usable))| {
-                let selected = i == current;
+                let selected = if row == Row::Tiers {
+                    self.choices.search_tiers.has(SearchGroup::ALL[i])
+                } else {
+                    i == current
+                };
                 div()
                     .id(SharedString::from(format!("wizard-{}-{i}", row.key())))
                     .px_2p5()
@@ -1214,15 +1216,10 @@ impl WizardPanel {
             ),
             Row::Tiers => (
                 "Search tiers".into(),
-                match c.search_tiers {
-                    SearchTiers::Bling => "Each module at the tier your bling choices set.",
-                    SearchTiers::Faction => {
-                        "Also T2 and faction modules, and T1 and T2 rigs, so the search can \
-                         weigh them."
-                    }
-                    SearchTiers::All => "Also deadspace and officer modules. Expect big prices.",
-                }
-                .into(),
+                "Which kinds of each module the search tries, the strongest few of each kind \
+                 switched on. Officer and deadspace modules get expensive; the budgets keep \
+                 them in check."
+                    .into(),
             ),
             Row::BudgetEach => (
                 "Per module".into(),

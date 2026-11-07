@@ -391,54 +391,98 @@ impl Budget {
     }
 }
 
-/// Which variations the tank search tries for each module and rig.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SearchTiers {
-    /// The bling choices: one variation of each.
-    #[default]
-    Bling,
-    /// Also T2 and faction modules, and T1 and T2 rigs.
+/// A group of variations the tank search can try: the switches on the Tank tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SearchGroup {
+    T1,
+    /// Meta and compact variations of the T1 item.
+    Meta,
+    T2,
     Faction,
-    /// Also deadspace and officer modules.
-    All,
+    Storyline,
+    Deadspace,
+    Officer,
+    /// T2 rigs; T1 rigs are always tried.
+    T2Rigs,
 }
 
-impl SearchTiers {
-    pub const ALL: [Self; 3] = [Self::Bling, Self::Faction, Self::All];
+impl SearchGroup {
+    pub const ALL: [Self; 8] = [
+        Self::T1,
+        Self::Meta,
+        Self::T2,
+        Self::Faction,
+        Self::Storyline,
+        Self::Deadspace,
+        Self::Officer,
+        Self::T2Rigs,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Bling => "My bling",
-            Self::Faction => "Up to faction",
-            Self::All => "Everything",
+            Self::T1 => "T1",
+            Self::Meta => "Meta",
+            Self::T2 => "T2",
+            Self::Faction => "Faction",
+            Self::Storyline => "Storyline",
+            Self::Deadspace => "Deadspace",
+            Self::Officer => "Officer",
+            Self::T2Rigs => "T2 rigs",
         }
     }
 
-    /// The tiers to try for a module whose bling tier is `own`, beyond it.
-    pub fn module_tiers(self, own: bling::Tier) -> Vec<bling::Tier> {
-        use bling::Tier;
-        let extra: &[Tier] = match self {
-            Self::Bling => &[],
-            Self::Faction => &[Tier::T2, Tier::Faction],
-            Self::All => &[Tier::T2, Tier::Faction, Tier::Deadspace, Tier::Officer],
-        };
-        let mut tiers = vec![own];
-        for &t in extra {
-            if !tiers.contains(&t) {
-                tiers.push(t);
-            }
+    /// The game's meta group for module groups; None for T1, Meta and rigs, which are found
+    /// by other means.
+    pub(super) fn meta_group(self) -> Option<i32> {
+        match self {
+            Self::T2 => Some(meta::TECH2),
+            Self::Faction => Some(meta::FACTION),
+            Self::Storyline => Some(meta::STORYLINE),
+            Self::Deadspace => Some(meta::DEADSPACE),
+            Self::Officer => Some(meta::OFFICER),
+            Self::T1 | Self::Meta | Self::T2Rigs => None,
+        }
+    }
+}
+
+/// Which groups of variations the tank search tries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SearchTiers(u16);
+
+impl Default for SearchTiers {
+    /// T2 modules and T1 rigs, as most fits are built.
+    fn default() -> Self {
+        Self::of(&[SearchGroup::T2])
+    }
+}
+
+impl SearchTiers {
+    pub fn of(groups: &[SearchGroup]) -> Self {
+        let mut tiers = Self(0);
+        for &g in groups {
+            tiers.toggle(g);
         }
         tiers
     }
 
-    /// The rig tiers to try, given the rig bling tier `own`.
-    pub fn rig_tiers(self, own: bling::Tier) -> Vec<bling::Tier> {
-        use bling::Tier;
-        match self {
-            Self::Bling => vec![own],
-            _ if own == Tier::T2 => vec![Tier::T2, Tier::T1],
-            _ => vec![own, Tier::T2],
-        }
+    fn bit(group: SearchGroup) -> u16 {
+        1 << SearchGroup::ALL
+            .iter()
+            .position(|&g| g == group)
+            .unwrap_or(0)
+    }
+
+    pub fn has(self, group: SearchGroup) -> bool {
+        self.0 & Self::bit(group) != 0
+    }
+
+    pub fn toggle(&mut self, group: SearchGroup) {
+        self.0 ^= Self::bit(group);
+    }
+
+    /// Every group, for searches that should leave nothing out.
+    pub fn everything() -> Self {
+        Self::of(&SearchGroup::ALL)
     }
 }
 
@@ -1186,7 +1230,7 @@ impl<'a> Setup<'a> {
                 Layer::Armor
             },
             goal: Goal::Balanced,
-            search_tiers: SearchTiers::Bling,
+            search_tiers: SearchTiers::default(),
             budget: Budget::default(),
             tank_fit: None,
             damage: if drones || family.is_none() && facts.drone_bandwidth > 0.0 {

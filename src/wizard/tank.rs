@@ -791,48 +791,73 @@ impl Setup<'_> {
         category: Category,
         choices: &Choices,
     ) -> Vec<TypeId> {
-        if let Some(exact) = choices.bling.exact(category, base) {
-            return vec![exact];
-        }
-        let own = choices.bling.tier_for(category);
-        let tiers = if category == Category::Rig {
-            choices.search_tiers.rig_tiers(own)
-        } else {
-            choices.search_tiers.module_tiers(own)
-        };
-        let mut found = Vec::new();
-        for tier in tiers {
-            let id = self.resolve(base, tier);
+        use super::SearchGroup;
+        let tiers = choices.search_tiers;
+        let mut found: Vec<TypeId> = Vec::new();
+        let mut add = |id: TypeId| {
             if !found.contains(&id) {
                 found.push(id);
             }
-        }
-        // Past the bling tier, the strongest few of each wider meta group too: the lowest of a
-        // group (a C-type, the weakest officer) is rarely the one worth fitting.
-        let groups: &[i32] = match (choices.search_tiers, category) {
-            (super::SearchTiers::Bling, _) | (_, Category::Rig) => &[],
-            (super::SearchTiers::Faction, _) => &[super::meta::FACTION, super::meta::STORYLINE],
-            (super::SearchTiers::All, _) => &[
-                super::meta::FACTION,
-                super::meta::STORYLINE,
-                super::meta::DEADSPACE,
-                super::meta::OFFICER,
-            ],
         };
-        for &group in groups {
-            let mut members: Vec<&crate::data::ItemType> = self
-                .catalog
-                .variations_of(base)
-                .iter()
-                .filter_map(|&v| self.catalog.get(v))
-                .filter(|t| t.published && t.market_group.is_some() && t.meta_group == Some(group))
-                .collect();
+        // A variation the user picked by hand is always in.
+        if let Some(exact) = choices.bling.exact(category, base) {
+            add(exact);
+        }
+        let variations: Vec<&crate::data::ItemType> = self
+            .catalog
+            .variations_of(base)
+            .iter()
+            .filter_map(|&v| self.catalog.get(v))
+            .filter(|t| t.published && t.market_group.is_some())
+            .collect();
+        // The strongest few of a group: its weakest member is rarely the one worth fitting.
+        let strongest = |keep: &dyn Fn(&crate::data::ItemType) -> bool| {
+            let mut members: Vec<&crate::data::ItemType> =
+                variations.iter().copied().filter(|t| keep(t)).collect();
             members.sort_by(|a, b| b.meta_level.cmp(&a.meta_level).then(a.id.cmp(&b.id)));
-            for t in members.into_iter().take(STRONGEST_PER_GROUP) {
-                if !found.contains(&t.id) {
-                    found.push(t.id);
+            members
+                .into_iter()
+                .take(STRONGEST_PER_GROUP)
+                .map(|t| t.id)
+                .collect::<Vec<_>>()
+        };
+        if category == Category::Rig {
+            add(self.resolve(base, choices.bling.tier_for(Category::Rig)));
+            add(base);
+            if tiers.has(SearchGroup::T2Rigs) {
+                add(self.resolve(base, super::Tier::T2));
+            }
+            return found;
+        }
+        for group in SearchGroup::ALL {
+            if !tiers.has(group) {
+                continue;
+            }
+            match group {
+                SearchGroup::T1 => add(base),
+                SearchGroup::Meta => {
+                    for id in
+                        strongest(&|t| t.meta_group == Some(super::meta::TECH1) && t.id != base)
+                    {
+                        add(id);
+                    }
+                }
+                SearchGroup::T2Rigs => {}
+                _ => {
+                    let wanted = group.meta_group();
+                    for id in strongest(&|t| t.meta_group.is_some() && t.meta_group == wanted) {
+                        add(id);
+                    }
                 }
             }
+        }
+        // A module none of the switched-on groups has still comes at the bling tier, so
+        // switching on only Officer does not leave the plates out.
+        let fallback = self.resolve(base, choices.bling.tier_for(category));
+        add(fallback);
+        if found.len() > 1 {
+            // It was only wanted when nothing else came up.
+            found.retain(|&id| id != fallback || tiers_cover(choices, self, fallback));
         }
         found
     }
@@ -881,6 +906,26 @@ impl Setup<'_> {
             .map(|(base, type_id)| RigCandidate { base, type_id })
             .collect()
     }
+}
+
+/// Whether a switched-on search group covers `id`.
+fn tiers_cover(choices: &Choices, setup: &Setup<'_>, id: TypeId) -> bool {
+    use super::SearchGroup;
+    let Some(t) = setup.catalog.get(id) else {
+        return false;
+    };
+    let tiers = choices.search_tiers;
+    SearchGroup::ALL
+        .into_iter()
+        .filter(|&g| tiers.has(g))
+        .any(|g| match g {
+            SearchGroup::T1 => t.variation_parent.is_none(),
+            SearchGroup::Meta => {
+                t.meta_group == Some(super::meta::TECH1) && t.variation_parent.is_some()
+            }
+            SearchGroup::T2Rigs => false,
+            _ => t.meta_group.is_some() && t.meta_group == g.meta_group(),
+        })
 }
 
 #[cfg(test)]
