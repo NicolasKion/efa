@@ -1,0 +1,33 @@
+# git-cliff turns the conventional commits since the last release tag into the release notes.
+# See https://git-cliff.org
+
+[changelog]
+header = ""
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}\
+- {{ commit.message | split(pat=": ") | last | trim | upper_first }}
+{% endfor %}\
+{% endfor %}"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+filter_commits = true
+tag_pattern = "v[0-9]*"
+sort_commits = "oldest"
+commit_parsers = [
+    { message = "^feat", group = "Features" },
+    { message = "^fix", group = "Bug Fixes" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Refactor" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^ci", group = "Build & CI" },
+    { message = "^chore", skip = true },
+    { message = "^test", skip = true },
+    { message = "^style", skip = true },
+    { message = ".*", skip = true },
+]

@@ -1,0 +1,83 @@
+name: Rust cache
+
+# A pull request can only read the caches its own ref wrote and the ones of main. CI never saves
+# (ci.yml), so this builds what CI builds on main, once per OS, and saves it; pull requests start
+# from it and only compile what they changed. Clippy's check build and the test build cannot
+# share their artifacts, so Linux keeps both.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: rust-cache
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# The same settings as ci.yml, or the builds would not match.
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  build:
+    name: Build and save (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-24.04
+          - name: macOS
+            os: macos-latest
+          - name: Windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libfontconfig-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libzstd-dev libvulkan1
+
+      - name: Install Rust
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+
+      - name: Clippy build
+        if: runner.os == 'Linux'
+        run: cargo clippy --all-targets
+
+      - name: Test build
+        run: cargo test --all-targets --no-run
+
+      # The EVE data the Linux tests use, saved where pull requests can read it.
+      - name: Find the deimos release
+        if: runner.os == 'Linux'
+        id: deimos
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "tag=$(gh api repos/NicolasKion/deimos/releases/latest --jq .tag_name)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore EVE data
+        if: runner.os == 'Linux'
+        id: data
+        uses: actions/cache@v4
+        with:
+          path: data/eve
+          key: deimos-${{ steps.deimos.outputs.tag }}
+
+      - name: Fetch EVE data
+        if: runner.os == 'Linux' && steps.data.outputs.cache-hit != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/fetch-data.sh
