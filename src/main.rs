@@ -7,6 +7,7 @@ fn main() {
     efa::persist::move_old_data();
     efa::errors::install_panic_hook();
     efa::errors::queue_last_crash();
+    efa::desktop::install();
     let data_dir =
         std::env::var_os("EFA_DATA").map_or_else(|| PathBuf::from("data/eve"), PathBuf::from);
     // An EFT file given on the command line is imported as a new fit.

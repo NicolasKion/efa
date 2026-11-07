@@ -266,13 +266,15 @@ impl Default for Market {
     }
 }
 
-/// pyfa's Network page, without the parts for its own update check.
+/// pyfa's Network page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Network {
-    /// Master switch: off means no price or ESI requests at all.
+    /// Master switch: off means no price, ESI or update requests at all.
     pub enabled: bool,
     pub prices: bool,
+    /// Look for a new efa release at startup and every hour.
+    pub check_updates: bool,
     pub proxy: Proxy,
 }
 
@@ -281,6 +283,7 @@ impl Default for Network {
         Self {
             enabled: true,
             prices: true,
+            check_updates: true,
             proxy: Proxy::default(),
         }
     }

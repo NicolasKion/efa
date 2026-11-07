@@ -3,8 +3,8 @@
 //! window, the way pyfa applies a preference as soon as it is clicked.
 //!
 //! Left out on purpose: language and theme (efa follows the system and Omarchy's theme), gauge
-//! animation, market shortcuts and market view modes, reactivation timers, update checks, pyfa's
-//! own SSO server mode (efa always logs in through a local callback), and logging.
+//! animation, market shortcuts and market view modes, reactivation timers, pyfa's own SSO server
+//! mode (efa always logs in through a local callback), and logging.
 
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
@@ -189,8 +189,10 @@ impl PreferencesWindow {
                     }
                 })
             };
+        let updates = hub.read(cx).updates.clone();
         let subscriptions = vec![
             cx.observe(&hub, |_, _, cx| cx.notify()),
+            cx.observe(&updates, |_, _, cx| cx.notify()),
             on_change(&fields.spool, cx, |s, v| {
                 if let Ok(percent) = v.trim().trim_end_matches('%').parse::<f64>() {
                     s.preferences.engine.default_spool = (percent / 100.0).clamp(0.0, 1.0);
@@ -803,6 +805,68 @@ impl PreferencesWindow {
                 ],
                 cx,
             ),
+            section("Updates", self.update_rows(n, cx), cx),
+        ]
+    }
+
+    /// The update check switch, and checking by hand with what the last check found.
+    fn update_rows(
+        &self,
+        n: &crate::preferences::Network,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let updates = self.hub.read(cx).updates.clone();
+        let (checking, result) = {
+            let u = updates.read(cx);
+            (u.checking, u.last_result.clone())
+        };
+        let switch = Switch::new("check-updates")
+            .checked(n.check_updates)
+            .disabled(!n.enabled)
+            .on_click(cx.listener(|this, value: &bool, _, cx| {
+                let value = *value;
+                this.set(cx, |s| s.preferences.network.check_updates = value);
+            }))
+            .into_any_element();
+        let check = Button::new("check-updates-now")
+            .small()
+            .label(if checking { "Checking..." } else { "Check Now" })
+            .disabled(checking || !n.enabled)
+            .on_click(move |_, _, cx| updates.update(cx, |u, cx| u.check(true, cx)))
+            .into_any_element();
+        let found = result.unwrap_or_else(|| "Not checked yet.".into());
+        vec![
+            row(
+                "Check for updates",
+                "Look for a new efa at startup and every hour.",
+                switch,
+                false,
+                !n.enabled,
+                cx,
+            ),
+            h_flex()
+                .gap_6()
+                .px_4()
+                .py_3()
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_0p5()
+                        .child(
+                            div()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(format!("efa {}", crate::update::VERSION)),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(found),
+                        ),
+                )
+                .child(div().flex_none().child(check))
+                .into_any_element(),
         ]
     }
 
