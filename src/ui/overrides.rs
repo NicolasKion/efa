@@ -3,7 +3,7 @@
 //! of its attributes. Every change goes to the hub, which saves it and rebuilds the engine's data
 //! while overrides are on.
 
-use std::{path::PathBuf, rc::Rc};
+use std::rc::Rc;
 
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
@@ -330,7 +330,7 @@ impl OverridesWindow {
     /// Write the overrides as a pyfa override file.
     fn export(&self, cx: &mut Context<Self>) {
         let csv = self.overrides(cx).to_csv();
-        let dir = std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from);
+        let dir = crate::paths::home_dir();
         let chosen = cx.prompt_for_new_path(&dir, Some("pyfa_overrides.csv"));
         cx.background_spawn(async move {
             if let Ok(Ok(Some(path))) = chosen.await

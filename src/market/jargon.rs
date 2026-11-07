@@ -110,10 +110,7 @@ impl<'de> Deserialize<'de> for Key {
 }
 
 fn user_file() -> Option<PathBuf> {
-    let data = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
-    Some(data.join("efa").join(USER_FILE))
+    crate::paths::data_file(USER_FILE)
 }
 
 /// A parsed market search: each word a pattern the name has to contain somewhere.

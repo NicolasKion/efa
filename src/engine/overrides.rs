@@ -5,8 +5,6 @@
 //! refine has no API to change a base value, so a cacher that loads the cached adapted data and
 //! patches it stands in for the usual one.
 
-use std::path::Path;
-
 use rc::{
     Src,
     ad::{
@@ -16,13 +14,21 @@ use rc::{
 };
 use serde::{Serialize, de::DeserializeOwned};
 
+use super::source::{EngineSource, load_src};
 use crate::overrides::Values;
 
 /// The cacher refine reads its data through, with the overrides applied on load.
 #[derive(Debug)]
-struct Patched {
-    inner: radc::PostcardZfsAdc,
+pub(super) struct Patched {
+    inner: Box<dyn AdaptedDataCacherCore>,
     values: Values,
+}
+
+impl Patched {
+    /// `inner`'s data with `values` written into it.
+    pub(super) fn new(inner: Box<dyn AdaptedDataCacherCore>, values: Values) -> Self {
+        Self { inner, values }
+    }
 }
 
 impl AdaptedDataCacherCore for Patched {
@@ -57,33 +63,13 @@ pub struct Overridden {
 }
 
 impl Overridden {
-    /// Load the data from the dump in `data_dir` and the cache in `cache_dir` with `values`
-    /// applied.
-    pub fn load(data_dir: &Path, cache_dir: &Path, values: &Values) -> Result<Self, String> {
+    /// Load the data from `source` with `values` applied.
+    pub fn load(source: &EngineSource, values: &Values) -> Result<Self, String> {
         Ok(Self {
-            src: load_src(data_dir, cache_dir, values)?,
+            src: load_src(source, values)?,
             values: values.clone(),
         })
     }
-}
-
-/// refine's data source with `values` as the base values of their types. Empty values give the
-/// plain data.
-pub fn load_src(data_dir: &Path, cache_dir: &Path, values: &Values) -> Result<Src, String> {
-    let edh = redh::PhbFsEdh::new(data_dir).into();
-    let plain = || radc::PostcardZfsAdc::new(cache_dir, "tq");
-    let src = Src::new(&edh, Some(&plain().into()));
-    if values.is_empty() {
-        return src.map_err(|e| format!("loading engine data: {e}"));
-    }
-    // The plain load brings the cache up to date first, so the patched one reads it rather than
-    // generating fresh, unpatched data.
-    src.map_err(|e| format!("loading engine data: {e}"))?;
-    let patched = Patched {
-        inner: plain(),
-        values: values.clone(),
-    };
-    Src::new(&edh, Some(&patched.into())).map_err(|e| format!("applying overrides: {e}"))
 }
 
 /// Write the overridden values into the items they belong to. Attributes an item does not have

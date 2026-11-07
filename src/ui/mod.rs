@@ -32,7 +32,7 @@ mod wizard;
 
 use std::{
     collections::HashSet,
-    path::{Path, PathBuf},
+    path::PathBuf,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -121,10 +121,10 @@ pub struct Loaded {
     /// thread.
     pub engine: std::sync::Arc<Engine>,
     pub icons: Icons,
-    /// Where downloads and derived data are kept: icons, prices, the catalog cache.
+    /// Where downloads are kept: icons, prices, the CDN index.
     pub cache_dir: PathBuf,
-    /// The dump the data came from, for what is only read when first needed.
-    pub data_dir: PathBuf,
+    /// The pack or dump the data came from, for what is only read when first needed.
+    pub source: crate::pack::Source,
 }
 
 enum Loading {
@@ -1376,26 +1376,27 @@ impl Efa {
     }
 }
 
-fn load(data_dir: &Path, overrides: &crate::overrides::Values) -> Result<Loaded, String> {
-    if !data_dir.join("phobos/metadata.json").exists() {
-        return Err(format!(
-            "No EVE data in {}.\nRun scripts/fetch-data.sh, or point EFA_DATA at a deimos dump.",
-            data_dir.display()
-        ));
-    }
-    let cache_dir = data_dir.parent().unwrap_or(data_dir).join("cache");
-    let catalog = Catalog::load_cached(data_dir, &cache_dir)?;
-    let engine = Engine::load(data_dir, &cache_dir, catalog.skills.clone())?;
+fn load(overrides: &crate::overrides::Values) -> Result<Loaded, String> {
+    let start = std::time::Instant::now();
+    let source = crate::pack::Source::detect()?;
+    let catalog = source.catalog()?;
+    let engine = Engine::from_source(source.engine(), catalog.skills.clone())?;
+    eprintln!(
+        "loaded {} in {} ms",
+        source.describe(),
+        start.elapsed().as_millis()
+    );
     if !overrides.is_empty() {
         engine.apply_overrides(overrides)?;
     }
-    let icons = Icons::new(data_dir, &cache_dir);
+    let cache_dir = crate::paths::cache_dir();
+    let icons = Icons::new(source.dump_dir(), &cache_dir);
     Ok(Loaded {
         catalog,
         engine: std::sync::Arc::new(engine),
         icons,
         cache_dir,
-        data_dir: data_dir.to_owned(),
+        source,
     })
 }
 

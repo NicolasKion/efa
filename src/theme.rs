@@ -3,7 +3,7 @@
 //!
 //! Without Omarchy, [`Palette::default`] gives a plain dark theme.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -91,8 +91,7 @@ pub fn generation() -> Option<String> {
 }
 
 fn theme_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let dir = PathBuf::from(home).join(".local/state/omarchy/current/theme");
+    let dir = crate::paths::in_home(Path::new(".local/state/omarchy/current/theme"))?;
     dir.is_dir().then_some(dir)
 }
 

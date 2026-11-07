@@ -4,7 +4,7 @@
 //! publishes its copy here when it changes, and every other window pulls the new one in. Each
 //! window keeps its own tabs; only the main window's are remembered between runs.
 
-use std::{path::PathBuf, rc::Rc};
+use std::rc::Rc;
 
 use gpui_kit::{
     AnyWindowHandle, App, AppContext, Context, Global, SharedString, Task, WeakEntity, Window,
@@ -85,13 +85,11 @@ pub struct Hub {
 }
 
 impl Hub {
-    pub fn new(data_dir: PathBuf, import: Option<String>, cx: &mut Context<Self>) -> Self {
+    pub fn new(import: Option<String>, cx: &mut Context<Self>) -> Self {
         let mut saved = Saved::load();
         let overrides = saved.overrides.active();
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
-            let result = cx
-                .background_spawn(async move { load(&data_dir, &overrides) })
-                .await;
+            let result = cx.background_spawn(async move { load(&overrides) }).await;
             let _ = this.update(cx, |hub, cx| {
                 hub.loading = match result {
                     Ok(loaded) => {
@@ -220,12 +218,12 @@ impl Hub {
             self.overrides_task = None;
             return;
         }
-        let (data_dir, cache_dir) = (loaded.data_dir.clone(), loaded.cache_dir.clone());
+        let source = loaded.engine.source().clone();
         // A newer change replaces a rebuild still running.
         self.overrides_task = Some(cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let built = cx
                 .background_spawn(async move {
-                    let data = Overridden::load(&data_dir, &cache_dir, &values);
+                    let data = Overridden::load(&source, &values);
                     (values, data)
                 })
                 .await;

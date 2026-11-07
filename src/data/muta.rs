@@ -16,6 +16,7 @@ use super::{PhbTypeDogma, TypeId, read};
 pub struct Mutaplasmid {
     pub id: TypeId,
     /// Each type it takes, with the abyssal type that comes out.
+    #[serde(serialize_with = "crate::sorted::map")]
     pub results: HashMap<TypeId, TypeId>,
     /// Multipliers of the base value an attribute can roll between, by attribute ID.
     pub ranges: Vec<(i32, Range)>,
@@ -84,12 +85,16 @@ impl Limits {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Mutaplasmids {
+    #[serde(serialize_with = "crate::sorted::map")]
     pub by_type: HashMap<TypeId, Mutaplasmid>,
     /// Mutaplasmids that take a type, in pyfa's menu order.
+    #[serde(serialize_with = "crate::sorted::map")]
     pub for_base: HashMap<TypeId, Vec<TypeId>>,
     /// Unmutated values of the attributes any of a type's mutaplasmids change, by type.
+    #[serde(serialize_with = "crate::sorted::map")]
     pub base_values: HashMap<TypeId, Vec<(i32, f64)>>,
     /// Every attribute some mutaplasmid changes.
+    #[serde(serialize_with = "crate::sorted::map")]
     pub attrs: HashMap<i32, MutaAttr>,
 }
 

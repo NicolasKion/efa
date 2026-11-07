@@ -32,19 +32,12 @@ pub fn load<T: DeserializeOwned + Default>(path: &Path) -> T {
     }
 }
 
-/// efa's data directory: `$XDG_DATA_HOME/efa`, or `~/.local/share/efa`.
-pub fn data_dir() -> Option<PathBuf> {
-    let data = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
-    Some(data.join("efa"))
-}
-
 /// The app was called gyfa before; its folder moves to efa's the first time efa starts, so fits,
 /// characters and logins come along. Nothing happens when efa's folder already exists.
 pub fn move_old_data() {
-    let Some(new) = data_dir() else { return };
-    let old = new.with_file_name("gyfa");
+    let (Some(new), Some(old)) = (crate::paths::data_dir(), crate::paths::old_data_dir()) else {
+        return;
+    };
     if new.exists() || !old.is_dir() {
         return;
     }
@@ -95,17 +88,28 @@ fn write_file(path: &Path, bytes: &[u8], private: bool) -> std::io::Result<()> {
     use std::io::Write as _;
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    if private {
-        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
-        options.mode(0o600);
-        let file = options.open(path)?;
-        // The mode only applies to a new file; a leftover one keeps its own.
-        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        return (&file).write_all(bytes);
-    }
-    let _ = private;
-    options.open(path)?.write_all(bytes)
+    let file = if private {
+        open_private(&options, path)?
+    } else {
+        options.open(path)?
+    };
+    (&file).write_all(bytes)
+}
+
+#[cfg(unix)]
+fn open_private(options: &std::fs::OpenOptions, path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+    let file = options.clone().mode(0o600).open(path)?;
+    // The mode only applies to a new file; a leftover one keeps its own.
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    Ok(file)
+}
+
+/// Windows has no mode bits. Files under `%APPDATA%` inherit the profile's ACL, which already
+/// keeps other users out, so the plain open is as private as it gets without Win32 calls.
+#[cfg(not(unix))]
+fn open_private(options: &std::fs::OpenOptions, path: &Path) -> std::io::Result<std::fs::File> {
+    options.open(path)
 }
 
 enum Read<T> {

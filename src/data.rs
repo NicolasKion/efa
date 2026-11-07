@@ -273,22 +273,30 @@ pub struct MarketGroup {
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct Catalog {
+    #[serde(serialize_with = "crate::sorted::map")]
     pub types: HashMap<TypeId, ItemType>,
+    #[serde(serialize_with = "crate::sorted::map")]
     pub by_name: HashMap<String, TypeId>,
     pub market_groups: BTreeMap<i32, MarketGroup>,
     /// Top-level market groups that contain something fittable, in name order.
     pub market_roots: Vec<i32>,
     pub skills: Vec<TypeId>,
     /// Icon ID to `res:/` path, for attribute and market group icons.
+    #[serde(serialize_with = "crate::sorted::map")]
     pub icon_files: HashMap<i32, String>,
     /// Every published type sharing a variation parent, keyed by that parent.
+    #[serde(serialize_with = "crate::sorted::map")]
     pub variations: HashMap<TypeId, Vec<TypeId>>,
+    #[serde(serialize_with = "crate::sorted::map")]
     pub meta_group_names: HashMap<i32, String>,
+    #[serde(serialize_with = "crate::sorted::map")]
     pub group_names: HashMap<i32, String>,
     /// Cargo-only types the market search finds, the way pyfa limits its search.
+    #[serde(serialize_with = "crate::sorted::set")]
     pub cargo_searchable: HashSet<TypeId>,
     /// Skills each type needs and at what level, in the order the type lists them. Skills have
     /// their prerequisites here too.
+    #[serde(serialize_with = "crate::sorted::map")]
     pub required_skills: HashMap<TypeId, Vec<(TypeId, u8)>>,
     /// Environmental effects, projectable items and fighter data.
     pub projection: projection::Projection,
@@ -299,6 +307,7 @@ pub struct Catalog {
     pub mutaplasmids: muta::Mutaplasmids,
     /// Published types that are the same item under another name, pyfa's item replacements
     /// (`db_update.py` `processReplacements`): same group, skills, effects and attributes.
+    #[serde(serialize_with = "crate::sorted::map")]
     pub replacements: HashMap<TypeId, Vec<TypeId>>,
     /// The Alpha clone grades, by name.
     pub alpha_clones: Vec<AlphaClone>,
@@ -309,6 +318,7 @@ pub struct Catalog {
 pub struct AlphaClone {
     pub id: i32,
     pub name: String,
+    #[serde(serialize_with = "crate::sorted::map")]
     pub caps: HashMap<TypeId, u8>,
 }
 
@@ -349,6 +359,23 @@ impl Catalog {
             write_cache(&path, &key, &catalog);
         }
         Ok(catalog)
+    }
+
+    /// The catalog as the data pack stores it, with the format it was written in.
+    pub fn to_bytes(&self) -> Result<(u32, Vec<u8>), String> {
+        postcard::to_stdvec(self)
+            .map(|bytes| (CACHE_FORMAT, bytes))
+            .map_err(|e| format!("writing the catalog: {e}"))
+    }
+
+    /// A catalog [`Catalog::to_bytes`] wrote.
+    pub fn from_bytes(format: u32, bytes: &[u8]) -> Result<Self, String> {
+        if format != CACHE_FORMAT {
+            return Err(format!(
+                "the catalog is in format {format}, this build reads {CACHE_FORMAT}"
+            ));
+        }
+        postcard::from_bytes(bytes).map_err(|e| format!("reading the catalog: {e}"))
     }
 
     pub fn load(dir: &Path) -> Result<Self, String> {
@@ -624,12 +651,15 @@ impl Catalog {
             &dogma,
         );
 
-        // Published names win when two types share one, which happens with old unpublished copies.
+        // Published names win when two types share one, which happens with old unpublished copies;
+        // otherwise the lowest type ID does, so every build picks the same one.
         let mut by_name = HashMap::with_capacity(types.len());
-        for t in types.values() {
+        let mut in_order: Vec<&ItemType> = types.values().collect();
+        in_order.sort_unstable_by_key(|t| t.id);
+        for t in in_order {
             let key = t.name.to_lowercase();
             match by_name.get(&key).and_then(|id| types.get(id)) {
-                Some(existing) if existing.published && !t.published => {}
+                Some(existing) if existing.published || !t.published => {}
                 _ => {
                     by_name.insert(key, t.id);
                 }

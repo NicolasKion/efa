@@ -1,7 +1,8 @@
 //! Icons for items and attributes, as files on disk.
 //!
-//! The deimos dump carries the attribute and market group icons. Item icons are fetched from CCP's
-//! CDN the first time they are asked for and kept on disk, so the cost is paid once per icon.
+//! A deimos dump carries the attribute and market group icons. Everything else, and those too
+//! when running on the data pack, is fetched from CCP's CDN the first time it is asked for and
+//! kept in the cache folder, so the cost is paid once per icon.
 
 use std::{
     collections::HashMap,
@@ -40,7 +41,8 @@ enum State {
 type States = Arc<Mutex<HashMap<Icon, State>>>;
 
 pub struct Icons {
-    dump_dir: PathBuf,
+    /// The dump's attribute and market group icons; the data pack has none.
+    dump_dir: Option<PathBuf>,
     cache_dir: PathBuf,
     states: States,
     fetch: Sender<(Icon, String, PathBuf)>,
@@ -49,7 +51,7 @@ pub struct Icons {
 }
 
 impl Icons {
-    pub fn new(data_dir: &Path, cache_dir: &Path) -> Self {
+    pub fn new(dump_dir: Option<&Path>, cache_dir: &Path) -> Self {
         let states: States = Arc::default();
         let updated = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::channel::<(Icon, String, PathBuf)>();
@@ -84,7 +86,7 @@ impl Icons {
             });
         }
         Self {
-            dump_dir: data_dir.join("icons"),
+            dump_dir: dump_dir.map(|d| d.join("icons")),
             cache_dir: cache_dir.join("icons"),
             states,
             fetch: tx,
@@ -102,7 +104,7 @@ impl Icons {
         }
         let (dumped, cached, res_path) = match icon {
             Icon::Id(id) => (
-                Some(self.dump_dir.join(format!("{id}.png"))),
+                self.dump_dir.as_ref().map(|d| d.join(format!("{id}.png"))),
                 self.cache_dir.join(format!("{id}.png")),
                 catalog.icon_files.get(&id).cloned(),
             ),

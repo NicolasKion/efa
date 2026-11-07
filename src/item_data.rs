@@ -127,13 +127,18 @@ impl TypeInfo {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ItemData {
+    #[serde(serialize_with = "crate::sorted::map")]
     pub attrs: HashMap<i32, AttrInfo>,
+    #[serde(serialize_with = "crate::sorted::map")]
     pub units: HashMap<i32, UnitInfo>,
+    #[serde(serialize_with = "crate::sorted::map")]
     pub effects: HashMap<i32, EffectInfo>,
+    #[serde(serialize_with = "crate::sorted::map")]
     pub types: HashMap<TypeId, TypeInfo>,
     /// The certificates each ship's top mastery level asks for, by name, like "Large Energy
     /// Turret". They say what the ship is meant to fly with.
     #[serde(default)]
+    #[serde(serialize_with = "crate::sorted::map")]
     pub masteries: HashMap<TypeId, Vec<String>>,
     /// Types needing a skill, with the level they need, keyed by the skill.
     #[serde(skip)]
@@ -161,6 +166,26 @@ impl ItemData {
         if let Some(key) = key {
             write_cache(&path, &key, &data);
         }
+        data.link();
+        Ok(data)
+    }
+
+    /// The data as the data pack stores it, with the format it was written in.
+    pub fn to_bytes(&self) -> Result<(u32, Vec<u8>), String> {
+        postcard::to_stdvec(self)
+            .map(|bytes| (CACHE_FORMAT, bytes))
+            .map_err(|e| format!("writing the item data: {e}"))
+    }
+
+    /// Data [`ItemData::to_bytes`] wrote.
+    pub fn from_bytes(format: u32, bytes: &[u8]) -> Result<Self, String> {
+        if format != CACHE_FORMAT {
+            return Err(format!(
+                "the item data is in format {format}, this build reads {CACHE_FORMAT}"
+            ));
+        }
+        let mut data: Self =
+            postcard::from_bytes(bytes).map_err(|e| format!("reading the item data: {e}"))?;
         data.link();
         Ok(data)
     }

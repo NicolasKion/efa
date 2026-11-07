@@ -253,7 +253,7 @@ impl Efa {
             requirements::plan_xml(&name, &plan),
             requirements::plan_text(&name, &plan),
         );
-        let dir = std::env::var_os("HOME").map_or_else(std::path::PathBuf::new, Into::into);
+        let dir = crate::paths::home_dir();
         let path = cx.prompt_for_new_path(&dir, Some("skills.emp"));
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let Ok(Ok(Some(path))) = path.await else {

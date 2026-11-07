@@ -1566,6 +1566,7 @@ version = "0.1.0"
 dependencies = [
  "aws-lc-rs",
  "base64 0.22.1",
+ "dirs 6.0.0",
  "fancy-regex",
  "flate2",
  "gpui-kit",
@@ -1577,8 +1578,10 @@ dependencies = [
  "roxmltree 0.21.2",
  "serde",
  "serde-saphyr",
+ "serde_bytes",
  "serde_json",
  "toml 0.9.12+spec-1.1.0",
+ "zstd",
 ]
 
 [[package]]

@@ -1,0 +1,3 @@
+# The data pack is built by scripts/build-pack.sh and never committed.
+*
+!.gitignore

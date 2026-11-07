@@ -9,12 +9,13 @@ mod overrides;
 mod pane;
 mod pilot;
 mod probe;
+mod source;
 mod surroundings;
 mod validate;
 
 use std::{
     collections::{HashMap, HashSet},
-    path::{Path, PathBuf},
+    path::Path,
     sync::RwLock,
 };
 
@@ -41,6 +42,7 @@ pub use pane::{
 };
 pub use pilot::{MAX_LEVEL, Pilot, SkillTarget};
 pub use probe::TankProbe;
+pub use source::{EngineSource, PackedEngine};
 pub use surroundings::{AbilityInfo, FighterClasses, FighterInfo};
 pub use validate::{Budget, ItemRef, MissingSkill, Problem, Validation};
 
@@ -51,8 +53,8 @@ pub struct Engine {
     /// refine's data, with the attribute overrides in [`Engine::overrides`] applied.
     src: RwLock<Src>,
     overrides: RwLock<crate::overrides::Values>,
-    data_dir: PathBuf,
-    cache_dir: PathBuf,
+    /// Where the data came from, for rebuilding it with other overrides.
+    source: EngineSource,
     /// The built-in All 5 character, which [`Engine::compute`] flies fits with.
     all5: Pilot,
 }
@@ -344,7 +346,16 @@ impl Engine {
     /// Load refine's data from a Phobos-layout dump. The adapted data is cached in `cache_dir`, so
     /// only the first start after a data update pays for converting it.
     pub fn load(data_dir: &Path, cache_dir: &Path, skills: Vec<TypeId>) -> Result<Self, String> {
-        let src = overrides::load_src(data_dir, cache_dir, &crate::overrides::Values::new())?;
+        let source = EngineSource::Dump {
+            data_dir: data_dir.to_owned(),
+            cache_dir: cache_dir.to_owned(),
+        };
+        Self::from_source(source, skills)
+    }
+
+    /// Load refine's data from wherever `source` says, the data pack or a dump.
+    pub fn from_source(source: EngineSource, skills: Vec<TypeId>) -> Result<Self, String> {
+        let src = source::load_src(&source, &crate::overrides::Values::new())?;
         let all5 = Pilot {
             skills: skills.into_iter().map(|s| (s, MAX_LEVEL)).collect(),
             ..Pilot::default()
@@ -352,10 +363,14 @@ impl Engine {
         Ok(Self {
             src: RwLock::new(src),
             overrides: RwLock::default(),
-            data_dir: data_dir.to_owned(),
-            cache_dir: cache_dir.to_owned(),
+            source,
             all5,
         })
+    }
+
+    /// Where the engine's data came from, for [`Overridden::load`].
+    pub fn source(&self) -> &EngineSource {
+        &self.source
     }
 
     /// A solar system on the engine's data.
@@ -388,7 +403,7 @@ impl Engine {
         if *self.overrides.read().expect("overrides lock") == *values {
             return Ok(());
         }
-        self.set_overrides(Overridden::load(&self.data_dir, &self.cache_dir, values)?);
+        self.set_overrides(Overridden::load(&self.source, values)?);
         Ok(())
     }
 

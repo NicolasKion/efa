@@ -577,10 +577,7 @@ pub fn roman(level: u8) -> String {
 
 /// Where the characters are kept.
 pub fn path() -> Option<PathBuf> {
-    let data = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
-    Some(data.join("efa/characters.json"))
+    crate::paths::data_file("characters.json")
 }
 
 #[cfg(test)]

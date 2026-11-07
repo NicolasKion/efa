@@ -13,6 +13,7 @@ mod implants;
 mod item_stats;
 mod mutations;
 mod overrides;
+mod pack;
 mod port;
 mod prices;
 mod profiles;

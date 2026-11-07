@@ -16,7 +16,7 @@ mod tests;
 mod text;
 mod tree;
 
-use std::{cell::Cell, collections::HashSet, path::PathBuf, rc::Rc, time::Duration};
+use std::{cell::Cell, collections::HashSet, rc::Rc, time::Duration};
 
 use gpui_kit::component::{
     ActiveTheme, IconName, Selectable, Sizable,
@@ -93,15 +93,11 @@ fn ensure_data(loaded: &Rc<Loaded>, cx: &mut App) {
         return;
     }
     cx.set_global(ItemDataGlobal(DataState::Loading));
-    let data_dir = loaded.data_dir.clone();
-    let cache_dir = loaded.cache_dir.clone();
+    let source = loaded.source.clone();
     let wanted: HashSet<TypeId> = loaded.catalog.types.keys().copied().collect();
     cx.spawn(async move |cx| {
         let result = cx
-            .background_spawn(async move {
-                let key = crate::data::cache_key(&data_dir);
-                ItemData::load_cached(&data_dir, &cache_dir, key.as_deref(), &wanted)
-            })
+            .background_spawn(async move { source.item_data(&wanted) })
             .await;
         cx.update(|cx| {
             let state = match result {
@@ -1077,7 +1073,7 @@ impl Render for ItemStats {
 
 /// Ask where to save the CSV and write it there.
 fn export_csv(file_name: &str, csv: String, cx: &mut App) {
-    let dir = std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let dir = crate::paths::home_dir();
     let chosen = cx.prompt_for_new_path(&dir, Some(file_name));
     cx.background_spawn(async move {
         if let Ok(Ok(Some(path))) = chosen.await

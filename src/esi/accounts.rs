@@ -126,7 +126,7 @@ impl Accounts {
 }
 
 fn path() -> Option<PathBuf> {
-    crate::persist::data_dir().map(|d| d.join(FILE))
+    crate::paths::data_file(FILE)
 }
 
 #[cfg(test)]

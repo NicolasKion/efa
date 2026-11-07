@@ -107,10 +107,7 @@ pub fn queue_last_crash() {
 }
 
 fn crash_file() -> Option<PathBuf> {
-    let data = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
-    Some(data.join("efa/crash.txt"))
+    crate::paths::data_file("crash.txt")
 }
 
 #[cfg(test)]

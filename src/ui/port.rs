@@ -238,7 +238,7 @@ impl Efa {
         cx: &mut Context<Self>,
         render: impl FnOnce(&Path) -> Result<String, String> + 'static,
     ) {
-        let dir = home_dir();
+        let dir = crate::paths::home_dir();
         let picked = cx.prompt_for_new_path(&dir, Some(suggested));
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let Ok(Ok(Some(path))) = picked.await else {
@@ -374,15 +374,7 @@ pub(super) fn html_path(preference: &str) -> PathBuf {
     if !preference.trim().is_empty() {
         return PathBuf::from(preference.trim());
     }
-    let data = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
-        .unwrap_or_default();
-    data.join("efa/fits.html")
-}
-
-fn home_dir() -> PathBuf {
-    std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from)
+    crate::paths::data_file("fits.html").unwrap_or_else(|| PathBuf::from("fits.html"))
 }
 
 fn extension(path: &Path) -> Option<String> {

@@ -121,14 +121,19 @@ pub struct FighterType {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Projection {
     pub env_menu: EnvMenu,
+    #[serde(serialize_with = "crate::sorted::map")]
     pub env_types: HashMap<TypeId, EnvType>,
     /// Modules, drones and fighters with an effect that reaches other ships, which pyfa calls
     /// projected items.
+    #[serde(serialize_with = "crate::sorted::set")]
     pub projectable: HashSet<TypeId>,
     /// Command bursts, which make a fit worth offering as a fleet booster.
+    #[serde(serialize_with = "crate::sorted::set")]
     pub command_bursts: HashSet<TypeId>,
+    #[serde(serialize_with = "crate::sorted::map")]
     pub fighters: HashMap<TypeId, FighterType>,
     /// Fighter ability names, by ability ID.
+    #[serde(serialize_with = "crate::sorted::map")]
     pub ability_names: HashMap<i32, String>,
 }
 
