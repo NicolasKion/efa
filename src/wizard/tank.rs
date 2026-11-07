@@ -116,6 +116,8 @@ pub struct Candidate {
 pub struct RigCandidate {
     pub base: TypeId,
     pub type_id: TypeId,
+    /// A powergrid or CPU rig: worth fitting first, for the room it makes for the modules.
+    pub fitting: bool,
 }
 
 /// One search, with everything it needs, so it can run off the UI thread.
@@ -309,9 +311,21 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
     let mut states: Vec<(State, Outcome)> = Vec::new();
     let mut rejected = Rejected::default();
 
-    let start = State::default();
-    seen.insert(start.clone());
-    let (mut beam, dropped) = evaluate_all(engine, problem, &[start], progress);
+    // Besides the empty start, starts with a powergrid or CPU rig on, so the modules can use
+    // the room it makes; the rig stage later fills any rig slots still free.
+    let mut starts = vec![State::default()];
+    if !problem.rig_positions.is_empty() {
+        for (r, rig) in problem.rigs.iter().enumerate() {
+            if rig.fitting {
+                starts.push(State {
+                    modules: Vec::new(),
+                    rigs: vec![r],
+                });
+            }
+        }
+    }
+    seen.extend(starts.iter().cloned());
+    let (mut beam, dropped) = evaluate_all(engine, problem, &starts, progress);
     rejected += dropped;
     states.extend(beam.iter().cloned());
     for _ in 0..depth {
@@ -341,7 +355,7 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
                 modules.sort_unstable();
                 let grown = State {
                     modules,
-                    rigs: Vec::new(),
+                    rigs: state.rigs.clone(),
                 };
                 if seen.insert(grown.clone()) {
                     next.push(grown);
@@ -936,19 +950,32 @@ impl Setup<'_> {
                 }
             }
         }
+        // Rigs that make room rather than tank: for hulls short of powergrid or CPU.
+        let fitting = [
+            "Ancillary Current Router I",
+            "Processor Overclocking Unit I",
+        ];
+        names.extend(fitting.iter().map(|&n| n.to_owned()));
         let size = self.facts.size.label();
         names
             .into_iter()
-            .filter_map(|name| self.base(&format!("{size} {name}")))
-            .flat_map(|base| {
+            .filter_map(|name| {
+                let base = self.base(&format!("{size} {name}"))?;
+                Some((base, fitting.contains(&name.as_str())))
+            })
+            .flat_map(|(base, fitting)| {
                 self.search_variations(base, Category::Rig, choices)
                     .into_iter()
-                    .map(move |type_id| (base, type_id))
+                    .map(move |type_id| (base, type_id, fitting))
             })
-            .filter(|&(_, type_id)| {
+            .filter(|&(_, type_id, _)| {
                 self.attr(type_id, attr::UPGRADE_COST) <= self.facts.calibration
             })
-            .map(|(base, type_id)| RigCandidate { base, type_id })
+            .map(|(base, type_id, fitting)| RigCandidate {
+                base,
+                type_id,
+                fitting,
+            })
             .collect()
     }
 }
