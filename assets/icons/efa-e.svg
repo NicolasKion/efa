@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b2433"/>
+      <stop offset="1" stop-color="#0c111a"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bg)"/>
+  <g transform="translate(64 64) scale(3)">
+  <path d="M64 10 L110.8 37 L110.8 91 L64 118 L17.2 91 L17.2 37 Z"
+        fill="none" stroke="#f2a33a" stroke-width="7" stroke-linejoin="round"/>
+  <!-- The three racks of a fit, high, mid and low, joined into an E. -->
+  <rect x="44" y="40" width="9" height="48" rx="4.5" fill="#f2a33a"/>
+  <rect x="44" y="40" width="42" height="9" rx="4.5" fill="#f2a33a"/>
+  <rect x="44" y="59.5" width="32" height="9" rx="4.5" fill="#f2a33a"/>
+  <rect x="44" y="79" width="42" height="9" rx="4.5" fill="#f2a33a"/>
+  </g>
+</svg>
