@@ -204,6 +204,14 @@ impl Gyfa {
         };
         // Kept for undo; recorded only if the action changed the fit.
         let before = self.saved.fits[current].clone();
+        // Actions that put modules on are checked against the fitting rules afterwards; filling
+        // a rack checks each copy as it goes.
+        let checked = matches!(
+            action,
+            Action::Place(..) | Action::SwapType(..) | Action::CargoToModule(..)
+        );
+        let pilot = self.pilot(&loaded);
+        let mut refused: Option<String> = None;
         let free = |slot: Slot, used: usize, stats: Option<&crate::engine::Stats>| {
             let total = stats.map_or(0, |s| match slot {
                 Slot::High => s.high.total.unwrap_or(0),
@@ -371,8 +379,18 @@ impl Gyfa {
                     Slot::Subsystem => fit.subsystems.len(),
                     Slot::High | Slot::Mid | Slot::Low => fit.rack(slot).iter().flatten().count(),
                 };
+                // Like pyfa, copies go on until the rack is full or the next one is refused.
+                let mut base = loaded.engine.validate(fit, &pilot);
                 for _ in 0..free(slot, used, stats) {
-                    fit.add(&loaded.catalog, type_id);
+                    let mut next = fit.clone();
+                    next.add(&loaded.catalog, type_id);
+                    let after = loaded.engine.validate(&next, &pilot);
+                    if let Some(problem) = base.refusal(&after, next.ignore_restrictions) {
+                        refused = Some(problem.describe(|t| loaded.catalog.name(t)));
+                        break;
+                    }
+                    *fit = next;
+                    base = after;
                 }
             }
             Action::SetDronesActive(i, n) => fit.drones[i].active = n.min(fit.drones[i].count),
@@ -528,6 +546,16 @@ impl Gyfa {
                     }
                 }
             }
+        }
+        if checked {
+            let after = self.saved.fits[current].clone();
+            refused = self.refusal(&loaded, &before, &after);
+            if refused.is_some() {
+                self.saved.fits[current] = before.clone();
+            }
+        }
+        if let Some(reason) = refused {
+            self.status = Some(reason.into());
         }
         if structural {
             self.clear_selection();
