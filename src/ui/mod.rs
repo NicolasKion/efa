@@ -6,6 +6,7 @@ mod additions;
 mod character_editor;
 mod characters;
 mod columns;
+mod error_dialog;
 mod export;
 mod fitting;
 mod graphs;
@@ -243,6 +244,9 @@ pub struct Gyfa {
     pilot_cache: Option<(Rc<Characters>, CharacterId, Rc<Pilot>)>,
     /// The character last picked, which new fits get, as in pyfa.
     last_character: CharacterId,
+    /// The damage pattern last picked, which every fit takes with the global damage pattern
+    /// preference. Uniform until one is picked, as in pyfa.
+    last_damage_profile: crate::fit::DamageProfile,
     _subscriptions: Vec<Subscription>,
     _tasks: Vec<Task<()>>,
 }
@@ -385,6 +389,7 @@ impl Gyfa {
             characters,
             pilot_cache: None,
             last_character: CharacterId::default(),
+            last_damage_profile: crate::fit::DamageProfile::default(),
             _subscriptions: subscriptions,
             _tasks: vec![poller],
         };
@@ -590,9 +595,14 @@ impl Gyfa {
     }
 
     fn poll(&mut self, cx: &mut Context<Self>) {
-        // One window fetching prices is enough; the hub hands them to the rest.
+        // One window fetching prices is enough; the hub hands them to the rest. The same goes
+        // for showing errors.
         if self.role == Role::Main {
             self.refresh_prices(cx);
+            let errors = crate::errors::take();
+            if !errors.is_empty() {
+                cx.defer(move |cx| error_dialog::open(&errors, cx));
+            }
         }
         if std::mem::take(&mut self.unsaved) {
             self.publish(cx);
@@ -616,6 +626,7 @@ impl Gyfa {
 
     fn recompute(&mut self) {
         let Some(loaded) = self.loaded() else { return };
+        self.follow_globals();
         let options = crate::engine::CalcOptions {
             factor_reload: self.saved.factor_reload,
             default_spool: Some(self.saved.preferences.engine.default_spool),
@@ -633,6 +644,23 @@ impl Gyfa {
                 .engine
                 .compute_among(fit, &self.saved.fits, &pilot, options)
         });
+    }
+
+    /// With pyfa's "Use global character" and "Use global damage pattern", the current fit
+    /// takes the character and damage pattern picked last, as pyfa's `switchFit` does.
+    fn follow_globals(&mut self) {
+        let general = &self.saved.preferences.general;
+        let (character, pattern) = (general.global_character, general.global_damage_pattern);
+        let Some(i) = self.saved.current else { return };
+        let fit = &mut self.saved.fits[i];
+        if character && fit.character != self.last_character {
+            fit.character = self.last_character;
+            self.unsaved = true;
+        }
+        if pattern && fit.damage_profile != self.last_damage_profile {
+            fit.damage_profile = self.last_damage_profile.clone();
+            self.unsaved = true;
+        }
     }
 
     /// Mark the fits as changed. The poll publishes them to the hub, which writes them out and
