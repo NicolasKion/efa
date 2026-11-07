@@ -738,20 +738,21 @@ mod tests {
         let text = |slot: Slot, i: usize| {
             let m = fit.rack(slot)[i].as_ref().expect("fitted");
             let misc = &stats.module_misc[&FitItem::Module(slot, i)];
-            module_misc(&catalog, m.type_id, m.charge, misc, None).expect("a text")
+            module_misc(&catalog, m.type_id, m.charge, misc, None)
         };
         assert_eq!(
             text(Slot::Mid, 0),
-            ("-60%".to_owned(), "Speed reduction".to_owned())
+            Some(("-60%".to_owned(), "Speed reduction".to_owned()))
         );
         assert_eq!(
             text(Slot::Mid, 1),
-            (
+            Some((
                 "-2".to_owned(),
                 "Warp core strength modification".to_owned()
-            )
+            ))
         );
-        assert_eq!(text(Slot::Low, 0).1, "Assault ability duration");
+        // Only assault damage controls have a duration; pyfa leaves the cell empty for the rest.
+        assert_eq!(text(Slot::Low, 0), None);
     }
 
     #[test]
