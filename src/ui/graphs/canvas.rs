@@ -55,6 +55,14 @@ pub fn limits(values: impl Iterator<Item = f64>, extra: (f64, f64), round: bool)
     if !min.is_finite() || !max.is_finite() {
         (min, max) = (0.0, 0.0);
     }
+    // A span that is only rounding noise counts as a flat line; otherwise its ticks would be
+    // a millionth apart and their labels a dozen digits long.
+    let magnitude = min.abs().max(max.abs());
+    if max - min <= (magnitude * 1e-6).max(1e-9) {
+        let mid = f64::midpoint(min, max);
+        let mid = if mid.abs() < 1e-9 { 0.0 } else { mid };
+        (min, max) = (mid, mid);
+    }
     let span = max - min;
     min -= span * extra.0;
     max += span * extra.1;
@@ -98,6 +106,8 @@ pub fn ticks(range: (f64, f64), count: usize) -> Vec<f64> {
     let first = (range.0 / step).ceil() * step;
     (0..)
         .map(|i| first + f64::from(i) * step)
+        // Adding steps up leaves noise like 5.6e-17 where zero belongs.
+        .map(|v| if v.abs() < step * 1e-6 { 0.0 } else { v })
         .take_while(|&v| v <= range.1 + step * 1e-9)
         .take(100)
         .collect()
@@ -105,15 +115,37 @@ pub fn ticks(range: (f64, f64), count: usize) -> Vec<f64> {
 
 /// A number the way pyfa's readouts print it: four significant digits, no trailing zeros.
 pub fn format(v: f64) -> String {
-    if v == 0.0 || !v.is_finite() {
-        return if v.is_finite() {
-            "0".to_owned()
+    if !v.is_finite() {
+        return if v > 0.0 {
+            "∞".to_owned()
         } else {
             v.to_string()
         };
     }
-    let digits = (4 - 1 - v.abs().log10().floor() as i32).max(0) as usize;
-    let s = format!("{v:.digits$}");
+    let magnitude = v.abs();
+    if magnitude < 1e-9 {
+        return "0".to_owned();
+    }
+    // Big numbers get k, M and G; tiny ones scientific notation, so a label stays short.
+    for (scale, suffix) in [(1e9, "G"), (1e6, "M"), (1e5, "k")] {
+        if magnitude >= scale {
+            let scale = if suffix == "k" { 1e3 } else { scale };
+            return format!("{}{suffix}", significant(v / scale, 4));
+        }
+    }
+    if magnitude < 1e-3 {
+        let text = format!("{v:.2e}");
+        let (mantissa, exponent) = text.split_once('e').unwrap_or((&text, "0"));
+        let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
+        return format!("{mantissa}e{exponent}");
+    }
+    significant(v, 4)
+}
+
+/// `v` to `digits` significant digits, without trailing zeros.
+fn significant(v: f64, digits: i32) -> String {
+    let places = (digits - 1 - v.abs().log10().floor() as i32).max(0) as usize;
+    let s = format!("{v:.places$}");
     if s.contains('.') {
         s.trim_end_matches('0').trim_end_matches('.').to_owned()
     } else {
@@ -509,5 +541,18 @@ mod tests {
         assert_eq!(format(12.3456), "12.35");
         assert_eq!(format(0.5), "0.5");
         assert_eq!(format(0.0), "0");
+    }
+
+    #[test]
+    fn labels_stay_short() {
+        assert_eq!(format(0.000_000_000_012), "0");
+        assert_eq!(format(0.000_123_4), "1.23e-4");
+        assert_eq!(format(1_234_567.0), "1.235M");
+        assert_eq!(format(250_000.0), "250k");
+        assert_eq!(format(0.1 + 0.2), "0.3");
+        // A line that is flat but for noise gets a sane range and round ticks.
+        let (lo, hi) = limits([0.0, 1e-13].into_iter(), (0.05, 0.03), true);
+        assert!(hi - lo >= 1.0, "{lo}..{hi}");
+        assert!(ticks((lo, hi), 5).iter().all(|t| format(*t).len() <= 6));
     }
 }
