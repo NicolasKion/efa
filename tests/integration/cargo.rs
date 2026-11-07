@@ -189,3 +189,24 @@ fn cargo_modules_replace_fitted_ones_of_their_rack() {
     assert_eq!(fit.low[0].as_ref().map(|m| m.type_id), Some(dc));
     assert_eq!(count(&fit, dc), 0);
 }
+
+#[test]
+fn implants_and_boosters_can_count_against_the_hold() {
+    let Some(catalog) = catalog() else { return };
+    let implant = catalog
+        .find("Zainou 'Gnome' Shield Management SM-705")
+        .expect("an implant");
+    let booster = catalog
+        .find("Standard Blue Pill Booster")
+        .expect("a booster");
+    let mut fit = Fit::new("hold");
+    fit.add(&catalog, implant.id);
+    fit.add(&catalog, booster.id);
+    let cargo_only = fit.hold_volume(&catalog, false);
+    let with_character = fit.hold_volume(&catalog, true);
+    assert!((cargo_only - fit.cargo_volume(&catalog)).abs() < 1e-9);
+    assert!(
+        (with_character - cargo_only - implant.volume - booster.volume).abs() < 1e-9,
+        "{with_character} vs {cargo_only}"
+    );
+}

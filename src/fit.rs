@@ -504,6 +504,26 @@ impl Fit {
         }
     }
 
+    /// Volume the hold carries, in m³: the cargo, plus the fit's own implants and boosters when
+    /// `with_character` is set, for fits whose pilot carries them along.
+    pub fn hold_volume(&self, catalog: &Catalog, with_character: bool) -> f64 {
+        let volume = |t: TypeId| catalog.get(t).map_or(0.0, |t| t.volume);
+        let character: f64 = if with_character {
+            let implants = (self.implant_source == ImplantSource::Fit)
+                .then_some(&self.implants)
+                .into_iter()
+                .flatten()
+                .copied();
+            implants
+                .chain(self.boosters.iter().map(|b| b.type_id))
+                .map(volume)
+                .sum()
+        } else {
+            0.0
+        };
+        self.cargo_volume(catalog) + character
+    }
+
     /// Volume the cargo takes, in m³.
     pub fn cargo_volume(&self, catalog: &Catalog) -> f64 {
         self.cargo
@@ -792,13 +812,7 @@ impl Fit {
             drones,
             self.fighters
                 .iter()
-                .map(|f| {
-                    let size = f
-                        .amount
-                        .or_else(|| catalog.projection.squadron_size(f.type_id))
-                        .unwrap_or(1);
-                    format!("{} x{size}", catalog.name(f.type_id))
-                })
+                .map(|f| format!("{} x{}", catalog.name(f.type_id), f.size(catalog)))
                 .collect(),
             self.implants.iter().map(|&i| catalog.name(i)).collect(),
             self.boosters
@@ -848,10 +862,29 @@ impl Fit {
         let mut in_cargo_section = false;
         let mut seen_stacks = false;
 
+        // pyfa's fighter bay: a section of nothing but counted fighters. When there is one,
+        // counted fighters anywhere else are spare squadrons in cargo.
+        let lines: Vec<&str> = lines.collect();
+        let fighter_bays: Vec<bool> = lines
+            .split(|l| l.is_empty())
+            .map(|section| {
+                !section.is_empty()
+                    && section.iter().all(|line| {
+                        let (line, _) = crate::port::muta::split_reference(line);
+                        let (name, count) = split_count(line);
+                        count.is_some()
+                            && catalog.find(name).is_some_and(|t| t.kind == Kind::Fighter)
+                    })
+            })
+            .collect();
+        let has_fighter_bay = fighter_bays.contains(&true);
+        let mut section = 0;
+
         for line in lines {
             if line.is_empty() {
                 // Charges after the drone section are cargo, not ammo for anything.
                 in_cargo_section = seen_stacks;
+                section += 1;
                 continue;
             }
             if let Some(empty) = line
@@ -892,11 +925,10 @@ impl Fit {
                 continue;
             };
             match (t.kind, count) {
-                (Kind::Fighter, Some(n)) => {
+                (Kind::Fighter, Some(n)) if !has_fighter_bay || fighter_bays[section] => {
                     seen_stacks = true;
-                    let mut fighter = fighters::Fighter::new(t.id);
-                    fighter.set_amount(n, catalog.projection.squadron_size(t.id));
-                    fit.fighters.push(fighter);
+                    fit.fighters
+                        .push(fighters::Fighter::with_size(catalog, t.id, n));
                 }
                 (Kind::Drone, Some(n)) => {
                     seen_stacks = true;

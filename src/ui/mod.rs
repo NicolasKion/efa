@@ -109,7 +109,9 @@ const POLL: Duration = Duration::from_millis(250);
 
 pub struct Loaded {
     pub catalog: Catalog,
-    pub engine: Engine,
+    /// Shared so long searches, like the fitting wizard's tank optimiser, can run off the UI
+    /// thread.
+    pub engine: std::sync::Arc<Engine>,
     pub icons: Icons,
     /// Where downloads and derived data are kept: icons, prices, the catalog cache.
     pub cache_dir: PathBuf,
@@ -1286,7 +1288,7 @@ fn load(data_dir: &Path) -> Result<Loaded, String> {
     let icons = Icons::new(data_dir, &cache_dir);
     Ok(Loaded {
         catalog,
-        engine,
+        engine: std::sync::Arc::new(engine),
         icons,
         cache_dir,
         data_dir: data_dir.to_owned(),
@@ -1328,9 +1330,12 @@ impl Render for Gyfa {
                 v_resizable("center")
                     .child(resizable_panel().child(self.fitting_view(&loaded, window, cx)))
                     .child(
+                        // The additions drawer keeps its height as the window resizes; the
+                        // fitting view above takes the change and scrolls.
                         resizable_panel()
                             .size(px(200.))
                             .size_range(px(80.)..px(600.))
+                            .fixed()
                             .child(self.additions(&loaded, window, cx)),
                     )
                     .into_any_element()

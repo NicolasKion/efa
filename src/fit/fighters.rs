@@ -6,6 +6,26 @@ use serde::{Deserialize, Serialize};
 use super::{DroneStack, Fit};
 use crate::data::{Catalog, Kind, TypeId};
 
+/// pyfa's `FIGHTER_ORDER`, by the group a fighter is in.
+const FIGHTER_ORDER: [&str; 6] = [
+    "Light Fighter",
+    "Structure Light Fighter",
+    "Heavy Fighter",
+    "Structure Heavy Fighter",
+    "Support Fighter",
+    "Structure Support Fighter",
+];
+
+/// Where a fighter's group comes in pyfa's `FIGHTER_ORDER`; other groups go last.
+pub fn group_rank(catalog: &Catalog, type_id: TypeId) -> usize {
+    let group = catalog
+        .get(type_id)
+        .and_then(|t| catalog.group_names.get(&t.group_id));
+    group
+        .and_then(|g| FIGHTER_ORDER.iter().position(|o| o == g))
+        .unwrap_or(FIGHTER_ORDER.len())
+}
+
 /// A squadron in the fighter bay or in a tube.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Fighter {
@@ -34,6 +54,22 @@ impl Fighter {
             active: true,
             abilities: Vec::new(),
         }
+    }
+
+    /// A squadron of `size` fighters, kept at the full size when `size` reaches the type's
+    /// squadron size, the way pyfa's importers set a fighter's amount.
+    pub fn with_size(catalog: &Catalog, type_id: TypeId, size: u32) -> Self {
+        let mut fighter = Self::new(type_id);
+        fighter.set_amount(size, catalog.projection.squadron_size(type_id));
+        fighter
+    }
+
+    /// Fighters in the squadron as the formats write it: the set amount, or the type's full
+    /// squadron size.
+    pub fn size(&self, catalog: &Catalog) -> u32 {
+        self.amount
+            .or_else(|| catalog.projection.squadron_size(self.type_id))
+            .unwrap_or(1)
     }
 
     /// The user's choice for an ability, if they made one.
