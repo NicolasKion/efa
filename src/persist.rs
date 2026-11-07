@@ -15,12 +15,14 @@ pub fn load<T: DeserializeOwned + Default>(path: &Path) -> T {
         Read::Missing => {}
         Read::Broken(e) => {
             let aside = set_aside(path);
-            eprintln!(
-                "{} could not be read ({e}); kept it as {} and loading the backup",
-                path.display(),
-                aside
-                    .as_deref()
-                    .map_or("<not moved>".into(), |p| p.display().to_string()),
+            crate::errors::report(
+                format!("{} could not be read", path.display()),
+                format!(
+                    "{e}\n\nThe file was kept as {} and the backup loaded instead.",
+                    aside
+                        .as_deref()
+                        .map_or("<not moved>".into(), |p| p.display().to_string()),
+                ),
             );
         }
     }

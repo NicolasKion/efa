@@ -2,11 +2,9 @@
 //! of its own. Every change goes straight to the hub, which saves it and hands it to every fit
 //! window, the way pyfa applies a preference as soon as it is clicked.
 //!
-//! Left out on purpose: language and theme (gyfa follows the system and Omarchy's theme),
-//! global character and damage pattern, compact skills tooltip, gauge animation, Omega icons,
-//! market shortcuts and market view modes, reactivation timers, update checks, pyfa's own SSO
-//! server mode (gyfa always logs in through a local callback),
-//! database paths and logging.
+//! Left out on purpose: language and theme (gyfa follows the system and Omarchy's theme), gauge
+//! animation, market shortcuts and market view modes, reactivation timers, update checks, pyfa's
+//! own SSO server mode (gyfa always logs in through a local callback), and logging.
 
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
@@ -49,10 +47,11 @@ enum Page {
     Network,
     Html,
     Esi,
+    Database,
 }
 
 impl Page {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::General,
         Self::Engine,
         Self::Stats,
@@ -61,6 +60,7 @@ impl Page {
         Self::Network,
         Self::Html,
         Self::Esi,
+        Self::Database,
     ];
 
     fn title(self) -> &'static str {
@@ -73,6 +73,7 @@ impl Page {
             Self::Network => "Network",
             Self::Html => "HTML Export",
             Self::Esi => "ESI",
+            Self::Database => "Database",
         }
     }
 
@@ -86,6 +87,7 @@ impl Page {
             Self::Network => AssetIcon::Globe,
             Self::Html => AssetIcon::FileCode,
             Self::Esi => AssetIcon::KeyRound,
+            Self::Database => AssetIcon::Database,
         }
     }
 
@@ -99,6 +101,7 @@ impl Page {
             Self::Network => "Internet access and proxy settings.",
             Self::Html => "Exporting every fit to one HTML page.",
             Self::Esi => "Logging in with EVE for skills and in-game fittings.",
+            Self::Database => "Where gyfa keeps its files, and starting over.",
         }
     }
 }
@@ -420,6 +423,33 @@ impl PreferencesWindow {
                          the opposite.",
                         g.ammo_change_all,
                         |s, v| s.preferences.general.ammo_change_all = v,
+                        cx,
+                    ),
+                    Self::toggle(
+                        "global-character",
+                        "Use global character",
+                        "Every fit flies the character picked last, instead of each fit keeping \
+                         its own.",
+                        g.global_character,
+                        |s, v| s.preferences.general.global_character = v,
+                        cx,
+                    ),
+                    Self::toggle(
+                        "global-damage-pattern",
+                        "Use global damage pattern",
+                        "Every fit takes the damage pattern picked last, instead of each fit \
+                         keeping its own.",
+                        g.global_damage_pattern,
+                        |s, v| s.preferences.general.global_damage_pattern = v,
+                        cx,
+                    ),
+                    Self::toggle(
+                        "compact-skills",
+                        "Compact skills needed tooltip",
+                        "List each missing skill once. Off lists the skills under each item \
+                         that needs them.",
+                        g.compact_skills,
+                        |s, v| s.preferences.general.compact_skills = v,
                         cx,
                     ),
                     Self::toggle(
@@ -895,6 +925,150 @@ impl PreferencesWindow {
     }
 }
 
+/// What the Database page can delete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Wipe {
+    DamagePatterns,
+    TargetProfiles,
+    Prices,
+}
+
+impl Wipe {
+    fn button(self) -> &'static str {
+        match self {
+            Self::DamagePatterns => "Delete All Damage Pattern Profiles",
+            Self::TargetProfiles => "Delete All Target Profiles",
+            Self::Prices => "Delete All Prices",
+        }
+    }
+
+    /// pyfa's question before going ahead.
+    fn question(self) -> &'static str {
+        match self {
+            Self::DamagePatterns => {
+                "This is a destructive action that will delete all damage pattern profiles. \
+                 Are you sure you want to do this?"
+            }
+            Self::TargetProfiles => {
+                "This is a destructive action that will delete all target profiles. Are you \
+                 sure you want to do this?"
+            }
+            Self::Prices => {
+                "This is a destructive action that will delete all cached prices. Are you sure \
+                 you want to do this?"
+            }
+        }
+    }
+}
+
+impl PreferencesWindow {
+    /// pyfa's Database page: where things are kept, and the three deletes.
+    fn database(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let cache_dir = match &self.hub.read(cx).loading {
+            super::hub::HubLoading::Ready(loaded) => Some(loaded.cache_dir.clone()),
+            _ => None,
+        };
+        let shown = |path: Option<std::path::PathBuf>| {
+            path.map_or_else(|| "unknown".to_owned(), |p| p.display().to_string())
+        };
+        let path_row = |title: &'static str, path: String, cx: &App| {
+            row(
+                title,
+                "",
+                div()
+                    .text_xs()
+                    .max_w(px(360.))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(path)
+                    .into_any_element(),
+                false,
+                false,
+                cx,
+            )
+        };
+        let wipes = [Wipe::DamagePatterns, Wipe::TargetProfiles, Wipe::Prices]
+            .into_iter()
+            .map(|wipe| {
+                let description = match wipe {
+                    Wipe::DamagePatterns => "Your own damage patterns. The built-in ones stay.",
+                    Wipe::TargetProfiles => "Your own target profiles. The built-in ones stay.",
+                    Wipe::Prices => "Every price fetched so far. They are fetched again.",
+                };
+                let control = gpui_kit::component::button::Button::new(wipe.button())
+                    .small()
+                    .label(wipe.button())
+                    .on_click(cx.listener(move |_, _, window, cx| {
+                        Self::confirm_wipe(wipe, window, cx);
+                    }))
+                    .into_any_element();
+                row(wipe.button(), description, control, false, false, cx)
+            })
+            .collect();
+        vec![
+            section(
+                "Locations",
+                vec![
+                    path_row("Fits and settings", shown(crate::store::path()), cx),
+                    path_row("Characters", shown(crate::character::path()), cx),
+                    path_row("Cache", shown(cache_dir), cx),
+                ],
+                cx,
+            ),
+            section("Start over", wipes, cx),
+        ]
+    }
+
+    fn confirm_wipe(wipe: Wipe, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui_kit::component::{
+            WindowExt,
+            button::{Button, ButtonVariants},
+        };
+        let this = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let this = this.clone();
+            dialog.title("Confirm").w(px(380.)).child(
+                v_flex().gap_3().child(wipe.question()).child(
+                    h_flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            Button::new("wipe-no")
+                                .label("No")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(Button::new("wipe-yes").danger().label("Yes").on_click(
+                            move |_, window, cx| {
+                                window.close_dialog(cx);
+                                let _ = this.update(cx, |this, cx| this.wipe(wipe, cx));
+                            },
+                        )),
+                ),
+            )
+        });
+    }
+
+    fn wipe(&self, wipe: Wipe, cx: &mut Context<Self>) {
+        match wipe {
+            Wipe::DamagePatterns => self.set(cx, |s| s.damage_patterns.clear()),
+            Wipe::TargetProfiles => self.set(cx, |s| s.target_profiles.clear()),
+            Wipe::Prices => {
+                let cache_dir = match &self.hub.read(cx).loading {
+                    super::hub::HubLoading::Ready(loaded) => Some(loaded.cache_dir.clone()),
+                    _ => None,
+                };
+                if let Some(dir) = cache_dir
+                    && let Err(e) = crate::prices::Prices::delete_cached(&dir)
+                {
+                    crate::errors::report("Deleting the prices failed", e);
+                }
+                self.hub.update(cx, |hub, cx| {
+                    hub.set_prices(std::rc::Rc::new(crate::prices::Prices::default()), cx);
+                });
+            }
+        }
+    }
+}
+
 /// A setting's title with its description under it.
 fn text(
     title: impl Into<SharedString>,
@@ -988,6 +1162,7 @@ impl Render for PreferencesWindow {
             Page::Network => self.network(&prefs, cx),
             Page::Html => self.html(&prefs, cx),
             Page::Esi => self.esi(&prefs, cx),
+            Page::Database => self.database(cx),
         };
         let theme = cx.theme();
         let pages = Page::ALL.into_iter().map(|page| {

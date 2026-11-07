@@ -13,6 +13,8 @@ pub enum StatsOf {
     Type(TypeId),
     /// An item of the window's current fit.
     Fitted(FitItem),
+    /// An item of another saved fit, by its index: a projected fit's ship.
+    OtherFit(usize, FitItem),
 }
 
 impl Gyfa {
@@ -39,6 +41,15 @@ impl Gyfa {
                 Request {
                     target: Target::Fitted { fit, item },
                     fit: self.fit().cloned(),
+                }
+            }
+            StatsOf::OtherFit(fit, item) => {
+                let Some(other) = self.saved.fits.get(fit) else {
+                    return;
+                };
+                Request {
+                    target: Target::Fitted { fit, item },
+                    fit: Some(other.clone()),
                 }
             }
         };

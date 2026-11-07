@@ -140,7 +140,7 @@ impl Hub {
         let result = edit(&mut characters);
         if characters != *self.characters {
             if let Err(e) = characters.save() {
-                eprintln!("saving characters: {e}");
+                crate::errors::report("Saving characters failed", e);
             }
             self.characters = Rc::new(characters);
             cx.notify();
@@ -179,7 +179,7 @@ impl Hub {
             ..saved.clone()
         };
         if let Err(e) = self.saved.save() {
-            eprintln!("saving fits: {e}");
+            crate::errors::report("Saving fits failed", e);
         }
         self.sync_preferences(cx);
         cx.notify();
@@ -191,7 +191,7 @@ impl Hub {
         edit(&mut self.saved);
         self.generation += 1;
         if let Err(e) = self.saved.save() {
-            eprintln!("saving settings: {e}");
+            crate::errors::report("Saving settings failed", e);
         }
         self.sync_preferences(cx);
         cx.notify();

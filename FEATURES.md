@@ -1,7 +1,7 @@
 # Feature parity with pyfa
 
-Rough coverage: fitting, stats, additions, item stats, graphs, editors, context menus, the file formats and ESI/SSO are mostly there. What is left is mainly alpha clones, Optimize Fit Price, EFS export, generic command links and a tail of smaller items (the [ ] and [~] lines).
-Biggest gaps: alpha clones, global character and damage pattern.
+Rough coverage: fitting, stats, additions, item stats, graphs, editors, context menus, the file formats and ESI/SSO are mostly there.
+Biggest gaps: minimal stats views.
 Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
 Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time, abstract target profiles for applied damage, lock/warp time formulas (all done graph-side in src/graphs).
 
@@ -110,7 +110,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Fill all slots with module (builtinContextMenus/moduleFill.py)
 - [x] Fill rack / item fill (builtinContextMenus/itemFill.py)
 - [x] Change item amount (builtinContextMenus/itemAmountChange.py): drones, fighters, cargo, projected fits, drones and fighters
-- [~] Show item stats (builtinContextMenus/itemStats.py): missing on fighter rows, on projected modules, charges, drones and fighters, and on skills in the character editor
+- [x] Show item stats (builtinContextMenus/itemStats.py): everywhere pyfa has it, including fighter rows, projected rows and their charges, and skills in the character editor. Projected modules, drones, fighters and environment effects show their type's base attributes (pyfa shows them as the fit's skills modify them); a projected fit opens its ship with that fit's bonuses, which pyfa does not offer
 - [x] Jump to market group (itemMarketJump.py)
 - [x] Project item onto fit (builtinContextMenus/itemProject.py), refine: add_proj from a hidden capsule fit per projected item
 - [x] Projection range (builtinContextMenus/itemProjectionRange.py), refine: projector coordinates
@@ -131,7 +131,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Add fit from browser / currently open fits as projected or command (builtinContextMenus/fitAddBrowse.py, fitAddCurrentlyOpen.py, commandFitAdd.py)
 - [ ] Add command link bursts directly (builtinContextMenus/commandLinkAdd.py); refine cannot add warfare buffs without a burst on a fit, so pyfa's numbers are out of reach
 - [x] Add environment effect (wormhole, incursion, abyssal weather, etc.) (builtinContextMenus/envEffectAdd.py), refine: add_fw_effect, add_proj_effect for weather and clouds
-- [~] Show skills affecting item, change skill level inline (builtinContextMenus/skillAffectors.py), refine: iter_modifiers, set_level; modules, charges, ship and drones done, fighters missing
+- [x] Show skills affecting item, change skill level inline (builtinContextMenus/skillAffectors.py), refine: iter_modifiers, set_level; modules, charges, ship, drones and fighters
 - [x] Price total options (builtinContextMenus/priceOptions.py): Drones, Cargo, Implants && Boosters
 - [x] Copy/paste/export/import additions lists (builtinContextMenus/additionsExportAll.py, additionsExportSelection.py, additionsImport.py)
 - [x] Context menu enable/disable preferences (pyfaContextMenuPreferences.py): every toggle is honoured, and holding Ctrl while opening a menu brings the hidden entries back as in pyfa (gui/contextMenu.py)
@@ -165,7 +165,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Recharge rates: passive shield, reinforced and sustained shield/armor/hull in EHP/s or HP/s, armor spool range tooltip (builtinStatsViews/rechargeViewFull.py), refine: get_stat_rps
 - [x] Firepower: weapon and drone DPS (sentries count as drones), volley, total, spool and damage type tooltips, damage type bar, swap to mining yield (builtinStatsViews/firepowerViewFull.py), refine: get_stat_dmg
 - [x] Factor in Reload Time from the firepower menu, also used by the capacitor simulation (factorReload.py), refine: StatTimeOptions::Sim
-- [~] Applied DPS vs target resists (firepowerViewFull.py "Effective" and targetProfile/switcher.py): like pyfa, only the profile's resists are applied, per damage type on refine's get_stat_dmg; breacher damage is not shown yet
+- [x] Applied DPS vs target resists (firepowerViewFull.py "Effective" and targetProfile/switcher.py): like pyfa, only the profile's resists are applied, per damage type on refine's get_stat_dmg; breacher pods count as pure damage, capped by the profile's HP, and show as "Pure" in the tooltips
 - [x] Mining yield: miner, drone, total with yield, drain and efficiency tooltips (builtinStatsViews/miningyieldViewFull.py), refine: get_stat_mps
 - [x] Remote reps: capacitor, shield, armor, hull with spool tooltips, plus neutralization when the fit neuts (builtinStatsViews/outgoingViewFull.py), refine: get_stat_outgoing_rps, get_stat_outgoing_cps, get_stat_outgoing_nps
 - [x] Capacitor: capacity, stable or lasts, delta with recharge/use tooltip, neutralizer resistance with effective capacity (builtinStatsViews/capacitorViewFull.py), refine: get_stat_cap_sim, get_stat_cap_balance, get_stat_neut_resist
@@ -173,7 +173,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Bombing: bombs to kill per damage type and Covert Ops level, collapsed by default as pyfa hides it (builtinStatsViews/bombingViewFull.py); wormhole bomb damage effects not applied
 - [x] Price: ship, fittings, character, drones, cargo, total from ESI prices, with the Drones/Cargo/Implants && Boosters total toggles (builtinStatsViews/priceViewFull.py, priceOptions.py)
 - [x] Collapsible stat sections with header menus, also on right-click (gui/toggle_panel.py, statsPane.py)
-- [~] Per-view full/minimal/hidden preference (pyfaStatViewPreferences.py), shown or hidden; gyfa has no minimal views
+- [~] Per-view full/minimal/hidden preference (pyfaStatViewPreferences.py), shown or hidden; gyfa has no minimal views (each section would need a second, compact layout)
 - [ ] Capability flags: can warp/jump/dock/tether (no pyfa view), refine: get_stat_can_* (gyfa-only extra)
 - [~] Neut resist, breach resist, d-scan range (no pyfa view), refine: get_stat_neut_resist, get_stat_breach_resist, get_stat_dscan_range; neut resist is in the capacitor section, the other two are not shown
 
@@ -183,7 +183,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] All 0 / All 5 built-in characters, read-only (service/character.py)
 - [x] Character editor in its own window: skill tree by group with search, levels from the menu or keys 0-5, unlearn, pending levels marked (gui/characterEditor.py); setting a level trains its prerequisites and unlearns skills that need it higher (strict skill levels)
 - [x] Create, rename, copy, delete, save, save as, revert characters (characterEditor.py, mainMenuBar.py)
-- [ ] Alpha clone skill caps (characterEditor.py clone choice, eos/saveddata/character.py alphaClone): the dump's sde/clonegrades.json is already read for the Omega markers (data.rs alpha_skill_caps), but characters have no clone setting and nothing caps their skills
+- [x] Alpha clone skill caps (characterEditor.py clone choice, eos/saveddata/character.py alphaClone): Omega or one of the four Alpha clones per character, from sde/clonegrades.json. The trained levels stay; the pilot flies capped ones, skills the clone lacks at 0, and requirements check the capped levels. The editor shows a capped skill as "Level 3 (of 5)"
 - [x] Character implants tab, with Apply Implant Set (characterEditor.py)
 - [x] Character security status, used where the fit does not set its own (characterEditor.py), refine: set_sec_status
 - [x] Import skills from ESI (characterEditor.py "Get Skills" and the EVE SSO tab linking a character), see ESI and SSO
@@ -191,9 +191,9 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Import character file (EVEMon XML) (mainMenuBar.py importCharacter)
 - [x] Export skills needed for fit as EVEMon .emp/.xml or text, by file extension (mainMenuBar.py exportSkillsNeeded)
 - [x] Missing skills icon with tooltip and menu (gui/characterSelection.py); the condensed tooltip, pyfa's default
-- [ ] Global character vs per-fit character pref (pyfaGeneralPreferences.py "Use global character")
-- [ ] Compact vs full skills-needed tooltip pref (pyfaGeneralPreferences.py "Compact skills needed tooltip"): gyfa always shows the compact one
-- [ ] Skill Stats in the character editor's skill menu (itemStats.py skillItem)
+- [x] Global character vs per-fit character pref (pyfaGeneralPreferences.py "Use global character"): the current fit takes the character picked last, as pyfa's switchFit does
+- [x] Compact vs full skills-needed tooltip pref (pyfaGeneralPreferences.py "Compact skills needed tooltip")
+- [x] Skill Stats in the character editor's skill menu (itemStats.py skillItem), on the built-ins too
 - [x] Enforce strict skill requirements pref (pyfaEnginePreferences.py): lowering a skill unlearns the skills that need it higher, in the character editor and the Change Skills menus
 - [x] Implant set editor: new, rename, copy, delete, add from search, remove, clipboard import/export (gui/setEditor.py, builtinViews/implantEditor.py, service/implantSet.py)
 - [x] Precalculated implant sets (service/precalcImplantSet.py, db_update.py processImplantSets)
@@ -204,7 +204,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Damage pattern import/export (patternEditor.py)
 - [x] Target profile editor: resists, sig, speed, radius, HP (gui/targetProfileEditor.py, service/targetProfile.py)
 - [x] Built-in target profiles (service/targetProfile.py)
-- [ ] Global vs per-fit damage pattern pref (pyfaGeneralPreferences.py "Use global damage pattern")
+- [x] Global vs per-fit damage pattern pref (pyfaGeneralPreferences.py "Use global damage pattern"): the current fit takes the pattern picked last, Uniform until one is
 - [~] Target profile from a fit (graphs and applied DPS), refine: get_stat_dmg_applied against projectee; fits are graph targets, applied DPS in the stats pane is missing
 
 ## Import and export
@@ -215,14 +215,14 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] EFT import of cargo, charges and mutated items' blocks (eft.py), pyfa's /offline and several fits per paste
 - [x] EFT export options: implants, boosters, cargo, mutations, loaded charges (eft.py, gui/copySelectDialog.py), in pyfa's layout with empty slots up to the ship's count
 - [~] Import from clipboard with format autodetect (port.py importAuto), item lists go to the additions tabs (fighters to the Fighters tab) or fit a single module; ESI dynamic item links are not fetched
-- [ ] Renamed item conversions on import (service/conversions/, applied in service/market.py getItem): old item names in EFT and other text formats are not mapped to today's names, so they are skipped as unknown
+- [x] Renamed item conversions on import (service/conversions/, applied in service/market.py getItem): pyfa's tables in src/port/renames.tsv (scripts/renames.py rebuilds it), applied in every name lookup with chains followed
 - [x] Import from file dialog, multiple files (port.py importFitsThreaded)
 - [x] EFT .cfg legacy format (port.py importEftCfg); notes come from Description= lines, with | as line breaks
 - [x] DNA import/export (service/port/dna.py), chat links and the DNA: variant too; fighters as `typeid;size`
 - [~] XML import/export (EVE client format) (service/port/xml.py); notes are the description, exported cut to 400 characters with line breaks as <br>; fighters as "fighter bay" hardware with the squadron size
 - [~] ESI JSON import/export (service/port/esi.py); notes are the description, exported cut to 400 characters; fighters with flag 158 and the squadron size
 - [~] Multibuy export (service/port/multibuy.py), no Optimize Prices option
-- [ ] EFS stats JSON export (service/port/efs.py), the copy dialog's "EFS" format
+- [x] EFS stats JSON export (service/port/efs.py), the copy dialog's "EFS" format: pyfa's fields, weapons, repairs and projections, and the weapon bonus multipliers measured with Tech II test weapons against a capsule
 - [x] Ship stats export (service/port/shipstats.py), the copy dialog's "Stats" format
 - [x] Mutated item (muta) format (service/port/muta.py): pasting one mutated item fits it into the current fit, drone copy/paste carries mutations; ESI dynamic item links are not fetched
 - [x] HTML export of all fits (pyfaHTMLExportPreferences.py), full and minimal
@@ -269,14 +269,14 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 ## Preferences
 
 - [x] Preferences dialog (gui/preferenceDialog.py), its own window, changes apply to every window right away
-- [~] General (pyfaGeneralPreferences.py): character implants by default, slot colors, racks and labels, reopen fits, tab tooltips, ship browser tooltips, Omega icons, open in new tab, ammo change all, mutated names and tab info done; missing: language, item name language, theme choice, use global character, use global damage pattern, compact skills tooltip, animate gauges
+- [~] General (pyfaGeneralPreferences.py): character implants by default, slot colors, racks and labels, reopen fits, tab tooltips, ship browser tooltips, Omega icons, open in new tab, ammo change all, mutated names, tab info, global character, global damage pattern and compact skills tooltip done; missing: language, item name language, theme choice, animate gauges
 - [x] Engine: strict skills, factor in reload, global default spool (pyfaEnginePreferences.py), refine: set_default_spool, set_default_optional_reloads
 - [~] Stat view layout (pyfaStatViewPreferences.py), each section shown or hidden
 - [x] Context menu toggles (pyfaContextMenuPreferences.py)
 - [~] Market and prices: source, system, search delay, price total composition (pyfaMarketPreferences.py); missing "Show market shortcuts" and the four meta button modes
 - [x] Network/proxy (pyfaNetworkPreferences.py), for price and ESI requests
 - [~] ESI (pyfaEsiPreferences.py): Client ID, callback port and the callback URL to register with a copy button, the scopes to register; pyfa's login modes and server choice are not there
-- [ ] Database paths and resets (pyfaDatabasePreferences.py): show paths, Delete All Damage Pattern Profiles, Delete All Target Profiles, Delete All Prices
+- [x] Database paths and resets (pyfaDatabasePreferences.py): shows where fits, characters and the cache live; Delete All Damage Pattern Profiles, Delete All Target Profiles and Delete All Prices, each after pyfa's question
 - [ ] Logging (pyfaLoggingPreferences.py)
 - [ ] Update checks (pyfaUpdatePreferences.py, service/update.py)
 - [x] HTML export path (pyfaHTMLExportPreferences.py)
@@ -299,7 +299,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [~] Market sources: Fuzzwork, EVE Tycoon, evemarketdata, cevemarket (service/marketSources/), ESI average and Fuzzwork at the five hubs or universe; EVE Tycoon, evemarketdata and cevemarket missing
 - [x] Price column and price stats view (builtinViewColumns/price.py, builtinStatsViews/priceViewFull.py)
 - [ ] Optimize fit price: swap to cheaper equivalent modules (mainMenuBar.py optimizeFitPrice, Ctrl+D)
-- [ ] Delete all cached prices (pyfaDatabasePreferences.py)
+- [x] Delete all cached prices (pyfaDatabasePreferences.py)
 
 ## Misc
 
@@ -308,7 +308,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [~] In-game icons, in progress (gui/bitmap_loader.py)
 - [~] Keyboard shortcuts (mainMenuBar.py, mainFrame.py registerMenu): Ctrl+T, W, Alt+W, Z, Y, Shift+Z, C, V, O, S, P, I, K, G, Alt+G, B, E, F (search box of the browser shown), Space (switch market and fittings browser), Tab, Shift+Tab, PgUp/PgDn (next/previous tab), F4 and Alt+F4 (close tab, close all), 1..9 (additions tab), Alt+1..9 (market item) done; missing Ctrl+D (optimize price), Ctrl+B and Ctrl+E (ESI)
 - [x] About dialog, version info (gui/aboutData.py)
-- [ ] Error dialog with details (gui/errorDialog.py)
+- [x] Error dialog with details (gui/errorDialog.py): unreadable data files, failed saves and panics, with the details to copy. A panic that ends gyfa is kept in crash.txt and shown on the next start
 - [ ] Update notifications (gui/updateDialog.py, service/update.py)
 - [ ] Data prefetch/cache warmup (service/prefetch.py)
 - [~] Dark/bright themes (pyfaGeneralPreferences.py): gyfa follows the Omarchy theme live, with a plain dark theme otherwise; no theme choice

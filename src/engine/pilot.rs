@@ -1,7 +1,7 @@
 //! Who flies a fit: the character's skills, implants and security status, and which of the skills
 //! change an item.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use rc::{
     AddMode, AttrId, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack, SkillLevel, SolOwned,
@@ -22,6 +22,8 @@ pub struct Pilot {
     pub implants: Vec<TypeId>,
     /// Used where the fit does not set its own.
     pub sec_status: f64,
+    /// An Alpha clone's highest level per skill; skills it lacks fly at 0. None for Omega.
+    pub alpha_caps: Option<HashMap<TypeId, u8>>,
 }
 
 impl Pilot {
@@ -31,13 +33,23 @@ impl Pilot {
             skills: skills.iter().map(|&s| (s, level)).collect(),
             implants: Vec::new(),
             sec_status: 0.0,
+            alpha_caps: None,
         }
+    }
+
+    /// The level a skill is flown at: the trained level, capped for an Alpha clone the way
+    /// pyfa's `Skill.level` caps it.
+    pub fn flown_level(&self, skill: TypeId, level: u8) -> u8 {
+        self.alpha_caps.as_ref().map_or(level, |caps| {
+            level.min(caps.get(&skill).copied().unwrap_or(0))
+        })
     }
 
     /// Put the character and its skills on a fit.
     pub(super) fn board(&self, fit: &mut rc::Fit<'_>) {
         fit.set_character(ItemTypeId::from_i32(CHARACTER));
         for &(skill, level) in &self.skills {
+            let level = self.flown_level(skill, level);
             let _ = fit.add_skill(
                 ItemTypeId::from_i32(skill),
                 SkillLevel::from_i32_clamped(i32::from(level)),

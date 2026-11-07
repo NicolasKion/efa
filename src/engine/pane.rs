@@ -217,7 +217,7 @@ pub(super) fn minions() -> StatDmgItemKinds {
         .with_minion_static(true)
 }
 
-fn burst_at(spool: f64) -> StatTimeOptions {
+pub(super) fn burst_at(spool: f64) -> StatTimeOptions {
     StatTimeOptions::Burst(StatTimeOptionsBurst {
         spool: Some(Spool::SpoolScale(UnitInterval::from_f64_clamped(spool))),
     })

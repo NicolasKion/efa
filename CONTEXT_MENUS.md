@@ -2,7 +2,7 @@
 
 152 menu entries in 35 right-click contexts (pyfa ContextMenu registry plus 4 hand-built menus).
 gyfa progress is tracked per line below; fitting rows, additions rows and market results have Shift/Ctrl selection, and Ctrl/Alt "all similar" works where pyfa has it.
-Biggest gaps: Stats entries on fighters, projected items and skills; Change Fighter Skills; Generic Links.
+Biggest gaps: Generic Links.
 
 Legend: `[x]` in gyfa, `[~]` partial, `[ ]` missing. Line format: label | when it shows | what it does | pyfa file (in gui/builtinContextMenus/ unless a path is given).
 
@@ -71,12 +71,12 @@ Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 
 ### fighterItem
 - [x] Abilities | row clicked | checkable list of implemented abilities; toggles on selection, Ctrl/Alt on all similar. GuiToggleLocalFighterAbilityStateCommand | fighterAbilities.py
-- [ ] Fighter Stats | row clicked | stats window | itemStats.py. Missing in gyfa: the fighter row menu has no Stats entry (src/ui/additions/fighters.rs)
+- [x] Fighter Stats | row clicked | stats window | itemStats.py
 - [x] Fighter Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Fighter | row clicked | removes selection, Ctrl/Alt all similar. GuiRemoveLocalFightersCommand | itemRemove.py
 - [x] Change Fighter Quantity | row clicked | dialog, sets squadron size. GuiChangeLocalFighterAmountCommand | itemAmountChange.py
 - [x] Variations | 2+ variations | variation swap, Ctrl/Alt similar. GuiChangeLocalFighterMetasCommand | itemVariationChange.py
-- [ ] Change Fighter Skills | skills affect fighter | skill level submenu | skillAffectors.py. Missing in gyfa (src/ui/characters.rs skills_submenu is not called from fighters.rs)
+- [x] Change Fighter Skills | skills affect fighter | skill level submenu | skillAffectors.py
 
 ### fighterItemMisc
 - [x] Copy Selected Fighters | selection | clipboard export | additionsExportSelection.py
@@ -140,19 +140,19 @@ Contexts: one of projectedModule (+ projectedCharge if loaded) / projectedDrone 
 ### projectedModule (incl. environment effects, which are projected modules)
 - [x] Charge | module has loadable charges | same submenu as fittingModule. GuiChangeProjectedModuleChargesCommand | moduleAmmoChange.py
 - [x] Spoolup Cycles | Precursor Weapon / Mutadaptive RR | as fittingModule. GuiChangeProjectedModuleSpoolCommand | moduleSpool.py
-- [ ] Projected Item Stats | row clicked | stats window | itemStats.py
+- [x] Projected Item Stats | row clicked | stats window | itemStats.py. gyfa shows the type's base attributes, environment effects included
 - [x] Projected Item Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Projected Item | row clicked | removes selection, Ctrl/Alt all similar. GuiRemoveProjectedItemsCommand | itemRemove.py
 - [x] Change Projected Item Range | not an exclusive system effect | dialog "New Range, km" (empty = no range) for selection, Ctrl/Alt similar. GuiChangeProjectedItemsProjectionRangeCommand | itemProjectionRange.py
 - [x] Variations | 2+ variations | variation swap (no fit check). GuiChangeProjectedModuleMetasCommand | itemVariationChange.py
 
 ### projectedCharge
-- [ ] {Charge} Stats | charge loaded | stats window | itemStats.py
+- [x] {Charge} Stats | charge loaded | stats window | itemStats.py
 - [x] {Charge} Market Group | has market group | market jump | itemMarketJump.py
 - [x] Show Compatible Charges | module loads charges | gyfa extra, as on fittingCharge | none
 
 ### projectedDrone
-- [ ] Projected Item Stats | row clicked | stats window | itemStats.py
+- [x] Projected Item Stats | row clicked | stats window | itemStats.py
 - [x] Projected Item Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Projected Item Stack | row clicked | removes selection. GuiRemoveProjectedItemsCommand | itemRemove.py
 - [x] Change Projected Item Quantity | row clicked | dialog, amount. GuiChangeProjectedDroneAmountCommand | itemAmountChange.py
@@ -161,7 +161,7 @@ Contexts: one of projectedModule (+ projectedCharge if loaded) / projectedDrone 
 
 ### projectedFighter
 - [x] Abilities | row clicked | ability toggles. GuiToggleProjectedFighterAbilityStateCommand | fighterAbilities.py
-- [ ] Projected Item Stats | row clicked | stats window | itemStats.py
+- [x] Projected Item Stats | row clicked | stats window | itemStats.py
 - [x] Projected Item Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Projected Item | row clicked | removes selection, Ctrl/Alt similar. GuiRemoveProjectedItemsCommand | itemRemove.py
 - [x] Change Projected Item Quantity | row clicked | dialog, squadron size. GuiChangeProjectedFighterAmountCommand | itemAmountChange.py
@@ -170,6 +170,7 @@ Contexts: one of projectedModule (+ projectedCharge if loaded) / projectedDrone 
 
 ### projectedFit
 - [x] Open Fit in New Tab | projected fit is not the active fit | opens it in a new tab | fitOpenNewTab.py
+- [x] Projected Item Stats | row clicked | the projected fit's ship, with that fit's bonuses | gyfa extra, pyfa has no stats entry here
 - [x] Remove Projected Item Stack | row clicked | removes selected projected fits. GuiRemoveProjectedItemsCommand | itemRemove.py
 - [x] Change Projected Item Quantity | row clicked | dialog (0-20), number of copies projected. GuiChangeProjectedFitAmountCommand | itemAmountChange.py
 - [x] Change Projected Item Range | row clicked | range dialog. GuiChangeProjectedItemsProjectionRangeCommand | itemProjectionRange.py
@@ -227,7 +228,7 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 ## Character editor (gui/characterEditor.py)
 
 ### skillItem (skill tree leaf)
-- [ ] Skill Stats | always | stats window | itemStats.py. Missing in gyfa: the skill menu has only Unlearn and the levels (src/ui/character_editor.rs)
+- [x] Skill Stats | always | stats window | itemStats.py
 - [x] Unlearn, Level 0 .. Level 5 | character is not "All 0"/"All 5" (appended after separator) | sets skill level | gui/characterEditor.py. Keys 0-5 too
 
 ### implantEditor (character implants list)

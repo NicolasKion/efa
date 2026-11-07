@@ -4,6 +4,8 @@ use gpui_kit::{AppContext, WindowBounds, WindowOptions, px, size};
 use gyfa::ui::{Gyfa, Hub, Role};
 
 fn main() {
+    gyfa::errors::install_panic_hook();
+    gyfa::errors::queue_last_crash();
     let data_dir =
         std::env::var_os("GYFA_DATA").map_or_else(|| PathBuf::from("data/eve"), PathBuf::from);
     // An EFT file given on the command line is imported as a new fit.

@@ -643,7 +643,10 @@ impl Gyfa {
             Action::SetMode(mode) => fit.mode = Some(mode),
             Action::SetSecStatus(sec) => fit.sec_status = sec,
             Action::SetSystemSecurity(security) => fit.system_security = security,
-            Action::SetDamageProfile(profile) => fit.damage_profile = profile,
+            Action::SetDamageProfile(profile) => {
+                self.last_damage_profile.clone_from(&profile);
+                fit.damage_profile = profile;
+            }
             Action::SetTargetProfile(profile) => fit.target_profile = profile,
             Action::ToggleBoosters(main, rows) => {
                 let Some(on) = fit.boosters.get(main).map(|b| !b.active) else {

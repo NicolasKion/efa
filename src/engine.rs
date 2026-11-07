@@ -2,6 +2,7 @@
 //! keeps refine's state from ever drifting from what the UI shows.
 
 mod column;
+mod efs;
 mod graph;
 mod inspect;
 mod overrides;
@@ -32,6 +33,7 @@ use crate::{
 };
 
 pub use column::{ModuleMisc, RackHeat, ShipHeat, misc_attr};
+pub use efs::EfsContext;
 pub use inspect::{AttrValue, FitItem, Inspection, ModOp, Modifier, Source, SourceKind};
 pub use overrides::Overridden;
 pub use pane::{
@@ -73,12 +75,23 @@ pub struct Damage {
     pub thermal: f64,
     pub kinetic: f64,
     pub explosive: f64,
+    /// Breacher pods, which ignore resists; how much lands depends on the target's HP.
+    pub breacher: Breacher,
 }
 
 impl Damage {
+    /// The four damage types; breacher damage is not in it, see [`Breacher`].
     pub fn total(&self) -> f64 {
         self.em + self.thermal + self.kinetic + self.explosive
     }
+}
+
+/// Breacher pod damage before a target is known: at most `absolute`, and at most `relative`
+/// times the target's HP, pyfa's `BreacherInfo`.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Breacher {
+    pub absolute: f64,
+    pub relative: f64,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -1073,5 +1086,9 @@ fn damage(d: &StatDmgEntry) -> Damage {
         thermal: d.thermal.into_f64(),
         kinetic: d.kinetic.into_f64(),
         explosive: d.explosive.into_f64(),
+        breacher: Breacher {
+            absolute: d.breacher.absolute_max.into_f64(),
+            relative: d.breacher.relative_max.into_f64(),
+        },
     }
 }

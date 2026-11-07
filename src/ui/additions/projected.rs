@@ -22,7 +22,7 @@ use super::{
 };
 use crate::{
     data::{Catalog, Kind, TypeId, projection::EnvMenu},
-    engine::{FighterInfo, Stats},
+    engine::{FighterInfo, FitItem, Stats},
     fit::{
         Fit, ModuleState,
         projected::{MAX_FIT_COPIES, Projected},
@@ -33,6 +33,7 @@ use crate::{
         Gyfa, Loaded, RowRef,
         columns::{ICON_W, STATE_W},
         fitting::{ChargeMenu, DragSource, Dragged, compatible_charges, structure_charges},
+        item_stats::{StatsOf, stats_entry},
         widgets::{color, entry, icon, icon_box, icon_label, item_entry},
     },
 };
@@ -894,6 +895,13 @@ fn projected_item_menu(
             },
         );
     }
+    let stats_of = match row {
+        Row::Fit { fit, .. } => Some(StatsOf::OtherFit(fit, FitItem::Ship)),
+        _ => type_id.map(StatsOf::Type),
+    };
+    if let Some(of) = stats_of {
+        menu = menu.item(stats_entry(this, "Projected Item", of));
+    }
     if let Some(type_id) = type_id
         && catalog
             .get(type_id)
@@ -1026,6 +1034,12 @@ fn projected_item_menu(
                 },
             );
         }
+    }
+    // pyfa's projectedCharge entries follow the module's own.
+    if let Row::Module(i) = row
+        && let Some(charge) = projected.modules[i].charge
+    {
+        menu = menu.item(stats_entry(this, "Charge", StatsOf::Type(charge)));
     }
     // pyfa's projectedCharge entries follow the module's own.
     if let Row::Module(i) = row

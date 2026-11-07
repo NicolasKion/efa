@@ -32,6 +32,8 @@ pub enum FitItem {
     /// Implants and boosters take one per slot, so the type names them.
     Implant(TypeId),
     Booster(TypeId),
+    /// A fighter squadron, by its place in the fit's list.
+    Fighter(usize),
 }
 
 impl FitItem {
@@ -51,6 +53,7 @@ impl FitItem {
                 .any(|(i, _)| i == t)
                 .then_some(t),
             Self::Booster(t) => fit.boosters.iter().any(|b| b.type_id == t).then_some(t),
+            Self::Fighter(i) => fit.fighters.get(i).map(|f| f.type_id),
         }
     }
 }
@@ -302,6 +305,12 @@ impl Engine {
                 }
             }
             places.insert(item.get_item_id(), FitItem::Booster(booster.type_id));
+        }
+        for (i, id) in super::surroundings::add_fighters(&mut f, &fit.fighters)
+            .into_iter()
+            .enumerate()
+        {
+            places.insert(id, FitItem::Fighter(i));
         }
         let incoming = pane::dps_profile(pane::incoming_mix(&mut f, &fit.damage_profile));
         let rah = super::rah_incoming(&mut f, fit, incoming);

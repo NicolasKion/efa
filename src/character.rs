@@ -61,6 +61,8 @@ pub struct Character {
     pub sec_status: f64,
     /// The EVE character "Get Skills" reads from, pyfa's linked SSO character.
     pub esi_character: Option<u64>,
+    /// The Alpha clone grade capping the skills, pyfa's `alphaCloneID`; None for Omega.
+    pub alpha_clone: Option<i32>,
     /// Level changes not saved yet, pyfa's dirty skills; None unlearns. Never written out, so
     /// they are gone after a restart, as in pyfa.
     #[serde(skip)]
@@ -200,8 +202,39 @@ impl Characters {
         self.get(id).map_or(0.0, |c| c.sec_status)
     }
 
-    /// The character as the engine flies it. `skills` are every skill there is.
-    pub fn pilot(&self, id: CharacterId, skills: &[TypeId]) -> Pilot {
+    /// The Alpha clone grade the character flies as, None for Omega and the built-ins.
+    pub fn alpha_clone(&self, id: CharacterId) -> Option<i32> {
+        self.get(id).and_then(|c| c.alpha_clone)
+    }
+
+    /// Fly as an Alpha clone of that grade, or Omega with None. The trained levels stay; the
+    /// clone only caps them, as in pyfa.
+    pub fn set_alpha_clone(&mut self, id: CharacterId, clone: Option<i32>) {
+        if let Some(c) = self.get_mut(id) {
+            c.alpha_clone = clone;
+        }
+    }
+
+    /// The level a skill is flown at: [`Characters::level`] capped by the Alpha clone, the
+    /// level pyfa shows and checks requirements against. None when not learned.
+    pub fn flown_level(&self, id: CharacterId, skill: TypeId, catalog: &Catalog) -> Option<u8> {
+        let level = self.level(id, skill)?;
+        let cap = self
+            .alpha_clone(id)
+            .and_then(|clone| catalog.alpha_clone(clone))
+            .map(|clone| clone.caps.get(&skill).copied().unwrap_or(0));
+        Some(cap.map_or(level, |cap| level.min(cap)))
+    }
+
+    /// [`Characters::flown_level`] where not learned counts as 0, for requirements.
+    pub fn flown_level_or_zero(&self, id: CharacterId, skill: TypeId, catalog: &Catalog) -> u8 {
+        self.flown_level(id, skill, catalog).unwrap_or(0)
+    }
+
+    /// The character as the engine flies it, with every skill the catalog knows for the
+    /// built-ins.
+    pub fn pilot(&self, id: CharacterId, catalog: &Catalog) -> Pilot {
+        let skills = &catalog.skills;
         match self.resolve(id) {
             CharacterId::All0 => Pilot::all(skills, 0),
             CharacterId::All5 => Pilot::all(skills, MAX_LEVEL),
@@ -213,6 +246,10 @@ impl Characters {
                     skills: c.effective_skills().into_iter().collect(),
                     implants: c.implants.clone(),
                     sec_status: c.sec_status,
+                    alpha_caps: c
+                        .alpha_clone
+                        .and_then(|clone| catalog.alpha_clone(clone))
+                        .map(|clone| clone.caps.clone()),
                 }
             }
         }
@@ -538,7 +575,8 @@ pub fn roman(level: u8) -> String {
     }
 }
 
-fn path() -> Option<PathBuf> {
+/// Where the characters are kept.
+pub fn path() -> Option<PathBuf> {
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;

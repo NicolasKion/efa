@@ -22,7 +22,7 @@ const RIFTER: &str = "[Rifter, Test]
 Hobgoblin II x1
 ";
 
-fn setup() -> Option<&'static (Catalog, Engine)> {
+pub(crate) fn setup() -> Option<&'static (Catalog, Engine)> {
     static SETUP: OnceLock<Option<(Catalog, Engine)>> = OnceLock::new();
     SETUP
         .get_or_init(|| {
@@ -43,14 +43,14 @@ fn setup() -> Option<&'static (Catalog, Engine)> {
         .as_ref()
 }
 
-fn id(catalog: &Catalog, name: &str) -> TypeId {
+pub(crate) fn id(catalog: &Catalog, name: &str) -> TypeId {
     catalog
         .find(name)
         .unwrap_or_else(|| panic!("{name} exists"))
         .id
 }
 
-fn rifter(catalog: &Catalog) -> Fit {
+pub(crate) fn rifter(catalog: &Catalog) -> Fit {
     Fit::from_eft(catalog, RIFTER).expect("the fit parses").0
 }
 
@@ -96,7 +96,7 @@ fn stats_follow_the_characters_skills() {
     let pilot = characters.copy(CharacterId::All5, "Pilot", catalog);
     let gunnery = id(catalog, "Gunnery");
     let dps = |characters: &Characters, who| {
-        let pilot = characters.pilot(who, &catalog.skills);
+        let pilot = characters.pilot(who, catalog);
         engine
             .compute_for(&fit, &pilot, CalcOptions::default())
             .weapon_dps
@@ -244,4 +244,51 @@ fn skills_affecting_items() {
         charge.contains(&id(catalog, "Warhead Upgrades")),
         "{charge:?}"
     );
+}
+
+#[test]
+fn alpha_clones_cap_skills() {
+    let Some((catalog, engine)) = setup() else {
+        return;
+    };
+    let fit = rifter(catalog);
+    let mut characters = Characters::default();
+    let pilot = characters.copy(CharacterId::All5, "Alpha", catalog);
+    let clone = catalog
+        .alpha_clones
+        .iter()
+        .find(|c| c.name.contains("Minmatar"))
+        .expect("an Alpha Minmatar clone");
+    let dps = |characters: &Characters| {
+        engine
+            .compute_for(
+                &fit,
+                &characters.pilot(pilot, catalog),
+                CalcOptions::default(),
+            )
+            .weapon_dps
+    };
+    let omega = dps(&characters);
+
+    characters.set_alpha_clone(pilot, Some(clone.id));
+    let alpha = dps(&characters);
+    assert!(
+        alpha < omega,
+        "Alpha caps the gunnery skills: {alpha} vs {omega}"
+    );
+    let surgical = id(catalog, "Surgical Strike");
+    let cap = clone.caps.get(&surgical).copied().unwrap_or(0);
+    assert!(cap < 5);
+    assert_eq!(
+        characters.level(pilot, surgical),
+        Some(5),
+        "trained levels stay"
+    );
+    assert_eq!(characters.flown_level(pilot, surgical, catalog), Some(cap));
+    // A skill no Alpha clone has flies at 0.
+    let titans = id(catalog, "Minmatar Titan");
+    assert_eq!(characters.flown_level(pilot, titans, catalog), Some(0));
+
+    characters.set_alpha_clone(pilot, None);
+    assert!((dps(&characters) - omega).abs() < 1e-6, "Omega again");
 }

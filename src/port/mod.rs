@@ -5,11 +5,13 @@
 //! files go through the same door.
 
 pub mod dna;
+pub mod efs;
 pub mod eft;
 pub mod esi;
 pub mod html;
 pub mod multibuy;
 pub mod muta;
+pub mod renames;
 pub mod xml;
 
 use serde::{Deserialize, Serialize};
@@ -34,17 +36,20 @@ pub enum Format {
     MultiBuy,
     Esi,
     Dna,
+    /// Eve Fleet Simulator's JSON.
+    Efs,
     /// The stats pane's numbers as text, pyfa's "Stats".
     Stats,
     Xml,
 }
 
 impl Format {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Eft,
         Self::MultiBuy,
         Self::Esi,
         Self::Dna,
+        Self::Efs,
         Self::Stats,
         Self::Xml,
     ];
@@ -55,6 +60,7 @@ impl Format {
             Self::MultiBuy => "MultiBuy",
             Self::Esi => "ESI",
             Self::Dna => "DNA",
+            Self::Efs => "EFS",
             Self::Stats => "Stats",
             Self::Xml => "XML",
         }
@@ -64,7 +70,7 @@ impl Format {
     pub fn extension(self) -> &'static str {
         match self {
             Self::Eft | Self::MultiBuy | Self::Dna | Self::Stats => "txt",
-            Self::Esi => "json",
+            Self::Esi | Self::Efs => "json",
             Self::Xml => "xml",
         }
     }
