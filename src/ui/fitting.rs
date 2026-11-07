@@ -716,9 +716,22 @@ impl Gyfa {
             return;
         };
         match dragged.source {
+            // fittingView.py swapItems: Ctrl copies onto an empty slot, Ctrl+Alt fills the
+            // rack with copies, no modifier swaps; other modifiers do nothing.
             DragSource::Row(from) => {
-                if let Some(to) = on.row() {
-                    self.apply(Action::Swap(from, to), cx);
+                let Some(to) = on.row() else { return };
+                let (ctrl, alt) = (modifiers.control || modifiers.platform, modifiers.alt);
+                match (ctrl, alt, modifiers.shift) {
+                    (true, true, false) => {
+                        if let RowRef::Module(slot, i) = from {
+                            self.apply(Action::FillClone(slot, i), cx);
+                        }
+                    }
+                    (true, false, false) if matches!(on, DropOn::Empty(..)) => {
+                        self.apply(Action::Clone(from, to), cx);
+                    }
+                    (false, false, false) => self.apply(Action::Swap(from, to), cx),
+                    _ => {}
                 }
             }
             // Drone stacks only move within the drones pane.
@@ -838,7 +851,7 @@ fn item_menu(
         return menu;
     };
     let mut menu = menu;
-    let shown = super::hub::preferences(cx).context_menus;
+    let shown = super::hub::shown_menus(window, cx);
 
     let mut takes_charges = false;
     if let Some(m) = &snapshot.module {
