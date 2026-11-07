@@ -105,6 +105,8 @@ pub enum Action {
     CargoToModule(TypeId, (Slot, usize), Transfer),
     SetDamageProfile(DamageProfile),
     SetTargetProfile(Option<crate::target_profile::TargetProfile>),
+    /// Group a rack's modules by type, or stop grouping them.
+    ToggleGrouped(Slot),
 }
 
 /// The additions pane's tabs that list items.
@@ -224,21 +226,35 @@ impl Gyfa {
         };
         let stats = self.stats.as_ref();
         let fit = &mut self.saved.fits[current];
+        // In a grouped rack, whatever happens to a module happens to its whole group.
+        let action = with_groups(fit, action);
         let mut structural = false;
         match action {
             Action::CycleState(slot, i) => {
-                let Some(Some(m)) = fit.rack_mut(slot).get_mut(i) else {
+                let group = fit.group(slot, i);
+                let Some(Some(m)) = fit.rack(slot).get(i) else {
                     return;
                 };
                 let t = loaded.catalog.get(m.type_id);
                 let activatable = t.is_some_and(|t| t.activatable);
                 let overloadable = t.is_some_and(|t| t.overloadable);
-                m.state = match m.state {
+                let next = match m.state {
                     ModuleState::Offline => ModuleState::Online,
                     ModuleState::Online if activatable => ModuleState::Active,
                     ModuleState::Active if overloadable => ModuleState::Overload,
                     _ => ModuleState::Offline,
                 };
+                let rack = fit.rack_mut(slot);
+                for j in group {
+                    if let Some(Some(m)) = rack.get_mut(j) {
+                        m.state = next;
+                    }
+                }
+            }
+            Action::ToggleGrouped(slot) => {
+                if !fit.grouped.remove(&slot) {
+                    fit.grouped.insert(slot);
+                }
             }
             Action::SetState(rows, new_state) => {
                 for m in modules_mut(fit, &rows) {
@@ -563,6 +579,37 @@ impl Gyfa {
         self.history
             .record(current, before, &self.saved.fits[current]);
         self.changed(cx);
+    }
+}
+
+/// `action` with each module row it names widened to the module's group.
+fn with_groups(fit: &crate::fit::Fit, action: Action) -> Action {
+    let widen = |rows: Vec<RowRef>| -> Vec<RowRef> {
+        let mut out: Vec<RowRef> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let members = match row {
+                RowRef::Module(slot, i) => fit
+                    .group(slot, i)
+                    .into_iter()
+                    .map(|j| RowRef::Module(slot, j))
+                    .collect(),
+                RowRef::Rig(_) | RowRef::Subsystem(_) => vec![row],
+            };
+            for member in members {
+                if !out.contains(&member) {
+                    out.push(member);
+                }
+            }
+        }
+        out
+    };
+    match action {
+        Action::SetState(rows, state) => Action::SetState(widen(rows), state),
+        Action::SetCharge(rows, charge) => Action::SetCharge(widen(rows), charge),
+        Action::SetSpool(rows, cycles) => Action::SetSpool(widen(rows), cycles),
+        Action::Remove(rows) => Action::Remove(widen(rows)),
+        Action::SwapType(rows, type_id) => Action::SwapType(widen(rows), type_id),
+        other => other,
     }
 }
 
