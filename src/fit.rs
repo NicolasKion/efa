@@ -162,6 +162,10 @@ pub struct Fit {
     /// Fleet boosters, pyfa's command fits.
     #[serde(default)]
     pub command: Vec<projected::CommandFit>,
+    /// pyfa's "Disable Fitting Restrictions": anything goes on, and what breaks the rules shows
+    /// red.
+    #[serde(default)]
+    pub ignore_restrictions: bool,
     /// When the fit was created or last changed, in seconds since the Unix epoch; zero for fits
     /// saved before gyfa kept it. The fittings browser's recent fits go by it.
     #[serde(default)]

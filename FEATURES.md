@@ -20,8 +20,8 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [~] Reorder tabs by drag, tab tooltips (chrome_tabs.py), tooltips with the fit and hull behind a preference
 - [x] Open fit in new tab vs same tab (builtinContextMenus/fitOpenNewTab.py): a click in the fittings browser follows the "open in a new page" preference, "Open in new tab" and a middle click always open a tab
 - [x] Undo/redo for every fit change (gui/fitCommands/, mainMenuBar.py): one history per fit, every action and market add, Ctrl+Z/Ctrl+Y
-- [ ] Disable fitting restrictions toggle (fitCommands/gui/fitRestrictionToggle.py), refine: validate_fast/validate_verbose with ValOptions
-- [ ] Fit validation messages (over CPU/PG/slots/skills/max group fitted/rig size etc.) (eos/saveddata/fit.py), refine: validate_verbose
+- [x] Disable fitting restrictions toggle (fitCommands/gui/fitRestrictionToggle.py), per fit in the Fit menu: with restrictions on, modules the ship cannot take are refused (ship group, rig size, max group or type fitted, hardpoints, capital size, subsystem slot); a full rack refuses either way; turning them back on takes off what does not fit, as one undo step
+- [x] Fit validation messages (over CPU/PG/slots/skills/max group fitted/rig size etc.) (eos/saveddata/fit.py), refine: validate_verbose; per item in the row tooltips, overuse of CPU, powergrid and the like in the stats pane
 - [ ] System security zone per fit (builtinContextMenus/fitSystemSecurity.py), refine: set_sec_zone
 - [ ] Pilot security status per fit (builtinContextMenus/fitPilotSecurity.py), refine: set_sec_status
 - [x] Per-fit character selection, stored on the fit; old fits fly All 5 and new fits get the character picked last (gui/characterSelection.py)
@@ -72,7 +72,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Module table with attribute columns (builtinViewColumns/attributeDisplay.py)
 - [ ] Rack labels and rack separators prefs (pyfaGeneralPreferences.py)
 - [x] Color rows by slot type (pyfaGeneralPreferences.py)
-- [ ] Highlight modules with unmet skills or invalid fitting in red (fittingView.py), refine: validate_verbose skill_reqs
+- [x] Highlight modules with unmet skills or invalid fitting in red (fittingView.py), with the reasons on hover; drones, fighters, implants, boosters and the mode too. pyfa colors the row background and leaves skills out; gyfa uses red text for both
 - [ ] Drag and drop modules between slots, swap/rearrange (fittingView.py, fitCommands/gui/localModule)
 - [~] Shift/ctrl drag to copy module, drag module to cargo (fitCommands/gui/localModuleCargo), module/charge to and from cargo done with Ctrl to copy, copying between slots missing
 - [ ] Multi-select and bulk state change (fittingView.py)
@@ -186,7 +186,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Export skills needed for fit as EVEMon .emp/.xml or text, by file extension (mainMenuBar.py exportSkillsNeeded)
 - [x] Missing skills icon with tooltip and menu (gui/characterSelection.py); the condensed tooltip, pyfa's default
 - [ ] Global character vs per-fit character pref (pyfaGeneralPreferences.py)
-- [ ] Enforce strict skill requirements pref (pyfaEnginePreferences.py), refine: ValOptions skill_reqs
+- [x] Enforce strict skill requirements pref (pyfaEnginePreferences.py): lowering a skill unlearns the skills that need it higher, in the character editor and the Change Skills menus
 - [x] Implant set editor: new, rename, copy, delete, add from search, remove, clipboard import/export (gui/setEditor.py, builtinViews/implantEditor.py, service/implantSet.py)
 - [x] Precalculated implant sets (service/precalcImplantSet.py, db_update.py processImplantSets)
 
@@ -240,28 +240,28 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from refine (`Engine::graph_snapshot`: per-weapon damage and cycle timing, weapon/ewar/repair attributes, ship stats) with pyfa's application formulas (src/graphs). Turret and missile application are checked against refine's `get_stat_dmg_applied`, and damage over time against refine's simulation.
 
 - [x] Graph window and fit/target lists (graphs/gui): one window, fits and targets added from menus, removed with Delete, double-click or the menu, pyfa's extra columns per graph
-- [~] Damage stats: DPS/volley/damage inflicted vs distance, time, target speed (m/s, %), target sig (m, %), attacker and target vectors (graphs/data/fitDamageStats); turrets, launchers, vortons, smartbombs, bombs, guided bombs, doomsdays, drones. Breacher pods and fighters are not plotted (no fighters yet; breacher damage is HP-relative)
-- [ ] Application profile, best ammo per distance (graphs/data/fitApplicationProfile)
+- [x] Damage stats: DPS/volley/damage inflicted vs distance, time, target speed (m/s, %), target sig (m, %), attacker and target vectors (graphs/data/fitDamageStats); turrets, launchers, vortons, smartbombs, bombs, guided bombs, doomsdays, drones, fighter abilities (attack, missiles, bombs, kamikaze, each read from refine on its own) and breacher pods (the smaller of their cap and their share of the target's HP, times its breacher resistance). Fighter rearming is left out of the time axis
+- [x] Application profile, best ammo per distance (graphs/data/fitApplicationProfile): every charge of the chosen meta tier loaded into each weapon group in refine, the best per distance summed, segments colored, dashed or plain by charge. Charge colors are spread evenly rather than pyfa's per-ammo table
 - [x] Capacitor amount/regen vs time and cap amount, pyfa's cap simulator with stagger, injectors and reloads (graphs/data/fitCapacitor)
-- [x] Shield amount/regen vs time and shield amount, HP or EHP (graphs/data/fitShieldRegen); EHP is a checkbox in the graph window, where pyfa follows the stats pane
+- [x] Shield amount/regen vs time and shield amount, HP or EHP (graphs/data/fitShieldRegen), following the main window's stats pane raw/effective toggle
 - [x] Mobility: speed, distance, momentum, bump speed and distance vs time (graphs/data/fitMobility)
 - [x] Warp time vs distance in AU or km, from the speed with warp-incompatible modules off (graphs/data/fitWarpTime)
 - [x] Lock time vs target sig (graphs/data/fitLockTime)
 - [x] Remote reps: rate and total vs distance and time, ancillary reload option (graphs/data/fitRemoteReps)
 - [x] Ewar stats: neuts, webs, ECM, damps, TDs, GDs, TPs vs distance with target resistance (graphs/data/fitEwarStats)
-- [ ] ECM/burst/scanres damp effect (graphs/data/fitEcmBurstScanresDamps); hidden behind ctrl-alt-g in pyfa
-- [~] Graph options: ignore resists, apply projected (own webs and TPs), ignore lock range, ignore drone control range, drone mode, target resist mode (builtinContextMenus/graph*.py). Apply projected stacks the attacker's webs and paints among themselves only and leaves scrams out; options are not remembered between runs
-- [ ] Plot with different ammo (builtinContextMenus/graphFitAmmoPicker.py)
+- [x] ECM burst + scanres damps (graphs/data/fitEcmBurstScanresDamps), listed when the window is opened with Ctrl+Alt+G, as in pyfa
+- [x] Graph options: ignore resists, apply projected (own webs, painters and scrams, which turn off the target's microwarpdrive), ignore lock range, ignore drone control range, drone mode, target resist mode, the Application Profile's own two, style and ammo meta, legend and Y = 0 (builtinContextMenus/graph*.py), remembered between runs. Webs and paints stack among themselves rather than with what already affects a target fit
+- [x] Plot with different ammo (builtinContextMenus/graphFitAmmoPicker.py): a fit row submenu adding the fit again with another charge in one weapon type; pyfa's own dialog is switched off in its code
 - [x] Line color per fit, lightness and line style per target (builtinViewColumns/graphColor.py, graphLineStyle.py, graphLightness.py), from the theme's palette where it has the hue
 - [x] Legend, "Always show Y = 0", readout at the hovered or clicked X (right-click clears)
 - [x] Built-in target profiles and the ideal target (eos/saveddata/targetProfile.py)
-- [ ] Drag fits from the fittings browser into the graph lists
+- [ ] Drag fits from the fittings browser into the graph lists: gpui drags stay inside their window, and the graph window is a window of its own
 
 ## Preferences
 
 - [x] Preferences dialog (gui/preferenceDialog.py), its own window, changes apply to every window right away
 - [~] General: theme, language, tooltips, rack layout, omega icons, mutated names, tab info (pyfaGeneralPreferences.py), theme follows Omarchy live; character implants by default, slot colors, reopen fits, tab tooltips, ship browser tooltips, Omega icons, open in new tab, ammo change all and tab info done
-- [~] Engine: strict skills, factor in reload, global default spool (pyfaEnginePreferences.py), reload and default spool done, refine: set_default_spool, set_default_optional_reloads
+- [x] Engine: strict skills, factor in reload, global default spool (pyfaEnginePreferences.py), refine: set_default_spool, set_default_optional_reloads
 - [~] Stat view layout (pyfaStatViewPreferences.py), each section shown or hidden
 - [x] Context menu toggles (pyfaContextMenuPreferences.py)
 - [~] Market and prices: source, search delay, meta buttons, price total composition (pyfaMarketPreferences.py), all but the meta buttons and market view modes

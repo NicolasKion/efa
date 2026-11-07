@@ -319,7 +319,12 @@ impl PreferencesWindow {
         ]
     }
 
-    fn engine(&self, factor_reload: bool, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn engine(
+        &self,
+        prefs: &Preferences,
+        factor_reload: bool,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         vec![
             Self::check(
                 "factor-reload",
@@ -327,6 +332,16 @@ impl PreferencesWindow {
                 None,
                 factor_reload,
                 |s, v| s.factor_reload = v,
+                cx,
+            ),
+            Self::check(
+                "strict-skill-levels",
+                "Enforce strict skill level requirements",
+                Some(
+                    "Lowering a skill resets the skills that need it higher. Setting Drones from V to IV resets Heavy Drone Operation, which needs Drones V.",
+                ),
+                prefs.engine.strict_skill_levels,
+                |s, v| s.preferences.engine.strict_skill_levels = v,
                 cx,
             ),
             labelled(
@@ -617,7 +632,7 @@ impl Render for PreferencesWindow {
         };
         let body = match self.page {
             Page::General => Self::general(&prefs, cx),
-            Page::Engine => self.engine(factor_reload, cx),
+            Page::Engine => self.engine(&prefs, factor_reload, cx),
             Page::Stats => Self::stats(&prefs, cx),
             Page::ContextMenus => Self::context_menus(&prefs, cx),
             Page::Market => self.market(&prefs, totals, cx),

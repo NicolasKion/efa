@@ -17,13 +17,14 @@ use gpui_kit::{
 use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, misc_entries, price_text};
 use crate::{
     data::{Catalog, ItemType, Kind, TypeId},
-    engine::Stats,
+    engine::{ItemRef, Stats},
     fit::{Booster, Fit},
     icons::Icon,
     ui::{
         Action, AddKind, Gyfa, Loaded,
         columns::STATE_W,
         fitting::{DragSource, Dragged},
+        validation::flag,
         widgets::{color, entry, icon_box, icon_label, item_entry, short},
     },
 };
@@ -291,6 +292,9 @@ impl Gyfa {
             .when(i % 2 == 1, |r| r.bg(theme.table_even))
             .when(selected, |r| r.bg(theme.table_active))
             .hover(|s| s.bg(theme.table_hover))
+            .when_some(self.problems_of(loaded, ItemRef::Booster(i)), |row, why| {
+                flag(row, why, theme.danger)
+            })
             .child(
                 div()
                     .id(SharedString::from(format!("booster-state-{i}")))

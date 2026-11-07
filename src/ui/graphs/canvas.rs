@@ -22,6 +22,10 @@ pub struct PlotLine {
     pub label: String,
     pub color: LineColor,
     pub lightness: Lightness,
+    /// A color of its own instead of the fit's: the Application Profile's per-charge colors.
+    pub hue: Option<f32>,
+    /// Segments of one line share a legend entry.
+    pub in_legend: bool,
     pub style: LineStyle,
     pub series: Series,
 }
@@ -141,7 +145,10 @@ pub fn render(
     // Colors come from the theme at draw time, so a theme switch recolors the lines.
     let colors: Vec<Hsla> = lines
         .iter()
-        .map(|l| l.lightness.apply(l.color.color(theme)))
+        .map(|l| match l.hue {
+            Some(hue) => l.lightness.apply(gpui_kit::hsla(hue, 0.75, 0.6, 1.0)),
+            None => l.lightness.apply(l.color.color(theme)),
+        })
         .collect();
     let x_ticks = ticks(frame.x_range, 8);
     let y_ticks = ticks(frame.y_range, 6);
@@ -280,12 +287,18 @@ pub fn render(
             .border_color(theme.border)
             .bg(theme.background.opacity(0.85))
             .text_xs()
-            .children(lines.iter().zip(&colors).map(|(line, &color)| {
-                h_flex()
-                    .gap_1()
-                    .child(swatch(color, line.style))
-                    .child(line.label.clone())
-            }))
+            .children(
+                lines
+                    .iter()
+                    .zip(&colors)
+                    .filter(|(line, _)| line.in_legend)
+                    .map(|(line, &color)| {
+                        h_flex()
+                            .gap_1()
+                            .child(swatch(color, line.style))
+                            .child(line.label.clone())
+                    }),
+            )
     });
 
     let readout = mark.map(|x| {
@@ -397,6 +410,12 @@ pub fn render(
         )
         .when(lines.is_empty(), |d| d.opacity(0.7))
         .into_any_element()
+}
+
+/// A hue for the `index`th charge, spread by the golden angle so neighbours differ.
+pub fn ammo_hue(index: usize) -> f32 {
+    const GOLDEN: f32 = 0.381_966;
+    (index as f32 * GOLDEN).fract()
 }
 
 /// A short sample of a line, for the legend and the lists.

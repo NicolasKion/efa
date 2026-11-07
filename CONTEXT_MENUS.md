@@ -257,7 +257,7 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 ### graphFitList (fits list) then graphFitListMisc
 - [x] Add Fit... | always | submenu of every fit instead of pyfa's fit browser | fitAddBrowse.py
 - [x] Add Currently Open Fit | always | submenu of the main window's tabs | fitAddCurrentlyOpen.py
-- [ ] Plot with Different Ammo... | fit row, damage graph | dialog: per weapon group pick charges, drones, fighters to plot | graphFitAmmoPicker.py
+- [x] Plot with Different Ammo | fit row, damage graph | submenu per weapon type of its charges, adding the fit with that charge (pyfa's dialog is disabled in its code) | graphFitAmmoPicker.py
 - [x] Remove Fit | row clicked | removes the row (also double-click) | itemRemove.py
 - [x] Open Fit in New Tab | fit row | opens a tab in the main window | fitOpenNewTab.py
 - [x] Line color | left-click the color swatch | pyfa's color picker popup | graphColor.py
@@ -275,8 +275,8 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 ### graph control panel menu icon (ctrlPanel.py, context = graph internalName)
 - [x] Apply Projected Items | dmgStatsGraph | checkbox | graphDmgApplyProjected.py
 - [x] Ignore Target Resists | dmgStatsGraph | checkbox | graphDmgIgnoreResists.py
-- [ ] Ignore Target Resists | ammoOptimalDpsGraph | checkbox | graphAmmoOptimalIgnoreResists.py
-- [ ] Apply Projected Effects | ammoOptimalDpsGraph | checkbox | graphAmmoOptimalApplyProjected.py
+- [x] Ignore Target Resists | ammoOptimalDpsGraph | checkbox | graphAmmoOptimalIgnoreResists.py
+- [x] Apply Projected Effects | ammoOptimalDpsGraph | checkbox | graphAmmoOptimalApplyProjected.py
 - [x] Ignore Lock Range | dmgStatsGraph, remoteRepsGraph, ewarStatsGraph | checkbox | graphLockRange.py
 - [x] Ignore Drone Control Range | dmgStatsGraph, remoteRepsGraph, ewarStatsGraph | checkbox | graphDroneControlRange.py
 - [x] Drone Mode | dmgStatsGraph | radio Auto / Stick to Target / Stick to Attacker | graphDmgDroneMode.py
@@ -424,7 +424,7 @@ refine API paths are under refine-core/src/api. "ui only" = no engine involvemen
 
 ## Graphs
 - Add Fit... / Add Currently Open Fit / Remove / Open in New Tab: ui only.
-- Plot with Different Ammo...: yes, Module::set_charge_type_id per sample (or scratch fit copies).
+- Plot with Different Ammo: yes, the fit read again with the charge set; the Application Profile loads each charge with Module::set_charge_type_id in one solar system.
 - Add Target Profile / Edit Target Profile: menus are ui only (ui::profile_menus, ui::profile_editor); refine has no projectee for abstract profiles, so the graphs apply pyfa's math graph-side on refine's attributes.
 - Resist Mode: no engine (graph math choosing which layer's resists to apply).
 - Apply Projected Items: graph-side, the attacker's webs and painters from refine's attributes.

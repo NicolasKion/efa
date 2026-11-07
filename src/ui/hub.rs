@@ -43,6 +43,8 @@ pub struct Hub {
     pub import: Option<String>,
     /// Fits other windows (the graphs) asked the main window to open as tabs.
     pub open_requests: Vec<usize>,
+    /// The main window's stats pane shows raw HP rather than EHP; the graphs follow it.
+    pub raw_hp: bool,
     /// The characters. Replaced, never changed in place, so a window can tell it has the
     /// latest by pointer.
     pub characters: Rc<Characters>,
@@ -81,6 +83,7 @@ impl Hub {
             prices: Rc::new(Prices::default()),
             import,
             open_requests: Vec::new(),
+            raw_hp: false,
             characters: Rc::new(Characters::load()),
             character_editor: None,
         }
