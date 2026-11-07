@@ -250,6 +250,8 @@ impl Outcome {
         TankFit {
             modules: self.modules.clone(),
             rigs: self.rigs.clone(),
+            types: self.types.clone(),
+            rig_types: self.rig_types.clone(),
         }
     }
 }

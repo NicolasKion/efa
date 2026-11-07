@@ -651,3 +651,51 @@ fn a_tank_budget_caps_the_price() {
         "no faction module over the per-module budget"
     );
 }
+
+#[test]
+fn a_picked_result_is_fitted_as_found() {
+    let Some((catalog, engine, data)) = setup() else {
+        return;
+    };
+    let fit = ship(catalog, "Abaddon");
+    let (facts, families) = hull(catalog, engine, data, &fit);
+    let wizard = Setup::new(catalog, data, &facts, &families);
+    let mut choices = wizard.defaults();
+    choices.tank = TankStyle::Buffer;
+    choices.layer = Layer::Armor;
+    choices.goal = wizard::Goal::Resists;
+    choices.search_tiers = wizard::SearchTiers::All;
+    let problem = wizard
+        .tank_problem(
+            engine,
+            engine.all5(),
+            &fit,
+            &choices,
+            &gyfa::prices::Prices::default(),
+        )
+        .expect("a tank to search for");
+    let found = tank::optimise(engine, &problem, &Progress::default(), 5);
+    let best = found.outcomes.first().expect("a tank");
+    choices.tank_fit = Some(best.tank_fit());
+    let picks = wizard.plan(&fit, &choices);
+    let fitted: Vec<TypeId> = picks
+        .iter()
+        .filter(|p| p.tank && p.slot != Slot::Rig)
+        .map(|p| p.type_id)
+        .collect();
+    let rigs: Vec<TypeId> = picks
+        .iter()
+        .filter(|p| p.tank && p.slot == Slot::Rig)
+        .map(|p| p.type_id)
+        .collect();
+    let mut want = best.types.clone();
+    let mut got = fitted.clone();
+    want.sort_unstable();
+    got.sort_unstable();
+    assert_eq!(got, want, "the modules the search found go on");
+    let mut want = best.rig_types.clone();
+    let mut got = rigs;
+    want.sort_unstable();
+    got.sort_unstable();
+    assert_eq!(got, want, "the rigs the search found go on");
+}

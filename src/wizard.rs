@@ -480,6 +480,11 @@ impl Goal {
 pub struct TankFit {
     pub modules: Vec<TypeId>,
     pub rigs: Vec<TypeId>,
+    /// The exact variations the search found, in the same order as `modules` and `rigs`. They
+    /// go on as found, whatever the bling choices say, so what the results show is what is
+    /// fitted.
+    pub types: Vec<TypeId>,
+    pub rig_types: Vec<TypeId>,
 }
 
 /// Which damage modules go into the low slots.
@@ -1584,7 +1589,7 @@ impl<'a> Setup<'a> {
                 self.base(&format!("{} {name}", facts.size.label()))
             })
             .collect();
-        for pick in self.rig_picks(&bases, &choices.bling, &mut calibration, false) {
+        for pick in self.rig_picks(&bases, &[], &choices.bling, &mut calibration, false) {
             picks.push(pick);
             rigs_left -= 1;
         }
@@ -1605,16 +1610,22 @@ impl<'a> Setup<'a> {
     }
 
     /// Rigs in order, until one costs more calibration than is left.
+    /// Rigs for `bases` within the calibration left; `exact` holds the variation to use for each
+    /// base where one was found, otherwise the bling choices decide.
     fn rig_picks(
         &self,
         bases: &[TypeId],
+        exact: &[TypeId],
         bling: &Bling,
         calibration: &mut f64,
         tank: bool,
     ) -> Vec<Pick> {
         let mut picks = Vec::new();
-        for &base in bases {
-            let type_id = self.pick(base, Category::Rig, bling);
+        for (i, &base) in bases.iter().enumerate() {
+            let type_id = exact
+                .get(i)
+                .copied()
+                .unwrap_or_else(|| self.pick(base, Category::Rig, bling));
             let cost = self.cost(type_id);
             if cost > *calibration + 1e-6 {
                 break;
@@ -1652,14 +1663,20 @@ impl<'a> Setup<'a> {
             }
         };
         let rig_bases: Vec<TypeId> = if let Some(found) = &choices.tank_fit {
-            for &id in found.modules.iter().take(room.slots) {
+            for (k, &id) in found.modules.iter().enumerate().take(room.slots) {
                 let priority = match tank::category_of(catalog, id) {
                     Category::Repairer => 7,
                     Category::Buffer => 6,
                     Category::Hardener => 5,
                     _ => 4,
                 };
-                push_base(&mut picks, id, priority);
+                // The variation the search found, not the bling tier's.
+                if push_base(&mut picks, id, priority)
+                    && let (Some(pick), Some(&exact)) = (picks.last_mut(), found.types.get(k))
+                {
+                    pick.type_id = exact;
+                    pick.charge = self.charge_for(exact);
+                }
             }
             found.rigs.clone()
         } else {
@@ -1719,7 +1736,11 @@ impl<'a> Setup<'a> {
         };
         let mut calibration = room.calibration;
         let rigs: Vec<TypeId> = rig_bases.into_iter().take(room.rigs).collect();
-        picks.extend(self.rig_picks(&rigs, &choices.bling, &mut calibration, true));
+        let exact: &[TypeId] = choices
+            .tank_fit
+            .as_ref()
+            .map_or(&[], |found| found.rig_types.as_slice());
+        picks.extend(self.rig_picks(&rigs, exact, &choices.bling, &mut calibration, true));
         picks
     }
 
