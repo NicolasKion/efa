@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use gyfa::{
+use efa::{
     data::Catalog,
     fit::{Fit, Module, ModuleState},
     market::{MetaCategory, charges_for_fit},
@@ -130,9 +130,9 @@ fn off_market_boosters_get_a_group_of_their_own() {
         .expect("in the catalog");
     assert_eq!(
         booster.market_group,
-        Some(gyfa::data::MARKET_SPECIAL_BOOSTERS)
+        Some(efa::data::MARKET_SPECIAL_BOOSTERS)
     );
-    let group = &catalog.market_groups[&gyfa::data::MARKET_SPECIAL_BOOSTERS];
+    let group = &catalog.market_groups[&efa::data::MARKET_SPECIAL_BOOSTERS];
     assert!(group.types.contains(&booster.id));
     assert!(
         catalog.search("synth blue pill", 50).contains(&booster.id),

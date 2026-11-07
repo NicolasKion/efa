@@ -14,7 +14,7 @@ use crate::{
     engine::{Damage, FirepowerDetail, MiningRate, SpoolRange},
     target_profile::{applied, applied_breacher},
     ui::{
-        Gyfa,
+        Efa,
         actions::Action,
         profile_menus::{FirstProfile, PickProfile, target_profile_menu},
         widgets::{DAMAGE_COLORS, color, icon},
@@ -112,7 +112,7 @@ fn swap_button(
     key: &'static str,
     icon_id: i32,
     text: &'static str,
-    cx: &Context<Gyfa>,
+    cx: &Context<Efa>,
 ) -> AnyElement {
     tip(key, p.icon(icon_id, 16.), text)
         .flex_none()
@@ -127,9 +127,9 @@ fn swap_button(
 
 pub(super) fn firepower(
     p: &Pane<'_>,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     factor_reload: bool,
-    cx: &Context<Gyfa>,
+    cx: &Context<Efa>,
 ) -> Section {
     let s = p.stats;
     let target = p.fit.target_profile.as_ref();
@@ -212,7 +212,7 @@ pub(super) fn firepower(
                         .child(totals),
                 ),
         )
-        // The damage type bar is gyfa's own: the mix at a glance, which pyfa leaves to tooltips.
+        // The damage type bar is efa's own: the mix at a glance, which pyfa leaves to tooltips.
         .when(total > 0.0, |col| {
             col.child(
                 h_flex()
@@ -249,7 +249,7 @@ pub(super) fn firepower(
     let pick: PickProfile = {
         let this = this.clone();
         Rc::new(move |profile, _, cx| {
-            Gyfa::app_update(&this, cx, |g, cx| {
+            Efa::app_update(&this, cx, |g, cx| {
                 g.apply(Action::SetTargetProfile(profile), cx);
             });
         })
@@ -272,7 +272,7 @@ pub(super) fn firepower(
                 PopupMenuItem::new("Factor in Reload Time")
                     .checked(factor_reload)
                     .on_click(move |_, _, cx| {
-                        Gyfa::app_update(&this, cx, |g, cx| {
+                        Efa::app_update(&this, cx, |g, cx| {
                             g.saved.factor_reload = !g.saved.factor_reload;
                             g.changed(cx);
                         });
@@ -317,7 +317,7 @@ fn mining_tooltip(rate: MiningRate) -> String {
     )
 }
 
-pub(super) fn mining(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
+pub(super) fn mining(p: &Pane<'_>, cx: &Context<Efa>) -> Section {
     let m = p.stats.mining;
     let total = MiningRate {
         yield_: m.miner.yield_ + m.drone.yield_,
@@ -433,7 +433,7 @@ pub(super) fn outgoing(p: &Pane<'_>) -> Section {
             Some(hull_spool),
             "HP/s",
         ))
-        // pyfa has no neutralizer column; gyfa adds one when the fit neuts, since refine knows it.
+        // pyfa has no neutralizer column; efa adds one when the fit neuts, since refine knows it.
         .when(o.neut > 0.0, |row| {
             row.child(column(
                 "neut",

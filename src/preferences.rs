@@ -1,4 +1,4 @@
-//! pyfa's preferences that make sense for gyfa, with pyfa's defaults. Saved with the fits; every
+//! pyfa's preferences that make sense for efa, with pyfa's defaults. Saved with the fits; every
 //! field defaults so older saves load.
 
 use serde::{Deserialize, Serialize};
@@ -128,7 +128,7 @@ impl Default for Engine {
 }
 
 /// Which stats pane sections show, pyfa's Statistics Panel page. pyfa also has a "minimal"
-/// variant per section; gyfa's sections only come in one size, so each is shown or not.
+/// variant per section; efa's sections only come in one size, so each is shown or not.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 #[expect(
@@ -353,7 +353,7 @@ pub struct HtmlExport {
     pub minimal: bool,
 }
 
-/// EVE SSO and ESI, pyfa's ESI page. gyfa ships no client ID of its own: the user registers an
+/// EVE SSO and ESI, pyfa's ESI page. efa ships no client ID of its own: the user registers an
 /// application at developers.eveonline.com and pastes its ID here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

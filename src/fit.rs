@@ -282,7 +282,7 @@ pub struct Fit {
     #[serde(default)]
     pub grouped: std::collections::BTreeSet<Slot>,
     /// When the fit was created or last changed, in seconds since the Unix epoch; zero for fits
-    /// saved before gyfa kept it. The fittings browser's recent fits go by it.
+    /// saved before efa kept it. The fittings browser's recent fits go by it.
     #[serde(default)]
     pub modified: u64,
 }

@@ -1,4 +1,4 @@
-//! What is wrong with a fit, from refine's validation, in gyfa's terms: which item breaks which
+//! What is wrong with a fit, from refine's validation, in efa's terms: which item breaks which
 //! rule, the way pyfa colors rows red and refuses modules that cannot go on the ship.
 
 use std::collections::HashMap;
@@ -253,7 +253,7 @@ impl Validation {
     }
 }
 
-/// Which gyfa item each refine item stands for.
+/// Which efa item each refine item stands for.
 pub(super) type Refs = HashMap<ItemId, ItemRef>;
 
 /// Everything refine checks, less what needs a target, a security zone or another fit.

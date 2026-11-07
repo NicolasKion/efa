@@ -4,7 +4,7 @@
 //! Both are the same editor over a different [`Kind`]: a list of entries, New, Rename, Copy and
 //! Delete with pyfa's name prompts, value fields that save as they are typed, and clipboard
 //! import and export. The entries live in the [`Hub`], so every window sees a change at once;
-//! fits that use an entry follow it when it is renamed, edited or deleted, as pyfa's do. gyfa
+//! fits that use an entry follow it when it is renamed, edited or deleted, as pyfa's do. efa
 //! also lists the builtins, read-only, so one can be copied as a starting point.
 
 use std::{marker::PhantomData, rc::Rc};
@@ -51,7 +51,7 @@ pub struct Field {
 /// What an editor edits: damage patterns or target profiles.
 pub trait Kind: 'static {
     type Item: Clone + PartialEq + 'static;
-    /// The window's title, after "gyfa: ".
+    /// The window's title, after "efa: ".
     const TITLE: &'static str;
     /// What pyfa calls one entry in its prompts.
     const ENTITY: &'static str;
@@ -412,11 +412,11 @@ fn open<K: Kind>(hub: Entity<Hub>, select: Option<String>, cx: &mut App) {
     }
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::centered(size(px(K::WIDTH), px(520.)), cx)),
-        app_id: Some("gyfa".into()),
+        app_id: Some("efa".into()),
         ..Default::default()
     };
     let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-        window.set_window_title(&format!("gyfa: {}", K::TITLE));
+        window.set_window_title(&format!("efa: {}", K::TITLE));
         cx.new(|cx| Editor::<K>::new(hub, select.as_deref(), window, cx))
     });
     match opened {

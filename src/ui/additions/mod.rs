@@ -31,7 +31,7 @@ use gpui_kit::{
 };
 
 use super::{
-    Action, AddKind, AdditionsTab, Gyfa, Loaded,
+    Action, AddKind, AdditionsTab, Efa, Loaded,
     item_stats::{StatsOf, stats_entry},
     stats::format,
     widgets::{entry, icon_label, item_entry},
@@ -160,7 +160,7 @@ fn parse_lines(catalog: &Catalog, kind: AddKind, text: &str) -> Vec<(TypeId, u32
         .collect()
 }
 
-impl Gyfa {
+impl Efa {
     pub(super) fn additions(
         &mut self,
         loaded: &Rc<Loaded>,
@@ -392,7 +392,7 @@ impl Gyfa {
 /// pyfa's droneItem, cargoItem, implantItem and boosterItem menus, then the tab's misc entries.
 fn addition_menu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     kind: AddKind,
     i: usize,
@@ -420,7 +420,7 @@ fn addition_menu(
     let targeted = |make: fn(Vec<usize>) -> Action| {
         let this = this.clone();
         move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-            Gyfa::app_update(&this, cx, |g, cx| {
+            Efa::app_update(&this, cx, |g, cx| {
                 let targets = g.addition_targets(i);
                 g.apply(make(targets), cx);
             });
@@ -445,7 +445,7 @@ fn addition_menu(
         menu = menu.item(
             entry(IconName::Search, format!("{category} Market Group")).on_click(
                 move |_, window, cx| {
-                    Gyfa::app_update(&this, cx, |g, cx| {
+                    Efa::app_update(&this, cx, |g, cx| {
                         g.jump_to_market(market_type, window, cx);
                     });
                 },
@@ -472,9 +472,9 @@ fn addition_menu(
         let this = this.clone();
         menu = menu.item(
             entry(IconName::Settings2, label).on_click(move |_, window, cx| {
-                Gyfa::app_update(&this, cx, |g, cx| {
+                Efa::app_update(&this, cx, |g, cx| {
                     let targets = g.addition_targets(i);
-                    Gyfa::open_value_dialog(
+                    Efa::open_value_dialog(
                         "New Amount",
                         amount.to_string(),
                         window,
@@ -489,8 +489,8 @@ fn addition_menu(
         let this = this.clone();
         menu = menu.item(entry(IconName::Minus, "Split Drone Stack").on_click(
             move |_, window, cx| {
-                Gyfa::app_update(&this, cx, |_, cx| {
-                    Gyfa::open_value_dialog(
+                Efa::app_update(&this, cx, |_, cx| {
+                    Efa::open_value_dialog(
                         "Split Off",
                         (amount / 2).to_string(),
                         window,
@@ -520,7 +520,7 @@ fn addition_menu(
                             item_entry(&loaded, v, name.clone())
                                 .checked(v == type_id)
                                 .on_click(move |_, _, cx| {
-                                    Gyfa::app_update(&this, cx, |g, cx| {
+                                    Efa::app_update(&this, cx, |g, cx| {
                                         let targets = g.addition_targets(i);
                                         g.apply(Action::SwapAdditions(kind, targets, v), cx);
                                     });
@@ -554,7 +554,7 @@ fn addition_menu(
         menu = menu.item(
             entry(IconName::Inbox, format!("Fill Cargo With {category}")).on_click(
                 move |_, _, cx| {
-                    Gyfa::app_update(&this, cx, |g, cx| {
+                    Efa::app_update(&this, cx, |g, cx| {
                         let Some(loaded) = g.loaded() else { return };
                         let room = g.cargo_room_for(&loaded, type_id);
                         if room > 0 {
@@ -574,7 +574,7 @@ fn addition_menu(
 /// pyfa's *`ItemMisc` entries: copy the selection or the whole tab, paste into it.
 fn misc_entries(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     kind: AddKind,
     clicked: Option<usize>,
@@ -598,7 +598,7 @@ fn misc_entries(
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
         menu = menu.item(
             entry(IconName::Copy, format!("Copy Selected {noun}")).on_click(move |_, _, cx| {
-                Gyfa::app_update(&this, cx, |g, cx| {
+                Efa::app_update(&this, cx, |g, cx| {
                     let Some(fit) = g.fit() else { return };
                     let picked = g.addition_targets(i);
                     let text = copy_text(&loaded.catalog, fit, kind, &picked);
@@ -611,7 +611,7 @@ fn misc_entries(
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
         menu = menu.item(entry(IconName::Copy, format!("Copy All {noun}")).on_click(
             move |_, _, cx| {
-                Gyfa::app_update(&this, cx, |g, cx| {
+                Efa::app_update(&this, cx, |g, cx| {
                     let Some(fit) = g.fit() else { return };
                     let all: Vec<usize> = (0..kind.rows(fit).len()).collect();
                     let text = copy_text(&loaded.catalog, fit, kind, &all);
@@ -630,7 +630,7 @@ fn misc_entries(
                 if kind == AddKind::Drones {
                     let stacks = crate::port::eft::parse_drones(&loaded.catalog, &text);
                     if !stacks.is_empty() {
-                        Gyfa::app_update(&this, cx, |g, cx| {
+                        Efa::app_update(&this, cx, |g, cx| {
                             g.apply(Action::AddDroneStacks(stacks), cx);
                         });
                     }
@@ -638,7 +638,7 @@ fn misc_entries(
                 }
                 let items = parse_lines(&loaded.catalog, kind, &text);
                 if !items.is_empty() {
-                    Gyfa::app_update(&this, cx, |g, cx| {
+                    Efa::app_update(&this, cx, |g, cx| {
                         g.apply(Action::AddAdditions(kind, items), cx);
                     });
                 }

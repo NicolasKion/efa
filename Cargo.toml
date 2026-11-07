@@ -1,9 +1,9 @@
 [package]
-name = "gyfa"
+name = "efa"
 version = "0.1.0"
 edition = "2024"
 description = "EVE Online fitting tool: GPUI on top of the refine fitting engine"
-# refine is AGPL, and gyfa links it.
+# refine is AGPL, and efa links it.
 license = "AGPL-3.0-or-later"
 publish = false
 
@@ -52,7 +52,7 @@ too_many_lines = "allow"
 
 # Submenu entries with a custom label (game icons next to ammo families) need a gpui-component
 # change that is not released yet; it lives on the submenu-element branch of a local checkout. Absolute paths so
-# git worktrees of gyfa find it too.
+# git worktrees of efa find it too.
 [patch.crates-io]
 gpui-kit = { path = "/home/tim/Projects/rust/gpui-component/crates/kit" }
 gpui-component = { path = "/home/tim/Projects/rust/gpui-component/crates/component" }

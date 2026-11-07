@@ -1,6 +1,6 @@
 //! Eve Fleet Simulator export against the real data. Skipped when no dump is present.
 
-use gyfa::{
+use efa::{
     character::{CharacterId, Characters},
     engine::EfsContext,
     port::efs,
@@ -21,7 +21,7 @@ fn efs_export_has_pyfas_shape() {
         fits: &[],
         pilot: &pilot,
         character: None,
-        exporter: "gyfa test",
+        exporter: "efa test",
     };
     let text = efs::export(engine, &fit, &cx).expect("a fit with a ship exports");
     let data: Value = serde_json::from_str(&text).expect("valid JSON");

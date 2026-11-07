@@ -10,7 +10,7 @@ use gpui_kit::component::{
 use gpui_kit::{App, ClipboardItem, Context, WeakEntity, Window, px};
 
 use super::{
-    Gyfa, Loaded,
+    Efa, Loaded,
     actions::{Action, MutaTarget},
     widgets::{entry, item_entry, item_label},
 };
@@ -31,7 +31,7 @@ const MENU_MAX_H: f32 = 480.;
 )]
 pub(super) fn mutation_entries(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     type_id: TypeId,
     mutation: Option<&Mutation>,
@@ -46,7 +46,7 @@ pub(super) fn mutation_entries(
         return menu.item(
             entry(IconName::Undo2, label).on_click(move |_, _, cx: &mut App| {
                 let target = target.clone();
-                Gyfa::app_update(&this, cx, |g, cx| g.apply(Action::Revert(target), cx));
+                Efa::app_update(&this, cx, |g, cx| g.apply(Action::Revert(target), cx));
             }),
         );
     }
@@ -73,7 +73,7 @@ pub(super) fn mutation_entries(
                     menu.item(item_entry(&loaded, id, name.clone()).on_click(
                         move |_, _, cx: &mut App| {
                             let target = target.clone();
-                            Gyfa::app_update(&this, cx, |g, cx| {
+                            Efa::app_update(&this, cx, |g, cx| {
                                 g.apply(Action::Mutate(target, id), cx);
                             });
                         },

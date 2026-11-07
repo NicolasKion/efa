@@ -48,7 +48,7 @@ pub fn damage_pattern_menu(
         let checked = *current == profile
             || matches!((current, &profile), (DamageProfile::Pattern { name: a, .. }, DamageProfile::Pattern { name: b, .. }) if a == b);
         menu = menu.item(item(short, profile, checked));
-        // gyfa's Selected Ammo, the fit's own loaded charges, sits right after Uniform.
+        // efa's Selected Ammo, the fit's own loaded charges, sits right after Uniform.
         if i == 0 {
             menu = menu.item(item(
                 SELECTED_AMMO,

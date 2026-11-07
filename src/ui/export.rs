@@ -17,7 +17,7 @@ use gpui_kit::{
     prelude::FluentBuilder, px, size,
 };
 
-use super::{Gyfa, Hub, Loaded, stats::text};
+use super::{Efa, Hub, Loaded, stats::text};
 use crate::{
     engine::Stats,
     fit::Fit,
@@ -36,7 +36,7 @@ type OptionBox = (
 /// What the window copies: the fit as it was when the window opened.
 pub struct ExportWindow {
     hub: Entity<Hub>,
-    gyfa: WeakEntity<Gyfa>,
+    efa: WeakEntity<Efa>,
     loaded: Rc<Loaded>,
     fit: Fit,
     stats: Option<Stats>,
@@ -45,7 +45,7 @@ pub struct ExportWindow {
     error: Option<SharedString>,
 }
 
-impl Gyfa {
+impl Efa {
     /// pyfa's "To Clipboard": open the format picker for the current fit.
     pub(super) fn open_export_window(&mut self, cx: &mut Context<Self>) {
         let (Some(loaded), Some(fit)) = (self.loaded(), self.fit().cloned()) else {
@@ -55,7 +55,7 @@ impl Gyfa {
         // updated, so it must not read this view.
         let window = ExportWindow {
             hub: self.hub.clone(),
-            gyfa: cx.entity().downgrade(),
+            efa: cx.entity().downgrade(),
             loaded,
             fit,
             stats: self.stats.clone(),
@@ -65,11 +65,11 @@ impl Gyfa {
         };
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(380.), px(480.)), cx)),
-            app_id: Some("gyfa".into()),
+            app_id: Some("efa".into()),
             ..Default::default()
         };
         let opened = gpui_kit::open_window(options, cx, move |window_handle, cx| {
-            window_handle.set_window_title("gyfa: Export");
+            window_handle.set_window_title("efa: Export");
             cx.new(|_| window)
         });
         if let Err(e) = opened {
@@ -96,7 +96,7 @@ impl ExportWindow {
                 let pilot = characters.pilot(fit.character, catalog);
                 let id = characters.resolve(fit.character);
                 let name = characters.name(id);
-                let exporter = format!("gyfa {}", env!("CARGO_PKG_VERSION"));
+                let exporter = format!("efa {}", env!("CARGO_PKG_VERSION"));
                 let context = crate::engine::EfsContext {
                     catalog,
                     fits: &hub.saved.fits,
@@ -127,7 +127,7 @@ impl ExportWindow {
                 self.hub
                     .update(cx, |hub, cx| hub.update_saved(|s| s.export = settings, cx));
                 let what = format!("fit as {}", settings.format.label());
-                let _ = self.gyfa.update(cx, |g, cx| {
+                let _ = self.efa.update(cx, |g, cx| {
                     g.status = Some(format!("Copied {what} to clipboard").into());
                     cx.notify();
                 });
@@ -150,7 +150,7 @@ impl ExportWindow {
         let fit = self.fit.clone();
         let amounts = multibuy::amounts(&fit, &loaded.catalog, &settings.multibuy);
         let types = optimize::types_to_price(&loaded.catalog, amounts.iter().map(|&(t, _)| t));
-        let _ = self.gyfa.update(cx, |g, cx| {
+        let _ = self.efa.update(cx, |g, cx| {
             g.with_prices_for(types, cx, move |g, cx| {
                 let prices = Rc::clone(&g.prices);
                 let text =

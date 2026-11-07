@@ -110,7 +110,7 @@ use crate::{
 const PRICE_RETRY: Duration = Duration::from_secs(600);
 
 /// What runs once prices for some types are in, or could not be had.
-type PriceWaiter = Box<dyn FnOnce(&mut Gyfa, &mut Context<Gyfa>)>;
+type PriceWaiter = Box<dyn FnOnce(&mut Efa, &mut Context<Efa>)>;
 
 /// How often background work is checked: icons that finished downloading, theme switches.
 const POLL: Duration = Duration::from_millis(250);
@@ -191,7 +191,7 @@ impl AdditionsTab {
     clippy::struct_excessive_bools,
     reason = "independent view flags of one window, not a state machine"
 )]
-pub struct Gyfa {
+pub struct Efa {
     hub: Entity<Hub>,
     role: Role,
     /// The hub generation this window's fits match.
@@ -287,7 +287,7 @@ pub struct Gyfa {
     _tasks: Vec<Task<()>>,
 }
 
-impl Gyfa {
+impl Efa {
     pub fn new(hub: Entity<Hub>, role: Role, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let palette = Palette::current().unwrap_or_default();
         widgets::apply_palette(&palette, cx);
@@ -348,7 +348,7 @@ impl Gyfa {
         let poller = cx.spawn(async move |this: WeakEntity<Self>, cx| {
             loop {
                 cx.background_executor().timer(POLL).await;
-                if this.update(cx, Gyfa::poll).is_err() {
+                if this.update(cx, Efa::poll).is_err() {
                     break;
                 }
             }
@@ -546,11 +546,11 @@ impl Gyfa {
         let hub = self.hub.clone();
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(1400.), px(860.)), cx)),
-            app_id: Some("gyfa".into()),
+            app_id: Some("efa".into()),
             ..Default::default()
         };
         let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-            cx.new(|cx| Gyfa::new(hub, Role::Detached(index), window, cx))
+            cx.new(|cx| Efa::new(hub, Role::Detached(index), window, cx))
         });
         match opened {
             Ok(_) => self.close_fit(index, cx),
@@ -1229,7 +1229,7 @@ impl Gyfa {
                 let this = cx.entity().downgrade();
                 let ship = fit.ship.filter(|_| selected);
                 move |menu, window, cx| {
-                    let on = |f: fn(&mut Gyfa, usize, &mut Context<Gyfa>)| {
+                    let on = |f: fn(&mut Efa, usize, &mut Context<Efa>)| {
                         let this = this.clone();
                         move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
                             let _ = this.update(cx, |g, cx| f(g, i, cx));
@@ -1248,15 +1248,13 @@ impl Gyfa {
                         ))
                         .item(
                             widgets::entry(IconName::ExternalLink, "Open in New Window")
-                                .on_click(on(Gyfa::open_in_new_window)),
+                                .on_click(on(Efa::open_in_new_window)),
                         )
                         .separator()
-                        .item(
-                            widgets::entry(IconName::Close, "Close").on_click(on(Gyfa::close_fit)),
-                        )
+                        .item(widgets::entry(IconName::Close, "Close").on_click(on(Efa::close_fit)))
                         .item(
                             widgets::entry(IconName::Close, "Close Others")
-                                .on_click(on(Gyfa::close_other_fits)),
+                                .on_click(on(Efa::close_other_fits)),
                         );
                     // The ship's own menu, which used to sit on the header, for the active fit.
                     match ship {
@@ -1281,7 +1279,7 @@ impl Gyfa {
     }
 }
 
-impl Gyfa {
+impl Efa {
     /// Where a dragged tab is dropped to get a window of its own. Wayland does not tell a window
     /// where a drag outside it ends, so tearing off happens onto this zone instead.
     fn tear_off_zone(cx: &mut Context<Self>) -> impl IntoElement {
@@ -1381,7 +1379,7 @@ impl Gyfa {
 fn load(data_dir: &Path, overrides: &crate::overrides::Values) -> Result<Loaded, String> {
     if !data_dir.join("phobos/metadata.json").exists() {
         return Err(format!(
-            "No EVE data in {}.\nRun scripts/fetch-data.sh, or point GYFA_DATA at a deimos dump.",
+            "No EVE data in {}.\nRun scripts/fetch-data.sh, or point EFA_DATA at a deimos dump.",
             data_dir.display()
         ));
     }
@@ -1401,7 +1399,7 @@ fn load(data_dir: &Path, overrides: &crate::overrides::Values) -> Result<Loaded,
     })
 }
 
-impl Render for Gyfa {
+impl Render for Efa {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let root = v_flex()
             .size_full()
@@ -1469,10 +1467,10 @@ impl Render for Gyfa {
 
         let title = match self.fit() {
             Some(fit) => match fit.ship {
-                Some(ship) => format!("gyfa: {} ({})", fit.name, loaded.catalog.name(ship)),
-                None => format!("gyfa: {}", fit.name),
+                Some(ship) => format!("efa: {} ({})", fit.name, loaded.catalog.name(ship)),
+                None => format!("efa: {}", fit.name),
             },
-            None => "gyfa".to_owned(),
+            None => "efa".to_owned(),
         };
         if title != self.window_title {
             window.set_window_title(&title);
@@ -1521,7 +1519,7 @@ impl Render for Gyfa {
 }
 
 /// Inputs that the views embed, exposed for them.
-impl Gyfa {
+impl Efa {
     fn search_input(&self) -> Input {
         Input::new(&self.search).small()
     }

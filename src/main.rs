@@ -1,13 +1,14 @@
 use std::path::PathBuf;
 
+use efa::ui::{Efa, Hub, Role};
 use gpui_kit::{AppContext, WindowBounds, WindowOptions, px, size};
-use gyfa::ui::{Gyfa, Hub, Role};
 
 fn main() {
-    gyfa::errors::install_panic_hook();
-    gyfa::errors::queue_last_crash();
+    efa::persist::move_old_data();
+    efa::errors::install_panic_hook();
+    efa::errors::queue_last_crash();
     let data_dir =
-        std::env::var_os("GYFA_DATA").map_or_else(|| PathBuf::from("data/eve"), PathBuf::from);
+        std::env::var_os("EFA_DATA").map_or_else(|| PathBuf::from("data/eve"), PathBuf::from);
     // An EFT file given on the command line is imported as a new fit.
     let import = std::env::args_os().nth(1).map(|path| {
         std::fs::read_to_string(&path).unwrap_or_else(|e| {
@@ -21,16 +22,16 @@ fn main() {
         .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
-            gyfa::ui::init_menus(cx);
+            efa::ui::init_menus(cx);
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::centered(size(px(1500.), px(900.)), cx)),
-                app_id: Some("gyfa".into()),
+                app_id: Some("efa".into()),
                 ..Default::default()
             };
             // Loading and the fits live in the hub, which every window shares.
             let hub = cx.new(|cx| Hub::new(data_dir, import, cx));
             gpui_kit::open_window(options, cx, move |window, cx| {
-                cx.new(|cx| Gyfa::new(hub, Role::Main, window, cx))
+                cx.new(|cx| Efa::new(hub, Role::Main, window, cx))
             })
             .expect("the main window opens");
         });

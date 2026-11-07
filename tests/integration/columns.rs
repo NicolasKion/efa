@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use gyfa::{
+use efa::{
     data::{Catalog, Kind, Slot},
     engine::{Engine, FitItem, Stats, misc_attr},
     fit::{DamageProfile, Fit, ModuleState, RahPattern},
@@ -46,7 +46,7 @@ Small Remote Armor Repairer II
 Miner II
 ";
 
-fn misc(stats: &Stats, slot: Slot, i: usize) -> &gyfa::engine::ModuleMisc {
+fn misc(stats: &Stats, slot: Slot, i: usize) -> &efa::engine::ModuleMisc {
     stats
         .module_misc
         .get(&FitItem::Module(slot, i))

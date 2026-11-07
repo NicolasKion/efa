@@ -27,7 +27,7 @@ use crate::{
     },
     icons::Icon,
     ui::{
-        Gyfa, Loaded,
+        Efa, Loaded,
         columns::{ICON_W, STATE_W},
         fitting::{DragSource, Dragged},
         validation::flag,
@@ -129,7 +129,7 @@ fn abilities_text(catalog: &Catalog, info: Option<&FighterInfo>) -> String {
     }
 }
 
-impl Gyfa {
+impl Efa {
     fn fighter_order(&self, loaded: &Loaded) -> Vec<usize> {
         self.fit().map_or_default(|fit| {
             display_order(&loaded.catalog, &fit.fighters, self.stats.as_ref())
@@ -584,7 +584,7 @@ impl Gyfa {
 /// pyfa's fighterItem menu.
 fn fighter_menu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     n: usize,
     i: usize,
@@ -626,7 +626,7 @@ fn fighter_menu(
                                 .on_click(move |_, window, cx| {
                                     let similar =
                                         window.modifiers().alt || window.modifiers().control;
-                                    Gyfa::app_update(&this, cx, |g, cx| {
+                                    Efa::app_update(&this, cx, |g, cx| {
                                         let Some(loaded) = g.loaded() else { return };
                                         let rows = if similar {
                                             g.similar_fighter_targets(&loaded, n)
@@ -654,7 +654,7 @@ fn fighter_menu(
         let this = this.clone();
         menu = menu.item(entry(IconName::Search, "Fighter Market Group").on_click(
             move |_, window, cx| {
-                Gyfa::app_update(&this, cx, |g, cx| g.jump_to_market(type_id, window, cx));
+                Efa::app_update(&this, cx, |g, cx| g.jump_to_market(type_id, window, cx));
             },
         ));
     }
@@ -663,7 +663,7 @@ fn fighter_menu(
         menu = menu.item(entry(IconName::Delete, "Remove Fighter").on_click(
             move |_, window, cx| {
                 let similar = window.modifiers().alt || window.modifiers().control;
-                Gyfa::app_update(&this, cx, |g, cx| {
+                Efa::app_update(&this, cx, |g, cx| {
                     let Some(loaded) = g.loaded() else { return };
                     let rows = if similar {
                         g.similar_fighter_targets(&loaded, n)
@@ -683,8 +683,8 @@ fn fighter_menu(
             .unwrap_or(0);
         menu = menu.item(
             entry(IconName::Settings2, "Change Fighter Quantity").on_click(move |_, window, cx| {
-                Gyfa::app_update(&this, cx, |_, cx| {
-                    Gyfa::open_input_dialog(
+                Efa::app_update(&this, cx, |_, cx| {
+                    Efa::open_input_dialog(
                         "Change Amount",
                         "New Amount:",
                         current.to_string(),
@@ -721,7 +721,7 @@ fn fighter_menu(
                                 .on_click(move |_, window, cx| {
                                     let similar =
                                         window.modifiers().alt || window.modifiers().control;
-                                    Gyfa::app_update(&this, cx, |g, cx| {
+                                    Efa::app_update(&this, cx, |g, cx| {
                                         let Some(loaded) = g.loaded() else { return };
                                         let rows = if similar {
                                             g.similar_fighter_targets(&loaded, n)
@@ -750,7 +750,7 @@ fn fighter_menu(
 /// pyfa's fighterItemMisc: copy the selection or every squadron, paste squadrons.
 fn fighter_misc(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     clicked: Option<usize>,
     cx: &App,
@@ -766,7 +766,7 @@ fn fighter_misc(
     let copy = |rows: Option<usize>| {
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
         move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-            Gyfa::app_update(&this, cx, |g, cx| {
+            Efa::app_update(&this, cx, |g, cx| {
                 let Some(fit) = g.fit() else { return };
                 let indices: Vec<usize> = match rows {
                     Some(n) => g.fighter_targets(&loaded, n),
@@ -800,7 +800,7 @@ fn fighter_misc(
                     return;
                 };
                 let fighters = parse_lines(&loaded.catalog, &text);
-                Gyfa::app_update(&this, cx, |g, cx| g.add_fighter_squadrons(fighters, cx));
+                Efa::app_update(&this, cx, |g, cx| g.add_fighter_squadrons(fighters, cx));
             }),
         );
     }

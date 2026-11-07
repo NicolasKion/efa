@@ -87,7 +87,7 @@ impl CharacterEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        window.set_window_title("gyfa: Character Editor");
+        window.set_window_title("efa: Character Editor");
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search skills"));
         let implant_search =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search implants"));

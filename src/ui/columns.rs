@@ -12,7 +12,7 @@ use gpui_kit::{
 };
 
 use super::{
-    Gyfa, Loaded, stats,
+    Efa, Loaded, stats,
     widgets::{icon, icon_box, km, short},
 };
 use crate::{
@@ -262,7 +262,7 @@ pub(super) fn text_width(window: &Window, text: &str) -> f32 {
     f32::from(line.width)
 }
 
-impl Gyfa {
+impl Efa {
     /// The Miscellanea text and tooltip of a module or subsystem.
     pub(super) fn misc_of(
         &self,

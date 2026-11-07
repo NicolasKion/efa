@@ -21,7 +21,7 @@ use crate::{
     fit::{Booster, Fit},
     icons::Icon,
     ui::{
-        Action, AddKind, Gyfa, Loaded,
+        Action, AddKind, Efa, Loaded,
         columns::STATE_W,
         fitting::{DragSource, Dragged},
         validation::flag,
@@ -178,7 +178,7 @@ fn booster_variations(catalog: &Catalog, type_id: TypeId) -> Vec<TypeId> {
     items.into_iter().map(|t| t.id).collect()
 }
 
-impl Gyfa {
+impl Efa {
     pub(in crate::ui) fn boosters_tab(
         &mut self,
         loaded: &Rc<Loaded>,
@@ -377,7 +377,7 @@ impl Gyfa {
 /// pyfa's boosterItem menu, then the boosterItemMisc entries.
 fn booster_menu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     i: usize,
     window: &mut Window,
@@ -414,7 +414,7 @@ fn booster_menu(
                         PopupMenuItem::new(se.label.clone())
                             .checked(se.active)
                             .on_click(move |_, _, cx| {
-                                Gyfa::app_update(&this, cx, |g, cx| {
+                                Efa::app_update(&this, cx, |g, cx| {
                                     g.apply(Action::ToggleBoosterSideEffect(i, effect_id), cx);
                                 });
                             }),
@@ -432,7 +432,7 @@ fn booster_menu(
         let this = this.clone();
         menu = menu.item(entry(IconName::Search, "Booster Market Group").on_click(
             move |_, window, cx| {
-                Gyfa::app_update(&this, cx, |g, cx| g.jump_to_market(type_id, window, cx));
+                Efa::app_update(&this, cx, |g, cx| g.jump_to_market(type_id, window, cx));
             },
         ));
     }
@@ -440,7 +440,7 @@ fn booster_menu(
         let this = this.clone();
         menu = menu.item(entry(IconName::Delete, "Remove Booster").on_click(
             move |_, _: &mut Window, cx: &mut App| {
-                Gyfa::app_update(&this, cx, |g, cx| {
+                Efa::app_update(&this, cx, |g, cx| {
                     let rows = g.addition_targets(i);
                     g.apply(Action::RemoveAdditions(AddKind::Boosters, rows), cx);
                 });
@@ -468,7 +468,7 @@ fn booster_menu(
                             item_entry(&loaded, v, name.clone())
                                 .checked(v == type_id)
                                 .on_click(move |_, _, cx| {
-                                    Gyfa::app_update(&this, cx, |g, cx| {
+                                    Efa::app_update(&this, cx, |g, cx| {
                                         g.apply(
                                             Action::SwapAdditions(AddKind::Boosters, vec![i], v),
                                             cx,

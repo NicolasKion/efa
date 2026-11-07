@@ -1,6 +1,6 @@
 //! The Cargo Presets editor, a window of its own: presets on the left, the selected one in the
 //! middle and the market to add from on the right. Also the name prompt behind "Save Cargo as
-//! Preset". A gyfa extra.
+//! Preset". A efa extra.
 
 use std::{collections::HashMap, rc::Rc};
 
@@ -21,7 +21,7 @@ use gpui_kit::{
 };
 
 use super::{
-    Action, AdditionsTab, Gyfa, Loaded,
+    Action, AdditionsTab, Efa, Loaded,
     additions::amount,
     editor_kit::{self, ItemTree, ListEntry, caption, empty_state, icon_button},
     fitting::{DragPreview, DragSource, Dragged},
@@ -78,7 +78,7 @@ fn item_count(n: usize) -> String {
     }
 }
 
-impl Gyfa {
+impl Efa {
     /// Change the saved presets, keeping them sorted by name, and write them out.
     fn edit_cargo_presets(
         &mut self,
@@ -124,11 +124,11 @@ impl Gyfa {
         cx: &mut Context<Self>,
     ) {
         let Some(loaded) = self.loaded() else { return };
-        let gyfa = cx.entity();
+        let efa = cx.entity();
         let select = select.or_else(|| self.saved.cargo_presets.first().map(|p| p.name.clone()));
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(EDITOR_W), px(EDITOR_H)), cx)),
-            app_id: Some("gyfa".into()),
+            app_id: Some("efa".into()),
             ..Default::default()
         };
         // Opened once this update is over: the new window draws right away, and drawing reads
@@ -148,16 +148,16 @@ impl Gyfa {
                     return;
                 }
             }
-            let weak = gyfa.downgrade();
+            let weak = efa.downgrade();
             let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-                window.set_window_title("gyfa: Cargo Presets");
-                cx.new(|cx| CargoPresetEditor::new(&gyfa, loaded, select, window, cx))
+                window.set_window_title("efa: Cargo Presets");
+                cx.new(|cx| CargoPresetEditor::new(&efa, loaded, select, window, cx))
             });
             match opened {
                 Ok((handle, editor)) => {
                     cx.set_global(OpenEditor(Some((handle, editor.downgrade()))));
                 }
-                Err(e) => Gyfa::app_update(&weak, cx, |g, cx| {
+                Err(e) => Efa::app_update(&weak, cx, |g, cx| {
                     g.status = Some(format!("Could not open the cargo preset editor: {e}").into());
                     cx.notify();
                 }),
@@ -197,7 +197,7 @@ impl Gyfa {
                     items: items.clone(),
                     policy: CargoPolicy::default(),
                 };
-                Gyfa::app_update(&this, cx, |g, cx| {
+                Efa::app_update(&this, cx, |g, cx| {
                     g.edit_cargo_presets(cx, |presets| presets.push(preset));
                     g.status = Some(format!("Saved the cargo as preset {name}").into());
                 });
@@ -206,9 +206,9 @@ impl Gyfa {
     }
 }
 
-/// The editor's own state; the presets themselves live in [`Gyfa`]'s saved data.
+/// The editor's own state; the presets themselves live in [`Efa`]'s saved data.
 pub struct CargoPresetEditor {
-    gyfa: WeakEntity<Gyfa>,
+    efa: WeakEntity<Efa>,
     loaded: Rc<Loaded>,
     /// The preset being edited, by name; names are unique.
     selected: Option<String>,
@@ -227,7 +227,7 @@ pub struct CargoPresetEditor {
 
 impl CargoPresetEditor {
     fn new(
-        gyfa: &Entity<Gyfa>,
+        efa: &Entity<Efa>,
         loaded: Rc<Loaded>,
         selected: Option<String>,
         window: &mut Window,
@@ -242,14 +242,14 @@ impl CargoPresetEditor {
                 }
             };
         let subscriptions = vec![
-            cx.observe(gyfa, |_, _, cx| cx.notify()),
+            cx.observe(efa, |_, _, cx| cx.notify()),
             cx.subscribe(&list_search, redraw),
             cx.subscribe(&tree.search, redraw),
         ];
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         Self {
-            gyfa: gyfa.downgrade(),
+            efa: efa.downgrade(),
             loaded,
             selected,
             picked: None,
@@ -264,7 +264,7 @@ impl CargoPresetEditor {
     }
 
     fn presets<'a>(&self, cx: &'a App) -> &'a [CargoPreset] {
-        self.gyfa
+        self.efa
             .upgrade()
             .map_or(&[], |g| g.read(cx).saved.cargo_presets.as_slice())
     }
@@ -275,7 +275,7 @@ impl CargoPresetEditor {
     }
 
     fn edit(&self, cx: &mut Context<Self>, edit: impl FnOnce(&mut Vec<CargoPreset>)) {
-        Gyfa::app_update(&self.gyfa, cx, |g, cx| g.edit_cargo_presets(cx, edit));
+        Efa::app_update(&self.efa, cx, |g, cx| g.edit_cargo_presets(cx, edit));
     }
 
     /// Change the selected preset.
@@ -456,7 +456,7 @@ impl CargoPresetEditor {
     /// Add every stack of the current fit's cargo to the preset.
     fn add_fit_cargo(&mut self, cx: &mut Context<Self>) {
         let cargo = self
-            .gyfa
+            .efa
             .upgrade()
             .and_then(|g| g.read(cx).fit().map(|f| f.cargo.clone()));
         let Some(cargo) = cargo else {
@@ -483,7 +483,7 @@ impl CargoPresetEditor {
         let Some(name) = self.selected.clone() else {
             return;
         };
-        Gyfa::app_update(&self.gyfa, cx, |g, cx| g.apply_cargo_preset(&name, cx));
+        Efa::app_update(&self.efa, cx, |g, cx| g.apply_cargo_preset(&name, cx));
         self.notice = Some("Applied to the current fit; see its status line.".into());
         cx.notify();
     }
@@ -742,7 +742,7 @@ impl CargoPresetEditor {
             .map(|(n, &(t, count))| self.item_row(n, t, count, window, cx))
             .collect();
         let has_fit = self
-            .gyfa
+            .efa
             .upgrade()
             .is_some_and(|g| g.read(cx).fit().is_some());
         let narrow = window.viewport_size().width < px(NARROW_W);
@@ -1016,16 +1016,16 @@ impl Render for CargoPresetEditor {
 /// The Cargo tab's preset entries: apply one, or save the cargo as a new one.
 pub(super) fn menu_entries(
     menu: gpui_kit::component::menu::PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     window: &mut Window,
     cx: &mut Context<gpui_kit::component::menu::PopupMenu>,
 ) -> gpui_kit::component::menu::PopupMenu {
     use super::widgets::{entry, icon_label};
     use gpui_kit::component::IconName;
-    let Some(gyfa) = this.upgrade() else {
+    let Some(efa) = this.upgrade() else {
         return menu;
     };
-    let g = gyfa.read(cx);
+    let g = efa.read(cx);
     let names: Vec<String> = g
         .saved
         .cargo_presets
@@ -1046,7 +1046,7 @@ pub(super) fn menu_entries(
                     let (this, name) = (this.clone(), name.clone());
                     menu.item(
                         entry(IconName::Inbox, name.clone()).on_click(move |_, _, cx| {
-                            Gyfa::app_update(&this, cx, |g, cx| g.apply_cargo_preset(&name, cx));
+                            Efa::app_update(&this, cx, |g, cx| g.apply_cargo_preset(&name, cx));
                         }),
                     )
                 })
@@ -1057,14 +1057,14 @@ pub(super) fn menu_entries(
         let this = this.clone();
         menu = menu.item(entry(IconName::Plus, "Save Cargo as Preset…").on_click(
             move |_, window, cx| {
-                Gyfa::app_update(&this, cx, |g, cx| g.save_cargo_preset_dialog(window, cx));
+                Efa::app_update(&this, cx, |g, cx| g.save_cargo_preset_dialog(window, cx));
             },
         ));
     }
     let this = this.clone();
     menu.item(
         entry(IconName::Settings2, "Edit Cargo Presets…").on_click(move |_, _, cx| {
-            Gyfa::app_update(&this, cx, |g, cx| g.open_cargo_preset_editor(None, cx));
+            Efa::app_update(&this, cx, |g, cx| g.open_cargo_preset_editor(None, cx));
         }),
     )
 }

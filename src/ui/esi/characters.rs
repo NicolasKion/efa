@@ -155,7 +155,7 @@ impl Render for EsiCharactersWindow {
             .text_sm()
             .child(
                 div().text_xs().text_color(theme.muted_foreground).child(
-                    "Characters gyfa may read skills and fittings for, and save fittings to.",
+                    "Characters efa may read skills and fittings for, and save fittings to.",
                 ),
             )
             .child(

@@ -8,7 +8,7 @@ use std::{
 
 use gpui_kit::{Context, PathPromptOptions, SharedString, Task, WeakEntity};
 
-use super::{Action, AddKind, AdditionsTab, Gyfa};
+use super::{Action, AddKind, AdditionsTab, Efa};
 use crate::{
     data::{Catalog, Kind, TypeId},
     fit::{Fit, ImplantSource},
@@ -19,8 +19,8 @@ use crate::{
 /// which only opens a handful after a large import.
 const OPEN_AFTER_IMPORT: usize = 10;
 
-impl Gyfa {
-    /// What a fit new to gyfa starts with, from the preferences: pyfa's "use character implants
+impl Efa {
+    /// What a fit new to efa starts with, from the preferences: pyfa's "use character implants
     /// by default" applies to fits that bring none of their own.
     pub(super) fn new_fit_defaults(&self, fit: &mut Fit) {
         fit.character = self.last_character;
@@ -225,7 +225,7 @@ impl Gyfa {
     pub(super) fn backup_dialog(&mut self, cx: &mut Context<Self>) {
         let Some(loaded) = self.loaded() else { return };
         let fits = self.saved.fits.clone();
-        let suggested = format!("gyfa-fits-{}.xml", timestamp());
+        let suggested = format!("efa-fits-{}.xml", timestamp());
         Self::save_text_dialog(&suggested, cx, move |_| {
             let refs: Vec<&Fit> = fits.iter().collect();
             Ok(xml::export(&refs, &loaded.catalog))
@@ -369,7 +369,7 @@ impl Gyfa {
     }
 }
 
-/// Where the HTML export goes: the preference, or a file in gyfa's data directory.
+/// Where the HTML export goes: the preference, or a file in efa's data directory.
 pub(super) fn html_path(preference: &str) -> PathBuf {
     if !preference.trim().is_empty() {
         return PathBuf::from(preference.trim());
@@ -378,7 +378,7 @@ pub(super) fn html_path(preference: &str) -> PathBuf {
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
         .unwrap_or_default();
-    data.join("gyfa/fits.html")
+    data.join("efa/fits.html")
 }
 
 fn home_dir() -> PathBuf {

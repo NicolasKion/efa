@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use gpui_kit::{ClickEvent, Context, Modifiers};
 
-use super::Gyfa;
+use super::Efa;
 use crate::{
     data::{Slot, TypeId},
     fit::{
@@ -162,7 +162,7 @@ pub enum AddKind {
     Cargo,
 }
 
-impl Gyfa {
+impl Efa {
     /// The rows an action on `clicked` should touch.
     pub(super) fn targets(&self, clicked: RowRef, scope: Scope) -> Vec<RowRef> {
         let Some(fit) = self.fit() else {

@@ -21,7 +21,7 @@ use crate::{
     fit::cargo::Transfer,
     icons::Icon,
     ui::{
-        Action, AddKind, AdditionsTab, Gyfa, Loaded, RowRef,
+        Action, AddKind, AdditionsTab, Efa, Loaded, RowRef,
         fitting::{DragPreview, DragSource, Dragged},
         widgets::{icon_box, short},
     },
@@ -57,7 +57,7 @@ fn double_click_batch(m: Modifiers) -> u32 {
 }
 
 /// Whether a market double-click or "Fill Cargo" applies. pyfa offers both for charges and
-/// commodities; gyfa takes every cargo-only item, since nothing else can be done with them.
+/// commodities; efa takes every cargo-only item, since nothing else can be done with them.
 pub fn goes_to_cargo(kind: Kind) -> bool {
     matches!(kind, Kind::Charge | Kind::Cargo)
 }
@@ -124,7 +124,7 @@ fn name_text(catalog: &Catalog, type_id: TypeId, count: u32) -> String {
 
 /// The menu of the Cargo tab's empty space: presets, then copy and paste.
 fn space_menu(
-    this: WeakEntity<Gyfa>,
+    this: WeakEntity<Efa>,
     loaded: Rc<Loaded>,
 ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
     move |menu, window, cx| {
@@ -156,7 +156,7 @@ fn display_order(catalog: &Catalog, cargo: &[(TypeId, u32)]) -> Vec<usize> {
     order
 }
 
-impl Gyfa {
+impl Efa {
     pub(in crate::ui) fn cargo_tab(
         &mut self,
         loaded: &Rc<Loaded>,

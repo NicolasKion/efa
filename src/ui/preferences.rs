@@ -2,9 +2,9 @@
 //! of its own. Every change goes straight to the hub, which saves it and hands it to every fit
 //! window, the way pyfa applies a preference as soon as it is clicked.
 //!
-//! Left out on purpose: language and theme (gyfa follows the system and Omarchy's theme), gauge
+//! Left out on purpose: language and theme (efa follows the system and Omarchy's theme), gauge
 //! animation, market shortcuts and market view modes, reactivation timers, update checks, pyfa's
-//! own SSO server mode (gyfa always logs in through a local callback), and logging.
+//! own SSO server mode (efa always logs in through a local callback), and logging.
 
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
@@ -21,7 +21,7 @@ use gpui_kit::{
     WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, size,
 };
 
-use super::{Gyfa, Hub, port::html_path};
+use super::{Efa, Hub, port::html_path};
 use crate::{
     preferences::{AdditionsLabels, Preferences, ProxyMode},
     prices::{PriceSource, PriceSystem},
@@ -101,7 +101,7 @@ impl Page {
             Self::Network => "Internet access and proxy settings.",
             Self::Html => "Exporting every fit to one HTML page.",
             Self::Esi => "Logging in with EVE for skills and in-game fittings.",
-            Self::Database => "Where gyfa keeps its files, and starting over.",
+            Self::Database => "Where efa keeps its files, and starting over.",
         }
     }
 }
@@ -125,17 +125,17 @@ pub struct PreferencesWindow {
     _subscriptions: Vec<Subscription>,
 }
 
-impl Gyfa {
+impl Efa {
     /// pyfa's Global > Preferences.
     pub(super) fn open_preferences(&mut self, cx: &mut Context<Self>) {
         let hub = self.hub.clone();
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(880.), px(640.)), cx)),
-            app_id: Some("gyfa".into()),
+            app_id: Some("efa".into()),
             ..Default::default()
         };
         let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-            window.set_window_title("gyfa: Preferences");
+            window.set_window_title("efa: Preferences");
             cx.new(|cx| PreferencesWindow::new(hub, window, cx))
         });
         if let Err(e) = opened {
@@ -375,7 +375,7 @@ impl PreferencesWindow {
                     Self::toggle(
                         "reopen-fits",
                         "Reopen fits on startup",
-                        "Bring back the tabs that were open when gyfa was closed.",
+                        "Bring back the tabs that were open when efa was closed.",
                         g.reopen_fits,
                         |s, v| s.preferences.general.reopen_fits = v,
                         cx,
@@ -791,7 +791,7 @@ impl PreferencesWindow {
                     Self::choice(
                         "proxy-mode",
                         "Proxy",
-                        "How gyfa reaches the internet.",
+                        "How efa reaches the internet.",
                         &modes,
                         n.proxy.mode,
                         |s, v| s.preferences.network.proxy.mode = v,
@@ -884,7 +884,7 @@ impl PreferencesWindow {
                 vec![
                     row(
                         "Client ID",
-                        "Leave empty to use gyfa's own application. Fill in only to log in \
+                        "Leave empty to use efa's own application. Fill in only to log in \
                          through an application of your own.",
                         Input::new(&self.fields.esi_client_id)
                             .small()
@@ -896,7 +896,7 @@ impl PreferencesWindow {
                     ),
                     row(
                         "Callback port",
-                        "The local port EVE sends the browser back to after logging in. gyfa's \
+                        "The local port EVE sends the browser back to after logging in. efa's \
                          own application is registered for 6461.",
                         Input::new(&self.fields.esi_port)
                             .small()

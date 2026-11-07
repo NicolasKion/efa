@@ -3,7 +3,7 @@
 
 use std::{collections::HashSet, path::Path};
 
-use gyfa::{
+use efa::{
     data::{Catalog, Slot, TypeId},
     engine::{Engine, FitItem, ModOp, SourceKind},
     fit::Fit,
@@ -42,7 +42,7 @@ fn setup() -> Option<(Catalog, Engine)> {
 
 fn item_data(catalog: &Catalog) -> ItemData {
     let wanted: HashSet<TypeId> = catalog.types.keys().copied().collect();
-    let key = gyfa::data::cache_key(Path::new(DATA));
+    let key = efa::data::cache_key(Path::new(DATA));
     ItemData::load_cached(
         Path::new(DATA),
         Path::new("data/cache"),

@@ -26,7 +26,7 @@ use gpui_kit::{
 };
 
 use super::{
-    AdditionsTab, Gyfa, Loaded,
+    AdditionsTab, Efa, Loaded,
     widgets::{icon_box, section_title},
 };
 use crate::{
@@ -143,7 +143,7 @@ pub const PANE_WIDTH: f32 = 300.;
 /// pyfa draws its stats pane in 8 point text on Linux, about 11 pixels.
 const TEXT_SIZE: f32 = 11.;
 
-impl Gyfa {
+impl Efa {
     pub(super) fn stats_panel(&self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
         let character = self.character_bar(loaded, cx);
         let theme = cx.theme();

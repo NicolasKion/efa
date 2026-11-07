@@ -1,5 +1,5 @@
 //! EVE SSO and ESI in the UI: logging characters in, and running ESI requests for them off the
-//! UI thread. The logged-in characters live in the [`Hub`], like the gyfa characters, so every
+//! UI thread. The logged-in characters live in the [`Hub`], like the efa characters, so every
 //! window sees a login or a removal right away.
 //!
 //! The windows: Manage ESI Characters (pyfa's SSO Character Management), Browse ESI Fittings
@@ -22,7 +22,7 @@ use gpui_kit::{
     WeakEntity, Window, WindowBounds, WindowOptions, px, size,
 };
 
-use super::{Gyfa, Hub};
+use super::{Efa, Hub};
 use crate::{
     esi::{Account, Accounts, api::Session, sso::Login},
     preferences::Proxy,
@@ -63,7 +63,7 @@ impl Hub {
         if !prefs.network.enabled {
             return Err("The network is switched off in Preferences > Network.".to_owned());
         }
-        // A Client ID in the preferences overrides gyfa's own application.
+        // A Client ID in the preferences overrides efa's own application.
         let client_id = match prefs.esi.client_id.trim() {
             "" => crate::esi::CLIENT_ID,
             own => own,
@@ -158,7 +158,7 @@ impl Hub {
                     cx.notify();
                     result
                 })
-                .unwrap_or_else(|_| Err("gyfa is closing".to_owned()));
+                .unwrap_or_else(|_| Err("efa is closing".to_owned()));
             cx.update(|cx| done(result, cx));
         })
         .detach();
@@ -282,11 +282,11 @@ fn open_single<V: Render + 'static>(
         }
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(width), px(height)), cx)),
-            app_id: Some("gyfa".into()),
+            app_id: Some("efa".into()),
             ..Default::default()
         };
         let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-            window.set_window_title(&format!("gyfa: {title}"));
+            window.set_window_title(&format!("efa: {title}"));
             cx.new(|cx| build(window, cx))
         });
         match opened {
@@ -303,7 +303,7 @@ pub fn open_characters_window(hub: Entity<Hub>, cx: &mut App) {
     });
 }
 
-impl Gyfa {
+impl Efa {
     /// pyfa's Character > Manage ESI Characters.
     pub(super) fn open_esi_characters(&mut self, cx: &mut Context<Self>) {
         open_characters_window(self.hub.clone(), cx);
@@ -357,11 +357,11 @@ impl Gyfa {
         cx.defer(move |cx| {
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::centered(size(px(460.), px(340.)), cx)),
-                app_id: Some("gyfa".into()),
+                app_id: Some("efa".into()),
                 ..Default::default()
             };
             let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-                window.set_window_title("gyfa: Export to EVE");
+                window.set_window_title("efa: Export to EVE");
                 cx.new(|cx| upload::ExportToEveWindow::new(hub, loaded, fit, preferred, cx))
             });
             if let Err(e) = opened {

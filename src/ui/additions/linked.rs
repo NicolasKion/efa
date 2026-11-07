@@ -22,13 +22,13 @@ use crate::{
     fit::Fit,
     icons::Icon,
     ui::{
-        Gyfa, Loaded,
+        Efa, Loaded,
         widgets::{entry, icon_box, icon_label},
     },
 };
 
 /// What a picked set of fits is handed to.
-type OnPick = Rc<dyn Fn(&mut Gyfa, Vec<usize>, &mut Context<Gyfa>)>;
+type OnPick = Rc<dyn Fn(&mut Efa, Vec<usize>, &mut Context<Efa>)>;
 
 const PICKER_ROW_H: f32 = 30.;
 const PICKER_H: f32 = 360.;
@@ -41,7 +41,7 @@ pub(super) fn fit_label(catalog: &Catalog, fit: &Fit) -> String {
     }
 }
 
-impl Gyfa {
+impl Efa {
     /// Change the current fit and recalculate. `edit` says whether rows came or went, which
     /// clears the selection since it holds row positions.
     pub(super) fn edit_current(
@@ -87,7 +87,7 @@ impl Gyfa {
         initial: String,
         window: &mut Window,
         cx: &mut Context<Self>,
-        apply: impl Fn(&mut Gyfa, T, &mut Context<Gyfa>) + 'static,
+        apply: impl Fn(&mut Efa, T, &mut Context<Efa>) + 'static,
     ) {
         let input = cx.new(|cx| InputState::new(window, cx).default_value(initial));
         let this = cx.entity().downgrade();
@@ -103,7 +103,7 @@ impl Gyfa {
                             return;
                         };
                         window.close_dialog(cx);
-                        Gyfa::app_update(&this, cx, |g, cx| apply(g, value, cx));
+                        Efa::app_update(&this, cx, |g, cx| apply(g, value, cx));
                     },
                 )
             };
@@ -143,7 +143,7 @@ impl Gyfa {
         exclude: &[u64],
         window: &mut Window,
         cx: &mut Context<Self>,
-        on_pick: impl Fn(&mut Gyfa, Vec<usize>, &mut Context<Gyfa>) + 'static,
+        on_pick: impl Fn(&mut Efa, Vec<usize>, &mut Context<Efa>) + 'static,
     ) {
         // Gathered here: the picker is built while this view is being updated and cannot read
         // it.
@@ -160,9 +160,9 @@ impl Gyfa {
             })
             .collect();
         fits.sort_by(|a, b| a.label.cmp(&b.label));
-        let gyfa = cx.entity().downgrade();
+        let efa = cx.entity().downgrade();
         let loaded = Rc::clone(loaded);
-        let picker = cx.new(|cx| FitPicker::new(gyfa, loaded, fits, Rc::new(on_pick), window, cx));
+        let picker = cx.new(|cx| FitPicker::new(efa, loaded, fits, Rc::new(on_pick), window, cx));
         window.open_dialog(cx, move |dialog, _, _| {
             dialog.title(title).w(px(460.)).child(picker.clone())
         });
@@ -177,7 +177,7 @@ struct PickerFit {
 
 /// The browser's own state; the fits come in as a snapshot.
 struct FitPicker {
-    gyfa: WeakEntity<Gyfa>,
+    efa: WeakEntity<Efa>,
     loaded: Rc<Loaded>,
     fits: Vec<PickerFit>,
     picked: Vec<usize>,
@@ -188,7 +188,7 @@ struct FitPicker {
 
 impl FitPicker {
     fn new(
-        gyfa: WeakEntity<Gyfa>,
+        efa: WeakEntity<Efa>,
         loaded: Rc<Loaded>,
         fits: Vec<PickerFit>,
         on_pick: OnPick,
@@ -202,7 +202,7 @@ impl FitPicker {
             }
         })];
         Self {
-            gyfa,
+            efa,
             loaded,
             fits,
             picked: Vec::new(),
@@ -218,7 +218,7 @@ impl FitPicker {
             return;
         }
         let on_pick = Rc::clone(&self.on_pick);
-        Gyfa::app_update(&self.gyfa, cx, |g, cx| on_pick(g, indices, cx));
+        Efa::app_update(&self.efa, cx, |g, cx| on_pick(g, indices, cx));
     }
 }
 
@@ -334,7 +334,7 @@ impl Link {
     }
 }
 
-impl Gyfa {
+impl Efa {
     /// Add saved fits, by index, to the current fit's projected or command list.
     pub(in crate::ui) fn link(&mut self, link: Link, indices: &[usize], cx: &mut Context<Self>) {
         self.link_fits(indices, cx, |fit, uid| link.apply(fit, uid));
@@ -344,7 +344,7 @@ impl Gyfa {
 /// pyfa's fitAddBrowse and fitAddCurrentlyOpen entries.
 pub(super) fn add_fit_entries(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     link: Link,
     window: &mut Window,
@@ -365,7 +365,7 @@ pub(super) fn add_fit_entries(
         menu.item(
             entry(IconName::FolderOpen, "Add Fit...").on_click(move |_, window, cx| {
                 let existing = existing.clone();
-                Gyfa::app_update(&this, cx, |g, cx| {
+                Efa::app_update(&this, cx, |g, cx| {
                     g.open_fit_picker(
                         link.title(),
                         &loaded,
@@ -391,7 +391,7 @@ pub(super) fn add_fit_entries(
                 open.iter().fold(menu, |menu, (index, label)| {
                     let (this, index) = (this.clone(), *index);
                     menu.item(PopupMenuItem::new(label.clone()).on_click(move |_, _, cx| {
-                        Gyfa::app_update(&this, cx, |g, cx| g.link(link, &[index], cx));
+                        Efa::app_update(&this, cx, |g, cx| g.link(link, &[index], cx));
                     }))
                 })
             },

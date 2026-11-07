@@ -21,7 +21,7 @@ use gpui_kit::{
     WindowOptions, div, prelude::FluentBuilder, px, size,
 };
 
-use super::{Gyfa, Hub, Loaded, item_stats, preferences::section, widgets::icon_box};
+use super::{Efa, Hub, Loaded, item_stats, preferences::section, widgets::icon_box};
 use crate::{data::TypeId, icons::Icon, item_data::ItemData, overrides::Overrides};
 
 /// Most search hits the list shows, so a short query stays cheap to draw.
@@ -52,7 +52,7 @@ pub struct OverridesWindow {
     field_subscriptions: Vec<Subscription>,
 }
 
-impl Gyfa {
+impl Efa {
     /// pyfa's Global > Attribute Overrides.
     pub(super) fn open_overrides(&mut self, cx: &mut Context<Self>) {
         let Some(loaded) = self.loaded() else { return };
@@ -60,16 +60,16 @@ impl Gyfa {
         let weak = cx.entity().downgrade();
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(960.), px(640.)), cx)),
-            app_id: Some("gyfa".into()),
+            app_id: Some("efa".into()),
             ..Default::default()
         };
         cx.defer(move |cx| {
             let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-                window.set_window_title("gyfa: Attribute Overrides");
+                window.set_window_title("efa: Attribute Overrides");
                 cx.new(|cx| OverridesWindow::new(hub, loaded, window, cx))
             });
             if let Err(e) = opened {
-                Gyfa::app_update(&weak, cx, |g, cx| {
+                Efa::app_update(&weak, cx, |g, cx| {
                     g.status = Some(format!("Could not open a window: {e}").into());
                     cx.notify();
                 });

@@ -686,7 +686,7 @@ struct Local {
     drone_ids: Vec<Option<ItemId>>,
     booster_ids: Vec<ItemId>,
     fighter_ids: Vec<ItemId>,
-    /// Which gyfa item each refine item stands for, for validation.
+    /// Which efa item each refine item stands for, for validation.
     refs: validate::Refs,
 }
 

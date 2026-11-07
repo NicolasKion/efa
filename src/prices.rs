@@ -20,9 +20,9 @@ use crate::data::TypeId;
 pub mod optimize;
 
 const ESI_URL: &str = "https://esi.evetech.net/markets/prices";
-/// ESI behaviour gyfa is written against. Bump on purpose after checking what changed.
+/// ESI behaviour efa is written against. Bump on purpose after checking what changed.
 const COMPATIBILITY_DATE: &str = "2026-08-18";
-const AGENT: &str = "gyfa/0.1 (EVE Online fitting tool)";
+const AGENT: &str = "efa/0.1 (EVE Online fitting tool)";
 const CACHE_FILE: &str = "prices.json";
 /// How long prices are kept; ESI says so itself, the others are refreshed this often.
 const DEFAULT_MAX_AGE: Duration = Duration::from_secs(3600);
@@ -600,7 +600,7 @@ fn parse_tycoon(body: &[u8]) -> Result<Option<f64>, String> {
     Ok(stats.sell_avg_five_percent.filter(|&p| p > 0.0))
 }
 
-/// The user agent gyfa sends, for clients built elsewhere.
+/// The user agent efa sends, for clients built elsewhere.
 pub fn user_agent() -> &'static str {
     AGENT
 }

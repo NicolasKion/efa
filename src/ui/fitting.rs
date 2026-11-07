@@ -16,7 +16,7 @@ use gpui_kit::{
 };
 
 use super::{
-    Action, Gyfa, Loaded, RowRef, Scope,
+    Action, Efa, Loaded, RowRef, Scope,
     actions::MutaTarget,
     characters::skills_submenu,
     columns::{Col, ICON_W, STATE_W},
@@ -57,7 +57,7 @@ enum Row {
     Mode(TypeId),
 }
 
-impl Gyfa {
+impl Efa {
     /// The rows that hold something, top to bottom, for Shift-click ranges.
     fn row_order(&self) -> Vec<RowRef> {
         let (Some(fit), Some(stats)) = (self.fit(), self.stats.as_ref()) else {
@@ -566,9 +566,9 @@ fn item_row_behaviour(
     loaded: &Rc<Loaded>,
     item: RowRef,
     ship: TypeId,
-    cx: &mut Context<Gyfa>,
+    cx: &mut Context<Efa>,
 ) -> AnyElement {
-    let this = Gyfa::weak(cx);
+    let this = Efa::weak(cx);
     let loaded = Rc::clone(loaded);
     base.on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
         window.focus(&g.fitting_focus, cx);
@@ -712,7 +712,7 @@ impl DropOn {
 }
 
 /// Highlight a row while something is dragged over it, and handle the drop.
-fn drop_target(row: Stateful<Div>, on: DropOn, cx: &mut Context<Gyfa>) -> Stateful<Div> {
+fn drop_target(row: Stateful<Div>, on: DropOn, cx: &mut Context<Efa>) -> Stateful<Div> {
     row.drag_over::<Dragged>(|style, _, _, cx| style.bg(cx.theme().drop_target))
         .on_drop(cx.listener(move |g, dragged: &Dragged, window, cx| {
             cx.stop_propagation();
@@ -720,7 +720,7 @@ fn drop_target(row: Stateful<Div>, on: DropOn, cx: &mut Context<Gyfa>) -> Statef
         }))
 }
 
-impl Gyfa {
+impl Efa {
     /// pyfa's drop rules: a module onto its own rack goes to that position, a charge onto a
     /// module loads it, a module dragged within its rack swaps places, anything else is added.
     fn drop_on(
@@ -800,7 +800,7 @@ struct MenuSnapshot {
 }
 
 impl MenuSnapshot {
-    fn take(this: &WeakEntity<Gyfa>, item: RowRef, cx: &App) -> Option<Self> {
+    fn take(this: &WeakEntity<Efa>, item: RowRef, cx: &App) -> Option<Self> {
         let g = this.upgrade()?;
         let g = g.read(cx);
         let fit = g.fit()?;
@@ -832,8 +832,8 @@ impl MenuSnapshot {
 
 /// A menu entry handler that runs `f` on the app.
 fn handler(
-    this: &WeakEntity<Gyfa>,
-    f: impl Fn(&mut Gyfa, &ClickEvent, &mut Window, &mut Context<Gyfa>) + 'static,
+    this: &WeakEntity<Efa>,
+    f: impl Fn(&mut Efa, &ClickEvent, &mut Window, &mut Context<Efa>) + 'static,
 ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
     let this = this.clone();
     move |event, window, cx| {
@@ -843,7 +843,7 @@ fn handler(
 
 /// Act on `item` and whatever the click's scope adds to it.
 fn scoped(
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     item: RowRef,
     default: Scope,
     action: impl Fn(Vec<RowRef>) -> Action + 'static,
@@ -857,7 +857,7 @@ fn scoped(
 /// pyfa's fittingModule, fittingCharge and fittingShip menus, in its order.
 fn item_menu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     snapshot: &MenuSnapshot,
     ship: TypeId,
@@ -1020,7 +1020,7 @@ fn item_menu(
 }
 
 fn ship_menu_builder(
-    this: WeakEntity<Gyfa>,
+    this: WeakEntity<Efa>,
     ship: TypeId,
 ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
     move |menu, window, cx| ship_entries(menu, &this, ship, window, cx)
@@ -1040,7 +1040,7 @@ const SEC_STATUS_PRESETS: [f64; 11] = [-10., -8., -6., -4., -2., 0., 1., 2., 3.,
 /// pyfa's fittingShip menu.
 pub(super) fn ship_entries(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     ship: TypeId,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
@@ -1140,7 +1140,7 @@ pub(super) fn ship_entries(
                         PopupMenuItem::new(custom_label)
                             .checked(custom.is_some())
                             .on_click(handler(&this, move |_, _, window, cx| {
-                                Gyfa::open_value_dialog(
+                                Efa::open_value_dialog(
                                     "Security Status (-10 to 5)",
                                     custom.unwrap_or(0.0).to_string(),
                                     window,
@@ -1188,7 +1188,7 @@ fn py_round(value: f64) -> String {
 /// A charge entry: loads it into the selection, or every similar module when the preference
 /// says so; Ctrl or Alt swaps the two.
 fn charge_entry(
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     item: RowRef,
     id: TypeId,
@@ -1204,7 +1204,7 @@ fn charge_entry(
 /// A charge change: to every module of the same type or just the selection, as the "Change
 /// charge in all modules of the same type" preference says, with Ctrl or Alt doing the other.
 fn ammo_scoped(
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     item: RowRef,
     action: impl Fn(Vec<RowRef>) -> Action + 'static,
 ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
@@ -1227,7 +1227,7 @@ fn ammo_scoped(
 fn damage_ladder(
     menu: PopupMenu,
     title: String,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     item: RowRef,
     charges: Vec<TypeId>,
@@ -1258,7 +1258,7 @@ fn damage_ladder(
 )]
 fn charge_submenu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     item: RowRef,
     structure: ChargeMenu,
@@ -1330,7 +1330,7 @@ fn charge_submenu(
 
 fn spool_submenu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     item: RowRef,
     current: Option<u32>,
     max: u32,
@@ -1378,7 +1378,7 @@ const GROUP_RAH: i32 = 1150;
 /// pyfa's "RAH Damage Pattern": the fit's pattern, no adapting, or any damage pattern.
 fn rah_submenu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     item: RowRef,
     current: Option<RahPattern>,
     user: &[DamagePattern],
@@ -1419,7 +1419,7 @@ fn rah_submenu(
             };
             let this = this.clone();
             let pick: PickPattern = Rc::new(move |profile, _, cx| {
-                Gyfa::app_update(&this, cx, |g, cx| {
+                Efa::app_update(&this, cx, |g, cx| {
                     let rows = g.targets(item, Scope::Selection);
                     g.apply(Action::SetRah(rows, Some(RahPattern::Pattern(profile))), cx);
                 });
@@ -1435,7 +1435,7 @@ fn rah_submenu(
 )]
 fn variations_submenu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     item: RowRef,
     current: TypeId,
@@ -1577,7 +1577,7 @@ pub(super) enum RackStyle {
     Labels,
 }
 
-impl Gyfa {
+impl Efa {
     fn rack_style(&self) -> RackStyle {
         let general = &self.saved.preferences.general;
         match (general.rack_slots, general.rack_labels) {

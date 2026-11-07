@@ -9,12 +9,12 @@ use crate::{
     engine::{Resource, Slots},
     theme::Rgb,
     ui::{
-        Gyfa,
+        Efa,
         widgets::{gauge, icon},
     },
 };
 
-pub(super) fn section(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
+pub(super) fn section(p: &Pane<'_>, cx: &Context<Efa>) -> Section {
     let s = p.stats;
     let fighters = s.fighter_tubes.total.unwrap_or(0) > 0;
     let (minions, minions_tip) = if fighters {

@@ -4,7 +4,7 @@ use gpui_kit::component::{IconName, menu::PopupMenuItem};
 use gpui_kit::{ClickEvent, Context, WeakEntity, Window};
 
 use super::{Request, Target, open};
-use crate::{data::TypeId, engine::FitItem, ui::Gyfa, ui::widgets::entry};
+use crate::{data::TypeId, engine::FitItem, ui::Efa, ui::widgets::entry};
 
 /// What a menu entry shows the stats of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,7 +17,7 @@ pub enum StatsOf {
     OtherFit(usize, FitItem),
 }
 
-impl Gyfa {
+impl Efa {
     /// Open a stats window; Shift replaces the last one.
     pub(in crate::ui) fn show_stats(
         &mut self,
@@ -59,7 +59,7 @@ impl Gyfa {
 }
 
 /// pyfa's "{label} Stats" entry.
-pub fn stats_entry(this: &WeakEntity<Gyfa>, label: &str, of: StatsOf) -> PopupMenuItem {
+pub fn stats_entry(this: &WeakEntity<Efa>, label: &str, of: StatsOf) -> PopupMenuItem {
     let this = this.clone();
     entry(IconName::Info, format!("{label} Stats")).on_click(move |event, window, cx| {
         let _ = this.update(cx, |g, cx| g.show_stats(of, event, window, cx));

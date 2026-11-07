@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use gyfa::{
+use efa::{
     data::Catalog,
     engine::{Engine, FitItem},
     fit::{Fit, Module, Mutation},
@@ -66,7 +66,7 @@ fn catalog_knows_mutaplasmids() {
     let names: Vec<String> = mutas
         .for_base(MWD)
         .iter()
-        .map(|&m| gyfa::data::muta::short_name(&catalog.name(m)))
+        .map(|&m| efa::data::muta::short_name(&catalog.name(m)))
         .collect();
     assert_eq!(
         names,
@@ -88,10 +88,7 @@ fn catalog_knows_mutaplasmids() {
     assert_eq!(mutas.attrs[&SPEED_FACTOR].name, "speedFactor");
     // The abyssal type reads what it lacks from a base item: it is still a mid slot module.
     let abyssal = catalog.get(ABYSSAL_MWD).expect("abyssal MWD");
-    assert_eq!(
-        abyssal.kind,
-        gyfa::data::Kind::Module(gyfa::data::Slot::Mid)
-    );
+    assert_eq!(abyssal.kind, efa::data::Kind::Module(efa::data::Slot::Mid));
     assert!(abyssal.activatable);
 }
 
@@ -145,7 +142,7 @@ fn engine_applies_rolls() {
             .and_then(|i| i.attr(attr).copied())
             .expect("attribute is there")
     };
-    let mwd = FitItem::Module(gyfa::data::Slot::Mid, 0);
+    let mwd = FitItem::Module(efa::data::Slot::Mid, 0);
     assert_eq!(inspect(&plain, mwd, SPEED_FACTOR).base, 510.0);
     assert!((inspect(&rolled, mwd, SPEED_FACTOR).base - 561.0).abs() < 1e-6);
     assert!((inspect(&rolled, mwd, CAP_NEED).base - 96.0).abs() < 1e-6);

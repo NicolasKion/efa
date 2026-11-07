@@ -10,7 +10,7 @@ use serde::Deserialize;
 /// A color as 0xRRGGBB.
 pub type Rgb = u32;
 
-/// The theme's colors that gyfa uses.
+/// The theme's colors that efa uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
     pub dark: bool,

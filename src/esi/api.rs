@@ -1,4 +1,4 @@
-//! The ESI routes gyfa calls for a logged-in character, with its access token refreshed first
+//! The ESI routes efa calls for a logged-in character, with its access token refreshed first
 //! when it is about to run out.
 
 use reqwest::{Method, StatusCode, blocking::Client};
@@ -11,7 +11,7 @@ use super::{
 use crate::{data::TypeId, port::esi::Fitting};
 
 const ESI_URL: &str = "https://esi.evetech.net";
-/// ESI behaviour gyfa is written against, the same date the price fetch pins.
+/// ESI behaviour efa is written against, the same date the price fetch pins.
 const COMPATIBILITY_DATE: &str = "2026-08-18";
 
 /// What "Get Skills" brings in for a character.
@@ -221,7 +221,7 @@ fn failure(status: StatusCode, body: &[u8], retry_after: Option<&str>) -> String
     match status.as_u16() {
         401 | 403 => format!("ESI refused access ({status}){detail}. Log the character in again."),
         420 | 429 => format!(
-            "ESI asks gyfa to slow down; try again in {} seconds",
+            "ESI asks efa to slow down; try again in {} seconds",
             retry_after.unwrap_or("60")
         ),
         _ => format!("ESI answered {status}{detail}"),

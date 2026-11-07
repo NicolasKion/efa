@@ -10,12 +10,12 @@ pub mod sso;
 
 pub use accounts::{Account, Accounts};
 
-/// gyfa's own application at developers.eveonline.com, registered with the callback
+/// efa's own application at developers.eveonline.com, registered with the callback
 /// `http://localhost:6461/callback` and [`SCOPES`]. A client ID is public; logging in uses PKCE,
 /// so no client secret is involved anywhere.
 pub const CLIENT_ID: &str = "fe05a0cb454843e6b8d4b73613445011";
 
-/// What gyfa asks a character for. The app registered at developers.eveonline.com needs every
+/// What efa asks a character for. The app registered at developers.eveonline.com needs every
 /// one of them, or the login fails.
 pub const SCOPES: [&str; 4] = [
     "esi-skills.read_skills.v1",

@@ -2,7 +2,7 @@
 
 use std::{collections::HashSet, path::Path, sync::OnceLock};
 
-use gyfa::{
+use efa::{
     data::{Catalog, Hardpoint, Slot, TypeId},
     engine::Engine,
     fit::Fit,
@@ -29,7 +29,7 @@ fn setup() -> Option<&'static (Catalog, Engine, ItemData)> {
             let engine = Engine::load(Path::new(DATA), cache, catalog.skills.clone())
                 .expect("the engine loads");
             let wanted: HashSet<TypeId> = catalog.types.keys().copied().collect();
-            let key = gyfa::data::cache_key(Path::new(DATA));
+            let key = efa::data::cache_key(Path::new(DATA));
             let data = ItemData::load_cached(Path::new(DATA), cache, key.as_deref(), &wanted)
                 .expect("the item data loads");
             Some((catalog, engine, data))
@@ -293,7 +293,7 @@ fn best(
             engine.all5(),
             fit,
             &choices,
-            &gyfa::prices::Prices::default(),
+            &efa::prices::Prices::default(),
         )
         .expect("a tank to search for");
     let found = tank::optimise(engine, &problem, &Progress::default(), 5);
@@ -513,7 +513,7 @@ fn the_tank_tab_alone_fills_free_lows_and_rigs_around_the_fit() {
             engine.all5(),
             &fit,
             &choices,
-            &gyfa::prices::Prices::default(),
+            &efa::prices::Prices::default(),
         )
         .expect("a tank to search for");
     assert_eq!(problem.positions.len(), facts.total(Slot::Low) - 2);
@@ -622,7 +622,7 @@ fn a_tank_budget_caps_the_price() {
     choices.search_tiers =
         wizard::SearchTiers::of(&[wizard::SearchGroup::T2, wizard::SearchGroup::Faction]);
     // Faction items cost 100M each, everything else 1M.
-    let prices = gyfa::prices::Prices::fixed(catalog.types.values().map(|t| {
+    let prices = efa::prices::Prices::fixed(catalog.types.values().map(|t| {
         let price = if t.meta_group == Some(4) { 100e6 } else { 1e6 };
         (t.id, price)
     }));
@@ -672,7 +672,7 @@ fn a_picked_result_is_fitted_as_found() {
             engine.all5(),
             &fit,
             &choices,
-            &gyfa::prices::Prices::default(),
+            &efa::prices::Prices::default(),
         )
         .expect("a tank to search for");
     let found = tank::optimise(engine, &problem, &Progress::default(), 5);

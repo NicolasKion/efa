@@ -21,7 +21,7 @@ use crate::{
     icons::Icon,
     implant_set::{self, PrecalcSet},
     ui::{
-        Action, AddKind, Gyfa, Loaded,
+        Action, AddKind, Efa, Loaded,
         fitting::{DragSource, Dragged},
         validation::flag,
         widgets::{entry, icon_box, icon_label, item_entry, item_label},
@@ -36,7 +36,7 @@ struct Snapshot {
 }
 
 impl Snapshot {
-    fn take(this: &WeakEntity<Gyfa>, cx: &App) -> Option<Self> {
+    fn take(this: &WeakEntity<Efa>, cx: &App) -> Option<Self> {
         let g = this.upgrade()?;
         let g = g.read(cx);
         let fit = g.fit()?;
@@ -50,7 +50,7 @@ impl Snapshot {
     }
 }
 
-impl Gyfa {
+impl Efa {
     pub(in crate::ui) fn implants_tab(
         &mut self,
         loaded: &Rc<Loaded>,
@@ -194,7 +194,7 @@ impl Gyfa {
                     .tooltip(if active { "Active" } else { "Inactive" })
                     .on_click(move |_, _, cx| {
                         cx.stop_propagation();
-                        Gyfa::app_update(&this, cx, |g, cx| {
+                        Efa::app_update(&this, cx, |g, cx| {
                             let targets = g.addition_targets(i);
                             g.apply(Action::ToggleImplants(i, targets), cx);
                         });
@@ -251,7 +251,7 @@ impl Gyfa {
 /// pyfa's implantItem (or implantItemChar) entries for the clicked row, then implantItemMisc.
 fn implant_menu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     clicked: Option<usize>,
     window: &mut Window,
@@ -275,7 +275,7 @@ fn implant_menu(
             let this = this.clone();
             menu = menu.item(entry(IconName::Search, "Implant Market Group").on_click(
                 move |_, window, cx| {
-                    Gyfa::app_update(&this, cx, |g, cx| g.jump_to_market(type_id, window, cx));
+                    Efa::app_update(&this, cx, |g, cx| g.jump_to_market(type_id, window, cx));
                 },
             ));
         }
@@ -292,8 +292,8 @@ fn implant_menu(
         menu = menu.item(entry(IconName::Star, "Save as New Implant Set").on_click(
             move |_, window, cx| {
                 let implants = implants.clone();
-                Gyfa::app_update(&this, cx, |_, cx| {
-                    Gyfa::save_implant_set_dialog(implants, window, cx);
+                Efa::app_update(&this, cx, |_, cx| {
+                    Efa::save_implant_set_dialog(implants, window, cx);
                 });
             },
         ));
@@ -312,7 +312,7 @@ fn implant_menu(
 /// Remove and Variations, which only make sense for the fit's own implants.
 fn item_entries(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     i: usize,
     type_id: TypeId,
@@ -323,7 +323,7 @@ fn item_entries(
     let remove = {
         let this = this.clone();
         entry(IconName::Delete, "Remove Implant").on_click(move |_, _, cx| {
-            Gyfa::app_update(&this, cx, |g, cx| {
+            Efa::app_update(&this, cx, |g, cx| {
                 let targets = g.addition_targets(i);
                 g.apply(Action::RemoveAdditions(AddKind::Implants, targets), cx);
             });
@@ -349,7 +349,7 @@ fn item_entries(
                             item_entry(&loaded, v, name.clone())
                                 .checked(v == type_id)
                                 .on_click(move |_, _, cx| {
-                                    Gyfa::app_update(&this, cx, |g, cx| {
+                                    Efa::app_update(&this, cx, |g, cx| {
                                         let targets = g.addition_targets(i);
                                         let action =
                                             Action::SwapAdditions(AddKind::Implants, targets, v);
@@ -369,7 +369,7 @@ fn item_entries(
 /// then the user's sets under "Saved Sets".
 fn apply_set_entry(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
@@ -433,7 +433,7 @@ fn apply_set_entry(
             menu.separator()
                 .item(entry(IconName::Settings2, "Implant Set Editor…").on_click(
                     move |_, window, cx| {
-                        Gyfa::app_update(&editor, cx, |g, cx| {
+                        Efa::app_update(&editor, cx, |g, cx| {
                             g.open_implant_set_editor(None, window, cx);
                         });
                     },
@@ -444,7 +444,7 @@ fn apply_set_entry(
 
 /// One set in the Apply Implant Set menu, shown with its first implant's icon.
 fn set_item(
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     label: &str,
     implants: &[TypeId],
@@ -457,7 +457,7 @@ fn set_item(
     item.disabled(implants.is_empty())
         .on_click(move |_, _, cx| {
             let implants = implants.clone();
-            Gyfa::app_update(&this, cx, |g, cx| {
+            Efa::app_update(&this, cx, |g, cx| {
                 g.apply(Action::AddImplants(implants), cx);
             });
         })
@@ -466,7 +466,7 @@ fn set_item(
 /// pyfa's additions copy and paste entries, working on whichever implants the pane shows.
 fn copy_paste_entries(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     snapshot: &Snapshot,
     clicked: Option<usize>,
@@ -519,7 +519,7 @@ fn copy_paste_entries(
                 };
                 let items = parse_lines(&loaded.catalog, kind, &text);
                 if !items.is_empty() {
-                    Gyfa::app_update(&this, cx, |g, cx| {
+                    Efa::app_update(&this, cx, |g, cx| {
                         g.apply(Action::AddAdditions(kind, items), cx);
                     });
                 }

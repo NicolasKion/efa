@@ -30,7 +30,7 @@ use crate::{
     icons::Icon,
     store::Saved,
     ui::{
-        Gyfa, Loaded, RowRef,
+        Efa, Loaded, RowRef,
         columns::{ICON_W, STATE_W},
         fitting::{ChargeMenu, DragSource, Dragged, compatible_charges, structure_charges},
         item_stats::{StatsOf, stats_entry},
@@ -342,7 +342,7 @@ fn retain_indices<T>(list: &mut Vec<T>, indices: &[usize]) {
     });
 }
 
-impl Gyfa {
+impl Efa {
     fn projected_rows(&self, loaded: &Loaded) -> Vec<Row> {
         self.fit()
             .map_or_default(|fit| rows(&loaded.catalog, &self.saved, fit))
@@ -756,13 +756,13 @@ impl Gyfa {
 /// Run `edit` on the targets of display row `n`, the reach picked by the modifiers held when the
 /// entry is clicked.
 fn on_targets<F>(
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     n: usize,
     default: Reach,
     edit: F,
 ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static + use<F>
 where
-    F: Fn(&mut Gyfa, Vec<Row>, &mut Context<Gyfa>) + 'static,
+    F: Fn(&mut Efa, Vec<Row>, &mut Context<Efa>) + 'static,
 {
     let this = this.clone();
     move |_, window, cx| {
@@ -770,7 +770,7 @@ where
             Reach::Similar => Reach::Similar,
             Reach::Selection => default,
         };
-        Gyfa::app_update(&this, cx, |g, cx| {
+        Efa::app_update(&this, cx, |g, cx| {
             let Some(loaded) = g.loaded() else { return };
             let targets = g.projected_targets(&loaded, n, reach);
             edit(g, targets, cx);
@@ -782,7 +782,7 @@ where
 #[expect(clippy::too_many_lines, reason = "four menus in one")]
 fn projected_item_menu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     n: usize,
     row: Row,
@@ -821,7 +821,7 @@ fn projected_item_menu(
         let this = this.clone();
         menu = menu.item(
             entry(IconName::ExternalLink, "Open Fit in New Tab").on_click(move |_, _, cx| {
-                Gyfa::app_update(&this, cx, |g, cx| g.open_fit(index, cx));
+                Efa::app_update(&this, cx, |g, cx| g.open_fit(index, cx));
             }),
         );
     }
@@ -912,7 +912,7 @@ fn projected_item_menu(
         menu = menu.item(
             entry(IconName::Search, "Projected Item Market Group").on_click(
                 move |_, window, cx| {
-                    Gyfa::app_update(&this, cx, |g, cx| g.jump_to_market(type_id, window, cx));
+                    Efa::app_update(&this, cx, |g, cx| g.jump_to_market(type_id, window, cx));
                 },
             ),
         );
@@ -948,8 +948,8 @@ fn projected_item_menu(
         menu = menu.item(
             entry(IconName::Settings2, "Change Projected Item Quantity").on_click(
                 move |_, window, cx| {
-                    Gyfa::app_update(&this, cx, |_, cx| {
-                        Gyfa::open_input_dialog(
+                    Efa::app_update(&this, cx, |_, cx| {
+                        Efa::open_input_dialog(
                             "Change Amount",
                             prompt,
                             amount.to_string(),
@@ -971,8 +971,8 @@ fn projected_item_menu(
             entry(IconName::Map, "Change Projected Item Range").on_click(move |_, window, cx| {
                 let similar = window.modifiers().alt || window.modifiers().control;
                 let current_km = current_km.clone();
-                Gyfa::app_update(&this, cx, |_, cx| {
-                    Gyfa::open_input_dialog(
+                Efa::app_update(&this, cx, |_, cx| {
+                    Efa::open_input_dialog(
                         "Change Projection Range",
                         "New Range, km:",
                         current_km,
@@ -1052,7 +1052,7 @@ fn projected_item_menu(
         let this = this.clone();
         menu = menu.item(entry(IconName::Search, "Charge Market Group").on_click(
             move |_, window, cx| {
-                Gyfa::app_update(&this, cx, |g, cx| g.jump_to_market(charge, window, cx));
+                Efa::app_update(&this, cx, |g, cx| g.jump_to_market(charge, window, cx));
             },
         ));
     }
@@ -1063,7 +1063,7 @@ fn projected_item_menu(
             menu = menu.item(
                 entry(IconName::BatteryCharging, "Show Compatible Charges").on_click(
                     move |_, window, cx| {
-                        Gyfa::app_update(&this, cx, |g, cx| g.show_charges_for(module, window, cx));
+                        Efa::app_update(&this, cx, |g, cx| g.show_charges_for(module, window, cx));
                     },
                 ),
             );
@@ -1093,7 +1093,7 @@ fn swap_type(projected: &mut Projected, targets: &[Row], from: TypeId, to: TypeI
 
 /// pyfa's amount changes: fits between 1 and 20 (0 removes), drones and fighters at least one
 /// (0 removes).
-fn set_amount(g: &mut Gyfa, row: Row, amount: u32, cx: &mut Context<Gyfa>) {
+fn set_amount(g: &mut Efa, row: Row, amount: u32, cx: &mut Context<Efa>) {
     let max = match row {
         Row::Fighter(i) => g
             .stats
@@ -1137,7 +1137,7 @@ fn set_amount(g: &mut Gyfa, row: Row, amount: u32, cx: &mut Context<Gyfa>) {
 )]
 fn charge_submenu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     n: usize,
     structure: ChargeMenu,
@@ -1146,7 +1146,7 @@ fn charge_submenu(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let (this, loaded) = (this.clone(), Rc::clone(loaded));
-    let set = move |this: &WeakEntity<Gyfa>, charge: Option<TypeId>| {
+    let set = move |this: &WeakEntity<Efa>, charge: Option<TypeId>| {
         on_targets(this, n, Reach::Similar, move |g, targets, cx| {
             g.edit_projected(cx, |projected, catalog| {
                 for target in &targets {
@@ -1169,7 +1169,7 @@ fn charge_submenu(
             });
         })
     };
-    let charge_entry = move |this: &WeakEntity<Gyfa>, loaded: &Rc<Loaded>, id: TypeId| {
+    let charge_entry = move |this: &WeakEntity<Efa>, loaded: &Rc<Loaded>, id: TypeId| {
         item_entry(loaded, id, loaded.catalog.name(id))
             .checked(current == Some(id))
             .on_click(set(this, Some(id)))
@@ -1226,7 +1226,7 @@ fn charge_submenu(
 
 fn spool_submenu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     n: usize,
     current: Option<u32>,
     max: u32,
@@ -1234,7 +1234,7 @@ fn spool_submenu(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let this = this.clone();
-    let set = move |this: &WeakEntity<Gyfa>, cycles: Option<u32>| {
+    let set = move |this: &WeakEntity<Efa>, cycles: Option<u32>| {
         on_targets(this, n, Reach::Selection, move |g, targets, cx| {
             g.edit_projected(cx, |projected, _| {
                 for target in &targets {
@@ -1278,7 +1278,7 @@ fn spool_submenu(
 /// pyfa's projected entries for the whole pane: add fits, and environmental effects.
 fn projected_view_menu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
@@ -1298,7 +1298,7 @@ fn projected_view_menu(
 /// One level of the environmental effects tree: its submenus, then its effects.
 fn env_level(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     level: &Rc<EnvMenu>,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
@@ -1314,7 +1314,7 @@ fn env_level(
         let (this, type_id) = (this.clone(), item.type_id);
         menu = menu.item(
             PopupMenuItem::new(item.label.clone()).on_click(move |_, _, cx| {
-                Gyfa::app_update(&this, cx, |g, cx| {
+                Efa::app_update(&this, cx, |g, cx| {
                     g.edit_projected(cx, |projected, _| {
                         projected.add_env(type_id);
                         true

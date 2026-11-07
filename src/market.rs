@@ -19,7 +19,7 @@ use jargon::{Jargon, Query};
 pub const RECENT_LIMIT: usize = 20;
 
 /// The meta group buttons over the market results. Each covers one or more of the game's meta
-/// groups; pyfa lumps Tech I, II and III into one "Normal" button, gyfa splits them.
+/// groups; pyfa lumps Tech I, II and III into one "Normal" button, efa splits them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MetaCategory {
     /// Tech I, including meta and compact variants, and anything without a button of its own.

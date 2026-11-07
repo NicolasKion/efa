@@ -3,7 +3,7 @@
 
 use std::{path::Path, sync::OnceLock};
 
-use gyfa::{
+use efa::{
     data::{Catalog, TypeId},
     fit::{Fit, ImplantSource},
     implant_set::{self, ImplantSet},
@@ -168,7 +168,7 @@ fn a_whole_pirate_set_fills_its_slots() {
     let slots: Vec<u8> = set
         .implants
         .iter()
-        .map(|&t| gyfa::fit::implant_slot(catalog, t))
+        .map(|&t| efa::fit::implant_slot(catalog, t))
         .collect();
     assert_eq!(slots, vec![1, 2, 3, 4, 5, 6]);
 }
@@ -199,7 +199,7 @@ fn the_implant_tree_has_every_slot_by_kind() {
     assert!(
         group(8, "Armor Implants")
             .iter()
-            .all(|&t| gyfa::fit::implant_slot(catalog, t) == 8)
+            .all(|&t| efa::fit::implant_slot(catalog, t) == 8)
     );
 }
 

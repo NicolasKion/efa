@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, path::Path, sync::OnceLock};
 
-use gyfa::{
+use efa::{
     data::{Catalog, TypeId},
     engine::Engine,
     fit::Fit,

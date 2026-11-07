@@ -1,4 +1,4 @@
-//! Reading and writing gyfa's JSON files without ever losing them. A file that cannot be read
+//! Reading and writing efa's JSON files without ever losing them. A file that cannot be read
 //! is set aside rather than overwritten, and every save keeps the previous file as a backup to
 //! fall back on.
 
@@ -32,12 +32,39 @@ pub fn load<T: DeserializeOwned + Default>(path: &Path) -> T {
     }
 }
 
-/// gyfa's data directory: `$XDG_DATA_HOME/gyfa`, or `~/.local/share/gyfa`.
+/// efa's data directory: `$XDG_DATA_HOME/efa`, or `~/.local/share/efa`.
 pub fn data_dir() -> Option<PathBuf> {
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
-    Some(data.join("gyfa"))
+    Some(data.join("efa"))
+}
+
+/// The app was called gyfa before; its folder moves to efa's the first time efa starts, so fits,
+/// characters and logins come along. Nothing happens when efa's folder already exists.
+pub fn move_old_data() {
+    let Some(new) = data_dir() else { return };
+    let old = new.with_file_name("gyfa");
+    if new.exists() || !old.is_dir() {
+        return;
+    }
+    if let Err(e) = copy_dir(&old, &new) {
+        eprintln!("copying {} to {}: {e}", old.display(), new.display());
+    }
+}
+
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
 }
 
 /// Write `value` to `path` through a temporary file, keeping what was there as the backup.
@@ -117,7 +144,7 @@ mod tests {
 
     #[test]
     fn a_broken_file_is_kept_and_the_backup_loads() {
-        let dir = std::env::temp_dir().join(format!("gyfa-persist-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("efa-persist-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("fits.json");
         save(&path, &vec![1, 2, 3]).expect("first save");

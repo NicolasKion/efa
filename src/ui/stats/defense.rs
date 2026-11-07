@@ -16,7 +16,7 @@ use super::{Pane, Section, format, ids, tip, title};
 use crate::{
     engine::Layer,
     ui::{
-        Gyfa,
+        Efa,
         actions::Action,
         profile_menus::{PickPattern, damage_pattern_menu},
         widgets::{DAMAGE_COLORS, gauge, icon},
@@ -77,7 +77,7 @@ fn gauge_row(
         .into_any_element()
 }
 
-pub(super) fn resistances(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &Context<Gyfa>) -> Section {
+pub(super) fn resistances(p: &Pane<'_>, this: &WeakEntity<Efa>, cx: &Context<Efa>) -> Section {
     let raw = p.view.raw_hp;
     let total: f64 = layers(p).iter().map(|&(_, _, l, _)| shown_hp(l, raw)).sum();
     let (label, hover) = if raw {
@@ -168,7 +168,7 @@ pub(super) fn resistances(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &Context<Gy
 
     let this = this.clone();
     let pick: PickPattern = Rc::new(move |profile, _, cx| {
-        Gyfa::app_update(&this, cx, |g, cx| {
+        Efa::app_update(&this, cx, |g, cx| {
             g.apply(Action::SetDamageProfile(profile), cx);
         });
     });

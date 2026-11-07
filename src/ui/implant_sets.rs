@@ -20,7 +20,7 @@ use gpui_kit::{
 };
 
 use super::{
-    Action, Gyfa, Loaded,
+    Action, Efa, Loaded,
     editor_kit::{self, INDENT, ListEntry, TREE_ROW, caption, empty_state, icon_button},
     fitting::{DragPreview, DragSource, Dragged},
     item_stats, side,
@@ -72,7 +72,7 @@ pub(super) fn bind_keys(cx: &mut App) {
     ]);
 }
 
-impl Gyfa {
+impl Efa {
     /// Change the saved sets, keeping them sorted by name, and write them out.
     fn edit_implant_sets(
         &mut self,
@@ -93,7 +93,7 @@ impl Gyfa {
         cx: &mut Context<Self>,
     ) {
         let Some(loaded) = self.loaded() else { return };
-        let gyfa = cx.entity();
+        let efa = cx.entity();
         // Worked out here, while this view can still be read directly.
         let select = select.or_else(|| self.saved.implant_sets.first().map(|s| s.name.clone()));
         let priced: HashSet<TypeId> = self
@@ -105,23 +105,23 @@ impl Gyfa {
         // A window of its own, like pyfa's editors, so it can sit beside the fit.
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(EDITOR_W), px(EDITOR_H)), cx)),
-            app_id: Some("gyfa".into()),
+            app_id: Some("efa".into()),
             ..Default::default()
         };
         // Opened once this update is over: the new window draws right away, and drawing reads
         // this view, which gpui does not allow while it is being updated.
         cx.defer(move |cx| {
-            let weak = gyfa.downgrade();
+            let weak = efa.downgrade();
             let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-                window.set_window_title("gyfa: Implant Set Editor");
-                cx.new(|cx| ImplantSetEditor::new(&gyfa, loaded, select, window, cx))
+                window.set_window_title("efa: Implant Set Editor");
+                cx.new(|cx| ImplantSetEditor::new(&efa, loaded, select, window, cx))
             });
             match opened {
                 // The sets' prices, for their totals.
-                Ok(_) => Gyfa::app_update(&weak, cx, |g, cx| {
+                Ok(_) => Efa::app_update(&weak, cx, |g, cx| {
                     g.with_prices_for(priced, cx, |_, _| {});
                 }),
-                Err(e) => Gyfa::app_update(&weak, cx, |g, cx| {
+                Err(e) => Efa::app_update(&weak, cx, |g, cx| {
                     g.status = Some(format!("Could not open the implant set editor: {e}").into());
                     cx.notify();
                 }),
@@ -149,7 +149,7 @@ impl Gyfa {
             String::new(),
             check,
             move |name, window, cx| {
-                Gyfa::app_update(&this, cx, |g, cx| {
+                Efa::app_update(&this, cx, |g, cx| {
                     let set = ImplantSet {
                         name: name.clone(),
                         implants: implants.clone(),
@@ -165,7 +165,7 @@ impl Gyfa {
 /// What is wrong with a name for a set, if anything. `keep` is the set being renamed, which
 /// may keep its name.
 fn name_problem(
-    gyfa: &WeakEntity<Gyfa>,
+    efa: &WeakEntity<Efa>,
     name: &str,
     keep: Option<&str>,
     cx: &App,
@@ -173,7 +173,7 @@ fn name_problem(
     if name.is_empty() {
         return Some(NAME_MISSING);
     }
-    let taken = gyfa.upgrade().is_some_and(|g| {
+    let taken = efa.upgrade().is_some_and(|g| {
         g.read(cx)
             .saved
             .implant_sets
@@ -268,9 +268,9 @@ fn tree_drag(loaded: &Loaded, implants: &[TypeId], label: Option<&str>) -> Optio
     })
 }
 
-/// The editor's own state; the sets themselves live in [`Gyfa`]'s saved data.
+/// The editor's own state; the sets themselves live in [`Efa`]'s saved data.
 pub struct ImplantSetEditor {
-    gyfa: WeakEntity<Gyfa>,
+    efa: WeakEntity<Efa>,
     loaded: Rc<Loaded>,
     /// The set being edited, by name; names are unique.
     selected: Option<String>,
@@ -296,7 +296,7 @@ pub struct ImplantSetEditor {
 
 impl ImplantSetEditor {
     fn new(
-        gyfa: &Entity<Gyfa>,
+        efa: &Entity<Efa>,
         loaded: Rc<Loaded>,
         select: Option<String>,
         window: &mut Window,
@@ -311,7 +311,7 @@ impl ImplantSetEditor {
                 }
             };
         let subscriptions = vec![
-            cx.observe(gyfa, |_, _, cx| cx.notify()),
+            cx.observe(efa, |_, _, cx| cx.notify()),
             cx.subscribe(&search, redraw),
             cx.subscribe(&list_search, redraw),
             // Descriptions, for the bonus lines, load in the background.
@@ -334,7 +334,7 @@ impl ImplantSetEditor {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         Self {
-            gyfa: gyfa.downgrade(),
+            efa: efa.downgrade(),
             by_slot: implant_set::by_slot(catalog).into(),
             pirate_sets,
             loaded,
@@ -353,13 +353,13 @@ impl ImplantSetEditor {
     }
 
     fn sets<'a>(&self, cx: &'a App) -> &'a [ImplantSet] {
-        self.gyfa
+        self.efa
             .upgrade()
             .map_or(&[], |g| g.read(cx).saved.implant_sets.as_slice())
     }
 
     fn prices(&self, cx: &App) -> Rc<Prices> {
-        self.gyfa
+        self.efa
             .upgrade()
             .map_or_else(Rc::default, |g| Rc::clone(&g.read(cx).prices))
     }
@@ -370,7 +370,7 @@ impl ImplantSetEditor {
     }
 
     fn edit(&self, cx: &mut Context<Self>, edit: impl FnOnce(&mut Vec<ImplantSet>)) {
-        Gyfa::app_update(&self.gyfa, cx, |g, cx| g.edit_implant_sets(cx, edit));
+        Efa::app_update(&self.efa, cx, |g, cx| g.edit_implant_sets(cx, edit));
     }
 
     /// Change the named set.
@@ -385,7 +385,7 @@ impl ImplantSetEditor {
     /// Fetch prices for these implants if the ones there are are stale.
     fn want_prices(&self, implants: &[TypeId], cx: &mut Context<Self>) {
         let types: HashSet<TypeId> = implants.iter().copied().collect();
-        Gyfa::app_update(&self.gyfa, cx, |g, cx| {
+        Efa::app_update(&self.efa, cx, |g, cx| {
             g.with_prices_for(types, cx, |_, _| {});
         });
     }
@@ -398,14 +398,14 @@ impl ImplantSetEditor {
 
     fn create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let initial = implant_set::free_name(self.sets(cx), NEW_SET);
-        let (gyfa, this) = (self.gyfa.clone(), cx.entity().downgrade());
+        let (efa, this) = (self.efa.clone(), cx.entity().downgrade());
         editor_kit::prompt_name(
             window,
             cx,
             "New Implant Set".into(),
             "Enter a name for your new Implant Set:".into(),
             initial,
-            move |name, cx| name_problem(&gyfa, name, None, cx),
+            move |name, cx| name_problem(&efa, name, None, cx),
             move |name, _, cx| {
                 let _ = this.update(cx, |e, cx| {
                     let set = ImplantSet::new(name.clone());
@@ -421,14 +421,14 @@ impl ImplantSetEditor {
         let Some(old) = self.selected.clone() else {
             return;
         };
-        let (gyfa, this, keep) = (self.gyfa.clone(), cx.entity().downgrade(), old.clone());
+        let (efa, this, keep) = (self.efa.clone(), cx.entity().downgrade(), old.clone());
         editor_kit::prompt_name(
             window,
             cx,
             "Rename Implant Set".into(),
             "Enter a new name for the Implant Set:".into(),
             old.clone(),
-            move |name, cx| name_problem(&gyfa, name, Some(&keep), cx),
+            move |name, cx| name_problem(&efa, name, Some(&keep), cx),
             move |name, _, cx| {
                 let old = old.clone();
                 let _ = this.update(cx, |e, cx| {
@@ -542,7 +542,7 @@ impl ImplantSetEditor {
             return;
         };
         let mut applied = false;
-        Gyfa::app_update(&self.gyfa, cx, |g, cx| {
+        Efa::app_update(&self.efa, cx, |g, cx| {
             if g.fit().is_some() {
                 g.apply(Action::AddImplants(implants), cx);
                 applied = true;
@@ -790,7 +790,7 @@ impl ImplantSetEditor {
         let unpriced = set.implants.len() - known.len();
         let total: f64 = known.iter().sum();
         let has_fit = self
-            .gyfa
+            .efa
             .upgrade()
             .is_some_and(|g| g.read(cx).fit().is_some());
         let rows: Vec<AnyElement> = SLOTS

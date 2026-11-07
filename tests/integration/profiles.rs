@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use gyfa::{
+use efa::{
     damage_pattern::{self, DamagePattern},
     data::Catalog,
     engine::Engine,

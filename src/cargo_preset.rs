@@ -1,5 +1,5 @@
 //! Cargo presets: named lists of items to put in a fit's hold in one go, such as a stack of
-//! filaments or a set of scripts, with a policy for what is already there. A gyfa extra.
+//! filaments or a set of scripts, with a policy for what is already there. A efa extra.
 
 use serde::{Deserialize, Serialize};
 

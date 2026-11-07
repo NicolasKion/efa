@@ -12,7 +12,7 @@ use std::{
 
 const BINARIES: &str = "https://binaries.eveonline.com";
 const RESOURCES: &str = "https://resources.eveonline.com";
-const AGENT: &str = "gyfa/0.1";
+const AGENT: &str = "efa/0.1";
 
 pub struct Cdn {
     http: reqwest::blocking::Client,

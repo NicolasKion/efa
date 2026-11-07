@@ -28,7 +28,7 @@ use gpui_kit::{
     prelude::FluentBuilder, px,
 };
 
-use super::{Action, Gyfa, Loaded, item_stats, widgets};
+use super::{Action, Efa, Loaded, item_stats, widgets};
 use crate::{
     data::{Slot, TypeId},
     engine::{Cap, Layer as LayerStats, Pilot, Resource, Stats},
@@ -218,7 +218,7 @@ impl Drop for Search {
 }
 
 pub(super) struct WizardPanel {
-    gyfa: WeakEntity<Gyfa>,
+    efa: WeakEntity<Efa>,
     loaded: Rc<Loaded>,
     data: Rc<ItemData>,
     pilot: Rc<Pilot>,
@@ -264,7 +264,7 @@ pub(super) struct WizardPanel {
     _subscriptions: Vec<Subscription>,
 }
 
-impl Gyfa {
+impl Efa {
     /// Open the wizard over the current fit. It needs a ship, and the item data for the hull's
     /// bonuses and the modules' fitting costs, which may still be loading the first time.
     pub(super) fn open_wizard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -287,7 +287,7 @@ impl Gyfa {
                     let ready = cx.update(|cx| item_stats::hover_data(&loaded, cx).is_some());
                     if ready {
                         let _ = window_handle.update(cx, |_, window, cx| {
-                            Gyfa::app_update(&this, cx, |g, cx| {
+                            Efa::app_update(&this, cx, |g, cx| {
                                 g.status = None;
                                 g.open_wizard(window, cx);
                             });
@@ -313,7 +313,7 @@ impl Gyfa {
         // Nothing goes on until a step's choices change.
         choices.touched = Tabs::NONE;
         let tab = self.saved.wizard_tab;
-        let gyfa = cx.entity().downgrade();
+        let efa = cx.entity().downgrade();
         let palette = self.palette;
         let prices = Rc::clone(&self.prices);
         let ship = loaded.catalog.name(facts.ship).into();
@@ -352,7 +352,7 @@ impl Gyfa {
                 on_type(cx, &budget_total, |c, v| c.budget.total = v),
             ];
             let mut panel = WizardPanel {
-                gyfa,
+                efa,
                 loaded,
                 data,
                 pilot,
@@ -449,7 +449,7 @@ impl WizardPanel {
         let placements = self.setup().placements(&self.fit, &self.picks, clear);
         let bling = self.choices.bling.clone();
         window.close_dialog(cx);
-        Gyfa::app_update(&self.gyfa, cx, |g, cx| {
+        Efa::app_update(&self.efa, cx, |g, cx| {
             g.saved.wizard = bling;
             g.apply(Action::ApplyWizard { placements, clear }, cx);
         });
@@ -539,7 +539,7 @@ impl WizardPanel {
         self.note = Some("Fetching prices for the modules the search may try...".into());
         cx.notify();
         let wizard = cx.entity().downgrade();
-        Gyfa::app_update(&self.gyfa, cx, move |g, cx| {
+        Efa::app_update(&self.efa, cx, move |g, cx| {
             g.with_prices_for(types, cx, move |g, cx| {
                 let prices = Rc::clone(&g.prices);
                 // The wizard may be the one asking, so it is updated once this is over.
@@ -859,7 +859,7 @@ impl WizardPanel {
         }
         self.tab = tab;
         self.row = 0;
-        Gyfa::app_update(&self.gyfa, cx, |g, _| {
+        Efa::app_update(&self.efa, cx, |g, _| {
             g.saved.wizard_tab = tab;
             g.save();
         });

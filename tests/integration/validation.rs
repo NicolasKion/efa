@@ -3,7 +3,7 @@
 
 use std::{path::Path, sync::OnceLock};
 
-use gyfa::{
+use efa::{
     data::{Catalog, Slot, TypeId},
     engine::{CalcOptions, Engine, ItemRef, Pilot, Problem},
     fit::Fit,
@@ -142,9 +142,9 @@ fn modules_past_the_rack_are_too_many() {
     let gyro = id(catalog, "Gyrostabilizer II");
     // The Rifter has four low slots; the fifth module sits past the end.
     for _ in 0..5 {
-        fit.low.push(Some(gyfa::fit::Module {
+        fit.low.push(Some(efa::fit::Module {
             type_id: gyro,
-            state: gyfa::fit::ModuleState::Online,
+            state: efa::fit::ModuleState::Online,
             charge: None,
             spool: None,
             mutation: None,

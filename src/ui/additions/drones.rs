@@ -19,7 +19,7 @@ use crate::{
     icons::Icon,
     prices::Prices,
     ui::{
-        Action, AddKind, Gyfa, Loaded,
+        Action, AddKind, Efa, Loaded,
         columns::{ICON_W, STATE_W, text_width},
         fitting::{DragPreview, DragSource, Dragged},
         stats::format::{capitalize, format_list},
@@ -483,7 +483,7 @@ fn misc(catalog: &Catalog, stack: &DroneStack, info: &DroneInfo) -> Option<(Stri
     }
 }
 
-impl Gyfa {
+impl Efa {
     pub(in crate::ui) fn drones_tab(
         &mut self,
         loaded: &Rc<Loaded>,

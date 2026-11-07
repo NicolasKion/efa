@@ -45,7 +45,7 @@ pub const FIT_STRUCTURE_GROUPS: [i32; 3] = [1657, 1404, 1406];
 const GROUP_BOOSTER: i32 = 303;
 /// The market's Implants & Boosters > Booster group.
 const MARKET_BOOSTERS: i32 = 977;
-/// A market group of gyfa's own under it, for usable boosters the market does not sell: AIR,
+/// A market group of efa's own under it, for usable boosters the market does not sell: AIR,
 /// Agency, event and "Limited Synth" doses. Negative so it never meets a real group's ID.
 pub const MARKET_SPECIAL_BOOSTERS: i32 = -MARKET_BOOSTERS;
 /// Tactical destroyer modes.
@@ -967,7 +967,7 @@ fn prune_and_link(groups: &mut BTreeMap<i32, MarketGroup>) {
     }
 }
 
-/// What a cache must have been built from: the cache format, gyfa's version, the dump's release
+/// What a cache must have been built from: the cache format, efa's version, the dump's release
 /// and types.json's size and time, so hand-replaced data is noticed too. None if there is no
 /// data to describe.
 pub fn cache_key(dir: &Path) -> Option<String> {

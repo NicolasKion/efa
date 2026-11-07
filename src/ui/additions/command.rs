@@ -25,7 +25,7 @@ use crate::{
     icons::Icon,
     store::Saved,
     ui::{
-        Gyfa, Loaded,
+        Efa, Loaded,
         columns::{ICON_W, STATE_W},
         widgets::{color, entry, icon_box, icon_label},
     },
@@ -66,7 +66,7 @@ fn row_label(catalog: &Catalog, fit: &Fit) -> String {
     }
 }
 
-impl Gyfa {
+impl Efa {
     /// The command entries behind the clicked row and the selection it belongs to.
     fn command_targets(&self, clicked: usize) -> Vec<usize> {
         let Some(fit) = self.fit() else {
@@ -268,7 +268,7 @@ impl Gyfa {
 /// pyfa's commandFit entries.
 fn command_fit_menu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     n: usize,
     fit_index: usize,
     cx: &mut Context<PopupMenu>,
@@ -281,14 +281,14 @@ fn command_fit_menu(
         let this = this.clone();
         menu = menu.item(
             entry(IconName::ExternalLink, "Open Fit in New Tab").on_click(move |_, _, cx| {
-                Gyfa::app_update(&this, cx, |g, cx| g.open_fit(fit_index, cx));
+                Efa::app_update(&this, cx, |g, cx| g.open_fit(fit_index, cx));
             }),
         );
     }
     let this = this.clone();
     menu.item(
         entry(IconName::Delete, "Remove Command Fit").on_click(move |_, _, cx| {
-            Gyfa::app_update(&this, cx, |g, cx| {
+            Efa::app_update(&this, cx, |g, cx| {
                 let entries = g.command_targets(n);
                 g.remove_command_fits(entries, cx);
             });
@@ -300,7 +300,7 @@ fn command_fit_menu(
 /// with a command burst. Its Generic Links need boosts without a fit, which refine cannot do.
 fn command_view_menu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
@@ -331,7 +331,7 @@ fn command_view_menu(
     let pick = move |index: usize| {
         let this = this.clone();
         move |_: &ClickEvent, _: &mut Window, cx: &mut gpui_kit::App| {
-            Gyfa::app_update(&this, cx, |g, cx| g.link(Link::Command, &[index], cx));
+            Efa::app_update(&this, cx, |g, cx| g.link(Link::Command, &[index], cx));
         }
     };
     menu.submenu_with_element(

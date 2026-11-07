@@ -45,7 +45,7 @@ pub fn export(fits: &[Fit], catalog: &Catalog, minimal: bool) -> String {
     }
 
     let mut out = String::from(
-        "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>gyfa fittings</title>\n\
+        "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>efa fittings</title>\n\
          <style>body{font-family:sans-serif;max-width:60em;margin:1em auto;padding:0 1em}\
          h2{margin-top:1.5em}details{margin:.3em 0}pre{background:#f4f4f4;padding:.5em}</style>\n\
          </head>\n<body>\n<h1>Fittings</h1>\n",

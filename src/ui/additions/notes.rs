@@ -7,13 +7,13 @@ use gpui_kit::{
 };
 
 use crate::fit::Fit;
-use crate::ui::{Gyfa, Loaded};
+use crate::ui::{Efa, Loaded};
 
 /// Longest notes excerpt pyfa puts in a fitting browser tooltip, ellipsis included.
 const TOOLTIP_NOTES_MAX: usize = 200;
 const ELLIPSIS: &str = "...";
 
-impl Gyfa {
+impl Efa {
     pub(in crate::ui) fn notes_tab(
         &mut self,
         _loaded: &Rc<Loaded>,

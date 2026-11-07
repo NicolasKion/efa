@@ -1,16 +1,16 @@
 # pyfa context menus
 
 152 menu entries in 35 right-click contexts (pyfa ContextMenu registry plus 4 hand-built menus).
-gyfa progress is tracked per line below; fitting rows, additions rows and market results have Shift/Ctrl selection, and Ctrl/Alt "all similar" works where pyfa has it.
+efa progress is tracked per line below; fitting rows, additions rows and market results have Shift/Ctrl selection, and Ctrl/Alt "all similar" works where pyfa has it.
 Biggest gaps: Generic Links.
 
-Legend: `[x]` in gyfa, `[~]` partial, `[ ]` missing. Line format: label | when it shows | what it does | pyfa file (in gui/builtinContextMenus/ unless a path is given).
+Legend: `[x]` in efa, `[~]` partial, `[ ]` missing. Line format: label | when it shows | what it does | pyfa file (in gui/builtinContextMenus/ unless a path is given).
 
 ## How pyfa builds menus
 
 - gui/contextMenu.py: `getMenu(callingWindow, mainItem, selection, *fullContexts)`. For each fullContext `(srcContext, itemContext)` in order, every registered menu class is asked `display()`; matching entries are appended in registration order (gui/builtinContextMenus/__init__.py). A separator goes between consecutive source contexts that produced entries. No separators inside one context.
 - itemContext is the clicked item's market category display name ("Module", "Charge", "Drone", "Implant", ...) and fills `{}` in labels.
-- Holding Ctrl while opening shows entries hidden by preference (`visibilitySetting`: ammoPattern, changeAffectingSkills, metaSwap, project, moduleFill, spoolup, additionsCopyPaste; all on by default). gyfa does the same: Ctrl held while a menu opens shows every entry the Context Menus preferences hide.
+- Holding Ctrl while opening shows entries hidden by preference (`visibilitySetting`: ammoPattern, changeAffectingSkills, metaSwap, project, moduleFill, spoolup, additionsCopyPaste; all on by default). efa does the same: Ctrl held while a menu opens shows every entry the Context Menus preferences hide.
 - Ctrl/Alt while clicking an action applies it to all "similar" items (same type) instead of the selection, where noted. "multi" = acts on the whole selection.
 - Registration order (= order inside a context): fitOpenNewTab, fitAddBrowse, fitAddCurrentlyOpen, envEffectAdd, commandFitAdd, commandLinkAdd, targetProfile/adder, graphFitAmmoPicker | shipModeChange, moduleAmmoChange, moduleSpool, moduleRahPattern, boosterSideEffects, fighterAbilities, resistMode, targetProfile/editor | itemStats, itemMarketJump, fitSystemSecurity, fitPilotSecurity, shipJump | itemRemove, itemAmountChange, itemProjectionRange, droneSplitStack, itemVariationChange, itemMutations, moduleFill, moduleMutatedExport, skillAffectors | itemFill, droneAddStack, cargoAdd, cargoFill, cargoAddAmmo, itemProject, ammoToDmgPattern, implantSetApply, implantSetSave | priceOptions | damagePatternChange | factorReload, targetProfile/switcher | graph options | additionsExport*/Import. (The `|` groups are code comments only, not visible separators.)
 
@@ -29,12 +29,12 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 - [x] Apply Mutaplasmid / Revert to {base} | item has mutaplasmids or is mutated | not mutated: submenu of mutaplasmids (Glorified sorted after base name); mutated: plain entry reverting to base item. GuiConvertMutatedLocalModuleCommand / GuiRevertMutatedLocalModuleCommand | itemMutations.py
 - [x] Fill With {Module} | always (pref moduleFill) | clones the module into all free slots of that rack. GuiFillWithClonedLocalModulesCommand | moduleFill.py
 - [x] Copy Module to Clipboard | module is mutated | copies EFT mutant block (item, mutaplasmid, attrs) | moduleMutatedExport.py
-- [x] Change {Module} Skills | some skill modifies a non-zero attr of the item (pref changeAffectingSkills) | submenu per affecting skill, each with "Not Learned", "Level 0".."Level 5" (checked current); changes character skill level and refreshes fit | skillAffectors.py. gyfa lists the skill's current level after its name and greys the levels out for All 0/All 5, which ignore changes in pyfa too
+- [x] Change {Module} Skills | some skill modifies a non-zero attr of the item (pref changeAffectingSkills) | submenu per affecting skill, each with "Not Learned", "Level 0".."Level 5" (checked current); changes character skill level and refreshes fit | skillAffectors.py. efa lists the skill's current level after its name and greys the levels out for All 0/All 5, which ignore changes in pyfa too
 
 ### fittingCharge
 - [x] {Charge} Stats | charge loaded | stats window for the charge | itemStats.py
 - [x] {Charge} Market Group | charge has market group | jump to charge in market | itemMarketJump.py
-- [x] Show Compatible Charges | module loads charges | gyfa extra: lists every charge the module takes in the market's results pane, titled "Charges for {Module}", grouped like the Charge submenu | none
+- [x] Show Compatible Charges | module loads charges | efa extra: lists every charge the module takes in the market's results pane, titled "Charges for {Module}", grouped like the Charge submenu | none
 - [x] Change {Charge} Skills | skills affect charge attrs | as above, on chargeModifiedAttributes | skillAffectors.py
 
 ### fittingMode
@@ -113,7 +113,7 @@ Context depends on implant source: fit implants use implantItem/implantItemMisc,
 - [x] Implant Market Group | has market group | market jump | itemMarketJump.py
 
 ### implantItemMisc / implantItemMiscChar
-- [x] Apply Implant Set | implantItemMisc only, any user or precalculated set exists | submenu: precalculated sets (pirate sets etc., grade submenus Low/Mid/High-grade), separator, "Saved Sets" submenu of user sets; adds all implants of the set (gyfa adds an Implant Set Editor entry at the end) | implantSetApply.py
+- [x] Apply Implant Set | implantItemMisc only, any user or precalculated set exists | submenu: precalculated sets (pirate sets etc., grade submenus Low/Mid/High-grade), separator, "Saved Sets" submenu of user sets; adds all implants of the set (efa adds an Implant Set Editor entry at the end) | implantSetApply.py
 - [x] Save as New Implant Set | fit has applied implants | name dialog, opens implant set editor with them | implantSetSave.py
 - [x] Copy Selected Implants | selection | clipboard export | additionsExportSelection.py
 - [x] Copy All Implants | implants non-empty | clipboard export | additionsExportAll.py
@@ -140,7 +140,7 @@ Contexts: one of projectedModule (+ projectedCharge if loaded) / projectedDrone 
 ### projectedModule (incl. environment effects, which are projected modules)
 - [x] Charge | module has loadable charges | same submenu as fittingModule. GuiChangeProjectedModuleChargesCommand | moduleAmmoChange.py
 - [x] Spoolup Cycles | Precursor Weapon / Mutadaptive RR | as fittingModule. GuiChangeProjectedModuleSpoolCommand | moduleSpool.py
-- [x] Projected Item Stats | row clicked | stats window | itemStats.py. gyfa shows the type's base attributes, environment effects included
+- [x] Projected Item Stats | row clicked | stats window | itemStats.py. efa shows the type's base attributes, environment effects included
 - [x] Projected Item Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Projected Item | row clicked | removes selection, Ctrl/Alt all similar. GuiRemoveProjectedItemsCommand | itemRemove.py
 - [x] Change Projected Item Range | not an exclusive system effect | dialog "New Range, km" (empty = no range) for selection, Ctrl/Alt similar. GuiChangeProjectedItemsProjectionRangeCommand | itemProjectionRange.py
@@ -149,7 +149,7 @@ Contexts: one of projectedModule (+ projectedCharge if loaded) / projectedDrone 
 ### projectedCharge
 - [x] {Charge} Stats | charge loaded | stats window | itemStats.py
 - [x] {Charge} Market Group | has market group | market jump | itemMarketJump.py
-- [x] Show Compatible Charges | module loads charges | gyfa extra, as on fittingCharge | none
+- [x] Show Compatible Charges | module loads charges | efa extra, as on fittingCharge | none
 
 ### projectedDrone
 - [x] Projected Item Stats | row clicked | stats window | itemStats.py
@@ -170,7 +170,7 @@ Contexts: one of projectedModule (+ projectedCharge if loaded) / projectedDrone 
 
 ### projectedFit
 - [x] Open Fit in New Tab | projected fit is not the active fit | opens it in a new tab | fitOpenNewTab.py
-- [x] Projected Item Stats | row clicked | the projected fit's ship, with that fit's bonuses | gyfa extra, pyfa has no stats entry here
+- [x] Projected Item Stats | row clicked | the projected fit's ship, with that fit's bonuses | efa extra, pyfa has no stats entry here
 - [x] Remove Projected Item Stack | row clicked | removes selected projected fits. GuiRemoveProjectedItemsCommand | itemRemove.py
 - [x] Change Projected Item Quantity | row clicked | dialog (0-20), number of copies projected. GuiChangeProjectedFitAmountCommand | itemAmountChange.py
 - [x] Change Projected Item Range | row clicked | range dialog. GuiChangeProjectedItemsProjectionRangeCommand | itemProjectionRange.py
@@ -178,7 +178,7 @@ Contexts: one of projectedModule (+ projectedCharge if loaded) / projectedDrone 
 ### projected (pane background, always last)
 - [x] Add Fit... | always | fit browser dialog (excludes already added), projects chosen fits | fitAddBrowse.py
 - [x] Add Currently Open Fit | active fit exists | submenu "Ship: Fit" for each open tab; projects it | fitAddCurrentlyOpen.py
-- [x] Add Environmental Effect | always | submenu: Metaliminal Storm (Electrical/Exotic/Gamma/Plasma, by strength), Wormhole (Black Hole, Cataclysmic Variable, Magnetar, Pulsar, Red Giant, Wolf Rayet, by class), Abyssal Weather (5 weathers by tier, plus Localized: Bioluminescence/Tachyon/Filament clouds), Sansha Incursion, Drifter Incursion, Triglavian Invasion, FW/Insurgency, IHub Upgrades (Electric/Plasma/Exotic/Gamma). GuiAddProjectedModuleCommand | envEffectAdd.py. gyfa: effects act on the fit like pyfa; abyssal weather and clouds project onto the ship, everything else is a fit-wide effect. No range for them: refine projects environment effects without one
+- [x] Add Environmental Effect | always | submenu: Metaliminal Storm (Electrical/Exotic/Gamma/Plasma, by strength), Wormhole (Black Hole, Cataclysmic Variable, Magnetar, Pulsar, Red Giant, Wolf Rayet, by class), Abyssal Weather (5 weathers by tier, plus Localized: Bioluminescence/Tachyon/Filament clouds), Sansha Incursion, Drifter Incursion, Triglavian Invasion, FW/Insurgency, IHub Upgrades (Electric/Plasma/Exotic/Gamma). GuiAddProjectedModuleCommand | envEffectAdd.py. efa: effects act on the fit like pyfa; abyssal weather and clouds project onto the ship, everything else is a fit-wide effect. No range for them: refine projects environment effects without one
 
 ## Command pane (gui/builtinAdditionPanes/commandView.py)
 
@@ -189,7 +189,7 @@ Contexts: commandFit (row is a fit, not a generic link), separator, commandView 
 - [x] Remove Command Fit | row clicked | removes selected command fits. GuiRemoveCommandFitsCommand | itemRemove.py
 
 ### commandView
-- [x] Add Fit... | always | fit browser dialog, adds as command fits | fitAddBrowse.py. gyfa: a searchable list of saved fits, click to pick, double-click to add one
+- [x] Add Fit... | always | fit browser dialog, adds as command fits | fitAddBrowse.py. efa: a searchable list of saved fits, click to pick, double-click to add one
 - [x] Add Currently Open Fit | active fit exists | submenu of open tabs | fitAddCurrentlyOpen.py
 - [x] Command Fits | active fit and any saved fit carries a command burst | submenu of those fits ("(Ship) Fit"; grouped per ship if 15+). GuiAddCommandFitsCommand | commandFitAdd.py
 - [ ] Generic Links | active fit | submenu: "Max Links", separator, "All Links" (strength x mindlink grid), separator, Shield/Armor/Skirmish/Information/Expedition/Mining category submenus, each link type with leaves "5%/lvl + Mindlink".."0%/lvl + Mindlink", separator, "5%/lvl".."0%/lvl". Injects warfare buffs without a booster fit. GuiAddCommandLinkCommand | commandLinkAdd.py, eos/saveddata/commandLink.py. Left out: refine has no way to add warfare buffs without a burst module on a fit, and a stand-in fit cannot reach pyfa's 0-5%/lvl ship bonus strengths
@@ -198,20 +198,20 @@ Contexts: commandFit (row is a fit, not a generic link), separator, commandView 
 
 Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 - [x] {Category} Stats | always | stats window | itemStats.py
-- [x] {Category} Market Group | marketItemMisc only | jumps to the item's group | itemMarketJump.py. gyfa: anything the results pane lists outside the item's own group (search, recent items, charge lists, a parent group's items)
+- [x] {Category} Market Group | marketItemMisc only | jumps to the item's group | itemMarketJump.py. efa: anything the results pane lists outside the item's own group (search, recent items, charge lists, a parent group's items)
 - [x] Fill With Module | active fit, category Module (pref moduleFill) | adds the module to every free slot. GuiFillWithNewLocalModulesCommand | itemFill.py
 - [x] Add {Drone} to Drone Bay (xN) | active fit, category Drone, room for >= 1 | adds stack sized to bay/bandwidth limit. GuiAddLocalDroneCommand | droneAddStack.py
 - [x] Add {Category} to Cargo | active fit (structures: charges only) | adds 1 to cargo. GuiAddCargoCommand | cargoAdd.py
-- [x] Fill Cargo With {Category} | active fit, item is charge or commodity (gyfa: any cargo-only item) | adds max units that fit. GuiAddCargoCommand | cargoFill.py
+- [x] Fill Cargo With {Category} | active fit, item is charge or commodity (efa: any cargo-only item) | adds max units that fit. GuiAddCargoCommand | cargoFill.py
 - [x] Add {Charge} to Cargo (x1000) / (x8) for Scan Probes | active fit, category Charge | adds 1000 (or 8). GuiAddCargoCommand | cargoAddAmmo.py
 - [x] Project {Category} onto Fit | active non-structure fit, item has a projected effect (pref project) | adds as projected module/drone/fighter. GuiAddProjectedModule/Drone/FighterCommand | itemProject.py
-- [x] Set {Category} as Damage Pattern | active fit, item has em/therm/kin/exp damage attrs (pref ammoPattern) | sets fit damage pattern to the item's damage ratio | ammoToDmgPattern.py; gyfa shows it for items with nonzero damage, the pattern is called Selected Ammo as in pyfa
+- [x] Set {Category} as Damage Pattern | active fit, item has em/therm/kin/exp damage attrs (pref ammoPattern) | sets fit damage pattern to the item's damage ratio | ammoToDmgPattern.py; efa shows it for items with nonzero damage, the pattern is called Selected Ammo as in pyfa
 
 ## Fitting browser (gui/builtinShipBrowser)
 
 ### baseShip (ship row, shipItem.py)
 - [x] Ship Basic Stats | always | stats window for the ship type | itemStats.py. On ship rows and on the ship title above its fits
-- [x] New Fit | always | a fit for the ship named "<ship> fit" | gyfa: pyfa's New button on the ship row
+- [x] New Fit | always | a fit for the ship named "<ship> fit" | efa: pyfa's New button on the ship row
 
 ### fit row (fitItem.py, hand-built wx.Menu, only when a fit is active)
 - [x] Open in new tab | active fit exists | opens the fit in a new tab | gui/builtinShipBrowser/fitItem.py
@@ -284,9 +284,9 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 - [x] Ignore Drone Control Range | dmgStatsGraph, remoteRepsGraph, ewarStatsGraph | checkbox | graphDroneControlRange.py
 - [x] Drone Mode | dmgStatsGraph | radio Auto / Stick to Target / Stick to Attacker | graphDmgDroneMode.py
 
-## gyfa-only today
+## efa-only today
 - Module row State submenu (offline/online/active/overheated): pyfa has no menu for this, it uses clicks on the state column.
-- Fittings browser Delete: pyfa does this with a button on the fit row, not a menu, and asks for confirmation unless Shift is held; gyfa's menu entry (and Fit > Delete Fit) asks the same way, Shift skips it.
+- Fittings browser Delete: pyfa does this with a button on the fit row, not a menu, and asks for confirmation unless Shift is held; efa's menu entry (and Fit > Delete Fit) asks the same way, Shift skips it.
 - Rig/subsystem Remove: same entry as pyfa's fittingModule "Remove Module".
 - Fit tab menu: Rename, Open in New Window, Close, Close Others, then the ship's entries for the active tab. pyfa's tabs have no menu.
 - Market results: actions on several selected items at once.
@@ -327,8 +327,8 @@ refine API paths are under refine-core/src/api. "ui only" = no engine involvemen
 - Stats: yes, drone attrs.
 - Market Group: ui only.
 - Remove Stack: yes, Drone::remove per drone.
-- Change Quantity: yes, but refine drones are single items: add/remove N via Fit::add_drone / Drone::remove (stack is a gyfa concept).
-- Split Stack: ui only on top of the above (stacks are gyfa grouping; per-drone state via Drone::set_state).
+- Change Quantity: yes, but refine drones are single items: add/remove N via Fit::add_drone / Drone::remove (stack is a efa concept).
+- Split Stack: ui only on top of the above (stacks are efa grouping; per-drone state via Drone::set_state).
 - Variations: yes, Drone::set_type_id.
 - Mutaplasmid: yes, Drone::mutate, Mutation::remove.
 - Change Skills: yes, Skill::set_level.

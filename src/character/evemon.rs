@@ -10,7 +10,7 @@ use super::{Character, MAX_LEVEL, SEC_STATUS_RANGE};
 /// Root elements of the character sheets `EVEMon` saves.
 const SHEET_ROOTS: [&str; 2] = ["SerializableCCPCharacter", "SerializableUriCharacter"];
 
-/// Read an `EVEMon` character sheet into a new character named `"<name> (EVEMon)"`. Skills gyfa
+/// Read an `EVEMon` character sheet into a new character named `"<name> (EVEMon)"`. Skills efa
 /// does not know or with impossible levels are left out, as pyfa does.
 pub fn import_sheet(xml: &str, catalog: &Catalog) -> Result<Character, String> {
     let doc = roxmltree::Document::parse(xml).map_err(|e| e.to_string())?;

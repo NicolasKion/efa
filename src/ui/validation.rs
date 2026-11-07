@@ -13,7 +13,7 @@ use gpui_kit::{
     Window, px,
 };
 
-use super::{Gyfa, Loaded, actions::RowRef};
+use super::{Efa, Loaded, actions::RowRef};
 use crate::{
     data::Slot,
     engine::ItemRef,
@@ -36,7 +36,7 @@ pub(super) fn flag(el: Stateful<Div>, why: SharedString, danger: Hsla) -> Statef
         .tooltip(move |window, cx| Tooltip::new(why.clone()).build(window, cx))
 }
 
-impl Gyfa {
+impl Efa {
     /// What is wrong with an item of the current fit, one reason per line.
     pub(super) fn problems_of(&self, loaded: &Loaded, item: ItemRef) -> Option<SharedString> {
         let stats = self.stats.as_ref()?;
@@ -92,7 +92,7 @@ impl Gyfa {
                                 .label("Yes")
                                 .on_click(move |_, window, cx| {
                                     window.close_dialog(cx);
-                                    let _ = yes.update(cx, Gyfa::toggle_restrictions);
+                                    let _ = yes.update(cx, Efa::toggle_restrictions);
                                 }),
                         ),
                 ),

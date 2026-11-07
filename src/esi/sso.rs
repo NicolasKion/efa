@@ -371,7 +371,7 @@ fn check_claims(raw: &RawClaims, client_id: &str, now: u64) -> Result<Claims, St
 }
 
 /// [`validate`] with the SSO's current keys, fetching them again once if the token names a
-/// key gyfa has not seen.
+/// key efa has not seen.
 pub fn verify(http: &Client, token: &str, client_id: &str, now: u64) -> Result<Claims, String> {
     let (_, keys) = endpoints(http, false)?;
     let known = key_id(token).is_some_and(|kid| keys.keys.iter().any(|k| k.kid == kid));
@@ -529,12 +529,12 @@ fn answer(mut stream: TcpStream, state: &str) -> Callback {
         Callback::Other => ("404 Not Found", "Nothing here.".to_owned()),
         Callback::Code(_) => (
             "200 OK",
-            "Logged in. You can close this tab and go back to gyfa.".to_owned(),
+            "Logged in. You can close this tab and go back to efa.".to_owned(),
         ),
         Callback::Refused(e) => ("400 Bad Request", format!("The login failed: {e}")),
     };
     let body = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>gyfa</title></head>\
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>efa</title></head>\
          <body style=\"font-family:sans-serif;margin:3em\"><p>{}</p></body></html>",
         escape_html(&message)
     );

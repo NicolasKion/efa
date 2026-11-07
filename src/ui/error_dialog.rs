@@ -37,11 +37,11 @@ pub fn open(reports: &[Report], cx: &mut App) {
         .join("\n\n");
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::centered(size(px(640.), px(460.)), cx)),
-        app_id: Some("gyfa".into()),
+        app_id: Some("efa".into()),
         ..Default::default()
     };
     let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-        window.set_window_title("gyfa: Error");
+        window.set_window_title("efa: Error");
         cx.new(|cx| ErrorDialog::new(title, text, window, cx))
     });
     if let Err(e) = opened {
@@ -82,7 +82,7 @@ impl Render for ErrorDialog {
                     .child(self.title.clone()),
             )
             .child(div().text_color(theme.muted_foreground).child(
-                "Something went wrong that gyfa did not expect. If it keeps happening, \
+                "Something went wrong that efa did not expect. If it keeps happening, \
                      please report it with the details below.",
             ))
             .child(

@@ -270,7 +270,7 @@ pub fn import(catalog: &Catalog, text: &str) -> Result<Imported, String> {
     to_fit(catalog, &esi)
 }
 
-/// A fitting from ESI or a file as a gyfa fit.
+/// A fitting from ESI or a file as a efa fit.
 pub fn to_fit(catalog: &Catalog, esi: &Fitting) -> Result<Imported, String> {
     if catalog.get(esi.ship_type_id).is_none() {
         return Err(format!("unknown ship #{}", esi.ship_type_id));

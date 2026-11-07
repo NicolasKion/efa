@@ -20,7 +20,7 @@ use gpui_kit::{
 };
 
 use super::{
-    Gyfa, Hub, Loaded,
+    Efa, Hub, Loaded,
     character_editor::CharacterEditor,
     widgets::{entry, icon_label},
 };
@@ -48,7 +48,7 @@ enum CopyStyle {
     EveMon,
 }
 
-impl Gyfa {
+impl Efa {
     /// The current fit's character, or All 5 without a fit or once its character is deleted.
     pub(super) fn fit_character(&self) -> CharacterId {
         self.fit()
@@ -180,7 +180,7 @@ impl Gyfa {
         let hub = self.hub.clone();
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(950.), px(680.)), cx)),
-            app_id: Some("gyfa".into()),
+            app_id: Some("efa".into()),
             ..Default::default()
         };
         let opened = gpui_kit::open_window(options, cx, move |window, cx| {
@@ -317,7 +317,7 @@ impl Gyfa {
                             PopupMenuItem::new(name.clone())
                                 .checked(id == current)
                                 .on_click(move |_, _, cx| {
-                                    Gyfa::app_update(&this, cx, |g, cx| {
+                                    Efa::app_update(&this, cx, |g, cx| {
                                         g.set_fit_character(id, cx);
                                     });
                                 }),
@@ -327,7 +327,7 @@ impl Gyfa {
                     menu.separator()
                         .item(entry(IconName::User, "Open Character Editor").on_click(
                             move |_, _, cx| {
-                                Gyfa::app_update(&this, cx, Gyfa::open_character_editor);
+                                Efa::app_update(&this, cx, Efa::open_character_editor);
                             },
                         ))
                 }
@@ -370,7 +370,7 @@ impl Gyfa {
                 id.is_builtin(),
             )
         });
-        let on = |f: fn(&mut Gyfa, &mut Window, &mut Context<Gyfa>)| {
+        let on = |f: fn(&mut Efa, &mut Window, &mut Context<Efa>)| {
             let this = this.clone();
             move |_: &gpui_kit::ClickEvent, window: &mut Window, cx: &mut App| {
                 let _ = this.update(cx, |g, cx| f(g, window, cx));
@@ -404,7 +404,7 @@ impl Gyfa {
                         window,
                         cx,
                         move |name, cx| {
-                            Gyfa::app_update(&this, cx, |g, cx| {
+                            Efa::app_update(&this, cx, |g, cx| {
                                 g.edit_characters(cx, |c, loaded| {
                                     c.save_as(id, &name, &loaded.catalog);
                                 });
@@ -424,7 +424,7 @@ impl Gyfa {
         .separator()
         .item(
             entry(IconName::FolderOpen, "Import Character File…")
-                .on_click(on(|_, _, cx| Gyfa::import_character_files(cx))),
+                .on_click(on(|_, _, cx| Efa::import_character_files(cx))),
         )
         .item(
             entry(IconName::FileText, "Export Skills Needed…")
@@ -444,17 +444,17 @@ impl Gyfa {
 }
 
 /// The missing-skills icon's menu.
-fn missing_skills_menu(menu: PopupMenu, this: &WeakEntity<Gyfa>) -> PopupMenu {
+fn missing_skills_menu(menu: PopupMenu, this: &WeakEntity<Efa>) -> PopupMenu {
     let copy = |label: &'static str, style: CopyStyle| {
         let this = this.clone();
         entry(IconName::Copy, label).on_click(move |_, _, cx| {
-            Gyfa::app_update(&this, cx, |g, cx| g.copy_missing_skills(style, cx));
+            Efa::app_update(&this, cx, |g, cx| g.copy_missing_skills(style, cx));
         })
     };
     let grant = this.clone();
     menu.item(
         entry(IconName::Plus, "Grant Missing Skills").on_click(move |_, _, cx| {
-            Gyfa::app_update(&grant, cx, Gyfa::grant_missing_skills);
+            Efa::app_update(&grant, cx, Efa::grant_missing_skills);
         }),
     )
     .item(copy("Copy Missing Skills", CopyStyle::List))
@@ -469,7 +469,7 @@ fn missing_skills_menu(menu: PopupMenu, this: &WeakEntity<Gyfa>) -> PopupMenu {
 /// Nothing is added when no skill changes it.
 pub(super) fn skills_submenu(
     menu: PopupMenu,
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     target: SkillTarget,
     window: &mut Window,
@@ -527,7 +527,7 @@ pub(super) fn skills_submenu(
                     let set = |l: Option<u8>| {
                         let this = this.clone();
                         move |_: &gpui_kit::ClickEvent, _: &mut Window, cx: &mut App| {
-                            Gyfa::app_update(&this, cx, |g, cx| g.change_skill_level(skill, l, cx));
+                            Efa::app_update(&this, cx, |g, cx| g.change_skill_level(skill, l, cx));
                         }
                     };
                     // The built-ins keep their levels whatever is picked, as in pyfa.

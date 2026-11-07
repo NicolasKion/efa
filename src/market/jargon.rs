@@ -2,7 +2,7 @@
 //! (service/jargon/): every word of the query is a pattern the item name has to contain, and
 //! community abbreviations like "hml" or "lse" stand for the names they abbreviate.
 //!
-//! The defaults are pyfa's own file. A `user_jargon.yaml` next to gyfa's saved fits adds to them
+//! The defaults are pyfa's own file. A `user_jargon.yaml` next to efa's saved fits adds to them
 //! and wins where both name the same abbreviation, as pyfa's user file does.
 
 use std::{collections::HashMap, fmt, path::PathBuf, sync::OnceLock};
@@ -113,7 +113,7 @@ fn user_file() -> Option<PathBuf> {
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
-    Some(data.join("gyfa").join(USER_FILE))
+    Some(data.join("efa").join(USER_FILE))
 }
 
 /// A parsed market search: each word a pattern the name has to contain somewhere.

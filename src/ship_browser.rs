@@ -290,7 +290,7 @@ pub fn search_ships(catalog: &Catalog, query: &str) -> Vec<TypeId> {
     found
 }
 
-/// The fits changed last, newest first. Fits from before gyfa dated them come last, newest
+/// The fits changed last, newest first. Fits from before efa dated them come last, newest
 /// added first.
 pub fn recent_fits(fits: &[Fit]) -> Vec<usize> {
     let mut found: Vec<usize> = (0..fits.len())

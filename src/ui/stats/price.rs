@@ -14,7 +14,7 @@ use crate::{
     icons::Icon,
     store::PriceTotals,
     ui::{
-        Gyfa,
+        Efa,
         widgets::{icon, icon_box},
     },
 };
@@ -81,7 +81,7 @@ fn isk(v: f64) -> String {
     format!("{} ISK", format::currency(v))
 }
 
-pub(super) fn section(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &App) -> Section {
+pub(super) fn section(p: &Pane<'_>, this: &WeakEntity<Efa>, cx: &App) -> Section {
     let totals = p.price_totals;
     let price =
         FitPrice::with_character_implants(p.fit, p.character_implants, |id| p.prices.get(id));
@@ -168,7 +168,7 @@ pub(super) fn section(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &App) -> Sectio
                 PopupMenuItem::new(label)
                     .checked(on)
                     .on_click(move |_, _, cx| {
-                        Gyfa::app_update(&this, cx, |g, cx| {
+                        Efa::app_update(&this, cx, |g, cx| {
                             flip(&mut g.saved.price_totals);
                             g.save();
                             cx.notify();

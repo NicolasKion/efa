@@ -1,6 +1,6 @@
 //! Unexpected errors for pyfa's error dialog (gui/errorDialog.py): files that could not be read
 //! or written, and panics. They queue up here, wherever they happen, and the main window shows
-//! them. A panic that takes gyfa down is written to a crash file and shown on the next start.
+//! them. A panic that takes efa down is written to a crash file and shown on the next start.
 
 use std::{
     fmt::Write as _,
@@ -20,7 +20,7 @@ pub struct Report {
 }
 
 static PENDING: Mutex<Vec<Report>> = Mutex::new(Vec::new());
-/// A panic of this run is in the crash file; once shown, gyfa lived through it.
+/// A panic of this run is in the crash file; once shown, efa lived through it.
 static CRASH_WRITTEN: AtomicBool = AtomicBool::new(false);
 
 /// Queue an error for the error dialog, and log it.
@@ -68,7 +68,7 @@ pub fn install_panic_hook() {
         let thread = std::thread::current();
         let _ = write!(
             details,
-            "\nthread: {}\ngyfa {}\n\n{}",
+            "\nthread: {}\nefa {}\n\n{}",
             thread.name().unwrap_or("unnamed"),
             env!("CARGO_PKG_VERSION"),
             std::backtrace::Backtrace::force_capture()
@@ -83,7 +83,7 @@ pub fn install_panic_hook() {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(Report {
-                title: "gyfa ran into an unexpected error".to_owned(),
+                title: "efa ran into an unexpected error".to_owned(),
                 details,
             });
     }));
@@ -101,7 +101,7 @@ pub fn queue_last_crash() {
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .push(Report {
-            title: "gyfa closed after an unexpected error last time".to_owned(),
+            title: "efa closed after an unexpected error last time".to_owned(),
             details,
         });
 }
@@ -110,7 +110,7 @@ fn crash_file() -> Option<PathBuf> {
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
-    Some(data.join("gyfa/crash.txt"))
+    Some(data.join("efa/crash.txt"))
 }
 
 #[cfg(test)]

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub const REFRESH_MARGIN: u64 = 60;
 const FILE: &str = "esi.json";
 
-/// A character gyfa may act for.
+/// A character efa may act for.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Account {
@@ -43,7 +43,7 @@ impl Account {
         self.scopes.iter().any(|s| s == scope)
     }
 
-    /// The scopes gyfa asks for that this character did not grant.
+    /// The scopes efa asks for that this character did not grant.
     pub fn missing_scopes(&self) -> Vec<&'static str> {
         super::SCOPES
             .into_iter()
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn saved_privately_without_access_tokens() {
-        let dir = std::env::temp_dir().join(format!("gyfa-esi-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("efa-esi-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join(FILE);
         let mut a = account(7, "secret");

@@ -166,7 +166,7 @@ pub fn path() -> Option<PathBuf> {
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
-    Some(data.join("gyfa/fits.json"))
+    Some(data.join("efa/fits.json"))
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ use gpui_kit::{App, Context, IntoElement, ParentElement, Styled, div, px};
 use super::{Pane, Section, format, muted, tip, title};
 use crate::{
     engine::Cap,
-    ui::{Gyfa, widgets::icon},
+    ui::{Efa, widgets::icon},
 };
 
 pub(super) fn capacitor(p: &Pane<'_>) -> Section {
@@ -141,7 +141,7 @@ fn lock_times(scan_res: Option<f64>) -> String {
 /// A label, a value with its tooltip, the rows pyfa's minimal view is made of.
 type Line = (&'static str, String, String);
 
-pub(super) fn targeting(p: &Pane<'_>, cx: &Context<Gyfa>) -> Section {
+pub(super) fn targeting(p: &Pane<'_>, cx: &Context<Efa>) -> Section {
     let s = p.stats;
     let m = &s.misc;
     let or_zero = |v: Option<f64>| v.unwrap_or(0.0);

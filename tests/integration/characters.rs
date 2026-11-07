@@ -3,7 +3,7 @@
 
 use std::{path::Path, sync::OnceLock};
 
-use gyfa::{
+use efa::{
     character::{
         CharacterId, Characters, Keep,
         requirements::{self, Numerals},

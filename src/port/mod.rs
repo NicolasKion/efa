@@ -113,7 +113,7 @@ pub fn import(catalog: &Catalog, text: &str, file_name: Option<&str>) -> Result<
     if let Some(imported) = dna::import(catalog, text) {
         return imported;
     }
-    Err("not a fit in a format gyfa reads (EFT, DNA, XML, ESI)".to_owned())
+    Err("not a fit in a format efa reads (EFT, DNA, XML, ESI)".to_owned())
 }
 
 /// The ship an EFT config file is for, from its name: "Rifter.cfg" holds Rifter fits.

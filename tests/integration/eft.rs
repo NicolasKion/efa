@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use gyfa::{data::Catalog, fit::Fit};
+use efa::{data::Catalog, fit::Fit};
 
 const DATA: &str = "data/eve";
 

@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use gyfa::{
+use efa::{
     data::{Catalog, Slot},
     engine::{Engine, FitItem},
     fit::Fit,

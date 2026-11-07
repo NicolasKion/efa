@@ -1,5 +1,5 @@
 //! pyfa's Browse EVE Fittings (gui/esiFittings.py `EveFittings`): the fittings a character keeps
-//! in the game, with their contents, to import into gyfa or delete from the game.
+//! in the game, with their contents, to import into efa or delete from the game.
 
 use std::{collections::BTreeSet, rc::Rc, time::Duration};
 
@@ -219,8 +219,8 @@ impl EsiFittingsWindow {
         self.message = Some(if errors.is_empty() {
             (
                 match count {
-                    1 => "Imported 1 fit into gyfa".into(),
-                    n => format!("Imported {n} fits into gyfa").into(),
+                    1 => "Imported 1 fit into efa".into(),
+                    n => format!("Imported {n} fits into efa").into(),
                 },
                 false,
             )
@@ -605,8 +605,8 @@ impl Render for EsiFittingsWindow {
                             .primary()
                             .icon(IconName::Plus)
                             .label(match selected.len() {
-                                0 | 1 => "Import to gyfa".to_owned(),
-                                n => format!("Import {n} to gyfa"),
+                                0 | 1 => "Import to efa".to_owned(),
+                                n => format!("Import {n} to efa"),
                             })
                             .disabled(selected.is_empty())
                             .on_click(cx.listener(|w, _, _, cx| w.import(cx))),

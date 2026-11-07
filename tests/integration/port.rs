@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use gyfa::{
+use efa::{
     data::Catalog,
     fit::{Fit, ModuleState},
     port::{self, dna, eft, esi, html, multibuy, xml},

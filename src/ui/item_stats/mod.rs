@@ -234,14 +234,14 @@ pub fn open(
         })
     });
 
-    let title = format!("gyfa: {} stats", loaded.catalog.name(type_id));
+    let title = format!("efa: {} stats", loaded.catalog.name(type_id));
     let options = WindowOptions {
         window_bounds: Some(bounds),
         titlebar: Some(TitlebarOptions {
             title: Some(title.into()),
             ..Default::default()
         }),
-        app_id: Some("gyfa".into()),
+        app_id: Some("efa".into()),
         ..Default::default()
     };
     let (loaded, hub) = (Rc::clone(loaded), hub.clone());

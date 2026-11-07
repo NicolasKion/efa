@@ -68,11 +68,11 @@ pub fn open(hub: Entity<Hub>, fit: Option<usize>, hidden: bool, cx: &mut App) {
     }
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::centered(size(px(1180.), px(900.)), cx)),
-        app_id: Some("gyfa".into()),
+        app_id: Some("efa".into()),
         ..Default::default()
     };
     let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-        window.set_window_title("gyfa: Graphs");
+        window.set_window_title("efa: Graphs");
         cx.new(|cx| GraphsWindow::new(hub, fit, hidden, window, cx))
     });
     match opened {
@@ -81,7 +81,7 @@ pub fn open(hub: Entity<Hub>, fit: Option<usize>, hidden: bool, cx: &mut App) {
     }
 }
 
-impl super::Gyfa {
+impl super::Efa {
     /// pyfa's Fit > Graphs (Ctrl+G), starting with the current fit. The new window only reads the
     /// hub, never this window, so opening it from inside this window's update is safe.
     pub(super) fn open_graphs(&mut self, cx: &mut App) {

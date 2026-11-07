@@ -2,7 +2,7 @@
 
 use std::{io::Read, path::Path, time::Instant};
 
-use gyfa::{data::Catalog, engine::Engine, fit::Fit};
+use efa::{data::Catalog, engine::Engine, fit::Fit};
 
 fn main() {
     let dir = Path::new("data/eve");

@@ -17,17 +17,17 @@ use gpui_kit::{
     SharedString, Styled, WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
-use super::{AdditionsTab, BrowserTab, Gyfa, actions::Action};
+use super::{AdditionsTab, BrowserTab, Efa, actions::Action};
 use crate::prices::optimize;
 
 /// Key context of a fit window, so text fields keep their own Ctrl+C, Ctrl+V and Ctrl+Z.
-const CONTEXT: &str = "Gyfa";
+const CONTEXT: &str = "Efa";
 
 const WIKI_URL: &str = "https://github.com/pyfa-org/Pyfa/wiki";
 const FORUM_URL: &str = "https://forums.eveonline.com/t/27156";
 
 gpui_kit::actions!(
-    gyfa,
+    efa,
     [
         NewTab,
         CloseTab,
@@ -153,11 +153,11 @@ pub fn cycle_tab(open: &[usize], current: Option<usize>, forward: bool) -> Optio
 
 /// A menu entry that runs `f` on the window and shows `action`'s shortcut.
 fn command(
-    this: &WeakEntity<Gyfa>,
+    this: &WeakEntity<Efa>,
     icon: impl Into<gpui_kit::component::Icon>,
     label: &'static str,
     action: Option<Box<dyn gpui_kit::Action>>,
-    f: fn(&mut Gyfa, &mut Window, &mut Context<Gyfa>),
+    f: fn(&mut Efa, &mut Window, &mut Context<Efa>),
 ) -> PopupMenuItem {
     let this = this.clone();
     let item = PopupMenuItem::new(label)
@@ -171,7 +171,7 @@ fn command(
     }
 }
 
-impl Gyfa {
+impl Efa {
     /// The root element with the menu's shortcuts wired to this window.
     pub(super) fn bind_actions(root: Div, cx: &mut Context<Self>) -> Div {
         let root = root
@@ -187,7 +187,7 @@ impl Gyfa {
             .on_action(cx.listener(|g, _: &Redo, _, cx| g.redo(cx)))
             .on_action(cx.listener(|g, _: &CopyFit, _, cx| g.open_export_window(cx)))
             .on_action(cx.listener(|g, _: &PasteFit, _, cx| g.paste_from_clipboard(cx)))
-            .on_action(cx.listener(|_, _: &ImportFits, _, cx| Gyfa::import_files_dialog(cx)))
+            .on_action(cx.listener(|_, _: &ImportFits, _, cx| Efa::import_files_dialog(cx)))
             .on_action(cx.listener(|g, _: &ExportFit, _, cx| g.save_fit_dialog(cx)))
             .on_action(cx.listener(|g, _: &OpenPreferences, _, cx| g.open_preferences(cx)))
             .on_action(cx.listener(|g, _: &CharacterEditor, _, cx| {
@@ -421,7 +421,7 @@ impl Gyfa {
                         gpui_kit::assets::IconName::WandSparkles,
                         "Fitting Wizard…",
                         Some(Box::new(FittingWizard)),
-                        Gyfa::open_wizard,
+                        Efa::open_wizard,
                     )
                     .disabled(!has_ship),
                 )
@@ -448,7 +448,7 @@ impl Gyfa {
                     IconName::FileText,
                     "From Text…",
                     None,
-                    |_, window, cx| Gyfa::open_import_dialog(window, cx),
+                    |_, window, cx| Efa::open_import_dialog(window, cx),
                 ))
                 .separator()
                 .item(command(
@@ -456,7 +456,7 @@ impl Gyfa {
                     IconName::FolderOpen,
                     "Import Fittings",
                     Some(Box::new(ImportFits)),
-                    |_, _, cx| Gyfa::import_files_dialog(cx),
+                    |_, _, cx| Efa::import_files_dialog(cx),
                 ))
                 .item(
                     command(
@@ -497,7 +497,7 @@ impl Gyfa {
                             "Disable Fitting Restrictions"
                         },
                         None,
-                        Gyfa::confirm_restrictions_toggle,
+                        Efa::confirm_restrictions_toggle,
                     )
                     .disabled(!has_fit),
                 )
@@ -663,7 +663,7 @@ impl Gyfa {
                     IconName::Info,
                     "About",
                     None,
-                    |_, window, cx| Gyfa::open_about(window, cx),
+                    |_, window, cx| Efa::open_about(window, cx),
                 ))
             }) as Box<dyn Fn(PopupMenu) -> PopupMenu>
         };
@@ -693,10 +693,10 @@ impl Gyfa {
     }
 
     fn open_about(window: &mut Window, cx: &mut Context<Self>) {
-        let version: SharedString = format!("gyfa {}", env!("CARGO_PKG_VERSION")).into();
+        let version: SharedString = format!("efa {}", env!("CARGO_PKG_VERSION")).into();
         window.open_dialog(cx, move |dialog, _, cx| {
             let muted = cx.theme().muted_foreground;
-            dialog.title("About gyfa").w(px(420.)).child(
+            dialog.title("About efa").w(px(420.)).child(
                 v_flex()
                     .gap_2()
                     .child(div().text_lg().child(version.clone()))
