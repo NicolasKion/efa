@@ -75,10 +75,7 @@ impl Saved {
         let Some(path) = path() else {
             return Self::default();
         };
-        let mut saved: Self = std::fs::read(&path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default();
+        let mut saved: Self = crate::persist::load(&path);
         saved.open.retain(|&i| i < saved.fits.len());
         saved.current = saved.current.filter(|c| saved.open.contains(c));
         saved.dedupe_uids();
@@ -145,15 +142,9 @@ impl Saved {
         }
     }
 
-    /// Write the fits out. Goes through a temporary file so a crash mid-write cannot lose them.
+    /// Write the fits out, keeping the previous file as a backup.
     pub fn save(&self) -> Result<(), String> {
-        let path = path().ok_or("no home directory")?;
-        let dir = path.parent().ok_or("no data directory")?;
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        let json = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, json).map_err(|e| format!("{}: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, &path).map_err(|e| format!("{}: {e}", path.display()))
+        crate::persist::save(&path().ok_or("no home directory")?, self)
     }
 }
 
