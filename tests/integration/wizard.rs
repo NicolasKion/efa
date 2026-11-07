@@ -241,3 +241,28 @@ fn masteries_decide_the_weapons() {
         "the Raven's mastery asks for shield tanking"
     );
 }
+
+#[test]
+fn battleships_can_take_a_grappler() {
+    let Some((catalog, engine, data)) = setup() else {
+        return;
+    };
+    let fit = ship(catalog, "Abaddon");
+    let (facts, families) = hull(catalog, engine, data, &fit);
+    let wizard = Setup::new(catalog, data, &facts, &families);
+    assert!(wizard::Utility::Grappler.fits(facts.size));
+    let name = wizard.utility_name(wizard::Utility::Grappler, None);
+    assert!(catalog.find(&name).is_some(), "{name} is in the catalog");
+    let mut choices = wizard.defaults();
+    choices.utilities = vec![wizard::Utility::Grappler];
+    let picks = wizard.plan(&fit, &choices);
+    assert!(
+        names(catalog, &picks, Slot::Mid)
+            .iter()
+            .any(|n| n.contains("Stasis Grappler")),
+        "the grappler goes in a mid slot"
+    );
+    let frigate = ship(catalog, "Rifter");
+    let (facts, _) = hull(catalog, engine, data, &frigate);
+    assert!(!wizard::Utility::Grappler.fits(facts.size));
+}

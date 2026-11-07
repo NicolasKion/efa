@@ -376,7 +376,9 @@ impl WizardPanel {
                             label: u.label().into(),
                             icon: id,
                             on: c.has(u),
-                            disabled: id.is_none() || self.facts.total(u.slot()) == 0,
+                            disabled: id.is_none()
+                                || self.facts.total(u.slot()) == 0
+                                || !u.fits(self.facts.size),
                         }
                     })
                     .collect()

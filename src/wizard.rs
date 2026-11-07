@@ -238,6 +238,8 @@ pub enum Utility {
     Scram,
     Point,
     Web,
+    /// The heavy stasis grappler, a short-range web for battleships and up.
+    Grappler,
     Neut,
     Nos,
     SensorBooster,
@@ -247,10 +249,11 @@ pub enum Utility {
 }
 
 impl Utility {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Scram,
         Self::Point,
         Self::Web,
+        Self::Grappler,
         Self::Neut,
         Self::Nos,
         Self::SensorBooster,
@@ -258,6 +261,11 @@ impl Utility {
         Self::CapBooster,
         Self::Enhancer,
     ];
+
+    /// Whether a hull of this size can use it: grapplers only fit battleships and bigger.
+    pub fn fits(self, size: HullSize) -> bool {
+        self != Self::Grappler || matches!(size, HullSize::Large | HullSize::Capital)
+    }
 
     pub fn slot(self) -> Slot {
         match self {
@@ -272,6 +280,7 @@ impl Utility {
             Self::Scram => "Scram",
             Self::Point => "Point",
             Self::Web => "Web",
+            Self::Grappler => "Grappler",
             Self::Neut => "Neut",
             Self::Nos => "Nos",
             Self::SensorBooster => "Sensor booster",
@@ -284,7 +293,7 @@ impl Utility {
     /// What is kept longest when the fit has to shrink.
     fn priority(self) -> u8 {
         match self {
-            Self::Scram | Self::Point | Self::Web => 8,
+            Self::Scram | Self::Point | Self::Web | Self::Grappler => 8,
             Self::CapBooster => 4,
             Self::Neut => 3,
             Self::Nos => 2,
@@ -866,6 +875,7 @@ impl<'a> Setup<'a> {
             Utility::Scram => "Warp Scrambler I".into(),
             Utility::Point => "Warp Disruptor I".into(),
             Utility::Web => "Stasis Webifier I".into(),
+            Utility::Grappler => "Heavy Stasis Grappler I".into(),
             Utility::Neut => format!("{} Energy Neutralizer I", size.energy_word()),
             Utility::Nos => format!("{} Energy Nosferatu I", size.energy_word()),
             Utility::SensorBooster => "Sensor Booster I".into(),
