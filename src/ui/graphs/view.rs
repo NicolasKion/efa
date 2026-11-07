@@ -74,8 +74,8 @@ impl Render for GraphsWindow {
 }
 
 impl GraphsWindow {
-    /// The graph picker and the axis pickers, each under a small label.
-    fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The axis pickers, under the plot as in pyfa.
+    fn axes(&self, cx: &mut Context<Self>) -> AnyElement {
         let x_labels: Vec<String> = self
             .x_defs()
             .iter()
@@ -90,7 +90,6 @@ impl GraphsWindow {
             self.x.min(x_labels.len() - 1),
             self.y.min(y_labels.len() - 1),
         );
-        let graph = self.graph_selector(cx);
         let y_axis = Self::axis_button(
             "axis-y",
             y_labels,
@@ -114,6 +113,23 @@ impl GraphsWindow {
                 cx,
             )
         });
+        let mut rows = vec![panel::row("Y axis", "What the plot shows.", y_axis, cx)];
+        if let Some(x_axis) = x_axis {
+            rows.push(panel::row(
+                "X axis",
+                "What it is plotted against.",
+                x_axis,
+                cx,
+            ));
+        }
+        panel::section("Axes", rows, cx)
+    }
+
+    /// The graph picker, what the plot shows, and the readout or a hint, as pyfa heads its
+    /// window with the graph choice.
+    fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let graph = self.graph_selector(cx);
+        let header = self.plot_header(cx);
         let theme = cx.theme();
         h_flex()
             .flex_none()
@@ -125,10 +141,7 @@ impl GraphsWindow {
             .border_color(theme.border)
             .bg(theme.sidebar)
             .child(picker("Graph", graph, cx))
-            .child(picker("Y axis", y_axis, cx))
-            .when_some(x_axis, |bar, x_axis| {
-                bar.child(picker("X axis", x_axis, cx))
-            })
+            .child(header)
     }
 
     fn graph_selector(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -141,7 +154,7 @@ impl GraphsWindow {
         Button::new("graph-select")
             .outline()
             .small()
-            .w(px(240.))
+            .w(px(200.))
             .dropdown_caret(true)
             .label(current.name())
             .dropdown_menu(move |menu, _, _| {
@@ -171,7 +184,7 @@ impl GraphsWindow {
         Button::new(id)
             .outline()
             .small()
-            .w(px(240.))
+            .w(px(200.))
             .dropdown_caret(true)
             .label(label)
             .dropdown_menu(move |menu, _, _| {
@@ -190,9 +203,8 @@ impl GraphsWindow {
     }
 
     /// The plot in a card, under a header naming the axes, with the pinned readout or a hint.
-    fn plot_card(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mark = self.hover_mark.or(self.pinned_mark);
-        let plot = canvas::render(&self.lines, &self.frame, mark, &self.plot_bounds, cx);
+    /// What the plot shows, and the pinned readout or a hint on the right.
+    fn plot_header(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let frame = &self.frame;
         let title = canvas::axis_label(&frame.y_label, frame.y_unit);
@@ -247,10 +259,10 @@ impl GraphsWindow {
             )
         };
 
-        let header = h_flex()
+        h_flex()
+            .flex_1()
+            .min_w_0()
             .gap_2()
-            .px_2()
-            .pt_1()
             .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
             .child(
                 div()
@@ -261,8 +273,15 @@ impl GraphsWindow {
                     .truncate()
                     .child(subtitle),
             )
-            .child(div().flex_none().child(aside));
+            .child(div().flex_none().child(aside))
+            .into_any_element()
+    }
 
+    fn plot_card(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mark = self.hover_mark.or(self.pinned_mark);
+        let plot = canvas::render(&self.lines, &self.frame, mark, &self.plot_bounds, cx);
+        let theme = cx.theme();
+        let empty = self.lines.is_empty();
         // With nothing plotted, say why over the empty axes.
         let notice = self.status.clone().filter(|_| empty).map(|status| {
             v_flex()
@@ -290,24 +309,19 @@ impl GraphsWindow {
                 )
         });
 
-        v_flex()
-            .flex_1()
-            .min_h(px(240.))
-            .overflow_hidden()
-            .child(header)
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_h(px(200.))
-                    .child(plot)
-                    .children(notice),
-            )
+        v_flex().flex_1().min_h(px(240.)).overflow_hidden().child(
+            div()
+                .relative()
+                .flex_1()
+                .min_h(px(200.))
+                .child(plot)
+                .children(notice),
+        )
     }
 
     /// The column of settings cards: inputs, movement, options, ammo and display.
     fn settings_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut sections = Vec::new();
+        let mut sections = vec![self.axes(cx)];
         let fields: Vec<AnyElement> = self
             .main_input
             .iter()
