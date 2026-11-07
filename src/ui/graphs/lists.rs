@@ -8,6 +8,7 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     h_flex,
     menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
+    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
@@ -91,6 +92,30 @@ const SWATCH_W: f32 = 36.;
 const ICON: f32 = 20.;
 /// A value column.
 const COL_W: f32 = 80.;
+/// The least a row's name keeps before value columns drop off its end.
+const NAME_MIN_W: f32 = 120.;
+
+/// How many of `cols` fit in a list `width` wide, after the swatch, icon and a readable name.
+/// The rest are told in the row's tooltip.
+fn shown_columns(cols: &[Column], width: f32) -> usize {
+    // The card's border, the row's margin and padding, the swatch, the icon and their gaps.
+    let fixed = 2. + 8. + 16. + SWATCH_W + 8. + ICON + NAME_MIN_W;
+    let room = ((width - fixed) / (COL_W + 8.)).floor().max(0.);
+    cols.len().min(room as usize)
+}
+
+/// The values of the columns that did not fit, for a row's tooltip.
+fn hidden_values(
+    cols: &[Column],
+    shown: usize,
+    value: impl Fn(Column) -> String,
+) -> Option<SharedString> {
+    let lines: Vec<String> = cols[shown..]
+        .iter()
+        .map(|&c| format!("{}: {}", c.header(), value(c)))
+        .collect();
+    (!lines.is_empty()).then(|| lines.join("\n").into())
+}
 
 fn is_delete(event: &KeyDownEvent) -> bool {
     let key = &event.keystroke;
@@ -296,9 +321,30 @@ fn row_frame(id: SharedString, selected: bool, cx: &App) -> gpui_kit::Stateful<D
         .when(!selected, |r| r.hover(|s| s.bg(theme.list_hover)))
 }
 
-pub fn sources(g: &mut GraphsWindow, cx: &mut Context<GraphsWindow>) -> AnyElement {
+/// A list's value columns, and how many of them fit.
+#[derive(Clone, Copy)]
+struct Columns<'a> {
+    all: &'a [Column],
+    shown: usize,
+}
+
+impl<'a> Columns<'a> {
+    fn new(all: &'a [Column], width: f32) -> Self {
+        Self {
+            all,
+            shown: shown_columns(all, width),
+        }
+    }
+
+    fn shown(self) -> &'a [Column] {
+        &self.all[..self.shown]
+    }
+}
+
+/// The fit list, `width` wide.
+pub fn sources(g: &mut GraphsWindow, width: f32, cx: &mut Context<GraphsWindow>) -> AnyElement {
     let this = cx.entity().downgrade();
-    let cols = g.graph.src_columns();
+    let cols = Columns::new(g.graph.src_columns(), width);
     let (fits, tabs) = fit_choices(g);
     let rows: Vec<AnyElement> = (0..g.sources.len())
         .map(|i| source_row(g, i, cols, &this, &fits, &tabs, cx))
@@ -370,7 +416,7 @@ pub fn sources(g: &mut GraphsWindow, cx: &mut Context<GraphsWindow>) -> AnyEleme
             [add, remove],
             cx,
         ))
-        .child(header(cols, "Fit", cx))
+        .child(header(cols.shown(), "Fit", cx))
         .child(body)
         .into_any_element()
 }
@@ -560,7 +606,7 @@ fn pick_ammo(
 fn source_row(
     g: &mut GraphsWindow,
     i: usize,
-    cols: &[Column],
+    cols: Columns,
     this: &Weak,
     fits: &Choices,
     tabs: &Choices,
@@ -597,16 +643,21 @@ fn source_row(
             })
     };
     let icon = ship_icon(g, Some(source.fit), AssetIcon::Rocket, cx);
+    let value = |c: Column| {
+        snap.as_ref().map_or_else(String::new, |s| match c {
+            Column::DampScanRes => damp_scan_res(s),
+            _ => ship_column(c, &s.ship),
+        })
+    };
+    let hidden = hidden_values(cols.all, cols.shown, value);
     row_frame(SharedString::from(format!("src-row-{i}")), selected, cx)
         .child(picker)
         .child(icon)
         .child(div().flex_1().min_w_0().truncate().text_sm().child(name))
-        .children(cols.iter().map(|&c| {
-            value_cell().child(snap.as_ref().map_or_else(String::new, |s| match c {
-                Column::DampScanRes => damp_scan_res(s),
-                _ => ship_column(c, &s.ship),
-            }))
-        }))
+        .children(cols.shown().iter().map(|&c| value_cell().child(value(c))))
+        .when_some(hidden, |row, tip| {
+            row.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+        })
         .on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
             if event.click_count() >= 2 {
                 // pyfa removes a row on double-click.
@@ -628,13 +679,15 @@ fn source_row(
         .into_any_element()
 }
 
-pub fn targets(g: &mut GraphsWindow, cx: &mut Context<GraphsWindow>) -> AnyElement {
+/// The target list, `width` wide.
+pub fn targets(g: &mut GraphsWindow, width: f32, cx: &mut Context<GraphsWindow>) -> AnyElement {
     let this = cx.entity().downgrade();
-    let cols = g.graph.tgt_columns(g.options().ignore_resists);
+    let all = g.graph.tgt_columns(g.options().ignore_resists);
+    let cols = Columns::new(&all, width);
     let (fits, tabs) = fit_choices(g);
     let ignore_resists = g.options().ignore_resists;
     let rows: Vec<AnyElement> = (0..g.targets.len())
-        .map(|i| target_row(g, i, &cols, &this, &fits, &tabs, ignore_resists, cx))
+        .map(|i| target_row(g, i, cols, &this, &fits, &tabs, ignore_resists, cx))
         .collect();
     let empty = rows.is_empty();
     let add = {
@@ -700,7 +753,7 @@ pub fn targets(g: &mut GraphsWindow, cx: &mut Context<GraphsWindow>) -> AnyEleme
             [add, remove],
             cx,
         ))
-        .child(header(&cols, "Target", cx))
+        .child(header(cols.shown(), "Target", cx))
         .child(body)
         .into_any_element()
 }
@@ -815,7 +868,7 @@ fn target_menu(
 fn target_row(
     g: &mut GraphsWindow,
     i: usize,
-    cols: &[Column],
+    cols: Columns,
     this: &Weak,
     fits: &Choices,
     tabs: &Choices,
@@ -900,11 +953,15 @@ fn target_row(
         TargetKind::Profile(_) => None,
     };
     let icon = ship_icon(g, fit, AssetIcon::Target, cx);
+    let hidden = hidden_values(cols.all, cols.shown, value);
     row_frame(SharedString::from(format!("tgt-row-{i}")), selected, cx)
         .child(picker)
         .child(icon)
         .child(div().flex_1().min_w_0().truncate().text_sm().child(name))
-        .children(cols.iter().map(|&c| value_cell().child(value(c))))
+        .children(cols.shown().iter().map(|&c| value_cell().child(value(c))))
+        .when_some(hidden, |row, tip| {
+            row.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+        })
         .on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
             if event.click_count() >= 2 {
                 g.remove_target(i);

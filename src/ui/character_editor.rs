@@ -599,7 +599,7 @@ impl CharacterEditor {
                         theme.muted_foreground
                     }),
             )
-            .child(div().flex_1().truncate().child(name.to_owned()))
+            .child(div().flex_1().min_w_0().truncate().child(name.to_owned()))
             .child({
                 let (text, capped) = self.level_text(skill);
                 div()
@@ -799,7 +799,13 @@ impl CharacterEditor {
                 Icon::Type(implant),
                 20.,
             ))
-            .child(div().flex_1().truncate().child(catalog.name(implant)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .child(catalog.name(implant)),
+            )
             .children(trailing)
     }
 
@@ -875,6 +881,7 @@ impl CharacterEditor {
             .child(
                 v_flex()
                     .flex_1()
+                    .min_w_0()
                     .h_full()
                     .gap_1()
                     .child(Input::new(&self.implant_search).small())
@@ -899,6 +906,7 @@ impl CharacterEditor {
                 v_flex()
                     .id("editor-plugged")
                     .flex_1()
+                    .min_w_0()
                     .h_full()
                     .overflow_y_scroll()
                     .border_1()
@@ -1116,6 +1124,7 @@ impl CharacterEditor {
             .gap_2()
             .child(
                 h_flex()
+                    .flex_wrap()
                     .gap_2()
                     .child(div().text_color(muted).child("EVE character"))
                     .children(picker)

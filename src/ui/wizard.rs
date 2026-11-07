@@ -44,9 +44,66 @@ use crate::{
     },
 };
 
-/// Room the overlay leaves to each edge of the window.
+/// Room the overlay leaves to each edge of the window, and in a small window.
 const INSET: f32 = 24.;
+/// The dialog keeps at least 16 px clear of every edge itself.
+const SMALL_INSET: f32 = 16.;
 const PREVIEW_W: f32 = 320.;
+/// Below this window width the preview folds behind a button in the footer.
+const FOLD_PREVIEW_W: f32 = 900.;
+/// Below this window width rows put their controls under their names, and the step list and
+/// footer keep only what they need.
+const COMPACT_W: f32 = 640.;
+/// What the ship's name keeps beside the steps before they drop under it.
+const SHIP_MIN_W: f32 = 180.;
+
+/// How the panel fits the window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Layout {
+    /// The preview beside the step.
+    Wide,
+    /// The preview behind a button in the footer.
+    Folded,
+    /// Folded, and rows put their controls under their names.
+    Compact,
+}
+
+impl Layout {
+    fn of(width: gpui_kit::Pixels) -> Self {
+        if width < px(COMPACT_W) {
+            Self::Compact
+        } else if width < px(FOLD_PREVIEW_W) {
+            Self::Folded
+        } else {
+            Self::Wide
+        }
+    }
+
+    fn folded(self) -> bool {
+        self != Self::Wide
+    }
+
+    fn compact(self) -> bool {
+        self == Self::Compact
+    }
+}
+
+/// What a folded panel shows: the step, or the preview in its place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pane {
+    Step,
+    Preview,
+}
+
+/// Room the overlay leaves to the window's edges: less in a small window.
+fn inset(window: &Window) -> f32 {
+    let size = window.viewport_size();
+    if size.width < px(COMPACT_W) || size.height < px(480.) {
+        SMALL_INSET
+    } else {
+        INSET
+    }
+}
 const ICON: f32 = 16.;
 /// Icons in the results table's module strip.
 const STRIP_ICON: f32 = 20.;
@@ -253,6 +310,10 @@ pub(super) struct WizardPanel {
     repairers_short: Option<usize>,
     /// The tank's module rows are open.
     fine_tune: bool,
+    /// How much room the window leaves; set on every render.
+    layout: Layout,
+    /// With the preview folded, which of it and the step shows.
+    pane: Pane,
     focus: FocusHandle,
     focused: bool,
     palette: Palette,
@@ -376,6 +437,8 @@ impl Efa {
                 limit: None,
                 repairers_short: None,
                 fine_tune: false,
+                layout: Layout::Wide,
+                pane: Pane::Step,
                 focus: cx.focus_handle(),
                 focused: false,
                 palette,
@@ -390,9 +453,10 @@ impl Efa {
         });
         // The panel draws its own header and padding, so the overlay is all of it.
         window.open_dialog(cx, move |dialog, window, _| {
+            let inset = inset(window);
             dialog
-                .w(window.viewport_size().width - px(2. * INSET))
-                .margin_top(px(INSET))
+                .w(window.viewport_size().width - px(2. * inset))
+                .margin_top(px(inset))
                 .p_0()
                 .child(panel.clone())
         });
@@ -2218,9 +2282,11 @@ impl WizardPanel {
         let active = cursor == Some(row);
         let tip = (!inline && !matches!(row, Row::Utility(u) if !self.choices.has(u)))
             .then_some(description.clone());
+        let compact = self.layout.compact();
         let label = h_flex()
             .id(SharedString::from(format!("wizard-label-{}", row.key())))
-            .w(px(LABEL_W))
+            .when(compact, gpui_kit::Styled::w_full)
+            .when(!compact, |d| d.w(px(LABEL_W)))
             .h(px(LINE_H))
             .flex_none()
             .gap_1()
@@ -2242,10 +2308,11 @@ impl WizardPanel {
                 )
                 .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
             });
+        // A compact row puts its controls under its name.
         h_flex()
             .id(SharedString::from(format!("wizard-row-{}", row.key())))
-            .items_start()
-            .gap_4()
+            .when(compact, |d| d.flex_col().items_stretch().gap_0p5())
+            .when(!compact, |d| d.items_start().gap_4())
             .px_3()
             .py_1()
             .rounded_r(px(4.))
@@ -2418,14 +2485,14 @@ impl WizardPanel {
                                     .gap_1p5()
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
-                                    .child(UiIcon::new(AssetIcon::Info).xsmall())
-                                    .child(if tab == Tab::Tank {
+                                    .child(UiIcon::new(AssetIcon::Info).xsmall().flex_none())
+                                    .child(div().flex_1().min_w_0().child(if tab == Tab::Tank {
                                         "Nothing from this step goes on until you change \
                                          something here or find a tank."
                                     } else {
                                         "Nothing from this step goes on until you change \
                                          something here."
-                                    }),
+                                    })),
                             )
                         }),
                 ),
@@ -2529,15 +2596,17 @@ impl WizardPanel {
                                     .when(!current, |d| d.text_color(theme.muted_foreground))
                                     .child(tab.label()),
                             )
-                            .child(
-                                div()
-                                    .max_w(px(200.))
-                                    .truncate()
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .when(adds, |d| d.text_color(theme.foreground.opacity(0.8)))
-                                    .child(text),
-                            ),
+                            .when(!self.layout.compact(), |d| {
+                                d.child(
+                                    div()
+                                        .max_w(px(200.))
+                                        .truncate()
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .when(adds, |d| d.text_color(theme.foreground.opacity(0.8)))
+                                        .child(text),
+                                )
+                            }),
                     )
                     .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
                     .on_mouse_down(
@@ -2983,14 +3052,47 @@ impl WizardPanel {
                 )
                 .build(window, cx)
             });
+        let show_preview = self.pane == Pane::Preview;
+        let preview_toggle = self.layout.folded().then(|| {
+            Button::new("wizard-preview-toggle")
+                .small()
+                .ghost()
+                .tab_stop(false)
+                .icon(if show_preview {
+                    AssetIcon::ListChecks
+                } else {
+                    AssetIcon::ChartColumn
+                })
+                .label(if show_preview { "Choices" } else { "Preview" })
+                .tooltip(if show_preview {
+                    "Back to the step's choices"
+                } else {
+                    "What the fit looks like with these modules"
+                })
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.pane = if show_preview {
+                        Pane::Step
+                    } else {
+                        Pane::Preview
+                    };
+                    cx.notify();
+                    this.refocus(window, cx);
+                }))
+        });
+        // A compact footer drops the key hints and wraps its buttons rather than pushing them
+        // out of the window.
         h_flex()
             .flex_none()
+            .flex_wrap()
+            .justify_end()
             .gap_2()
-            .px_5()
+            .when(self.layout.compact(), gpui_kit::Styled::px_3)
+            .when(!self.layout.compact(), gpui_kit::Styled::px_5)
             .py_2p5()
             .border_t_1()
             .border_color(theme.border)
-            .child(hints)
+            .when(!self.layout.compact(), |d| d.child(hints))
+            .children(preview_toggle)
             .child(
                 Button::new("wizard-back")
                     .small()
@@ -3065,10 +3167,14 @@ impl WizardPanel {
         let steps = self.steps(cx);
         let theme = cx.theme();
         let catalog = &self.loaded.catalog;
+        // The steps drop under the ship when the two don't fit on a line.
         h_flex()
             .flex_none()
-            .gap_6()
-            .px_5()
+            .flex_wrap()
+            .gap_x_6()
+            .gap_y_1()
+            .when(self.layout.compact(), gpui_kit::Styled::px_3)
+            .when(!self.layout.compact(), gpui_kit::Styled::px_5)
             .py_2p5()
             // Room for the dialog's close button.
             .pr_12()
@@ -3077,7 +3183,7 @@ impl WizardPanel {
             .child(
                 h_flex()
                     .flex_1()
-                    .min_w_0()
+                    .min_w(px(SHIP_MIN_W))
                     .gap_3()
                     .child(widgets::icon_box(
                         catalog,
@@ -3358,13 +3464,25 @@ impl Render for WizardPanel {
             let focus = self.focus.clone();
             window.defer(cx, move |window, cx| window.focus(&focus, cx));
         }
+        let viewport = window.viewport_size();
+        self.layout = Layout::of(viewport.width);
+        if !self.layout.folded() {
+            self.pane = Pane::Step;
+        }
+        // Folded, the preview shows in place of the step when asked for.
+        let (show_body, show_preview) = match (self.layout.folded(), self.pane == Pane::Preview) {
+            (false, _) => (true, true),
+            (true, preview) => (!preview, preview),
+        };
         let cursor = self.current_row();
         let header = self.header(cx);
-        let body = self.step_body(cursor, cx);
+        let body = show_body.then(|| self.step_body(cursor, cx));
         let footer = self.footer(cx);
-        let preview = self.preview(cx);
-        let height = window.viewport_size().height - px(2. * INSET);
+        let preview = show_preview.then(|| self.preview(cx));
+        let height = viewport.height - px(2. * inset(window));
         let theme = cx.theme();
+        let folded = self.layout.folded();
+        let compact = self.layout.compact();
         v_flex()
             .track_focus(&self.focus)
             .key_context("FittingWizard")
@@ -3379,30 +3497,32 @@ impl Render for WizardPanel {
                     .flex_1()
                     .min_h_0()
                     .items_start()
-                    .child(
+                    .children(body.map(|body| {
                         div()
                             .flex_1()
                             .min_w_0()
                             .h_full()
-                            .pl_3()
-                            .pr_3()
-                            .pt_5()
-                            .child(body),
-                    )
-                    .child(
+                            .when(compact, |d| d.px_1().pt_3())
+                            .when(!compact, |d| d.px_3().pt_5())
+                            .child(body)
+                    }))
+                    .children(preview.map(|preview| {
                         v_flex()
                             .id("wizard-preview")
-                            .w(px(PREVIEW_W))
-                            .flex_none()
+                            .when(folded, |d| d.flex_1().min_w_0())
+                            .when(!folded, |d| {
+                                d.w(px(PREVIEW_W))
+                                    .flex_none()
+                                    .border_l_1()
+                                    .border_color(theme.border)
+                            })
                             .h_full()
                             .overflow_y_scroll()
-                            .px_5()
-                            .pt_5()
+                            .when(compact, |d| d.px_3().pt_3())
+                            .when(!compact, |d| d.px_5().pt_5())
                             .pb_4()
-                            .border_l_1()
-                            .border_color(theme.border)
-                            .child(preview),
-                    ),
+                            .child(preview)
+                    })),
             )
             .child(footer)
     }

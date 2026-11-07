@@ -37,6 +37,12 @@ use crate::{
     target_profile::{self, TargetProfile},
 };
 
+/// The list's width, and its width in a narrow window.
+const LIST_W: f32 = 250.;
+const LIST_NARROW_W: f32 = 170.;
+/// Below this width the list narrows and the fields' notes give way first.
+const NARROW_W: f32 = 640.;
+
 /// One value field of an entry.
 #[derive(Debug, Clone, Copy)]
 pub struct Field {
@@ -825,7 +831,7 @@ impl<K: Kind> Editor<K> {
             }))
     }
 
-    fn list(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn list(&self, width: f32, cx: &mut Context<Self>) -> impl IntoElement {
         let user: Vec<String> = self
             .user(cx)
             .iter()
@@ -866,7 +872,8 @@ impl<K: Kind> Editor<K> {
         let theme = cx.theme();
         div()
             .id("profile-list")
-            .w(px(250.))
+            .flex_none()
+            .w(px(width))
             .h_full()
             .overflow_y_scroll()
             .border_1()
@@ -888,11 +895,19 @@ impl<K: Kind> Editor<K> {
                 .id(SharedString::from(format!("field-{i}")))
                 .gap_2()
                 .child(icon)
-                .child(div().w(px(70.)).child(field.label))
-                .child(div().w(px(110.)).child(Input::new(&self.inputs[i]).small()))
-                .child(div().w(px(36.)).child(field.unit))
+                .child(div().flex_none().w(px(76.)).truncate().child(field.label))
                 .child(
                     div()
+                        .w(px(110.))
+                        .min_w(px(70.))
+                        .child(Input::new(&self.inputs[i]).small()),
+                )
+                .child(div().flex_none().w(px(36.)).child(field.unit))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
                         .text_color(cx.theme().muted_foreground)
                         .child(item.and_then(|item| K::note(item, i)).unwrap_or_default()),
                 )
@@ -900,12 +915,17 @@ impl<K: Kind> Editor<K> {
                     gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
                 })
         });
-        v_flex().gap_2().children(rows)
+        v_flex().flex_none().gap_2().children(rows)
     }
 }
 
 impl<K: Kind> Render for Editor<K> {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let list_w = if window.viewport_size().width < px(NARROW_W) {
+            LIST_NARROW_W
+        } else {
+            LIST_W
+        };
         let item = self.selected_item(cx);
         let user = matches!(self.selected, Some(Selection::User(_)));
         let editable = self.can_edit(cx);
@@ -970,13 +990,19 @@ impl<K: Kind> Render for Editor<K> {
                     .min_h_0()
                     .gap_3()
                     .items_start()
-                    .child(self.list(cx))
+                    .child(self.list(list_w, cx))
                     .child(
                         v_flex()
+                            .id("profile-fields")
                             .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .overflow_y_scroll()
                             .gap_3()
                             .child(
                                 div()
+                                    .flex_none()
+                                    .truncate()
                                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                                     .child(heading),
                             )
@@ -1003,6 +1029,9 @@ impl<K: Kind> Render for Editor<K> {
                     .when_some(notice, |row, notice| {
                         row.child(
                             div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(notice),

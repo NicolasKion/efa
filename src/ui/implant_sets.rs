@@ -53,6 +53,8 @@ const LIST_NARROW_W: f32 = 180.;
 const NARROW_W: f32 = 960.;
 /// Wide enough for the longest hardwiring names.
 const TREE_W: f32 = 420.;
+/// The set's column keeps this much beside an open market in a narrow window.
+const SET_MIN_W: f32 = 260.;
 const TREE_ICON: f32 = 20.;
 const SLOT_ROW_H: f32 = 38.;
 const SLOT_ICON: f32 = 26.;
@@ -740,7 +742,7 @@ impl ImplantSetEditor {
         let column = v_flex()
             .id("implant-set")
             .flex_1()
-            .min_w_0()
+            .min_w(px(if self.narrow { SET_MIN_W } else { 0. }))
             .h_full()
             .gap_2()
             .p_3()
@@ -941,9 +943,16 @@ impl ImplantSetEditor {
                         .border_color(theme.border)
                         .child(UiIcon::new(AssetIcon::Plus).size(px(14.)).text_color(muted)),
                 )
-                .child(div().flex_1().text_xs().text_color(muted).child(format!(
-                    "Drop a slot {slot} implant here, or click to list them"
-                )))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(format!(
+                            "Drop a slot {slot} implant here, or click to list them"
+                        )),
+                )
                 .on_click(cx.listener(move |e, _, window, cx| {
                     e.slot = Some(slot);
                     e.filter = SlotFilter::Slot(slot);
@@ -963,7 +972,7 @@ impl ImplantSetEditor {
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .child(div().child(catalog.name(id)))
+                    .child(div().truncate().child(catalog.name(id)))
                     .when_some(bonus, |col, bonus| {
                         col.child(div().text_xs().text_color(muted).truncate().child(bonus))
                     }),
@@ -1167,10 +1176,11 @@ impl ImplantSetEditor {
         };
         let theme = cx.theme();
         let muted = theme.muted_foreground;
+        // Narrow, it shares the room with the set instead of taking a fixed width.
         v_flex()
             .id("implant-tree-column")
-            .w(px(TREE_W))
-            .flex_none()
+            .when(self.narrow, |d| d.flex_1().min_w_0().max_w(px(TREE_W)))
+            .when(!self.narrow, |d| d.w(px(TREE_W)).flex_none())
             .h_full()
             .gap_2()
             .p_3()
@@ -1381,6 +1391,8 @@ impl Render for ImplantSetEditor {
         let list = self.list_column(&sets, cx);
         let middle = self.set_column(selected, !sets.is_empty(), cx);
         let tree = (!self.narrow || self.tree_open).then(|| self.tree_column(cx));
+        // Narrow, an open market takes the list's place while a set is open.
+        let list = (!self.narrow || !self.tree_open || selected.is_none()).then_some(list);
         let theme = cx.theme();
         h_flex()
             .size_full()
@@ -1400,7 +1412,7 @@ impl Render for ImplantSetEditor {
             .bg(theme.background)
             .text_color(theme.foreground)
             .text_sm()
-            .child(list)
+            .children(list)
             .child(middle)
             .children(tree)
     }
