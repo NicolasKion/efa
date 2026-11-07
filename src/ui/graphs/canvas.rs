@@ -168,7 +168,8 @@ fn frac(v: f64, range: (f64, f64)) -> f32 {
 pub fn render(
     lines: &[PlotLine],
     frame: &Frame,
-    mark: Option<f64>,
+    pin: Option<f64>,
+    hover: Option<f64>,
     bounds: &Rc<Cell<Option<Bounds<Pixels>>>>,
     cx: &mut Context<GraphsWindow>,
 ) -> AnyElement {
@@ -180,6 +181,11 @@ pub fn render(
         theme.muted_foreground,
     );
     let mark_color = theme.muted_foreground.opacity(0.8);
+    let pin_color = theme.primary.opacity(0.8);
+    // The hover readout is left out where it would sit on top of the pinned one.
+    let hover = hover.filter(|&h| {
+        pin.is_none_or(|p| (frac(h, frame.x_range) - frac(p, frame.x_range)).abs() > 0.01)
+    });
     // Colors come from the theme at draw time, so a theme switch recolors the lines.
     let colors: Vec<Hsla> = lines
         .iter()
@@ -295,7 +301,12 @@ pub fn render(
                         *color,
                     );
                 }
-                if let Some(x) = mark {
+                if let Some(x) = pin {
+                    let top = to_px(x, y_range.1);
+                    let bottom = to_px(x, y_range.0);
+                    stroke(window, &[top, bottom], 1.0, &[], pin_color);
+                }
+                if let Some(x) = hover {
                     let top = to_px(x, y_range.1);
                     let bottom = to_px(x, y_range.0);
                     stroke(window, &[top, bottom], 1.0, &[px(3.), px(3.)], mark_color);
@@ -343,7 +354,8 @@ pub fn render(
             )
     });
 
-    let readout = mark.map(|x| {
+    // The pinned readout stays while the mouse moves; the hover readout is drawn over it.
+    let readout = |x: f64, pinned: bool| {
         let fx = frac(x, frame.x_range);
         let x_text = match frame.x_unit {
             Some(unit) => format!("{} {unit}", format(x)),
@@ -363,10 +375,18 @@ pub fn render(
             beside(div().absolute().top(px(4.)))
                 .px_1p5()
                 .rounded(px(4.))
-                .bg(theme.foreground)
+                .bg(if pinned {
+                    theme.primary
+                } else {
+                    theme.foreground
+                })
                 .text_size(px(11.))
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(theme.background)
+                .text_color(if pinned {
+                    theme.primary_foreground
+                } else {
+                    theme.background
+                })
                 .child(x_text)
                 .into_any_element(),
         ];
@@ -391,7 +411,13 @@ pub fn render(
             );
         }
         labels
-    });
+    };
+    let readouts: Vec<AnyElement> = pin
+        .map(|x| readout(x, true))
+        .into_iter()
+        .chain(hover.map(|x| readout(x, false)))
+        .flatten()
+        .collect();
 
     let area = div()
         .id("graph-plot")
@@ -401,7 +427,7 @@ pub fn render(
         .min_w_0()
         .child(plot)
         .children(legend)
-        .children(readout.into_iter().flatten())
+        .children(readouts)
         .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
             this.hover_at(event.position, false, cx);
         }))

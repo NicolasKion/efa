@@ -337,8 +337,14 @@ impl GraphsWindow {
     }
 
     fn plot_card(&self, min_h: f32, cx: &mut Context<Self>) -> impl IntoElement {
-        let mark = self.hover_mark.or(self.pinned_mark);
-        let plot = canvas::render(&self.lines, &self.frame, mark, &self.plot_bounds, cx);
+        let plot = canvas::render(
+            &self.lines,
+            &self.frame,
+            self.pinned_mark,
+            self.hover_mark,
+            &self.plot_bounds,
+            cx,
+        );
         let theme = cx.theme();
         let empty = self.lines.is_empty();
         // With nothing plotted, say why over the empty axes.
