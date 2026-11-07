@@ -46,8 +46,9 @@ cargo build --release        # embeds assets/data/efa-data.pack
 
 `build.rs` embeds `assets/data/efa-data.pack`, or the file `EFA_PACK` names (the build fails if
 `EFA_PACK` is set and the file is missing). The pack is never committed. The same dump gives the
-same pack, byte for byte, and a pack only fits the build of efa and refine that made it: an older
-one is refused with a message to rebuild it.
+same pack, byte for byte. A pack records its format, the catalog and item data formats and the
+refine commit its engine data was made with; a build that differs in any of them refuses it with a
+message to rebuild it, so build the pack with the same checkout that embeds it.
 
 Without a pack, or with `EFA_DATA` set, efa reads a deimos dump (`EFA_DATA`, or `data/eve`) the way
 development always has: the first start after a data update converts the data and caches it.
