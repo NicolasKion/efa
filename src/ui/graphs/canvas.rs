@@ -5,7 +5,7 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui_kit::component::{ActiveTheme, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, Bounds, Context, Hsla, InteractiveElement, IntoElement, MouseButton,
+    AnyElement, Bounds, Context, FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, ParentElement, PathBuilder, Pixels, StatefulInteractiveElement,
     Styled, canvas, div, point, prelude::FluentBuilder, px, relative,
 };
@@ -121,7 +121,7 @@ pub fn format(v: f64) -> String {
     }
 }
 
-fn axis_label(label: &str, unit: Option<&str>) -> String {
+pub fn axis_label(label: &str, unit: Option<&str>) -> String {
     match unit {
         Some(unit) => format!("{label}, {unit}"),
         None => label.to_owned(),
@@ -141,7 +141,13 @@ pub fn render(
     cx: &mut Context<GraphsWindow>,
 ) -> AnyElement {
     let theme = cx.theme();
-    let (grid, axis, muted) = (theme.border, theme.muted_foreground, theme.muted_foreground);
+    // Soft gridlines, firmer axes, so the lines stand out.
+    let (grid, axis, muted) = (
+        theme.border.opacity(0.45),
+        theme.border,
+        theme.muted_foreground,
+    );
+    let mark_color = theme.muted_foreground.opacity(0.8);
     // Colors come from the theme at draw time, so a theme switch recolors the lines.
     let colors: Vec<Hsla> = lines
         .iter()
@@ -161,27 +167,28 @@ pub fn render(
         .children(y_ticks.iter().map(|&v| {
             div()
                 .absolute()
-                .right(px(4.))
+                .right(px(8.))
                 .top(relative(1.0 - frac(v, frame.y_range)))
                 .mt(px(-TICK_LABEL_H / 2.))
                 .h(px(TICK_LABEL_H))
-                .text_xs()
+                .text_size(px(11.))
                 .text_color(muted)
                 .child(format(v))
         }));
     let x_labels = div()
         .relative()
         .flex_1()
-        .h(px(TICK_LABEL_H + 2.))
+        .h(px(TICK_LABEL_H + 6.))
         .children(x_ticks.iter().map(|&v| {
             div()
                 .absolute()
+                .top(px(4.))
                 .left(relative(frac(v, frame.x_range)))
                 .ml(px(-TICK_LABEL_W / 2.))
                 .w(px(TICK_LABEL_W))
                 .flex()
                 .justify_center()
-                .text_xs()
+                .text_size(px(11.))
                 .text_color(muted)
                 .child(format(v))
         }));
@@ -259,15 +266,14 @@ pub fn render(
                 if let Some(x) = mark {
                     let top = to_px(x, y_range.1);
                     let bottom = to_px(x, y_range.0);
-                    stroke(window, &[top, bottom], 1.0, &[px(2.), px(2.)], axis);
+                    stroke(window, &[top, bottom], 1.0, &[px(3.), px(3.)], mark_color);
                 }
             });
+            // The axes on the left and at the bottom; the gridlines close the rest.
             let corners = [
-                to_px(x_range.0, y_range.0),
-                to_px(x_range.1, y_range.0),
-                to_px(x_range.1, y_range.1),
                 to_px(x_range.0, y_range.1),
                 to_px(x_range.0, y_range.0),
+                to_px(x_range.1, y_range.0),
             ];
             stroke(window, &corners, 1.0, &[], axis);
         },
@@ -278,15 +284,19 @@ pub fn render(
     let legend = (frame.legend && !lines.is_empty()).then(|| {
         v_flex()
             .absolute()
-            .top(px(6.))
-            .right(px(6.))
-            .p_1()
-            .gap_0p5()
-            .rounded(px(3.))
+            .top(px(8.))
+            .right(px(8.))
+            .max_w(relative(0.6))
+            .px_2p5()
+            .py_2()
+            .gap_1()
+            .rounded(px(6.))
             .border_1()
             .border_color(theme.border)
-            .bg(theme.background.opacity(0.85))
+            .bg(theme.popover.opacity(0.92))
+            .shadow_sm()
             .text_xs()
+            .text_color(theme.popover_foreground)
             .children(
                 lines
                     .iter()
@@ -294,9 +304,9 @@ pub fn render(
                     .filter(|(line, _)| line.in_legend)
                     .map(|(line, &color)| {
                         h_flex()
-                            .gap_1()
+                            .gap_2()
                             .child(swatch(color, line.style))
-                            .child(line.label.clone())
+                            .child(div().min_w_0().truncate().child(line.label.clone()))
                     }),
             )
     });
@@ -310,13 +320,15 @@ pub fn render(
         let mut labels: Vec<AnyElement> = vec![
             div()
                 .absolute()
-                .top(px(2.))
+                .top(px(4.))
                 .left(relative(fx))
-                .ml(px(4.))
-                .px_1()
-                .rounded(px(2.))
-                .bg(theme.background.opacity(0.85))
-                .text_xs()
+                .ml(px(6.))
+                .px_1p5()
+                .rounded(px(4.))
+                .bg(theme.foreground)
+                .text_size(px(11.))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.background)
                 .child(x_text)
                 .into_any_element(),
         ];
@@ -324,19 +336,21 @@ pub fn render(
             let Some(y) = line.series.at(x) else { continue };
             let fy = frac(y, frame.y_range).clamp(0.0, 1.0);
             labels.push(
-                div()
+                h_flex()
                     .absolute()
                     .left(relative(fx))
                     .top(relative(1.0 - fy))
-                    .ml(px(4.))
+                    .ml(px(6.))
                     .mt(px(-TICK_LABEL_H))
-                    .px_1()
-                    .rounded(px(2.))
-                    .bg(theme.background.opacity(0.85))
+                    .gap_1()
+                    .px_1p5()
+                    .rounded(px(4.))
+                    .bg(theme.popover.opacity(0.92))
                     .border_1()
                     .border_color(color)
-                    .text_xs()
-                    .text_color(color)
+                    .text_size(px(11.))
+                    .text_color(theme.popover_foreground)
+                    .child(div().flex_none().size(px(6.)).rounded_full().bg(color))
                     .child(format(y))
                     .into_any_element(),
             );
@@ -377,12 +391,17 @@ pub fn render(
         }));
 
     v_flex()
-        .size_full()
-        .p_2()
+        .absolute()
+        .inset_0()
+        .pl_1()
+        .pr_5()
+        .pt_3()
+        .pb_3()
         .child(
             div()
                 .ml(px(Y_TICKS_W))
                 .text_xs()
+                .font_weight(FontWeight::MEDIUM)
                 .text_color(muted)
                 .child(axis_label(&frame.y_label, frame.y_unit)),
         )
@@ -390,7 +409,7 @@ pub fn render(
             h_flex()
                 .flex_1()
                 .min_h_0()
-                .mt_1()
+                .mt_2()
                 .child(y_labels)
                 .child(area),
         )
@@ -405,10 +424,11 @@ pub fn render(
                 .flex()
                 .justify_center()
                 .text_xs()
+                .font_weight(FontWeight::MEDIUM)
                 .text_color(muted)
                 .child(axis_label(&frame.x_label, frame.x_unit)),
         )
-        .when(lines.is_empty(), |d| d.opacity(0.7))
+        .when(lines.is_empty(), |d| d.opacity(0.6))
         .into_any_element()
 }
 
@@ -437,7 +457,7 @@ pub fn swatch(color: Hsla, style: LineStyle) -> impl IntoElement {
         },
     )
     .flex_none()
-    .w(px(22.))
+    .w(px(20.))
     .h(px(10.))
 }
 
