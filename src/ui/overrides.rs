@@ -419,6 +419,7 @@ impl OverridesWindow {
             .w(px(SIDEBAR_W))
             .h_full()
             .flex_none()
+            .overflow_hidden()
             .px_3()
             .py_4()
             .gap_3()
@@ -427,11 +428,14 @@ impl OverridesWindow {
             .bg(theme.sidebar)
             .child(
                 h_flex()
+                    .items_start()
                     .gap_3()
                     .px_1()
                     .child(
+                        // The text wraps beside the switch instead of pushing it out.
                         v_flex()
                             .flex_1()
+                            .min_w_0()
                             .child(div().font_weight(FontWeight::MEDIUM).child("Use overrides"))
                             .child(
                                 div().text_xs().text_color(theme.muted_foreground).child(
@@ -439,7 +443,7 @@ impl OverridesWindow {
                                 ),
                             ),
                     )
-                    .child(switch),
+                    .child(div().flex_none().child(switch)),
             )
             .child(Input::new(&self.search).small().cleanable(true))
             .child(
@@ -678,7 +682,16 @@ impl Render for OverridesWindow {
             .text_color(theme.foreground)
             .text_sm()
             .child(self.sidebar(cx))
-            .child(body)
+            // The attribute list takes the rest of the width and can shrink, so nothing in it
+            // pushes past the window.
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .overflow_hidden()
+                    .child(body),
+            )
     }
 }
 
