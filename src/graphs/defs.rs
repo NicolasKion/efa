@@ -442,7 +442,7 @@ impl Graph {
                     (Param::TgtSigRad, Unit::Percent),
                 ),
             ],
-            Self::EwarStats => vec![x(
+            Self::EwarStats | Self::ApplicationProfile => vec![x(
                 Param::Distance,
                 Unit::Km,
                 "Distance",
@@ -507,12 +507,6 @@ impl Graph {
                 Unit::M,
                 "Target signature radius",
                 (Param::TgtSigRad, Unit::M),
-            )],
-            Self::ApplicationProfile => vec![x(
-                Param::Distance,
-                Unit::Km,
-                "Distance",
-                (Param::Distance, Unit::Km),
             )],
             Self::EcmBurstDamps => vec![
                 x(
