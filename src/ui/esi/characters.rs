@@ -122,10 +122,12 @@ impl Render for EsiCharactersWindow {
                     )
                     .child(
                         v_flex()
+                            .flex_1()
                             .min_w_0()
                             .child(
                                 div()
                                     .font_weight(FontWeight::MEDIUM)
+                                    .truncate()
                                     .child(account.name.clone()),
                             )
                             .child(
@@ -181,6 +183,7 @@ impl Render for EsiCharactersWindow {
             .child(login_status(&self.hub, cx))
             .child(
                 h_flex()
+                    .flex_wrap()
                     .gap_2()
                     .child(
                         Button::new("esi-add")

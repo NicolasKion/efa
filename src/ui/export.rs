@@ -12,9 +12,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext, ClipboardItem, Context, Entity, IntoElement, ParentElement,
-    Render, SharedString, Styled, WeakEntity, Window, WindowBounds, WindowOptions, div,
-    prelude::FluentBuilder, px, size,
+    AnyElement, App, AppContext, ClipboardItem, Context, Entity, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window,
+    WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, size,
 };
 
 use super::{Efa, Hub, Loaded, stats::text};
@@ -64,7 +64,7 @@ impl Efa {
             error: None,
         };
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(380.), px(480.)), cx)),
+            window_bounds: Some(WindowBounds::centered(size(px(380.), px(580.)), cx)),
             app_id: Some("efa".into()),
             ..Default::default()
         };
@@ -306,15 +306,26 @@ impl Render for ExportWindow {
             .text_sm()
             .child(
                 div()
+                    .flex_none()
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .child(format!("Copy \"{}\" as", self.fit.name)),
             )
-            .child(v_flex().flex_1().gap_2().children(formats))
+            // The formats scroll when the window is too short for them, keeping the buttons.
+            .child(
+                v_flex()
+                    .id("export-formats")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .gap_2()
+                    .children(formats),
+            )
             .when_some(self.error.clone(), |col, e| {
                 col.child(div().text_color(theme.danger).child(e))
             })
             .child(
                 h_flex()
+                    .flex_none()
                     .justify_end()
                     .gap_2()
                     .child(

@@ -52,7 +52,7 @@ pub fn open(reports: &[Report], cx: &mut App) {
 impl ErrorDialog {
     fn new(title: String, text: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let details = cx.new(|cx| {
-            let mut state = TextareaState::new(window, cx).rows(14);
+            let mut state = TextareaState::new(window, cx).rows(3);
             state.set_value(text.clone(), window, cx);
             state
         });

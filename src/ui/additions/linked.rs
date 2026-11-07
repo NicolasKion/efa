@@ -32,6 +32,8 @@ type OnPick = Rc<dyn Fn(&mut Efa, Vec<usize>, &mut Context<Efa>)>;
 
 const PICKER_ROW_H: f32 = 30.;
 const PICKER_H: f32 = 360.;
+/// The fit picker dialog without its list: margins, title, search box and button.
+const PICKER_AROUND: f32 = 220.;
 
 /// pyfa's label for a fit in menus: "Ship: Fit".
 pub(super) fn fit_label(catalog: &Catalog, fit: &Fit) -> String {
@@ -223,7 +225,7 @@ impl FitPicker {
 }
 
 impl Render for FitPicker {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let query = self.search.read(cx).value().to_lowercase();
         let words: Vec<&str> = query.split_whitespace().collect();
         let theme = cx.theme();
@@ -253,7 +255,7 @@ impl Render for FitPicker {
                             24.,
                         ))
                     })
-                    .child(div().truncate().child(f.label.clone()))
+                    .child(div().flex_1().min_w_0().truncate().child(f.label.clone()))
                     .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                         if event.click_count() >= 2 {
                             this.finish(vec![index], window, cx);
@@ -276,7 +278,11 @@ impl Render for FitPicker {
             .child(
                 v_flex()
                     .id("fit-picker-list")
-                    .h(px(PICKER_H))
+                    .h(crate::ui::widgets::dialog_fill_h(
+                        window,
+                        PICKER_H,
+                        PICKER_AROUND,
+                    ))
                     .overflow_y_scroll()
                     .children(rows)
                     .when(empty, |list| {

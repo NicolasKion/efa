@@ -262,6 +262,29 @@ pub fn item_entry(
     PopupMenuItem::element(item_label(loaded, Some(id), label))
 }
 
+/// The tallest a menu may be in this window: `cap`, or less when the window is too short for
+/// it, so a long menu scrolls instead of running off the window.
+pub fn menu_max_h(window: &gpui_kit::Window, cap: f32) -> gpui_kit::Pixels {
+    let room = window.viewport_size().height - px(MENU_WINDOW_MARGIN);
+    px(cap).min(room).max(px(MENU_MIN_H))
+}
+
+/// The height for a dialog's list or text area: `preferred`, or less in a short window, where
+/// `around` is what the rest of the dialog takes. Kept from shrinking past a few rows, so the
+/// dialog body scrolls once even that does not fit.
+pub fn dialog_fill_h(window: &gpui_kit::Window, preferred: f32, around: f32) -> gpui_kit::Pixels {
+    let room = window.viewport_size().height - px(around);
+    px(preferred).min(room).max(px(DIALOG_FILL_MIN))
+}
+
+/// The least a dialog's list or text area shrinks to.
+const DIALOG_FILL_MIN: f32 = 96.;
+
+/// What a menu leaves clear of the window's height, above and below it.
+const MENU_WINDOW_MARGIN: f32 = 48.;
+/// No menu is cut shorter than this, however short the window.
+const MENU_MIN_H: f32 = 120.;
+
 /// A menu entry with one of the UI's own icons.
 pub fn entry(icon: IconName, label: impl Into<SharedString>) -> PopupMenuItem {
     PopupMenuItem::element(icon_label(icon, label))

@@ -12,8 +12,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, Context, Entity, FontWeight, IntoElement, ParentElement, Render, SharedString,
-    Styled, Subscription, Task, Window, div, prelude::FluentBuilder,
+    AnyElement, Context, Entity, FontWeight, InteractiveElement, IntoElement, ParentElement,
+    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Task, Window, div,
+    prelude::FluentBuilder,
 };
 
 use super::{call, characters::login_status, pick};
@@ -159,19 +160,20 @@ impl Render for ExportToEveWindow {
         let no_character = self.character.is_none();
         let theme = cx.theme();
         let message = self.message.clone();
-        v_flex()
-            .size_full()
-            .p_4()
+        // What to export scrolls when the window is short; the status and buttons stay.
+        let body = v_flex()
+            .id("export-eve-body")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
             .gap_3()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .text_sm()
             .child(
                 h_flex()
                     .gap_3()
                     .child(icon_box(catalog, &self.loaded.icons, Icon::Type(ship), 40.))
                     .child(
                         v_flex()
+                            .flex_1()
                             .min_w_0()
                             .child(
                                 div()
@@ -182,6 +184,7 @@ impl Render for ExportToEveWindow {
                             .child(
                                 div()
                                     .text_xs()
+                                    .truncate()
                                     .text_color(theme.muted_foreground)
                                     .child(catalog.name(ship).clone()),
                             ),
@@ -217,8 +220,16 @@ impl Render for ExportToEveWindow {
                         |o, v| o.boosters = v,
                         cx,
                     )),
-            )
-            .child(div().flex_1())
+            );
+        let theme = cx.theme();
+        v_flex()
+            .size_full()
+            .p_4()
+            .gap_3()
+            .bg(theme.background)
+            .text_color(theme.foreground)
+            .text_sm()
+            .child(body)
             .child(login_status(&self.hub, cx))
             .when_some(message, |col, (text, error)| {
                 col.child(
@@ -242,8 +253,9 @@ impl Render for ExportToEveWindow {
             })
             .child(
                 h_flex()
+                    .flex_none()
                     .gap_2()
-                    .child(div().flex_1())
+                    .justify_end()
                     .child(
                         Button::new("export-eve-close")
                             .small()

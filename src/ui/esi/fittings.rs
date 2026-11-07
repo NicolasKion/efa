@@ -14,7 +14,7 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, AppContext, ClickEvent, Context, Entity, FontWeight, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Task, WeakEntity, Window, div, prelude::FluentBuilder, px,
+    Subscription, Task, WeakEntity, Window, div, prelude::FluentBuilder, px, relative,
 };
 
 use super::{call, characters::login_status, pick};
@@ -495,8 +495,17 @@ impl EsiFittingsWindow {
     }
 }
 
+/// The fittings list's width beside the contents.
+const LIST_W: f32 = 380.;
+/// Below this window width the contents go under the list.
+const STACK_BELOW: f32 = 640.;
+/// The search box keeps this much room, and goes to a line of its own when it cannot.
+const SEARCH_MIN: f32 = 160.;
+
 impl Render for EsiFittingsWindow {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A narrow window puts the fitting's contents under the list instead of beside it.
+        let narrow = window.viewport_size().width < px(STACK_BELOW);
         let busy = self.busy.is_some();
         let has_character = self.character.is_some();
         let listed: Vec<Fitting> = self.listed(cx).into_iter().cloned().collect();
@@ -525,6 +534,7 @@ impl Render for EsiFittingsWindow {
             .text_sm()
             .child(
                 h_flex()
+                    .flex_wrap()
                     .gap_2()
                     .child(picker)
                     .child(
@@ -536,19 +546,33 @@ impl Render for EsiFittingsWindow {
                             .disabled(busy || !has_character)
                             .on_click(cx.listener(|w, _, _, cx| w.fetch(cx))),
                     )
-                    .child(div().flex_1().child(Input::new(&self.search).small())),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(SEARCH_MIN))
+                            .child(Input::new(&self.search).small()),
+                    ),
             )
             .child(
-                h_flex()
+                div()
+                    .flex()
+                    .when(narrow, Styled::flex_col)
                     .flex_1()
                     .min_h_0()
                     .gap_2()
-                    .items_start()
                     .child(
                         v_flex()
                             .id("esi-fittings-list")
-                            .w(px(380.))
-                            .h_full()
+                            .map(|list| {
+                                if narrow {
+                                    list.w_full().flex_1().min_h_0()
+                                } else {
+                                    list.flex_shrink_0()
+                                        .w(px(LIST_W))
+                                        .max_w(relative(0.5))
+                                        .h_full()
+                                }
+                            })
                             .overflow_y_scroll()
                             .p_1()
                             .border_1()
@@ -568,8 +592,9 @@ impl Render for EsiFittingsWindow {
                         v_flex()
                             .id("esi-fitting-contents")
                             .flex_1()
-                            .h_full()
                             .min_w_0()
+                            .min_h_0()
+                            .when(!narrow, Styled::h_full)
                             .overflow_y_scroll()
                             .p_3()
                             .border_1()
@@ -582,6 +607,8 @@ impl Render for EsiFittingsWindow {
             .child(login_status(&self.hub, cx))
             .child(
                 h_flex()
+                    .flex_wrap()
+                    .justify_end()
                     .gap_2()
                     .when_some(message, |row, (text, error)| {
                         row.child(
@@ -598,7 +625,6 @@ impl Render for EsiFittingsWindow {
                                 .child(text),
                         )
                     })
-                    .child(div().flex_1())
                     .child(
                         Button::new("esi-import")
                             .small()
