@@ -2,3 +2,7 @@
 # core. Linking the test binaries is the expensive part; they live in one binary for that reason.
 [build]
 jobs = 8
+
+# Link the C runtime statically so the exe runs without the Visual C++ redistributable.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
