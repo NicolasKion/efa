@@ -33,13 +33,14 @@ impl Gyfa {
     pub(in crate::ui) fn edit_notes(&mut self, text: String, cx: &mut Context<Self>) {
         let Some(i) = self.saved.current else { return };
         self.saved.fits[i].notes = text;
+        self.saved.fits[i].modified = crate::fit::now();
         self.unsaved = true;
         // The tab title counts characters.
         cx.notify();
     }
 
     /// Hover text for a fit in the fittings browser, carrying its notes as pyfa's does. None
-    /// without notes: pyfa's tooltip is otherwise the ship's traits, which gyfa does not have.
+    /// without notes; the browser adds the ship's traits below when it shows them.
     pub(in crate::ui) fn fitting_tooltip(fit: &Fit, ship_name: &str) -> Option<SharedString> {
         tooltip(ship_name, &fit.notes).map(SharedString::from)
     }

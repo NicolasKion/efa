@@ -21,6 +21,9 @@ postcard = { version = "1", features = ["use-std"] }
 # EVEMon character sheets and skill plans.
 roxmltree = "0.21"
 flate2 = "1"
+# pyfa's market search: regex tokens and its jargon file, whose patterns use lookbehind.
+fancy-regex = "0.16"
+serde-saphyr = "1.3"
 
 [profile.dev.package."*"]
 # Loading 150 MB of JSON and running the engine unoptimized is painfully slow.

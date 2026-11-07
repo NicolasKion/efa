@@ -788,7 +788,7 @@ pub(super) fn ship_entries(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let Some(g) = this.upgrade() else { return menu };
-    let (loaded, mode, sec_status, character_sec) = {
+    let (loaded, mode, sec_status, character_sec, browsing_ship) = {
         let g = g.read(cx);
         let fit = g.fit();
         (
@@ -796,6 +796,7 @@ pub(super) fn ship_entries(
             fit.and_then(|f| f.mode),
             fit.and_then(|f| f.sec_status),
             g.characters.sec_status(g.fit_character()),
+            g.browsing_fits_of(ship),
         )
     };
     let Some(loaded) = loaded else { return menu };
@@ -879,14 +880,17 @@ pub(super) fn ship_entries(
             },
         );
     }
-    let menu = menu.item(
-        entry(IconName::FolderOpen, "Open in Fitting Browser").on_click(handler(
-            this,
-            move |g, _, _, cx| {
-                g.jump_to_fittings(ship, cx);
-            },
-        )),
-    );
+    // pyfa leaves this out while the browser already lists the ship's fits.
+    if !browsing_ship {
+        menu = menu.item(
+            entry(IconName::FolderOpen, "Open in Fitting Browser").on_click(handler(
+                this,
+                move |g, _, _, cx| {
+                    g.jump_to_fittings(ship, cx);
+                },
+            )),
+        );
+    }
     skills_submenu(menu, this, &loaded, SkillTarget::Ship, window, cx)
 }
 

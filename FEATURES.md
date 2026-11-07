@@ -15,10 +15,10 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Delete fit (shipBrowser fitItem.py)
 - [x] Close tab without deleting the fit, close all tabs (mainMenuBar.py), Ctrl+W and Ctrl+Alt+W
 - [x] Reopen previous fits on startup as a preference (pyfaGeneralPreferences.py)
-- [ ] Rename fit (fitCommands/gui/fitRename.py)
-- [ ] Copy/duplicate fit (builtinShipBrowser/fitItem.py)
+- [x] Rename fit (fitCommands/gui/fitRename.py): double-click the tab, the tab menu, or Rename in the fittings browser
+- [x] Copy/duplicate fit (builtinShipBrowser/fitItem.py): the main menu and Copy in the fittings browser, named "<fit> copy" as in pyfa
 - [~] Reorder tabs by drag, tab tooltips (chrome_tabs.py), tooltips with the fit and hull behind a preference
-- [ ] Open fit in new tab vs same tab (builtinContextMenus/fitOpenNewTab.py)
+- [x] Open fit in new tab vs same tab (builtinContextMenus/fitOpenNewTab.py): a click in the fittings browser follows the "open in a new page" preference, "Open in new tab" and a middle click always open a tab
 - [x] Undo/redo for every fit change (gui/fitCommands/, mainMenuBar.py): one history per fit, every action and market add, Ctrl+Z/Ctrl+Y
 - [x] Disable fitting restrictions toggle (fitCommands/gui/fitRestrictionToggle.py), per fit in the Fit menu: with restrictions on, modules the ship cannot take are refused (ship group, rig size, max group or type fitted, hardpoints, capital size, subsystem slot); a full rack refuses either way; turning them back on takes off what does not fit, as one undo step
 - [x] Fit validation messages (over CPU/PG/slots/skills/max group fitted/rig size etc.) (eos/saveddata/fit.py), refine: validate_verbose; per item in the row tooltips, overuse of CPU, powergrid and the like in the stats pane
@@ -37,28 +37,30 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Search box (builtinMarketBrowser/searchBox.py, pfSearchBox.py)
 - [x] Double-click to add to fit (builtinMarketBrowser/itemView.py)
 - [x] Item icons (itemView.py), from the client CDN, cached on disk
-- [ ] Meta group filter buttons: T1, T2, faction, storyline, deadspace, officer, structure (builtinMarketBrowser/metaButton.py)
-- [ ] Recently used items list (itemView.py, service/market.py)
-- [ ] "Charges for active fit" filter (itemView.py)
-- [~] Search delay and meta button behaviour prefs (pyfaMarketPreferences.py), search delay done
-- [ ] Jump to market group from an item (builtinContextMenus/itemMarketJump.py)
-- [ ] Drag item from market onto fit/slot/additions (itemView.py, fittingView.py)
-- [ ] Item tooltip with description/price (itemView.py)
-- [ ] Omega-only marker (builtinViewColumns/omega.py)
-- [ ] Hide items that do not fit the current ship (market filtering in service/market.py)
-- [ ] Jargon/abbreviation search, e.g. "lse", "hml" (service/jargon/)
+- [x] Meta group filter buttons (builtinMarketBrowser/metaButton.py): pyfa's four, Normal (T1, T2, T3 and everything else), Faction (faction, storyline, structure faction), Complex and Officer; a click shows one, Ctrl+click toggles one, buttons for categories the list lacks are greyed out, and a list the buttons would empty presses the leftmost useful one (pyfa's default). They filter the tree, search, recent items and charges alike
+- [x] Recently used items (itemView.py, service/market.py): pyfa's "Recently Used Items" tree entry, the last 20 items added from the market (double-click, menus, drags), saved with the fits
+- [x] "Charges For Active Fit" tree entry (itemView.py): every charge the fit's modules take, in market order
+- [~] Search delay and meta button behaviour prefs (pyfaMarketPreferences.py), search delay done; the meta buttons always behave as pyfa's defaults
+- [x] Jump to market group from an item (builtinContextMenus/itemMarketJump.py): from search results and recently used items, and the fit's, additions' and projected items' menus; the jump presses the item's meta button so it shows
+- [x] Drag item from market onto fit/slot/additions (itemView.py, fittingView.py)
+- [x] Item tooltip with name, Omega, price and the start of the description (gyfa extra: pyfa's item list has none); the description loads with the stats window's data on first hover
+- [x] Omega-only marker (builtinViewColumns/omega.py) behind pyfa's "Show Omega icons" preference, off by default; pyfa reads an attribute the current data no longer sets, gyfa marks items needing a skill level beyond the Alpha clone caps from clonegrades.json
+- [x] Items listed in pyfa's order (Market.itemSort): category, market group, variation parent, meta button, meta level, name, so variations sit next to their T1 item
+- [x] Jargon/abbreviation search, e.g. "lse", "hml" (service/jargon/): pyfa's default jargon file, a user_jargon.yaml next to the saved fits on top, `*` and `?` wildcards, `re:` regex queries, and pyfa's minimum of three characters after expansion
+- Hiding items that do not fit the current ship: pyfa has no such market filter, only "Charges For Active Fit"
 
 ## Ship browser
 
-- [~] Ships reachable via market tree, no dedicated ship browser (gui/shipBrowser.py)
-- [ ] Ship category/group navigation with back/forward (builtinShipBrowser/navigationPanel.py, categoryItem.py)
-- [ ] Race filter (builtinShipBrowser/raceSelector.py)
-- [ ] Saved fits listed under each ship, fit counts per group (builtinShipBrowser/shipItem.py, fitItem.py)
-- [ ] Recent fits view (navigationPanel.py)
-- [ ] Search saved fits by name (navigationPanel.py)
-- [ ] Hide empty ship groups (navigationPanel.py)
-- [ ] Ship tooltip with traits (shipItem.py)
-- [ ] Jump from fit to ship in browser (builtinContextMenus/shipJump.py)
+- [x] Fittings browser with pyfa's stages (gui/shipBrowser.py): ship groups, a group's ships, a ship's fits; ships are still in the market tree too
+- [x] Ship group navigation with back (builtinShipBrowser/navigationPanel.py, categoryItem.py): Ship groups, Back, Recent Fits, hide empty groups, New fit on a ship's fits; pyfa has no forward either
+- [x] Race filter (builtinShipBrowser/raceSelector.py): toggles for the races in the group, under its ships; nothing picked shows all, as in pyfa. Race comes from the faction, else the skills' races, else the ship's own, like pyfa's Item.race
+- [x] Saved fits listed under each ship with "N fits" on ships and groups (builtinShipBrowser/shipItem.py, fitItem.py); a ship without fits starts one named "<ship> fit"
+- [x] Recent fits view (navigationPanel.py): the 50 fits changed last, by the change time gyfa now keeps per fit, shown on fit rows like pyfa's timestamp (EVE time)
+- [x] Search ships and saved fits by name (navigationPanel.py)
+- [x] Hide empty ship groups (navigationPanel.py), for groups and ships
+- [x] Ship and fit tooltips with traits (shipItem.py, fitItem.py) behind pyfa's "Show ship browser tooltip" preference: fits show ship, notes, then traits
+- [x] Jump from fit to ship in browser (builtinContextMenus/shipJump.py), hidden while the browser already shows that ship's fits
+- [x] Copy, rename and delete from the fit row's menu (pyfa's row buttons); rename opens the fit and edits its tab name, delete does not ask
 
 ## Fitting view and columns
 - [x] Columns auto-size to content, resize by dragging the header edge, double-click resets (gui/display.py); widths are kept across restarts, pyfa forgets them
@@ -258,7 +260,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 ## Preferences
 
 - [x] Preferences dialog (gui/preferenceDialog.py), its own window, changes apply to every window right away
-- [~] General: theme, language, tooltips, rack layout, omega icons, mutated names, tab info (pyfaGeneralPreferences.py), theme follows Omarchy live; character implants by default, slot colors, reopen fits, tab tooltips, open in new tab, ammo change all and tab info done
+- [~] General: theme, language, tooltips, rack layout, omega icons, mutated names, tab info (pyfaGeneralPreferences.py), theme follows Omarchy live; character implants by default, slot colors, reopen fits, tab tooltips, ship browser tooltips, Omega icons, open in new tab, ammo change all and tab info done
 - [x] Engine: strict skills, factor in reload, global default spool (pyfaEnginePreferences.py), refine: set_default_spool, set_default_optional_reloads
 - [~] Stat view layout (pyfaStatViewPreferences.py), each section shown or hidden
 - [x] Context menu toggles (pyfaContextMenuPreferences.py)

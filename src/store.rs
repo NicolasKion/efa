@@ -41,6 +41,9 @@ pub struct Saved {
     /// The graph window's options.
     #[serde(default)]
     pub graphs: GraphSettings,
+    /// Items last added from the market, newest first: pyfa's Recently Used Items.
+    #[serde(default)]
+    pub recent_items: Vec<crate::data::TypeId>,
 }
 
 /// What besides ship and fittings the price total includes, with pyfa's defaults.
