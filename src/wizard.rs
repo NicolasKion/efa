@@ -5,7 +5,12 @@
 //! Items are found by their T1 name and resolved to a tier through their variations, so a new
 //! meta item or a renamed faction one is picked up without a list of type IDs.
 
+mod bling;
+pub mod tank;
+
 use std::collections::HashMap;
+
+pub use bling::{Bling, Category, Tier};
 
 use crate::{
     data::{Catalog, Hardpoint, ItemType, Kind, Slot, TypeId},
@@ -26,7 +31,10 @@ mod attr {
 mod meta {
     pub const TECH1: i32 = 1;
     pub const TECH2: i32 = 2;
+    pub const STORYLINE: i32 = 3;
     pub const FACTION: i32 = 4;
+    pub const OFFICER: i32 = 5;
+    pub const DEADSPACE: i32 = 6;
 }
 
 /// Battlecruiser groups: medium hulls that carry large shield extenders and boosters.
@@ -187,29 +195,6 @@ pub struct Family {
     pub count: usize,
 }
 
-/// Which variation of each item to fit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Tier {
-    T2,
-    Faction,
-    /// The best meta variation, which is usually the compact one.
-    Meta,
-    T1,
-}
-
-impl Tier {
-    pub const ALL: [Self; 4] = [Self::T2, Self::Faction, Self::Meta, Self::T1];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::T2 => "T2",
-            Self::Faction => "Faction",
-            Self::Meta => "Best meta",
-            Self::T1 => "T1",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ammo {
     Faction,
@@ -290,6 +275,16 @@ impl Utility {
         }
     }
 
+    pub fn category(self) -> Category {
+        match self {
+            Self::Scram | Self::Point | Self::Web | Self::Grappler => Category::Tackle,
+            Self::Neut | Self::Nos => Category::Energy,
+            Self::SensorBooster | Self::Computer | Self::CapBooster | Self::Enhancer => {
+                Category::Electronics
+            }
+        }
+    }
+
     /// What is kept longest when the fit has to shrink.
     fn priority(self) -> u8 {
         match self {
@@ -302,37 +297,83 @@ impl Utility {
     }
 }
 
+/// How the ship tanks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tank {
-    ShieldBuffer,
-    ShieldActive,
-    ArmorBuffer,
-    ArmorActive,
+pub enum TankStyle {
+    /// Plates or extenders with resists.
+    Buffer,
+    /// Repairers or boosters with resists.
+    Active,
+    /// Nothing but plates or extenders.
+    Brick,
     None,
 }
 
-impl Tank {
-    pub const ALL: [Self; 5] = [
-        Self::ShieldBuffer,
-        Self::ShieldActive,
-        Self::ArmorBuffer,
-        Self::ArmorActive,
-        Self::None,
-    ];
+impl TankStyle {
+    pub const ALL: [Self; 4] = [Self::Buffer, Self::Active, Self::Brick, Self::None];
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::ShieldBuffer => "Shield buffer",
-            Self::ShieldActive => "Shield active",
-            Self::ArmorBuffer => "Armor buffer",
-            Self::ArmorActive => "Armor active",
+            Self::Buffer => "Buffer",
+            Self::Active => "Active",
+            Self::Brick => "Brick",
             Self::None => "None",
         }
     }
+}
 
-    fn armor(self) -> bool {
-        matches!(self, Self::ArmorBuffer | Self::ArmorActive)
+/// Which layer takes the damage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layer {
+    Shield,
+    Armor,
+}
+
+impl Layer {
+    pub const ALL: [Self; 2] = [Self::Shield, Self::Armor];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Shield => "Shield",
+            Self::Armor => "Armor",
+        }
     }
+
+    /// The rack the layer's modules go in.
+    pub fn slot(self) -> Slot {
+        match self {
+            Self::Shield => Slot::Mid,
+            Self::Armor => Slot::Low,
+        }
+    }
+}
+
+/// What an active tank is tuned for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Goal {
+    Resists,
+    Repair,
+    Balanced,
+}
+
+impl Goal {
+    pub const ALL: [Self; 3] = [Self::Resists, Self::Repair, Self::Balanced];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Resists => "Max resists",
+            Self::Repair => "Max repair",
+            Self::Balanced => "Balanced",
+        }
+    }
+}
+
+/// A tank the optimiser found, by the T1 items of its modules and rigs; the bling choices decide
+/// which variation of each goes on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TankFit {
+    pub modules: Vec<TypeId>,
+    pub rigs: Vec<TypeId>,
 }
 
 /// Which damage modules go into the low slots.
@@ -371,16 +412,20 @@ impl Rigs {
 pub struct Choices {
     /// Index into [`Setup::families`]; None fits no weapons.
     pub family: Option<usize>,
-    pub tier: Tier,
     pub ammo: Ammo,
     pub prop: Prop,
     /// In [`Utility::ALL`] order.
     pub utilities: Vec<Utility>,
-    pub tank: Tank,
+    pub tank: TankStyle,
+    pub layer: Layer,
+    pub goal: Goal,
+    /// The optimiser's pick for the tank; None lays out the usual tank for the style.
+    pub tank_fit: Option<TankFit>,
     pub damage: DamageMods,
     pub rigs: Rigs,
     /// Empty the module racks and rigs first, instead of filling the free slots.
     pub clear: bool,
+    pub bling: Bling,
 }
 
 impl Choices {
@@ -545,9 +590,28 @@ pub struct Pick {
     pub charge: Option<TypeId>,
     /// Higher is kept longer when the fit has to shrink; weapons are never dropped.
     pub priority: u8,
+    /// Part of the tank, which the tank section lists and the optimiser replaces.
+    pub tank: bool,
 }
 
 const WEAPON_PRIORITY: u8 = 10;
+
+/// Item groups the wizard tells apart.
+mod group {
+    pub const CAP_BOOSTER: i32 = 76;
+    pub const ANCILLARY_SHIELD_BOOSTER: i32 = 1156;
+    pub const ANCILLARY_ARMOR_REPAIRER: i32 = 1199;
+}
+
+/// What the tank has to work with once everything else is planned.
+#[derive(Debug, Clone, Copy)]
+struct Room {
+    /// Free slots in the tank's rack.
+    slots: usize,
+    /// Free rig slots, when the tank takes the rigs.
+    rigs: usize,
+    calibration: f64,
+}
 
 /// Groups a fit takes one module of: damage controls and propulsion modules.
 const ONE_PER_FIT: [i32; 2] = [60, 46];
@@ -711,6 +775,22 @@ impl<'a> Setup<'a> {
             .map(|t| t.id)
     }
 
+    /// Published market variations of `base`, itself included, cheapest tier first.
+    pub fn variants(&self, base: TypeId) -> Vec<TypeId> {
+        let mut variations: Vec<&ItemType> = self
+            .catalog
+            .variations_of(base)
+            .iter()
+            .filter_map(|&v| self.catalog.get(v))
+            .filter(|t| t.published && t.market_group.is_some())
+            .collect();
+        if variations.is_empty() {
+            return vec![base];
+        }
+        variations.sort_by_key(|t| (Tier::of(self.catalog, t.id, base), t.meta_level, t.id));
+        variations.into_iter().map(|t| t.id).collect()
+    }
+
     /// The variation of `base` for a tier, falling back to the nearest one there is.
     pub fn resolve(&self, base: TypeId, tier: Tier) -> TypeId {
         let variations: Vec<&ItemType> = self
@@ -734,13 +814,47 @@ impl<'a> Setup<'a> {
                 .max_by_key(|t| (t.meta_level, -t.id))
                 .map(|t| t.id)
         };
+        let t2 = || lowest(meta::TECH2).or_else(meta);
+        let faction = || {
+            lowest(meta::FACTION)
+                .or_else(|| lowest(meta::STORYLINE))
+                .or_else(t2)
+        };
+        let deadspace = || lowest(meta::DEADSPACE).or_else(faction);
         match tier {
-            Tier::T2 => lowest(meta::TECH2).or_else(meta),
-            Tier::Faction => lowest(meta::FACTION).or_else(|| lowest(meta::TECH2)),
-            Tier::Meta => meta(),
             Tier::T1 => None,
+            Tier::Meta => meta(),
+            Tier::T2 => t2(),
+            Tier::Faction => faction(),
+            Tier::Deadspace => deadspace(),
+            Tier::Officer => lowest(meta::OFFICER).or_else(deadspace),
         }
         .unwrap_or(base)
+    }
+
+    /// The variation of `base` the bling choices ask for: the exact one picked for it, or the
+    /// tier of its kind.
+    pub fn pick(&self, base: TypeId, category: Category, bling: &Bling) -> TypeId {
+        bling
+            .exact(category, base)
+            .filter(|&id| id == base || self.catalog.variations_of(base).contains(&id))
+            .unwrap_or_else(|| self.resolve(base, bling.tier_for(category)))
+    }
+
+    /// What a module other than a weapon is loaded with: cap booster charges, and nanite paste
+    /// for ancillary armor repairers.
+    fn charge_for(&self, id: TypeId) -> Option<TypeId> {
+        let module = self.catalog.get(id)?;
+        match module.group_id {
+            group::CAP_BOOSTER | group::ANCILLARY_SHIELD_BOOSTER => self.cap_charge(id),
+            group::ANCILLARY_ARMOR_REPAIRER => self
+                .catalog
+                .types
+                .values()
+                .find(|t| t.published && t.name == "Nanite Repair Paste" && t.fits_in(module))
+                .map(|t| t.id),
+            _ => None,
+        }
     }
 
     /// The charge a weapon is loaded with: the hardest hitting faction or T1 one.
@@ -814,12 +928,6 @@ impl<'a> Setup<'a> {
                     b.contains("armor repair")
                 }
         });
-        let tank = match (shield_tank, active) {
-            (true, false) => Tank::ShieldBuffer,
-            (true, true) => Tank::ShieldActive,
-            (false, false) => Tank::ArmorBuffer,
-            (false, true) => Tank::ArmorActive,
-        };
         let drones = facts.drone_bandwidth >= 25.0
             && facts
                 .bonuses
@@ -838,7 +946,6 @@ impl<'a> Setup<'a> {
         }
         Choices {
             family,
-            tier: Tier::T2,
             ammo: Ammo::Faction,
             prop: if facts.size == HullSize::Capital {
                 Prop::None
@@ -846,7 +953,18 @@ impl<'a> Setup<'a> {
                 Prop::Microwarpdrive
             },
             utilities,
-            tank,
+            tank: if active {
+                TankStyle::Active
+            } else {
+                TankStyle::Buffer
+            },
+            layer: if shield_tank {
+                Layer::Shield
+            } else {
+                Layer::Armor
+            },
+            goal: Goal::Balanced,
+            tank_fit: None,
             damage: if drones || family.is_none() && facts.drone_bandwidth > 0.0 {
                 DamageMods::Drone
             } else if family.is_some() {
@@ -854,12 +972,9 @@ impl<'a> Setup<'a> {
             } else {
                 DamageMods::None
             },
-            rigs: if tank == Tank::None {
-                Rigs::Damage
-            } else {
-                Rigs::Tank
-            },
+            rigs: Rigs::Tank,
             clear: false,
+            bling: Bling::default(),
         }
     }
 
@@ -907,24 +1022,95 @@ impl<'a> Setup<'a> {
         }
     }
 
-    /// Rigs for the choices, without the size word.
-    fn rig_names(choices: &Choices, kind: Option<WeaponKind>) -> Vec<&'static str> {
-        let tank: &[&str] = match choices.tank {
-            Tank::ShieldBuffer => &["Core Defense Field Extender I"],
-            Tank::ShieldActive => &["Core Defense Operational Solidifier I"],
-            Tank::ArmorBuffer => &["Trimark Armor Pump I"],
-            Tank::ArmorActive => &["Auxiliary Nano Pump I"],
-            Tank::None => &[],
-        };
+    /// Whether the hull counts as large for its tank modules: battlecruisers take large
+    /// extenders, plates and boosters.
+    fn large(&self) -> bool {
+        self.facts.size >= HullSize::Large || self.facts.battlecruiser
+    }
+
+    /// The plate a hull this size takes.
+    fn plate_name(&self) -> &'static str {
+        match self.facts.size {
+            HullSize::Small => "400mm Steel Plates I",
+            HullSize::Medium if !self.large() => "800mm Steel Plates I",
+            HullSize::Medium | HullSize::Large => "1600mm Steel Plates I",
+            HullSize::Capital => "25000mm Steel Plates I",
+        }
+    }
+
+    fn extender_name(&self) -> &'static str {
+        match self.facts.size {
+            HullSize::Small => "Medium Shield Extender I",
+            HullSize::Medium | HullSize::Large => "Large Shield Extender I",
+            HullSize::Capital => "Capital Shield Extender I",
+        }
+    }
+
+    fn repairer_name(&self) -> String {
+        format!("{} Armor Repairer I", self.facts.size.label())
+    }
+
+    fn booster_name(&self) -> &'static str {
+        match self.facts.size {
+            HullSize::Small => "Small Shield Booster I",
+            HullSize::Medium if !self.large() => "Medium Shield Booster I",
+            HullSize::Medium => "Large Shield Booster I",
+            HullSize::Large => "X-Large Shield Booster I",
+            HullSize::Capital => "Capital Shield Booster I",
+        }
+    }
+
+    /// The ancillary repairer or booster for the layer.
+    fn ancillary_name(&self, layer: Layer) -> String {
+        match layer {
+            Layer::Armor => format!("{} Ancillary Armor Repairer", self.facts.size.label()),
+            Layer::Shield => {
+                let size = match self.facts.size {
+                    HullSize::Small => "Small",
+                    HullSize::Medium if !self.large() => "Medium",
+                    HullSize::Medium => "Large",
+                    HullSize::Large => "X-Large",
+                    HullSize::Capital => "Capital",
+                };
+                format!("{size} Ancillary Shield Booster")
+            }
+        }
+    }
+
+    /// Whether the rig slots go to the tank: when tank rigs are asked for, or damage rigs are and
+    /// the weapons have none.
+    pub fn tank_takes_rigs(choices: &Choices, kind: Option<WeaponKind>) -> bool {
         let damage = match choices.damage {
             DamageMods::Drone => &[][..],
             _ => kind.map_or(&[][..], WeaponKind::rigs),
         };
-        match choices.rigs {
-            Rigs::Tank if !tank.is_empty() => tank.to_vec(),
-            Rigs::Tank | Rigs::Damage if !damage.is_empty() => damage.to_vec(),
-            Rigs::Damage => tank.to_vec(),
-            Rigs::Tank | Rigs::None => Vec::new(),
+        choices.tank != TankStyle::None
+            && match choices.rigs {
+                Rigs::Tank => true,
+                Rigs::Damage => damage.is_empty(),
+                Rigs::None => false,
+            }
+    }
+
+    /// The usual tank rigs for the style, without the size word.
+    fn tank_rig_names(choices: &Choices) -> &'static [&'static str] {
+        match (choices.tank, choices.layer) {
+            (TankStyle::None, _) => &[],
+            (TankStyle::Active, Layer::Shield) => &["Core Defense Operational Solidifier I"],
+            (TankStyle::Active, Layer::Armor) => &["Auxiliary Nano Pump I"],
+            (_, Layer::Shield) => &["Core Defense Field Extender I"],
+            (_, Layer::Armor) => &["Trimark Armor Pump I"],
+        }
+    }
+
+    /// Damage rigs for the choices, without the size word; empty when the tank takes the rigs.
+    fn damage_rig_names(choices: &Choices, kind: Option<WeaponKind>) -> &'static [&'static str] {
+        if choices.rigs == Rigs::None || Self::tank_takes_rigs(choices, kind) {
+            return &[];
+        }
+        match choices.damage {
+            DamageMods::Drone => &[],
+            _ => kind.map_or(&[], WeaponKind::rigs),
         }
     }
 
@@ -942,8 +1128,65 @@ impl<'a> Setup<'a> {
             .collect()
     }
 
+    /// Calibration left for new rigs.
+    fn calibration_left(&self, fit: &Fit, clear: bool) -> f64 {
+        self.facts.calibration
+            - if clear {
+                0.0
+            } else {
+                fit.rigs.iter().flatten().map(|&r| self.cost(r)).sum()
+            }
+    }
+
     /// What the choices put on `fit`, best first within each rack.
     pub fn plan(&self, fit: &Fit, choices: &Choices) -> Vec<Pick> {
+        let (mut picks, room) = self.plan_base(fit, choices);
+        picks.extend(self.plan_tank(fit, choices, &room, &picks));
+        picks
+    }
+
+    /// One pick of the item named `name`, at the variation the bling choices ask for. None when
+    /// the item is unknown, or is a damage control or propulsion module and the fit has one.
+    fn pick_named(
+        &self,
+        fit: &Fit,
+        choices: &Choices,
+        picks: &[Pick],
+        (slot, name, category, priority): (Slot, &str, Category, u8),
+    ) -> Option<Pick> {
+        let base = self.base(name)?;
+        self.pick_base(fit, choices, picks, (slot, base, category, priority))
+    }
+
+    fn pick_base(
+        &self,
+        fit: &Fit,
+        choices: &Choices,
+        picks: &[Pick],
+        (slot, base, category, priority): (Slot, TypeId, Category, u8),
+    ) -> Option<Pick> {
+        let group = |id: TypeId| self.catalog.get(id).map(|t| t.group_id);
+        // One damage control and one propulsion module per fit.
+        if let Some(g) = group(base).filter(|g| ONE_PER_FIT.contains(g)) {
+            let fitted = !choices.clear && fit.modules().any(|m| group(m.type_id) == Some(g));
+            if fitted || picks.iter().any(|p| group(p.base) == Some(g)) {
+                return None;
+            }
+        }
+        let type_id = self.pick(base, category, &choices.bling);
+        Some(Pick {
+            slot,
+            base,
+            type_id,
+            charge: self.charge_for(type_id),
+            priority,
+            tank: false,
+        })
+    }
+
+    /// Everything but the tank: weapons, propulsion, tackle, utilities, damage modules and damage
+    /// rigs, with what is left for the tank.
+    fn plan_base(&self, fit: &Fit, choices: &Choices) -> (Vec<Pick>, Room) {
         let catalog = self.catalog;
         let facts = self.facts;
         let clear = choices.clear;
@@ -952,33 +1195,17 @@ impl<'a> Setup<'a> {
         let free_low = self.free(fit, Slot::Low, clear).len();
         let family = self.family(choices);
         let kind = family.map(|f| f.kind);
+        let tank = choices.tank != TankStyle::None;
+        let armor = tank && choices.layer == Layer::Armor;
         let mut picks = Vec::new();
-        let group = |id: TypeId| catalog.get(id).map(|t| t.group_id);
-        let push = |picks: &mut Vec<Pick>, slot: Slot, name: &str, tier: Tier, priority| -> bool {
-            let Some(base) = self.base(name) else {
-                return false;
-            };
-            // One damage control and one propulsion module per fit.
-            if let Some(g) = group(base).filter(|g| ONE_PER_FIT.contains(g)) {
-                let fitted = !clear && fit.modules().any(|m| group(m.type_id) == Some(g));
-                if fitted || picks.iter().any(|p| group(p.base) == Some(g)) {
-                    return false;
+        let push = |picks: &mut Vec<Pick>, slot: Slot, name: &str, category, priority| -> bool {
+            match self.pick_named(fit, choices, picks, (slot, name, category, priority)) {
+                Some(pick) => {
+                    picks.push(pick);
+                    true
                 }
+                None => false,
             }
-            let type_id = self.resolve(base, tier);
-            let charge = if name.contains("Capacitor Booster") {
-                self.cap_charge(type_id)
-            } else {
-                None
-            };
-            picks.push(Pick {
-                slot,
-                base,
-                type_id,
-                charge,
-                priority,
-            });
-            true
         };
 
         // Highs: weapons on every free hardpoint, then a neut and a nos.
@@ -1000,7 +1227,7 @@ impl<'a> Setup<'a> {
                 _ => facts.launchers,
             };
             let count = hardpoints.saturating_sub(used).min(highs_left);
-            let type_id = self.resolve(family.base, choices.tier);
+            let type_id = self.pick(family.base, Category::Weapon, &choices.bling);
             let charge = self.ammo(type_id, choices.ammo);
             for _ in 0..count {
                 picks.push(Pick {
@@ -1009,6 +1236,7 @@ impl<'a> Setup<'a> {
                     type_id,
                     charge,
                     priority: WEAPON_PRIORITY,
+                    tank: false,
                 });
             }
             highs_left -= count;
@@ -1016,87 +1244,61 @@ impl<'a> Setup<'a> {
         for utility in [Utility::Neut, Utility::Nos] {
             if choices.has(utility) && highs_left > 0 {
                 let name = self.utility_name(utility, kind);
-                push(&mut picks, Slot::High, &name, Tier::T2, utility.priority());
+                push(
+                    &mut picks,
+                    Slot::High,
+                    &name,
+                    utility.category(),
+                    utility.priority(),
+                );
                 highs_left -= 1;
             }
         }
 
-        // Mids: propulsion, tackle and utilities, then the shield tank in what is left.
+        // Mids: propulsion, tackle and utilities; a cap booster for an armor repairer.
         let mut mids_left = free_mid;
         if let Some(name) = self.prop_name(choices.prop)
             && mids_left > 0
+            && push(&mut picks, Slot::Mid, &name, Category::Propulsion, 9)
         {
-            push(&mut picks, Slot::Mid, &name, Tier::T2, 9);
             mids_left -= 1;
         }
         for &utility in &choices.utilities {
             if utility.slot() == Slot::Mid && mids_left > 0 {
                 let name = self.utility_name(utility, kind);
-                push(&mut picks, Slot::Mid, &name, Tier::T2, utility.priority());
+                push(
+                    &mut picks,
+                    Slot::Mid,
+                    &name,
+                    utility.category(),
+                    utility.priority(),
+                );
                 mids_left -= 1;
             }
         }
-        let size = facts.size;
-        let large = size >= HullSize::Large || facts.battlecruiser;
-        let hardener = "Multispectrum Shield Hardener I";
-        match choices.tank {
-            Tank::ShieldBuffer => {
-                let extender = match size {
-                    HullSize::Small => "Medium Shield Extender I",
-                    HullSize::Medium | HullSize::Large => "Large Shield Extender I",
-                    HullSize::Capital => "Capital Shield Extender I",
-                };
-                for i in 0..mids_left {
-                    let (name, priority) = match i {
-                        1 | 4 => (hardener, 5),
-                        0 => (extender, 7),
-                        _ => (extender, 4),
-                    };
-                    push(&mut picks, Slot::Mid, name, Tier::T2, priority);
-                }
+        if armor
+            && choices.tank == TankStyle::Active
+            && mids_left > 0
+            && !choices.has(Utility::CapBooster)
+        {
+            let name = self.utility_name(Utility::CapBooster, kind);
+            if push(&mut picks, Slot::Mid, &name, Category::Electronics, 4) {
+                mids_left -= 1;
             }
-            Tank::ShieldActive => {
-                let booster = match size {
-                    HullSize::Small => "Small Shield Booster I",
-                    HullSize::Medium if !large => "Medium Shield Booster I",
-                    HullSize::Medium => "Large Shield Booster I",
-                    HullSize::Large => "X-Large Shield Booster I",
-                    HullSize::Capital => "Capital Shield Booster I",
-                };
-                let cap_booster = self.utility_name(Utility::CapBooster, kind);
-                for i in 0..mids_left {
-                    let (name, priority) = match i {
-                        0 => (booster, 7),
-                        2 if !choices.has(Utility::CapBooster) => (cap_booster.as_str(), 4),
-                        _ => (hardener, 5),
-                    };
-                    push(&mut picks, Slot::Mid, name, Tier::T2, priority);
-                }
-            }
-            Tank::ArmorActive if mids_left > 0 && !choices.has(Utility::CapBooster) => {
-                let name = self.utility_name(Utility::CapBooster, kind);
-                push(&mut picks, Slot::Mid, &name, Tier::T2, 4);
-            }
-            _ => {}
         }
 
-        // Lows: damage modules, an enhancer, the armor tank or a damage control.
+        // Lows: damage modules and an enhancer; a damage control under a shield tank.
         let enhancer = usize::from(choices.has(Utility::Enhancer) && free_low > 0);
         let damage_mod = self.damage_mod_name(choices.damage, kind);
-        let damage_count = match (damage_mod, choices.tank.armor()) {
+        let damage_count = match (damage_mod, armor) {
             (None, _) => 0,
             (Some(_), true) => free_low.saturating_sub(3 + enhancer).min(3),
             (Some(_), false) => free_low.saturating_sub(enhancer).min(3),
         };
         if let Some(name) = damage_mod {
             for i in 0..damage_count {
-                push(
-                    &mut picks,
-                    Slot::Low,
-                    name,
-                    Tier::T2,
-                    if i == 0 { 6 } else { 5 },
-                );
+                let priority = if i == 0 { 6 } else { 5 };
+                push(&mut picks, Slot::Low, name, Category::Damage, priority);
             }
         }
         if enhancer > 0 {
@@ -1105,93 +1307,180 @@ impl<'a> Setup<'a> {
                 &mut picks,
                 Slot::Low,
                 &name,
-                Tier::T2,
+                Category::Electronics,
                 Utility::Enhancer.priority(),
             );
         }
         let mut lows_left = free_low - damage_count - enhancer;
-        let membrane = "Multispectrum Energized Membrane I";
-        let control = "Damage Control I";
-        match choices.tank {
-            Tank::ArmorBuffer => {
-                let plate = match size {
-                    HullSize::Small => "400mm Steel Plates I",
-                    HullSize::Medium if !large => "800mm Steel Plates I",
-                    HullSize::Medium | HullSize::Large => "1600mm Steel Plates I",
-                    HullSize::Capital => "25000mm Steel Plates I",
+        if tank
+            && !armor
+            && lows_left > 0
+            && push(
+                &mut picks,
+                Slot::Low,
+                "Damage Control I",
+                Category::Hardener,
+                6,
+            )
+        {
+            lows_left -= 1;
+        }
+        // A fourth damage module where nothing else wants the slot.
+        if let Some(name) = damage_mod
+            && !armor
+            && lows_left > 0
+            && damage_count == 3
+            && push(&mut picks, Slot::Low, name, Category::Damage, 2)
+        {
+            lows_left -= 1;
+        }
+
+        // Damage rigs, as many as the calibration takes.
+        let mut calibration = self.calibration_left(fit, clear);
+        let mut rigs_left = self.free(fit, Slot::Rig, clear).len();
+        let names = Self::damage_rig_names(choices, kind);
+        let bases: Vec<TypeId> = (0..rigs_left)
+            .filter_map(|i| {
+                let name = names.get(i % names.len().max(1))?;
+                self.base(&format!("{} {name}", facts.size.label()))
+            })
+            .collect();
+        for pick in self.rig_picks(&bases, &choices.bling, &mut calibration, false) {
+            picks.push(pick);
+            rigs_left -= 1;
+        }
+        let room = Room {
+            slots: match (tank, armor) {
+                (false, _) => 0,
+                (true, true) => lows_left,
+                (true, false) => mids_left,
+            },
+            rigs: if Self::tank_takes_rigs(choices, kind) {
+                rigs_left
+            } else {
+                0
+            },
+            calibration,
+        };
+        (picks, room)
+    }
+
+    /// Rigs in order, until one costs more calibration than is left.
+    fn rig_picks(
+        &self,
+        bases: &[TypeId],
+        bling: &Bling,
+        calibration: &mut f64,
+        tank: bool,
+    ) -> Vec<Pick> {
+        let mut picks = Vec::new();
+        for &base in bases {
+            let type_id = self.pick(base, Category::Rig, bling);
+            let cost = self.cost(type_id);
+            if cost > *calibration + 1e-6 {
+                break;
+            }
+            *calibration -= cost;
+            picks.push(Pick {
+                slot: Slot::Rig,
+                base,
+                type_id,
+                charge: None,
+                priority: 3,
+                tank,
+            });
+        }
+        picks
+    }
+
+    /// The tank in the room the rest left: the optimiser's pick if there is one, else the usual
+    /// layout for the style.
+    fn plan_tank(&self, fit: &Fit, choices: &Choices, room: &Room, base: &[Pick]) -> Vec<Pick> {
+        let catalog = self.catalog;
+        let layer = choices.layer;
+        let slot = layer.slot();
+        let mut picks: Vec<Pick> = Vec::new();
+        let push_base = |picks: &mut Vec<Pick>, base_id: TypeId, priority| {
+            let category = tank::category_of(catalog, base_id);
+            let all: Vec<Pick> = base.iter().chain(picks.iter()).cloned().collect();
+            if let Some(pick) =
+                self.pick_base(fit, choices, &all, (slot, base_id, category, priority))
+            {
+                picks.push(Pick { tank: true, ..pick });
+                true
+            } else {
+                false
+            }
+        };
+        let rig_bases: Vec<TypeId> = if let Some(found) = &choices.tank_fit {
+            for &id in found.modules.iter().take(room.slots) {
+                let priority = match tank::category_of(catalog, id) {
+                    Category::Repairer => 7,
+                    Category::Buffer => 6,
+                    Category::Hardener => 5,
+                    _ => 4,
                 };
-                for i in 0..lows_left {
-                    let (name, priority) = match i {
+                push_base(&mut picks, id, priority);
+            }
+            found.rigs.clone()
+        } else {
+            let id = |name: &str| self.base(name);
+            let plate = id(self.plate_name());
+            let extender = id(self.extender_name());
+            let membrane = id("Multispectrum Energized Membrane I");
+            let control = id("Damage Control I");
+            let hardener = id("Multispectrum Shield Hardener I");
+            let repairer = id(&self.repairer_name());
+            let booster = id(self.booster_name());
+            let cap_booster = id(&self.utility_name(Utility::CapBooster, None));
+            for i in 0..room.slots {
+                let (wanted, priority) = match (choices.tank, layer) {
+                    (TankStyle::None, _) => break,
+                    (TankStyle::Brick, Layer::Shield) => (extender, 6),
+                    (TankStyle::Brick, Layer::Armor) => (plate, 6),
+                    (TankStyle::Buffer, Layer::Shield) => match i {
+                        1 | 4 => (hardener, 5),
+                        0 => (extender, 7),
+                        _ => (extender, 4),
+                    },
+                    (TankStyle::Active, Layer::Shield) => match i {
+                        0 => (booster, 7),
+                        2 if !choices.has(Utility::CapBooster) => (cap_booster, 4),
+                        _ => (hardener, 5),
+                    },
+                    (TankStyle::Buffer, Layer::Armor) => match i {
                         0 => (plate, 7),
                         2 => (control, 6),
                         _ if i % 2 == 1 => (membrane, 5),
                         _ => (plate, 4),
-                    };
-                    // A fit that has its damage control gets a membrane instead.
-                    if !push(&mut picks, Slot::Low, name, Tier::T2, priority) {
-                        push(&mut picks, Slot::Low, membrane, Tier::T2, 5);
-                    }
-                }
-                lows_left = 0;
-            }
-            Tank::ArmorActive => {
-                let repairer = format!("{} Armor Repairer I", size.label());
-                for i in 0..lows_left {
-                    let (name, priority) = match i {
-                        0 => (repairer.as_str(), 7),
-                        2 => (repairer.as_str(), 4),
+                    },
+                    (TankStyle::Active, Layer::Armor) => match i {
+                        0 => (repairer, 7),
+                        2 => (repairer, 4),
                         3 => (control, 6),
                         _ => (membrane, 5),
-                    };
-                    if !push(&mut picks, Slot::Low, name, Tier::T2, priority) {
-                        push(&mut picks, Slot::Low, membrane, Tier::T2, 5);
-                    }
+                    },
+                };
+                let Some(wanted) = wanted else { continue };
+                // A fit that has its damage control gets a membrane instead.
+                if !push_base(&mut picks, wanted, priority)
+                    && layer == Layer::Armor
+                    && let Some(membrane) = membrane
+                {
+                    push_base(&mut picks, membrane, 5);
                 }
-                lows_left = 0;
             }
-            Tank::ShieldBuffer | Tank::ShieldActive if lows_left > 0 => {
-                if push(&mut picks, Slot::Low, control, Tier::T2, 6) {
-                    lows_left -= 1;
-                }
-            }
-            _ => {}
-        }
-        // A fourth damage module where nothing else wants the slot.
-        if let Some(name) = damage_mod
-            && lows_left > 0
-            && damage_count == 3
-        {
-            push(&mut picks, Slot::Low, name, Tier::T2, 2);
-        }
-
-        // Rigs, as many as the calibration takes.
-        let rigs = Self::rig_names(choices, kind);
-        let free_rigs = self.free(fit, Slot::Rig, clear).len();
-        let mut calibration = facts.calibration
-            - if clear {
-                0.0
-            } else {
-                fit.rigs.iter().flatten().map(|&r| self.cost(r)).sum()
-            };
-        for i in 0..free_rigs {
-            let Some(name) = rigs.get(i % rigs.len().max(1)) else {
-                break;
-            };
-            let name = format!("{} {name}", size.label());
-            let Some(base) = self.base(&name) else { break };
-            let cost = self.cost(base);
-            if cost > calibration + 1e-6 {
-                break;
-            }
-            calibration -= cost;
-            picks.push(Pick {
-                slot: Slot::Rig,
-                base,
-                type_id: base,
-                charge: None,
-                priority: 3,
-            });
-        }
+            let names = Self::tank_rig_names(choices);
+            (0..room.rigs)
+                .filter_map(|i| {
+                    let name = names.get(i % names.len().max(1))?;
+                    self.base(&format!("{} {name}", self.facts.size.label()))
+                })
+                .collect()
+        };
+        let mut calibration = room.calibration;
+        let rigs: Vec<TypeId> = rig_bases.into_iter().take(room.rigs).collect();
+        picks.extend(self.rig_picks(&rigs, &choices.bling, &mut calibration, true));
         picks
     }
 

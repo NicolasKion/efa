@@ -48,6 +48,9 @@ pub struct Saved {
     /// keeps that height when the window resizes; the tree above takes the change.
     #[serde(default)]
     pub market_results: Option<f32>,
+    /// The fitting wizard's last bling choices, which the next fit starts from.
+    #[serde(default)]
+    pub wizard: crate::wizard::Bling,
 }
 
 /// What besides ship and fittings the price total includes, with pyfa's defaults.

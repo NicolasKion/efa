@@ -193,8 +193,12 @@ fn cargo_modules_replace_fitted_ones_of_their_rack() {
 #[test]
 fn implants_and_boosters_can_count_against_the_hold() {
     let Some(catalog) = catalog() else { return };
-    let implant = catalog.find("Zainou 'Gnome' Shield Management SM-705").expect("an implant");
-    let booster = catalog.find("Standard Blue Pill Booster").expect("a booster");
+    let implant = catalog
+        .find("Zainou 'Gnome' Shield Management SM-705")
+        .expect("an implant");
+    let booster = catalog
+        .find("Standard Blue Pill Booster")
+        .expect("a booster");
     let mut fit = Fit::new("hold");
     fit.add(&catalog, implant.id);
     fit.add(&catalog, booster.id);
