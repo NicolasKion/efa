@@ -22,6 +22,9 @@ use crate::{
 const BEAM: usize = 20;
 /// Tanks the rigs are tried on.
 const RIG_SEEDS: usize = 8;
+/// How many of the strongest variations of each faction, deadspace or officer group the wider
+/// search tiers try per module.
+const STRONGEST_PER_GROUP: usize = 3;
 /// Repairers or boosters of one kind a tank takes at most.
 const MAX_REPAIRERS: usize = 3;
 /// Damage-type specific modules of one kind a tank takes at most.
@@ -802,6 +805,33 @@ impl Setup<'_> {
             let id = self.resolve(base, tier);
             if !found.contains(&id) {
                 found.push(id);
+            }
+        }
+        // Past the bling tier, the strongest few of each wider meta group too: the lowest of a
+        // group (a C-type, the weakest officer) is rarely the one worth fitting.
+        let groups: &[i32] = match (choices.search_tiers, category) {
+            (super::SearchTiers::Bling, _) | (_, Category::Rig) => &[],
+            (super::SearchTiers::Faction, _) => &[super::meta::FACTION, super::meta::STORYLINE],
+            (super::SearchTiers::All, _) => &[
+                super::meta::FACTION,
+                super::meta::STORYLINE,
+                super::meta::DEADSPACE,
+                super::meta::OFFICER,
+            ],
+        };
+        for &group in groups {
+            let mut members: Vec<&crate::data::ItemType> = self
+                .catalog
+                .variations_of(base)
+                .iter()
+                .filter_map(|&v| self.catalog.get(v))
+                .filter(|t| t.published && t.market_group.is_some() && t.meta_group == Some(group))
+                .collect();
+            members.sort_by(|a, b| b.meta_level.cmp(&a.meta_level).then(a.id.cmp(&b.id)));
+            for t in members.into_iter().take(STRONGEST_PER_GROUP) {
+                if !found.contains(&t.id) {
+                    found.push(t.id);
+                }
             }
         }
         found
