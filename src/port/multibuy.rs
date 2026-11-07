@@ -7,11 +7,10 @@ use super::{charge_count, sort_cargo};
 use crate::{
     data::{Catalog, TypeId},
     fit::Fit,
+    prices::optimize,
 };
 
-/// pyfa's multibuy options, with its defaults. pyfa's "Optimize Prices" swaps in cheaper
-/// variations through its price service, which gyfa's price sources cannot answer; it is left
-/// out.
+/// pyfa's multibuy options, with its defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 #[expect(
@@ -23,6 +22,8 @@ pub struct Options {
     pub implants: bool,
     pub boosters: bool,
     pub cargo: bool,
+    /// Swap items for their cheapest replacement, as Optimize Fit Price does.
+    pub optimize_prices: bool,
 }
 
 impl Default for Options {
@@ -32,11 +33,13 @@ impl Default for Options {
             implants: false,
             boosters: false,
             cargo: true,
+            optimize_prices: false,
         }
     }
 }
 
-pub fn export(fit: &Fit, catalog: &Catalog, options: &Options) -> String {
+/// The items the list holds and how many of each, the ship left out, in fit order.
+pub fn amounts(fit: &Fit, catalog: &Catalog, options: &Options) -> Vec<(TypeId, u32)> {
     let mut amounts: Vec<(TypeId, u32)> = Vec::new();
     let mut add =
         |type_id: TypeId, count: u32| match amounts.iter_mut().find(|(t, _)| *t == type_id) {
@@ -73,8 +76,33 @@ pub fn export(fit: &Fit, catalog: &Catalog, options: &Options) -> String {
             add(b.type_id, 1);
         }
     }
+    amounts
+}
+
+/// The list as it is, whatever `options` says about optimizing prices.
+pub fn export(fit: &Fit, catalog: &Catalog, options: &Options) -> String {
+    format(fit, catalog, &amounts(fit, catalog, options))
+}
+
+/// The list with `options.optimize_prices` honoured: `price` picks the replacements.
+pub fn export_priced(
+    fit: &Fit,
+    catalog: &Catalog,
+    options: &Options,
+    price: impl Fn(TypeId) -> Option<f64>,
+) -> String {
+    let amounts = amounts(fit, catalog, options);
+    if options.optimize_prices {
+        let cheaper = optimize::cheaper_amounts(catalog, &amounts, price);
+        format(fit, catalog, &cheaper)
+    } else {
+        format(fit, catalog, &amounts)
+    }
+}
+
+fn format(fit: &Fit, catalog: &Catalog, amounts: &[(TypeId, u32)]) -> String {
     let ship = fit.ship.map(|s| catalog.name(s));
-    let lines = sort_cargo(catalog, &amounts)
+    let lines = sort_cargo(catalog, amounts)
         .into_iter()
         .map(|(t, n)| match n {
             1 => catalog.name(t),

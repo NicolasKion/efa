@@ -22,6 +22,7 @@ use crate::{
     engine::Stats,
     fit::Fit,
     port::{self, ExportSettings, Format, dna, eft, multibuy, xml},
+    prices::optimize,
 };
 
 /// One option checkbox: label, tooltip, whether it is on, and how to set it.
@@ -98,6 +99,11 @@ impl ExportWindow {
     }
 
     fn copy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let settings = self.settings;
+        if settings.format == Format::MultiBuy && settings.multibuy.optimize_prices {
+            self.copy_cheaper_multibuy(window, cx);
+            return;
+        }
         match self.render_text() {
             Ok(text) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
@@ -116,6 +122,31 @@ impl ExportWindow {
                 cx.notify();
             }
         }
+    }
+
+    /// pyfa's multibuy with Optimize Prices: the main window prices the items and their
+    /// replacements, fetching what it lacks, then copies the list.
+    fn copy_cheaper_multibuy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let settings = self.settings;
+        self.hub
+            .update(cx, |hub, cx| hub.update_saved(|s| s.export = settings, cx));
+        let loaded = Rc::clone(&self.loaded);
+        let fit = self.fit.clone();
+        let amounts = multibuy::amounts(&fit, &loaded.catalog, &settings.multibuy);
+        let types = optimize::types_to_price(&loaded.catalog, amounts.iter().map(|&(t, _)| t));
+        let _ = self.gyfa.update(cx, |g, cx| {
+            g.with_prices_for(types, cx, move |g, cx| {
+                let prices = Rc::clone(&g.prices);
+                let text =
+                    multibuy::export_priced(&fit, &loaded.catalog, &settings.multibuy, |t| {
+                        prices.get(t)
+                    });
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+                g.status = Some("Copied fit as MultiBuy to clipboard".into());
+                cx.notify();
+            });
+        });
+        window.remove_window();
     }
 
     /// The option checkboxes under a format, live only while it is picked.
@@ -186,6 +217,14 @@ impl ExportWindow {
                     s.multibuy.cargo,
                     |s, v| {
                         s.multibuy.cargo = v;
+                    },
+                ),
+                (
+                    "Optimize Prices",
+                    "Replace items by cheaper alternatives",
+                    s.multibuy.optimize_prices,
+                    |s, v| {
+                        s.multibuy.optimize_prices = v;
                     },
                 ),
             ],
