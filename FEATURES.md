@@ -238,22 +238,22 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from refine (`Engine::graph_snapshot`: per-weapon damage and cycle timing, weapon/ewar/repair attributes, ship stats) with pyfa's application formulas (src/graphs). Turret and missile application are checked against refine's `get_stat_dmg_applied`, and damage over time against refine's simulation.
 
 - [x] Graph window and fit/target lists (graphs/gui): one window, fits and targets added from menus, removed with Delete, double-click or the menu, pyfa's extra columns per graph
-- [~] Damage stats: DPS/volley/damage inflicted vs distance, time, target speed (m/s, %), target sig (m, %), attacker and target vectors (graphs/data/fitDamageStats); turrets, launchers, vortons, smartbombs, bombs, guided bombs, doomsdays, drones. Breacher pods and fighters are not plotted (no fighters yet; breacher damage is HP-relative)
-- [ ] Application profile, best ammo per distance (graphs/data/fitApplicationProfile)
+- [x] Damage stats: DPS/volley/damage inflicted vs distance, time, target speed (m/s, %), target sig (m, %), attacker and target vectors (graphs/data/fitDamageStats); turrets, launchers, vortons, smartbombs, bombs, guided bombs, doomsdays, drones, fighter abilities (attack, missiles, bombs, kamikaze, each read from refine on its own) and breacher pods (the smaller of their cap and their share of the target's HP, times its breacher resistance). Fighter rearming is left out of the time axis
+- [x] Application profile, best ammo per distance (graphs/data/fitApplicationProfile): every charge of the chosen meta tier loaded into each weapon group in refine, the best per distance summed, segments colored, dashed or plain by charge. Charge colors are spread evenly rather than pyfa's per-ammo table
 - [x] Capacitor amount/regen vs time and cap amount, pyfa's cap simulator with stagger, injectors and reloads (graphs/data/fitCapacitor)
-- [x] Shield amount/regen vs time and shield amount, HP or EHP (graphs/data/fitShieldRegen); EHP is a checkbox in the graph window, where pyfa follows the stats pane
+- [x] Shield amount/regen vs time and shield amount, HP or EHP (graphs/data/fitShieldRegen), following the main window's stats pane raw/effective toggle
 - [x] Mobility: speed, distance, momentum, bump speed and distance vs time (graphs/data/fitMobility)
 - [x] Warp time vs distance in AU or km, from the speed with warp-incompatible modules off (graphs/data/fitWarpTime)
 - [x] Lock time vs target sig (graphs/data/fitLockTime)
 - [x] Remote reps: rate and total vs distance and time, ancillary reload option (graphs/data/fitRemoteReps)
 - [x] Ewar stats: neuts, webs, ECM, damps, TDs, GDs, TPs vs distance with target resistance (graphs/data/fitEwarStats)
-- [ ] ECM/burst/scanres damp effect (graphs/data/fitEcmBurstScanresDamps); hidden behind ctrl-alt-g in pyfa
-- [~] Graph options: ignore resists, apply projected (own webs and TPs), ignore lock range, ignore drone control range, drone mode, target resist mode (builtinContextMenus/graph*.py). Apply projected stacks the attacker's webs and paints among themselves only and leaves scrams out; options are not remembered between runs
-- [ ] Plot with different ammo (builtinContextMenus/graphFitAmmoPicker.py)
+- [x] ECM burst + scanres damps (graphs/data/fitEcmBurstScanresDamps), listed when the window is opened with Ctrl+Alt+G, as in pyfa
+- [x] Graph options: ignore resists, apply projected (own webs, painters and scrams, which turn off the target's microwarpdrive), ignore lock range, ignore drone control range, drone mode, target resist mode, the Application Profile's own two, style and ammo meta, legend and Y = 0 (builtinContextMenus/graph*.py), remembered between runs. Webs and paints stack among themselves rather than with what already affects a target fit
+- [x] Plot with different ammo (builtinContextMenus/graphFitAmmoPicker.py): a fit row submenu adding the fit again with another charge in one weapon type; pyfa's own dialog is switched off in its code
 - [x] Line color per fit, lightness and line style per target (builtinViewColumns/graphColor.py, graphLineStyle.py, graphLightness.py), from the theme's palette where it has the hue
 - [x] Legend, "Always show Y = 0", readout at the hovered or clicked X (right-click clears)
 - [x] Built-in target profiles and the ideal target (eos/saveddata/targetProfile.py)
-- [ ] Drag fits from the fittings browser into the graph lists
+- [ ] Drag fits from the fittings browser into the graph lists: gpui drags stay inside their window, and the graph window is a window of its own
 
 ## Preferences
 

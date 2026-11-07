@@ -3,9 +3,11 @@
 //! The numbers come from refine through [`snapshot::FitSnapshot`]; everything here is plain
 //! computation, so the UI can sample freely.
 
+pub mod ammo;
 pub mod capsim;
 pub mod defs;
 pub mod math;
 pub mod plot;
 pub mod profiles;
+pub mod settings;
 pub mod snapshot;

@@ -41,6 +41,7 @@ gpui_kit::actions!(
         ImplantSetEditor,
         CharacterEditor,
         Graphs,
+        HiddenGraphs,
         Quit,
     ]
 );
@@ -62,6 +63,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-k", CharacterEditor, Some(CONTEXT)),
         KeyBinding::new("ctrl-q", Quit, Some(CONTEXT)),
         KeyBinding::new("ctrl-g", Graphs, Some(CONTEXT)),
+        KeyBinding::new("ctrl-alt-g", HiddenGraphs, Some(CONTEXT)),
     ]);
 }
 
@@ -110,6 +112,7 @@ impl Gyfa {
                 g.open_implant_set_editor(None, window, cx);
             }))
             .on_action(cx.listener(|g, _: &Graphs, _, cx| g.open_graphs(cx)))
+            .on_action(cx.listener(|g, _: &HiddenGraphs, _, cx| g.open_hidden_graphs(cx)))
             .on_action(cx.listener(|_, _: &Quit, _, cx| cx.quit()))
     }
 

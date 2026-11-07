@@ -19,7 +19,16 @@ use super::{
     GraphsWindow, canvas,
     style::{self, Lightness, LineColor, LineStyle},
 };
-use crate::graphs::{defs::Column, plot::ResistMode, profiles::TargetProfile, snapshot::Ship};
+use crate::data::{Hardpoint, TypeId};
+use crate::graphs::{
+    ammo::{self, AmmoQuality},
+    defs::Column,
+    defs::Graph,
+    plot::ResistMode,
+    profiles::TargetProfile,
+    snapshot::Ship,
+    snapshot::{EwarKind, FitSnapshot},
+};
 use crate::ui::{
     profile_editor::open_target_profile_editor,
     profile_menus::{FirstProfile, PickProfile, target_profile_menu},
@@ -30,6 +39,15 @@ use crate::ui::{
 pub struct Source {
     pub fit: usize,
     pub color: LineColor,
+    /// A charge loaded into every module of a type, from "Plot with Different Ammo".
+    pub ammo: Option<AmmoChoice>,
+}
+
+/// A charge to plot a fit's weapons of one type with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AmmoChoice {
+    pub module: TypeId,
+    pub charge: TypeId,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -103,8 +121,22 @@ fn ship_column(col: Column, ship: &Ship) -> String {
         Column::ShieldTime => format!("{} s", f(ship.shield_recharge)),
         Column::SigRadius => format!("{} m", f(ship.sig_radius)),
         Column::FullHp => f(ship.hp.iter().sum()),
-        Column::TargetResists => String::new(),
+        Column::TargetResists | Column::DampScanRes => String::new(),
     }
+}
+
+/// How much the fit's dampeners cut scan resolution, pyfa's "Damp ScanRes" column.
+fn damp_scan_res(snap: &FitSnapshot) -> String {
+    let mults: Vec<f64> = snap
+        .ewar
+        .iter()
+        .filter(|e| e.kind == EwarKind::Damp)
+        .map(|e| 1.0 + e.strength2 / 100.0)
+        .collect();
+    format!(
+        "{:.0}%",
+        (crate::graphs::math::stacked_multiplier(&mults) - 1.0) * 100.0
+    )
 }
 
 fn resists_text(resists: &[f64; 4]) -> String {
@@ -203,7 +235,7 @@ fn add_fit_submenus(
                 if target {
                     g.add_target(TargetKind::Fit(fit));
                 } else {
-                    g.add_source(fit);
+                    g.add_source(fit, None);
                 }
             });
         }
@@ -233,6 +265,7 @@ fn source_menu(
 ) -> PopupMenu {
     let mut menu = add_fit_submenus(menu, this, fits, tabs, false, window, cx);
     if let Some(row) = selected {
+        menu = ammo_menu(menu, this, row, window, cx);
         let (remove, open) = (this.clone(), this.clone());
         menu = menu
             .separator()
@@ -260,6 +293,99 @@ fn source_menu(
     menu
 }
 
+/// pyfa's "Plot with Different Ammo": the damage graph plots the fit again with another charge
+/// in one type of weapon. pyfa's own picker dialog is switched off in its code; this offers the
+/// same choice as a menu.
+fn ammo_menu(
+    menu: PopupMenu,
+    this: &Weak,
+    row: usize,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let Some(g) = this.upgrade() else { return menu };
+    let (groups, fit) = {
+        let g = g.read(cx);
+        if g.graph != Graph::DamageStats {
+            return menu;
+        }
+        let (Some(source), Some(loaded)) = (g.sources.get(row), g.loaded.clone()) else {
+            return menu;
+        };
+        let Some(fit) = g.fits.get(source.fit) else {
+            return menu;
+        };
+        let catalog = &loaded.catalog;
+        let mut types: Vec<TypeId> = Vec::new();
+        for m in fit.modules() {
+            let weapon = catalog
+                .get(m.type_id)
+                .is_some_and(|t| t.hardpoint != Hardpoint::None && !t.mining);
+            if weapon && !types.contains(&m.type_id) {
+                types.push(m.type_id);
+            }
+        }
+        let groups: Vec<(TypeId, String, Vec<(TypeId, String)>)> = types
+            .into_iter()
+            .map(|t| {
+                let charges = ammo::charges_for(catalog, t, AmmoQuality::All)
+                    .into_iter()
+                    .map(|c| (c, catalog.name(c)))
+                    .collect();
+                (t, catalog.name(t), charges)
+            })
+            .filter(|(_, _, charges): &(_, _, Vec<_>)| !charges.is_empty())
+            .collect();
+        (groups, source.fit)
+    };
+    if groups.is_empty() {
+        return menu;
+    }
+    let this = this.clone();
+    menu.separator().submenu(
+        "Plot with Different Ammo",
+        window,
+        cx,
+        move |menu, window, cx| {
+            if let [(module, _, charges)] = groups.as_slice() {
+                return charges.iter().fold(menu, |menu, (charge, name)| {
+                    menu.item(
+                        PopupMenuItem::new(name.clone())
+                            .on_click(pick_ammo(&this, fit, *module, *charge)),
+                    )
+                });
+            }
+            groups
+                .iter()
+                .fold(menu, |menu, (module, module_name, charges)| {
+                    let (module, charges, this) = (*module, charges.clone(), this.clone());
+                    menu.submenu(module_name.clone(), window, cx, move |menu, _, _| {
+                        charges.iter().fold(menu, |menu, (charge, name)| {
+                            menu.item(
+                                PopupMenuItem::new(name.clone())
+                                    .on_click(pick_ammo(&this, fit, module, *charge)),
+                            )
+                        })
+                    })
+                })
+        },
+    )
+}
+
+fn pick_ammo(
+    this: &Weak,
+    fit: usize,
+    module: TypeId,
+    charge: TypeId,
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    let this = this.clone();
+    move |_, _, cx| {
+        with(&this, cx, |g, _| {
+            g.add_source(fit, Some(AmmoChoice { module, charge }));
+        });
+    }
+}
+
 fn source_row(
     g: &mut GraphsWindow,
     i: usize,
@@ -271,6 +397,7 @@ fn source_row(
 ) -> AnyElement {
     let source = g.sources[i].clone();
     let snap = g.snapshot(source.fit);
+    let name = g.source_name(&source);
     let theme = cx.theme();
     let color = source.color.color(theme);
     let selected = g.selected_source == Some(i);
@@ -309,12 +436,15 @@ fn source_row(
         .when(selected, |r| r.bg(theme.table_active))
         .hover(|s| s.bg(theme.table_hover))
         .child(picker)
-        .child(div().flex_1().truncate().child(g.fit_name(source.fit)))
+        .child(div().flex_1().truncate().child(name))
         .children(cols.iter().map(|&c| {
-            div().w(px(84.)).truncate().child(
-                snap.as_ref()
-                    .map_or_else(String::new, |s| ship_column(c, &s.ship)),
-            )
+            div()
+                .w(px(84.))
+                .truncate()
+                .child(snap.as_ref().map_or_else(String::new, |s| match c {
+                    Column::DampScanRes => damp_scan_res(s),
+                    _ => ship_column(c, &s.ship),
+                }))
         }))
         .on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
             if event.click_count() >= 2 {
@@ -339,9 +469,9 @@ fn source_row(
 
 pub fn targets(g: &mut GraphsWindow, cx: &mut Context<GraphsWindow>) -> AnyElement {
     let this = cx.entity().downgrade();
-    let cols = g.graph.tgt_columns(g.options.ignore_resists);
+    let cols = g.graph.tgt_columns(g.options().ignore_resists);
     let (fits, tabs) = fit_choices(g);
-    let ignore_resists = g.options.ignore_resists;
+    let ignore_resists = g.options().ignore_resists;
     let rows: Vec<AnyElement> = (0..g.targets.len())
         .map(|i| target_row(g, i, &cols, &this, &fits, &tabs, ignore_resists, cx))
         .collect();

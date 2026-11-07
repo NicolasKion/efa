@@ -16,7 +16,7 @@ const MAX_TIME: f64 = 2500.0;
 const MAX_CAP_TIME: f64 = 3600.0;
 
 /// pyfa's "mobile drone mode": how drones and fighters chase the target.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DroneMode {
     /// Drones faster than the target stick to it; slower ones shoot from the attacker.
     #[default]
@@ -155,6 +155,31 @@ pub struct TargetData {
     pub radius: f64,
     pub resists: Dmg,
     pub hp: Option<f64>,
+    /// Multiplier on breacher pod damage taken.
+    pub breacher_resist: f64,
+    /// Speed and signature once scrammed, for targets running a microwarpdrive.
+    pub scrammed: Option<(f64, f64)>,
+}
+
+impl TargetData {
+    /// An abstract target: no breacher resistance, nothing to scram.
+    pub fn profile(
+        max_velocity: f64,
+        sig_radius: f64,
+        radius: f64,
+        resists: Dmg,
+        hp: Option<f64>,
+    ) -> Self {
+        Self {
+            max_velocity,
+            sig_radius,
+            radius,
+            resists,
+            hp,
+            breacher_resist: 1.0,
+            scrammed: None,
+        }
+    }
 }
 
 /// Everything a plot needs besides the fits: axes, input values and options.
@@ -234,6 +259,9 @@ pub fn plot(req: &Request, src: &FitSnapshot, tgt: Option<&TargetData>) -> Optio
         Graph::Mobility => mobility(req, &src.ship)?,
         Graph::WarpTime => warp(req, &src.ship),
         Graph::LockTime => lock(req, &src.ship)?,
+        Graph::EcmBurstDamps => ecm_burst(req, src)?,
+        // Plotted in segments by [`super::ammo`].
+        Graph::ApplicationProfile => return None,
     };
     series
         .xs
@@ -335,8 +363,8 @@ fn change_times<T: Clone + Default>(cycles: &[&Cycle<T>], until: f64, delayed: b
 
 /// The geometry of one damage sample.
 #[derive(Debug, Clone, Copy)]
-struct Engagement {
-    distance: Option<f64>,
+pub(super) struct Engagement {
+    pub(super) distance: Option<f64>,
     atk_speed: f64,
     atk_angle: f64,
     tgt_speed: f64,
@@ -344,39 +372,59 @@ struct Engagement {
     tgt_sig: f64,
 }
 
-fn damage(req: &Request, src: &FitSnapshot, tgt: &TargetData) -> Option<Series> {
-    let ship = &src.ship;
+/// Where attacker and target are and how they move, from the inputs and vectors.
+pub(super) fn engagement(req: &Request, ship: &Ship, tgt: &TargetData) -> Engagement {
     let pct = |v: Option<f64>, of: f64| v.unwrap_or(100.0) / 100.0 * of;
-    let base = Engagement {
+    Engagement {
         distance: req.value(Param::Distance).map(|km| km * 1000.0),
         atk_speed: pct(req.value(Param::AtkSpeed), ship.max_velocity),
         atk_angle: req.value(Param::AtkAngle).unwrap_or(0.0),
         tgt_speed: pct(req.value(Param::TgtSpeed), tgt.max_velocity),
         tgt_angle: req.value(Param::TgtAngle).unwrap_or(0.0),
         tgt_sig: tgt.sig_radius,
+    }
+}
+
+/// What `weapons` dealing `values` apply to the target under `e`, after resists.
+pub(super) fn applied_damage(
+    req: &Request,
+    src: &FitSnapshot,
+    tgt: &TargetData,
+    weapons: &[Weapon],
+    values: &[Dmg],
+    e: Engagement,
+) -> f64 {
+    let e = if req.options.apply_projected {
+        tackle(req, src, tgt, e)
+    } else {
+        e
     };
+    let mut breach = 0.0;
+    let applied = values.iter().zip(weapons).fold([0.0; 4], |acc, (v, w)| {
+        let mult = application(req, &src.ship, tgt, w, e);
+        if matches!(w.kind, WeaponKind::Breacher { .. }) {
+            // A share of the target's HP up to a cap, past resists.
+            let hp = tgt.hp.unwrap_or(f64::INFINITY);
+            breach += v[0].min(v[1] * hp) * mult;
+            acc
+        } else {
+            add(acc, v.map(|d| d * mult))
+        }
+    });
+    let resists = if req.options.ignore_resists {
+        [0.0; 4]
+    } else {
+        tgt.resists
+    };
+    breach + (0..4).map(|i| applied[i] * (1.0 - resists[i])).sum::<f64>()
+}
+
+fn damage(req: &Request, src: &FitSnapshot, tgt: &TargetData) -> Option<Series> {
+    let base = engagement(req, &src.ship, tgt);
     let time = req.value(Param::Time).map(|t| t.clamp(0.0, MAX_TIME));
     let y = req.y.param;
-    let value = |values: &[Dmg], e: Engagement| -> f64 {
-        let e = if req.options.apply_projected {
-            tackle(req, src, tgt, e)
-        } else {
-            e
-        };
-        let applied = values
-            .iter()
-            .zip(&src.weapons)
-            .fold([0.0; 4], |acc, (v, w)| {
-                let mult = application(req, ship, tgt, w, e);
-                add(acc, v.map(|d| d * mult))
-            });
-        let resists = if req.options.ignore_resists {
-            [0.0; 4]
-        } else {
-            tgt.resists
-        };
-        (0..4).map(|i| applied[i] * (1.0 - resists[i])).sum()
-    };
+    let value =
+        |values: &[Dmg], e: Engagement| applied_damage(req, src, tgt, &src.weapons, values, e);
 
     let series = match req.x.param {
         Param::Distance => {
@@ -540,6 +588,32 @@ fn application(req: &Request, ship: &Ship, tgt: &TargetData, w: &Weapon, e: Enga
                 (e.tgt_sig / damage_sig).min(1.0)
             }
         }
+        WeaponKind::Breacher { range } => {
+            let Some(range) = range else { return 0.0 };
+            lock(range.factor(e.distance) * tgt.breacher_resist)
+        }
+        WeaponKind::Fighter {
+            optimal,
+            falloff,
+            er,
+            ev,
+            drf,
+            speed,
+            radius,
+            plain,
+        } => {
+            if *plain {
+                return lock(1.0);
+            }
+            let range = if follows(opts.drone_mode, *speed, e.tgt_speed) {
+                1.0
+            } else {
+                // Slower squadrons fire from the attacker's center, as pyfa places them.
+                let distance = e.distance.map(|d| d + ship.radius - radius);
+                math::range_factor(*optimal, *falloff, distance, true)
+            };
+            lock(range * math::missile_factor(*er, *ev, *drf, e.tgt_speed, e.tgt_sig))
+        }
         WeaponKind::Drone { gun, speed, radius } => {
             if !in_lock || !in_dcr {
                 return 0.0;
@@ -606,8 +680,21 @@ fn tackle(req: &Request, src: &FitSnapshot, tgt: &TargetData, e: Engagement) -> 
     let usable = |ewar: &&Ewar| !ewar.needs_dcr || in_dcr;
 
     let mut out = e;
+    // A scram in range shuts the target's microwarpdrive down: it flies and blooms as without.
+    let scrammed = src
+        .scram_range
+        .filter(|&range| e.distance.is_none_or(|d| d <= range))
+        .and(tgt.scrammed);
+    let max_velocity = scrammed.map_or(tgt.max_velocity, |s| s.0);
+    if let Some((_, sig)) = scrammed
+        && tgt.sig_radius > 0.0
+        && e.tgt_sig.is_finite()
+    {
+        out.tgt_sig = e.tgt_sig * sig / tgt.sig_radius;
+    }
     if tgt.max_velocity > 0.0 {
         let ratio = e.tgt_speed / tgt.max_velocity;
+        out.tgt_speed = max_velocity * ratio;
         let mut mults = Vec::new();
         for web in src
             .ewar
@@ -616,7 +703,7 @@ fn tackle(req: &Request, src: &FitSnapshot, tgt: &TargetData, e: Engagement) -> 
             .filter(|w| w.kind == EwarKind::Web)
         {
             mults.push(1.0 + applied(web, out.tgt_speed) / 100.0);
-            out.tgt_speed = tgt.max_velocity * math::stacked_multiplier(&mults) * ratio;
+            out.tgt_speed = max_velocity * math::stacked_multiplier(&mults) * ratio;
         }
     }
     let tp_mults: Vec<f64> = src
@@ -626,8 +713,8 @@ fn tackle(req: &Request, src: &FitSnapshot, tgt: &TargetData, e: Engagement) -> 
         .filter(|w| w.kind == EwarKind::TargetPainter)
         .map(|tp| 1.0 + applied(tp, out.tgt_speed) / 100.0)
         .collect();
-    if !tp_mults.is_empty() && e.tgt_sig.is_finite() {
-        out.tgt_sig = e.tgt_sig * math::stacked_multiplier(&tp_mults);
+    if !tp_mults.is_empty() && out.tgt_sig.is_finite() {
+        out.tgt_sig *= math::stacked_multiplier(&tp_mults);
     }
     out
 }
@@ -963,6 +1050,80 @@ fn warp(req: &Request, ship: &Ship) -> Series {
     .map_x(|m| m / scale)
 }
 
+/// pyfa's ECM burst cycle: a burst breaks every lock every 30 seconds.
+const ECM_BURST_CYCLE: f64 = 30.0;
+/// Seconds drones take to lock again after a burst.
+const DRONE_LOCK_TIME: f64 = 2.0;
+
+/// The hidden ECM burst and scan resolution damp graph: how long an enemy takes to lock this
+/// fit, how long it stays locked between bursts, and what the fit deals meanwhile.
+fn ecm_burst(req: &Request, src: &FitSnapshot) -> Option<Series> {
+    let ship = &src.ship;
+    let damp_mult = if req.checkbox(Checkbox::ApplyDamps) {
+        let mults: Vec<f64> = src
+            .ewar
+            .iter()
+            .filter(|e| e.kind == EwarKind::Damp)
+            .map(|e| 1.0 + e.strength2 / 100.0)
+            .collect();
+        math::stacked_multiplier(&mults)
+    } else {
+        1.0
+    };
+    let weapon_dps = ship.dps - ship.drone_dps;
+    let drone_dps = if req.checkbox(Checkbox::ApplyDrones) {
+        ship.drone_dps
+    } else {
+        0.0
+    };
+    let adjustment = req.value(Param::UptimeAdj).unwrap_or(1.0);
+    let limit = req.value(Param::UptimeAmtLimit).unwrap_or(3.0).max(0.0) as u32;
+    let lock_time = |scan_res: f64| math::lock_time(scan_res * damp_mult, ship.sig_radius);
+    let inflicted = |scan_res: f64, tgt_dps: f64| -> f64 {
+        let Some(lock) = lock_time(scan_res) else {
+            return f64::NAN;
+        };
+        let uptime = (ECM_BURST_CYCLE - lock - adjustment).max(0.0);
+        let downtime = ECM_BURST_CYCLE - uptime;
+        let (mut dealt, mut ehp) = (0.0, ship.ehp);
+        for _ in 0..limit {
+            let under_fire = if tgt_dps > 0.0 {
+                uptime.min(ehp / tgt_dps)
+            } else {
+                uptime
+            };
+            let alive = downtime + under_fire;
+            ehp -= uptime * tgt_dps;
+            dealt += alive * weapon_dps;
+            dealt += (alive - DRONE_LOCK_TIME - 1.0).max(0.0) * drone_dps;
+            if ehp <= 0.0 {
+                break;
+            }
+        }
+        dealt
+    };
+    let (low, high) = (req.range.0.max(1.0), req.range.1.max(1.0));
+    let series = match (req.x.param, req.y.param) {
+        (Param::TgtScanRes, Param::TgtLockTime) => {
+            math::smooth((low, high), 200, 0, |r| lock_time(r).unwrap_or(f64::NAN))
+        }
+        (Param::TgtScanRes, Param::TgtLockUptime) => math::smooth((low, high), 200, 0, |r| {
+            lock_time(r).map_or(f64::NAN, |t| (ECM_BURST_CYCLE - t).max(0.0))
+        }),
+        (Param::TgtScanRes, Param::SrcDmg) => {
+            let tgt_dps = req.value(Param::TgtDps).unwrap_or(200.0);
+            math::smooth((low, high), 200, 0, |r| inflicted(r, tgt_dps))
+        }
+        (Param::TgtDps, Param::SrcDmg) => {
+            let scan_res = req.value(Param::TgtScanRes).unwrap_or(700.0);
+            math::smooth(req.range, 200, 0, |d| inflicted(scan_res, d))
+        }
+        // pyfa has no getter for the other pairs and draws nothing.
+        _ => return None,
+    };
+    Some(Series::new(series))
+}
+
 fn lock(req: &Request, ship: &Ship) -> Option<Series> {
     let (low, high) = (req.range.0.max(1.0), req.range.1.max(1.0));
     let series = Series::new(math::smooth((low, high), 200, 0, |sig| {
@@ -1031,13 +1192,7 @@ mod tests {
     }
 
     fn ideal(resist: f64) -> TargetData {
-        TargetData {
-            max_velocity: 0.0,
-            sig_radius: f64::INFINITY,
-            radius: 0.0,
-            resists: [resist; 4],
-            hp: None,
-        }
+        TargetData::profile(0.0, f64::INFINITY, 0.0, [resist; 4], None)
     }
 
     #[test]
@@ -1096,13 +1251,7 @@ mod tests {
             needs_dcr: false,
             mobile: None,
         });
-        let tgt = TargetData {
-            max_velocity: 1000.0,
-            sig_radius: 40.0,
-            radius: 0.0,
-            resists: [0.0; 4],
-            hp: None,
-        };
+        let tgt = TargetData::profile(1000.0, 40.0, 0.0, [0.0; 4], None);
         let req = request(Graph::DamageStats, 0, 0, (0.0, 20.0));
         let e = Engagement {
             distance: Some(5_000.0),

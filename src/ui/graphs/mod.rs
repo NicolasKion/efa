@@ -23,13 +23,13 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, AnyWindowHandle, App, AppContext, Bounds, Context, Entity, FocusHandle, Global,
     InteractiveElement, IntoElement, ParentElement, Pixels, Point, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, WindowBounds, WindowOptions, div,
-    prelude::FluentBuilder, px, size,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, WindowBounds,
+    WindowOptions, div, prelude::FluentBuilder, px, size,
 };
 
 use self::{
     canvas::{Frame, PlotLine},
-    lists::{Source, Target, TargetKind},
+    lists::{AmmoChoice, Source, Target, TargetKind},
     style::LineStyle,
     vector::{Vector, Which},
 };
@@ -40,28 +40,37 @@ use super::{
 use crate::{
     fit::Fit,
     graphs::{
+        ammo::{self, AmmoQuality, AmmoStyle, WeaponGroup},
         defs::{
             Checkbox as CheckboxKey, Graph, InputDef, Param, Spec, Unit, XDef, YDef, conditions_met,
         },
         plot::{self, Options, Request, TargetData},
         profiles::TargetProfile,
+        settings::GraphSettings,
         snapshot::FitSnapshot,
     },
 };
 
 /// The open graph window, so a second "Graphs" only brings it forward, as in pyfa.
 #[derive(Default)]
-struct OpenGraphs(Option<AnyWindowHandle>);
+struct OpenGraphs(Option<(AnyWindowHandle, WeakEntity<GraphsWindow>)>);
 
 impl Global for OpenGraphs {}
 
 /// Open the graph window, or bring it forward, with `fit` in its fit list when opened fresh.
-pub fn open(hub: Entity<Hub>, fit: Option<usize>, cx: &mut App) {
-    if let Some(handle) = cx.try_global::<OpenGraphs>().and_then(|g| g.0)
+/// `hidden` also lists the graphs pyfa keeps behind Ctrl+Alt+G.
+pub fn open(hub: Entity<Hub>, fit: Option<usize>, hidden: bool, cx: &mut App) {
+    if let Some((handle, view)) = cx.try_global::<OpenGraphs>().and_then(|g| g.0.clone())
         && handle
             .update(cx, |_, window, _| window.activate_window())
             .is_ok()
     {
+        if hidden {
+            let _ = view.update(cx, |g, cx| {
+                g.include_hidden = true;
+                cx.notify();
+            });
+        }
         return;
     }
     let options = WindowOptions {
@@ -71,10 +80,10 @@ pub fn open(hub: Entity<Hub>, fit: Option<usize>, cx: &mut App) {
     };
     let opened = gpui_kit::open_window(options, cx, move |window, cx| {
         window.set_window_title("gyfa: Graphs");
-        cx.new(|cx| GraphsWindow::new(hub, fit, window, cx))
+        cx.new(|cx| GraphsWindow::new(hub, fit, hidden, window, cx))
     });
     match opened {
-        Ok((handle, _)) => cx.set_global(OpenGraphs(Some(handle))),
+        Ok((handle, view)) => cx.set_global(OpenGraphs(Some((handle, view.downgrade())))),
         Err(e) => eprintln!("opening the graph window: {e}"),
     }
 }
@@ -83,7 +92,12 @@ impl super::Gyfa {
     /// pyfa's Fit > Graphs (Ctrl+G), starting with the current fit. The new window only reads the
     /// hub, never this window, so opening it from inside this window's update is safe.
     pub(super) fn open_graphs(&mut self, cx: &mut App) {
-        open(self.hub.clone(), self.saved.current, cx);
+        open(self.hub.clone(), self.saved.current, false, cx);
+    }
+
+    /// pyfa's Ctrl+Alt+G: the graph window with its hidden graphs listed too.
+    pub(super) fn open_hidden_graphs(&mut self, cx: &mut App) {
+        open(self.hub.clone(), self.saved.current, true, cx);
     }
 }
 
@@ -102,11 +116,20 @@ pub struct GraphsWindow {
     synced: u64,
     /// The characters the snapshots were flown with; a new list means they are out of date.
     characters: Option<Rc<crate::character::Characters>>,
-    snapshots: HashMap<usize, Rc<FitSnapshot>>,
+    /// Snapshots by fit and ammo override, with the fit they were read from, so only fits that
+    /// changed are read again.
+    snapshots: HashMap<(usize, Option<AmmoChoice>), (String, Rc<FitSnapshot>)>,
+    /// The Application Profile graph's weapon groups with every charge loaded, likewise.
+    ammo_groups: HashMap<(usize, AmmoQuality), (String, Rc<Vec<WeaponGroup>>)>,
     graph: Graph,
     x: usize,
     y: usize,
-    options: Options,
+    /// The remembered options, saved with the fits.
+    settings: GraphSettings,
+    /// Shield graphs count EHP unless the main window's stats pane shows raw HP.
+    effective_hp: bool,
+    /// List the hidden ECM burst graph too, as pyfa's Ctrl+Alt+G does.
+    include_hidden: bool,
     checkboxes: HashMap<CheckboxKey, bool>,
     main_input: Option<Field>,
     fields: Vec<Field>,
@@ -115,8 +138,6 @@ pub struct GraphsWindow {
     atk_vector: Vector,
     tgt_vector: Vector,
     pub(super) drag_vector: Option<Which>,
-    show_legend: bool,
-    show_y0: bool,
     sources: Vec<Source>,
     targets: Vec<Target>,
     selected_source: Option<usize>,
@@ -140,6 +161,7 @@ impl GraphsWindow {
     fn new(
         hub: Entity<Hub>,
         fit: Option<usize>,
+        include_hidden: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -147,6 +169,10 @@ impl GraphsWindow {
             cx.observe(&hub, |this, _, cx| this.pull(cx)),
             cx.on_release(|_, cx| cx.set_global(OpenGraphs(None))),
         ];
+        let (settings, effective_hp) = {
+            let hub = hub.read(cx);
+            (hub.saved.graphs, !hub.raw_hp)
+        };
         let mut this = Self {
             hub,
             loaded: None,
@@ -155,10 +181,13 @@ impl GraphsWindow {
             synced: u64::MAX,
             characters: None,
             snapshots: HashMap::new(),
+            ammo_groups: HashMap::new(),
             graph: Graph::DamageStats,
             x: 0,
             y: 0,
-            options: Options::default(),
+            settings,
+            effective_hp,
+            include_hidden,
             checkboxes: HashMap::new(),
             main_input: None,
             fields: Vec::new(),
@@ -166,8 +195,6 @@ impl GraphsWindow {
             atk_vector: Vector::new(1.0, 0.0),
             tgt_vector: Vector::new(1.0, 90.0),
             drag_vector: None,
-            show_legend: true,
-            show_y0: true,
             sources: Vec::new(),
             targets: vec![Target::new(
                 TargetKind::Profile(TargetProfile::ideal()),
@@ -188,7 +215,7 @@ impl GraphsWindow {
         };
         this.pull(cx);
         if let Some(fit) = fit.filter(|&i| i < this.fits.len()) {
-            this.add_source(fit);
+            this.add_source(fit, None);
         }
         this.layout_inputs(window, cx);
         this.recompute(cx);
@@ -212,6 +239,11 @@ impl GraphsWindow {
         {
             self.characters = Some(Rc::clone(&hub.characters));
             self.snapshots.clear();
+            self.ammo_groups.clear();
+            changed = true;
+        }
+        if self.effective_hp == hub.raw_hp {
+            self.effective_hp = !hub.raw_hp;
             changed = true;
         }
         if hub.generation == self.synced {
@@ -249,8 +281,7 @@ impl GraphsWindow {
         self.sources.retain(|s| s.fit < count);
         self.targets
             .retain(|t| !matches!(t.kind, TargetKind::Fit(i) if i >= count));
-        // Any fit may have changed; pyfa clears its caches the same way.
-        self.snapshots.clear();
+        // Snapshots of fits that changed are read again when next asked for.
         self.recompute(cx);
         cx.notify();
     }
@@ -273,29 +304,91 @@ impl GraphsWindow {
         }
     }
 
-    fn snapshot(&mut self, fit: usize) -> Option<Rc<FitSnapshot>> {
+    pub(super) fn snapshot(&mut self, fit: usize) -> Option<Rc<FitSnapshot>> {
+        self.snapshot_with(fit, None)
+    }
+
+    /// The fit with `ammo` loaded into every module of its type, as "Plot with Different Ammo"
+    /// asks for.
+    fn fit_with(&self, fit: usize, ammo: Option<AmmoChoice>) -> Option<Fit> {
+        let mut f = self.fits.get(fit)?.clone();
+        if let Some(choice) = ammo {
+            for m in [&mut f.high, &mut f.mid, &mut f.low]
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter(|m| m.type_id == choice.module)
+            {
+                m.charge = Some(choice.charge);
+            }
+        }
+        Some(f)
+    }
+
+    fn snapshot_with(&mut self, fit: usize, ammo: Option<AmmoChoice>) -> Option<Rc<FitSnapshot>> {
         let loaded = self.loaded.clone()?;
-        if let Some(snap) = self.snapshots.get(&fit) {
+        let f = self.fit_with(fit, ammo)?;
+        let key = serde_json::to_string(&f).unwrap_or_default();
+        if let Some((cached, snap)) = self.snapshots.get(&(fit, ammo))
+            && *cached == key
+        {
             return Some(Rc::clone(snap));
         }
-        let f = self.fits.get(fit)?;
-        // Each fit flies with its own character, as in the main window.
-        let pilot = self.characters.as_ref().map_or_else(
-            || loaded.engine.all5().clone(),
-            |c| c.pilot(f.character, &loaded.catalog.skills),
-        );
-        let snap = Rc::new(loaded.engine.graph_snapshot(f, &pilot, &loaded.catalog));
-        self.snapshots.insert(fit, Rc::clone(&snap));
+        let pilot = self.pilot(&f, &loaded);
+        let snap = Rc::new(loaded.engine.graph_snapshot(&f, &pilot, &loaded.catalog));
+        self.snapshots.insert((fit, ammo), (key, Rc::clone(&snap)));
         Some(snap)
     }
 
+    /// Each fit flies with its own character, as in the main window.
+    fn pilot(&self, f: &Fit, loaded: &Loaded) -> crate::engine::Pilot {
+        self.characters.as_ref().map_or_else(
+            || loaded.engine.all5().clone(),
+            |c| c.pilot(f.character, &loaded.catalog.skills),
+        )
+    }
+
+    fn ammo_groups(&mut self, fit: usize) -> Option<Rc<Vec<WeaponGroup>>> {
+        let loaded = self.loaded.clone()?;
+        let quality = self.settings.ammo_quality;
+        let f = self.fits.get(fit)?.clone();
+        let key = serde_json::to_string(&f).unwrap_or_default();
+        if let Some((cached, groups)) = self.ammo_groups.get(&(fit, quality))
+            && *cached == key
+        {
+            return Some(Rc::clone(groups));
+        }
+        let pilot = self.pilot(&f, &loaded);
+        let groups = Rc::new(
+            loaded
+                .engine
+                .graph_ammo(&f, &pilot, &loaded.catalog, quality),
+        );
+        self.ammo_groups
+            .insert((fit, quality), (key, Rc::clone(&groups)));
+        Some(groups)
+    }
+
+    fn options(&self) -> Options {
+        self.settings.options(self.graph, self.effective_hp)
+    }
+
+    /// Recompute with changed settings and remember them.
+    pub(super) fn settings_changed(&mut self, cx: &mut Context<Self>) {
+        self.recompute(cx);
+        cx.notify();
+        let settings = self.settings;
+        self.hub
+            .update(cx, |hub, cx| hub.update_saved(|s| s.graphs = settings, cx));
+    }
+
     fn x_defs(&self) -> Vec<XDef> {
-        self.graph.x_defs(self.options.effective_hp)
+        self.graph.x_defs(self.effective_hp)
     }
 
     fn y_defs(&self) -> Vec<YDef> {
-        self.graph
-            .y_defs(self.options.ignore_resists, self.options.effective_hp)
+        let options = self.options();
+        self.graph.y_defs(options.ignore_resists, self.effective_hp)
     }
 
     fn x_def(&self) -> XDef {
@@ -483,7 +576,7 @@ impl GraphsWindow {
             range,
             misc,
             checkboxes,
-            options: self.options,
+            options: self.options(),
         }
     }
 
@@ -498,16 +591,60 @@ impl GraphsWindow {
     }
 
     fn plot_lines(&mut self, req: &Request) {
-        let sources: Vec<(usize, style::LineColor)> =
-            self.sources.iter().map(|s| (s.fit, s.color)).collect();
+        let sources: Vec<Source> = self.sources.clone();
         let targets: Vec<Target> = self.targets.clone();
         let mut lines = Vec::new();
-        for (fit, color) in sources {
-            let Some(src) = self.snapshot(fit) else {
+        let mut ammo_names: Vec<String> = Vec::new();
+        for source in sources {
+            let (fit, color) = (source.fit, source.color);
+            let Some(src) = self.snapshot_with(fit, source.ammo) else {
                 continue;
             };
-            let name = self.fit_name(fit);
-            if self.graph.has_targets() {
+            let name = self.source_name(&source);
+            if self.graph.has_segments() {
+                let Some(groups) = self.ammo_groups(fit) else {
+                    continue;
+                };
+                for target in &targets {
+                    let Some(data) = self.target_data(target) else {
+                        continue;
+                    };
+                    let label = format!("{name} vs {}", self.target_name(target));
+                    let segments = ammo::segments(req, &src, &groups, &data);
+                    let style = self.settings.ammo_style;
+                    for (n, segment) in segments.into_iter().enumerate() {
+                        let index = ammo_names
+                            .iter()
+                            .position(|a| *a == segment.ammo)
+                            .unwrap_or_else(|| {
+                                ammo_names.push(segment.ammo.clone());
+                                ammo_names.len() - 1
+                            });
+                        lines.push(PlotLine {
+                            label: match style {
+                                AmmoStyle::None => label.clone(),
+                                _ => segment.ammo.clone(),
+                            },
+                            color,
+                            lightness: target.lightness,
+                            style: match style {
+                                AmmoStyle::Pattern => LineStyle::ALL[index % LineStyle::ALL.len()],
+                                _ => target.style,
+                            },
+                            hue: (style == AmmoStyle::Color).then(|| canvas::ammo_hue(index)),
+                            // One legend entry per charge, or one per line without ammo styling.
+                            in_legend: match style {
+                                AmmoStyle::None => n == 0,
+                                _ => !lines.iter().any(|l: &PlotLine| l.label == segment.ammo),
+                            },
+                            series: plot::Series {
+                                xs: segment.xs,
+                                ys: segment.ys,
+                            },
+                        });
+                    }
+                }
+            } else if self.graph.has_targets() {
                 for target in &targets {
                     let Some(data) = self.target_data(target) else {
                         continue;
@@ -518,6 +655,8 @@ impl GraphsWindow {
                             color,
                             lightness: target.lightness,
                             style: target.style,
+                            hue: None,
+                            in_legend: true,
                             series,
                         });
                     }
@@ -528,6 +667,8 @@ impl GraphsWindow {
                     color,
                     lightness: style::Lightness::Normal,
                     style: LineStyle::Solid,
+                    hue: None,
+                    in_legend: true,
                     series,
                 });
             }
@@ -537,6 +678,8 @@ impl GraphsWindow {
             Some("Right-click the fit list to add fits.".into())
         } else if self.graph.has_targets() && self.targets.is_empty() {
             Some("Right-click the target list to add targets.".into())
+        } else if self.graph.has_segments() && lines.is_empty() {
+            Some("No turrets or launchers with charges to compare.".into())
         } else if req.y.param == Param::Damage
             && req.x.param != Param::Time
             && req.misc.get(&Param::Time).copied().flatten().is_none()
@@ -564,7 +707,7 @@ impl GraphsWindow {
             .iter()
             .flat_map(|l| l.series.ys.iter().copied())
             .collect();
-        if self.show_y0 {
+        if self.settings.show_y0 {
             ys.push(0.0);
         }
         Frame {
@@ -574,7 +717,7 @@ impl GraphsWindow {
             y_unit: req.y.unit.label(),
             x_range: canvas::limits(xs.into_iter(), (0.02, 0.02), false),
             y_range: canvas::limits(ys.into_iter(), (0.05, 0.03), true),
-            legend: self.show_legend,
+            legend: self.settings.show_legend,
         }
     }
 
@@ -585,6 +728,17 @@ impl GraphsWindow {
         match (f.ship, &self.loaded) {
             (Some(ship), Some(loaded)) => format!("{} ({})", f.name, loaded.catalog.name(ship)),
             _ => f.name.clone(),
+        }
+    }
+
+    /// A fit's name, with the charge it is plotted with when that was picked.
+    pub(super) fn source_name(&self, source: &Source) -> String {
+        let name = self.fit_name(source.fit);
+        match (source.ammo, &self.loaded) {
+            (Some(choice), Some(loaded)) => {
+                format!("{name} [{}]", loaded.catalog.name(choice.charge))
+            }
+            _ => name,
         }
     }
 
@@ -606,24 +760,26 @@ impl GraphsWindow {
                     radius: ship.radius,
                     resists: target.resist_mode.resists(ship),
                     hp: Some(ship.hp.iter().sum()),
+                    breacher_resist: ship.breacher_resist,
+                    scrammed: ship.scrammed,
                 }
             }
-            TargetKind::Profile(p) => TargetData {
-                max_velocity: p.max_velocity,
-                sig_radius: p.sig_radius.unwrap_or(f64::INFINITY),
-                radius: p.radius,
-                resists: p.resists,
-                hp: p.hp,
-            },
+            TargetKind::Profile(p) => TargetData::profile(
+                p.max_velocity,
+                p.sig_radius.unwrap_or(f64::INFINITY),
+                p.radius,
+                p.resists,
+                p.hp,
+            ),
         })
     }
 
-    pub(super) fn add_source(&mut self, fit: usize) {
-        if self.sources.iter().any(|s| s.fit == fit) {
+    pub(super) fn add_source(&mut self, fit: usize, ammo: Option<AmmoChoice>) {
+        if self.sources.iter().any(|s| s.fit == fit && s.ammo == ammo) {
             return;
         }
         let color = style::LineColor::least_used(self.sources.iter().map(|s| s.color));
-        self.sources.push(Source { fit, color });
+        self.sources.push(Source { fit, color, ammo });
     }
 
     pub(super) fn add_target(&mut self, kind: TargetKind) {
@@ -739,6 +895,10 @@ impl GraphsWindow {
     fn graph_selector(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let this = cx.entity().downgrade();
         let current = self.graph;
+        let graphs: Vec<Graph> = Graph::ALL
+            .into_iter()
+            .chain(self.include_hidden.then_some(Graph::EcmBurstDamps))
+            .collect();
         h_flex().p_2().child(
             Button::new("graph-select")
                 .outline()
@@ -746,7 +906,7 @@ impl GraphsWindow {
                 .w_full()
                 .label(current.name())
                 .dropdown_menu(move |menu, _, _| {
-                    Graph::ALL.iter().fold(menu, |menu, &graph| {
+                    graphs.iter().fold(menu, |menu, &graph| {
                         let this = this.clone();
                         menu.item(
                             PopupMenuItem::new(graph.name())
@@ -820,39 +980,85 @@ impl GraphsWindow {
                         cx,
                     )),
             )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(div().w(px(48.)).child("Axis X:"))
-                    .child(Self::axis_button(
-                        "axis-x",
-                        x_labels,
-                        x,
-                        |g, i, w, cx| {
-                            let y = g.y;
-                            g.set_axes(i, y, w, cx);
-                        },
-                        cx,
-                    )),
-            )
+            .when(!self.graph.has_segments(), |axes| {
+                axes.child(
+                    h_flex()
+                        .gap_2()
+                        .child(div().w(px(48.)).child("Axis X:"))
+                        .child(Self::axis_button(
+                            "axis-x",
+                            x_labels,
+                            x,
+                            |g, i, w, cx| {
+                                let y = g.y;
+                                g.set_axes(i, y, w, cx);
+                            },
+                            cx,
+                        )),
+                )
+            })
+            .when(self.graph.has_segments(), |axes| {
+                let style = AmmoStyle::ALL
+                    .iter()
+                    .position(|&s| s == self.settings.ammo_style)
+                    .unwrap_or(0);
+                let quality = AmmoQuality::ALL
+                    .iter()
+                    .position(|&q| q == self.settings.ammo_quality)
+                    .unwrap_or(0);
+                axes.child(
+                    h_flex()
+                        .gap_2()
+                        .child(div().w(px(48.)).child("Style:"))
+                        .child(Self::axis_button(
+                            "ammo-style",
+                            AmmoStyle::ALL
+                                .iter()
+                                .map(|s| s.label().to_owned())
+                                .collect(),
+                            style,
+                            |g, i, _, cx| {
+                                g.settings.ammo_style = AmmoStyle::ALL[i];
+                                g.settings_changed(cx);
+                            },
+                            cx,
+                        )),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(div().w(px(48.)).child("Ammo Meta:"))
+                        .child(Self::axis_button(
+                            "ammo-quality",
+                            AmmoQuality::ALL
+                                .iter()
+                                .map(|q| q.label().to_owned())
+                                .collect(),
+                            quality,
+                            |g, i, _, cx| {
+                                g.settings.ammo_quality = AmmoQuality::ALL[i];
+                                g.settings_changed(cx);
+                            },
+                            cx,
+                        )),
+                )
+            })
             .child(
                 Checkbox::new("show-legend")
                     .label("Show legend")
-                    .checked(self.show_legend)
+                    .checked(self.settings.show_legend)
                     .on_click(cx.listener(|g, checked: &bool, _, cx| {
-                        g.show_legend = *checked;
-                        g.recompute(cx);
-                        cx.notify();
+                        g.settings.show_legend = *checked;
+                        g.settings_changed(cx);
                     })),
             )
             .child(
                 Checkbox::new("show-y0")
                     .label("Always show Y = 0")
-                    .checked(self.show_y0)
+                    .checked(self.settings.show_y0)
                     .on_click(cx.listener(|g, checked: &bool, _, cx| {
-                        g.show_y0 = *checked;
-                        g.recompute(cx);
-                        cx.notify();
+                        g.settings.show_y0 = *checked;
+                        g.settings_changed(cx);
                     })),
             );
 
@@ -904,25 +1110,15 @@ impl GraphsWindow {
             });
 
         let options_menu = self.graph.has_options().then(|| {
-            let options = self.options;
+            let settings = self.settings;
             let graph = self.graph;
             Button::new("graph-options")
                 .ghost()
                 .xsmall()
                 .label("☰")
                 .dropdown_menu(move |menu, window, cx| {
-                    options_menu(menu, graph, options, &this, window, cx)
+                    options_menu(menu, graph, settings, &this, window, cx)
                 })
-        });
-        let shield_toggle = (self.graph == Graph::ShieldRegen).then(|| {
-            Checkbox::new("effective-hp")
-                .label("Effective HP")
-                .checked(self.options.effective_hp)
-                .on_click(cx.listener(|g, checked: &bool, window, cx| {
-                    g.options.effective_hp = *checked;
-                    let (x, y) = (g.x, g.y);
-                    g.set_axes(x, y, window, cx);
-                }))
         });
 
         h_flex()
@@ -930,7 +1126,7 @@ impl GraphsWindow {
             .gap_4()
             .p_2()
             .child(axes)
-            .child(inputs.children(shield_toggle).flex_1())
+            .child(inputs.flex_1())
             .child(vectors)
             .children(options_menu)
             .on_mouse_up(
@@ -977,55 +1173,62 @@ fn field_row(field: &Field, main: bool) -> AnyElement {
 fn options_menu(
     menu: PopupMenu,
     graph: Graph,
-    options: Options,
+    settings: GraphSettings,
     this: &gpui_kit::WeakEntity<GraphsWindow>,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
-    let toggle = |label: &'static str, checked: bool, f: fn(&mut Options)| {
+    let toggle = |label: &'static str, checked: bool, f: fn(&mut GraphSettings)| {
         let this = this.clone();
         PopupMenuItem::new(label)
             .checked(checked)
             .on_click(move |_, _, cx| {
                 let _ = this.update(cx, |g, cx| {
-                    f(&mut g.options);
-                    g.recompute(cx);
-                    cx.notify();
+                    f(&mut g.settings);
+                    g.settings_changed(cx);
                 });
             })
     };
     let mut menu = menu;
-    if graph == Graph::DamageStats {
-        menu = menu
-            .item(toggle(
-                "Apply Projected Items",
-                options.apply_projected,
-                |o| {
-                    o.apply_projected = !o.apply_projected;
-                },
-            ))
-            .item(toggle(
-                "Ignore Target Resists",
-                options.ignore_resists,
-                |o| {
-                    o.ignore_resists = !o.ignore_resists;
-                },
-            ));
+    match graph {
+        Graph::DamageStats => {
+            menu = menu
+                .item(toggle(
+                    "Apply Projected Items",
+                    settings.apply_projected,
+                    |s| s.apply_projected = !s.apply_projected,
+                ))
+                .item(toggle(
+                    "Ignore Target Resists",
+                    settings.ignore_resists,
+                    |s| s.ignore_resists = !s.ignore_resists,
+                ));
+        }
+        Graph::ApplicationProfile => {
+            return menu
+                .item(toggle(
+                    "Ignore Target Resists",
+                    settings.ammo_ignore_resists,
+                    |s| s.ammo_ignore_resists = !s.ammo_ignore_resists,
+                ))
+                .item(toggle(
+                    "Apply Projected Effects",
+                    settings.ammo_apply_projected,
+                    |s| s.ammo_apply_projected = !s.ammo_apply_projected,
+                ));
+        }
+        _ => {}
     }
     menu = menu
         .item(toggle(
             "Ignore Lock Range",
-            options.ignore_lock_range,
-            |o| {
-                o.ignore_lock_range = !o.ignore_lock_range;
-            },
+            settings.ignore_lock_range,
+            |s| s.ignore_lock_range = !s.ignore_lock_range,
         ))
         .item(toggle(
             "Ignore Drone Control Range",
-            options.ignore_dcr,
-            |o| {
-                o.ignore_dcr = !o.ignore_dcr;
-            },
+            settings.ignore_dcr,
+            |s| s.ignore_dcr = !s.ignore_dcr,
         ));
     if graph == Graph::DamageStats {
         let this = this.clone();
@@ -1034,12 +1237,11 @@ fn options_menu(
                 let this = this.clone();
                 menu.item(
                     PopupMenuItem::new(mode.label())
-                        .checked(options.drone_mode == mode)
+                        .checked(settings.drone_mode == mode)
                         .on_click(move |_, _, cx| {
                             let _ = this.update(cx, |g, cx| {
-                                g.options.drone_mode = mode;
-                                g.recompute(cx);
-                                cx.notify();
+                                g.settings.drone_mode = mode;
+                                g.settings_changed(cx);
                             });
                         }),
                 )
