@@ -454,7 +454,12 @@ impl Gyfa {
 
     fn drop_on_projected(&mut self, dragged: &Dragged, cx: &mut Context<Self>) {
         match dragged.source {
-            DragSource::Market | DragSource::Row(RowRef::Module(..)) => {
+            DragSource::Market => {
+                for id in dragged.types() {
+                    self.project_item(id, cx);
+                }
+            }
+            DragSource::Row(RowRef::Module(..)) => {
                 self.project_item(dragged.type_id, cx);
             }
             _ => {}
@@ -1036,6 +1041,19 @@ fn projected_item_menu(
                 Gyfa::app_update(&this, cx, |g, cx| g.jump_to_market(charge, window, cx));
             },
         ));
+    }
+    if let Row::Module(i) = row {
+        let module = projected.modules[i].type_id;
+        if !compatible_charges(catalog, module).is_empty() {
+            let this = this.clone();
+            menu = menu.item(
+                entry(IconName::BatteryCharging, "Show Compatible Charges").on_click(
+                    move |_, window, cx| {
+                        Gyfa::app_update(&this, cx, |g, cx| g.show_charges_for(module, window, cx));
+                    },
+                ),
+            );
+        }
     }
     menu
 }

@@ -86,6 +86,17 @@ mod attr {
     /// Chance of a booster's first side effect, which pyfa ranks booster variations by.
     pub const BOOSTER_EFFECT_CHANCE1: i32 = 1089;
     pub const IMPLANTNESS: i32 = 331;
+    /// Rig size on a rig and on the ships that take it.
+    pub const RIG_SIZE: i32 = 1547;
+    /// canFitShipGroup01 to 20: the ship groups a module is limited to.
+    pub const CAN_FIT_SHIP_GROUP: [i32; 20] = [
+        1298, 1299, 1300, 1301, 1872, 1879, 1880, 1881, 2065, 2396, 2476, 2477, 2478, 2479, 2480,
+        2481, 2482, 2483, 2484, 2485,
+    ];
+    /// canFitShipType1 to 12 and a subsystem's fitsToShipType: the ships an item is limited to.
+    pub const CAN_FIT_SHIP_TYPE: [i32; 13] = [
+        1302, 1303, 1304, 1305, 1944, 2103, 2463, 2486, 2487, 2488, 2758, 5948, 1380,
+    ];
     /// requiredSkill1..6 and the level attribute that goes with each.
     pub const REQUIRED_SKILLS: [(i32, i32); 6] = [
         (182, 277),
@@ -196,6 +207,11 @@ pub struct ItemType {
     pub race: Option<Race>,
     /// Needs a skill level beyond what an Alpha clone can train.
     pub omega: bool,
+    /// Rig size of a rig, or of the rigs a ship takes.
+    pub rig_size: Option<f64>,
+    /// Ships and ship groups the item is limited to; empty lists mean no limit.
+    pub fits_ships: Vec<TypeId>,
+    pub fits_groups: Vec<i32>,
 }
 
 impl ItemType {
@@ -280,7 +296,7 @@ pub struct Catalog {
 
 /// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
 /// instead of loaded.
-const CACHE_FORMAT: u32 = 5;
+const CACHE_FORMAT: u32 = 6;
 const CACHE_FILE: &str = "catalog.bin";
 
 /// The cache on disk: the key it was built for, then the catalog.
@@ -468,6 +484,14 @@ impl Catalog {
                 required_skills.insert(id, required);
             }
 
+            let limits = |attrs: &[i32]| -> Vec<i32> {
+                attrs
+                    .iter()
+                    .filter_map(|&a| attr(a))
+                    .filter(|&v| v > 0.0)
+                    .map(|v| v as i32)
+                    .collect()
+            };
             let charge_groups = attr::CHARGE_GROUPS
                 .iter()
                 .filter_map(|&a| attr(a))
@@ -543,6 +567,9 @@ impl Catalog {
                     capacity: t.capacity.unwrap_or(0.0),
                     race: race.flatten(),
                     omega: false,
+                    rig_size: attr(attr::RIG_SIZE),
+                    fits_ships: limits(&attr::CAN_FIT_SHIP_TYPE),
+                    fits_groups: limits(&attr::CAN_FIT_SHIP_GROUP),
                 },
             );
         }

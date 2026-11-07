@@ -301,20 +301,33 @@ impl Gyfa {
         let action = Rc::new(action);
         window.open_dialog(cx, move |dialog, _, _| {
             let (input, this, action) = (input.clone(), this.clone(), Rc::clone(&action));
+            // The OK button and Enter both submit; it closes the dialog itself when done.
+            let submit: crate::ui::widgets::Submit = {
+                let (input, this, action) = (input.clone(), this.clone(), action.clone());
+                Rc::new(move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                    let Ok(amount) = input.read(cx).value().trim().parse::<T>() else {
+                        return;
+                    };
+                    Self::app_update(&this, cx, |g, cx| g.apply(action(amount), cx));
+                    window.close_dialog(cx);
+                })
+            };
             dialog
+                .on_ok({
+                    let submit = Rc::clone(&submit);
+                    move |e, w, cx| {
+                        submit(e, w, cx);
+                        false
+                    }
+                })
                 .title(title)
                 .w(px(320.))
                 .child(v_flex().gap_3().child(Input::new(&input)).child(
                     h_flex().justify_end().child(
-                        Button::new("amount-ok").primary().label("OK").on_click(
-                            move |_, window, cx| {
-                                let Ok(amount) = input.read(cx).value().trim().parse::<T>() else {
-                                    return;
-                                };
-                                Self::app_update(&this, cx, |g, cx| g.apply(action(amount), cx));
-                                window.close_dialog(cx);
-                            },
-                        ),
+                        Button::new("amount-ok").primary().label("OK").on_click({
+                            let submit = Rc::clone(&submit);
+                            move |e: &ClickEvent, w: &mut Window, cx: &mut App| submit(e, w, cx)
+                        }),
                     ),
                 ))
         });

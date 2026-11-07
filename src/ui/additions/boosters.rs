@@ -221,7 +221,9 @@ impl Gyfa {
             .on_drop(cx.listener(|g, dragged: &Dragged, _, cx| {
                 if matches!(dragged.source, DragSource::Market) {
                     cx.stop_propagation();
-                    g.add_item(dragged.type_id, cx);
+                    for id in dragged.types() {
+                        g.add_item(id, cx);
+                    }
                 }
             }))
             .into_any_element()

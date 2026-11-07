@@ -605,6 +605,8 @@ pub enum DragSource {
 pub struct Dragged {
     pub source: DragSource,
     pub type_id: TypeId,
+    /// Further items dragged along, from a selection in the market results.
+    pub more: Vec<TypeId>,
     label: SharedString,
     icon: Option<std::path::PathBuf>,
 }
@@ -615,9 +617,26 @@ impl Dragged {
         Some(Self {
             source,
             type_id,
+            more: Vec::new(),
             label: loaded.catalog.name(type_id).into(),
             icon: loaded.icons.path(&loaded.catalog, Icon::Type(type_id)),
         })
+    }
+}
+
+impl Dragged {
+    /// Drag `more` along with the item.
+    pub fn with_more(mut self, more: Vec<TypeId>) -> Self {
+        if !more.is_empty() {
+            self.label = format!("{} items", more.len() + 1).into();
+        }
+        self.more = more;
+        self
+    }
+
+    /// Every item dragged, the grabbed one first.
+    pub fn types(&self) -> impl Iterator<Item = TypeId> + '_ {
+        std::iter::once(self.type_id).chain(self.more.iter().copied())
     }
 }
 
@@ -704,6 +723,18 @@ impl Gyfa {
             }
             // Drone stacks only move within the drones pane.
             DragSource::Drone(_) => {}
+            // Several from the market: the grabbed one goes where it was dropped, the rest
+            // wherever they fit, as a double-click would put them.
+            DragSource::Market if !dragged.more.is_empty() => {
+                let single = Dragged {
+                    more: Vec::new(),
+                    ..dragged.clone()
+                };
+                self.drop_on(on, &single, modifiers, cx);
+                for &id in &dragged.more {
+                    self.add_item(id, cx);
+                }
+            }
             DragSource::Market => match (t.kind, on.position()) {
                 (Kind::Module(slot), Some((target, pos))) if slot == target => {
                     self.apply(Action::Place(slot, pos, t.id), cx);
@@ -809,9 +840,11 @@ fn item_menu(
     let mut menu = menu;
     let shown = super::hub::preferences(cx).context_menus;
 
+    let mut takes_charges = false;
     if let Some(m) = &snapshot.module {
         let charges = compatible_charges(catalog, type_id);
-        if !charges.is_empty() {
+        takes_charges = !charges.is_empty();
+        if takes_charges {
             let structure = structure_charges(catalog, t, &charges);
             menu = charge_submenu(menu, this, loaded, item, structure, m.charge, window, cx);
         }
@@ -928,6 +961,16 @@ fn item_menu(
                 this,
                 move |g, _, window, cx| {
                     g.jump_to_market(charge, window, cx);
+                },
+            )),
+        );
+    }
+    if takes_charges {
+        menu = menu.item(
+            entry(IconName::BatteryCharging, "Show Compatible Charges").on_click(handler(
+                this,
+                move |g, _, window, cx| {
+                    g.show_charges_for(type_id, window, cx);
                 },
             )),
         );

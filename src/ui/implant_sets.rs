@@ -98,49 +98,70 @@ impl Gyfa {
                 Rc::clone(&implants),
             );
             let message = error.read(cx).clone();
-            dialog.title("New Implant Set").w(px(360.)).child(
-                v_flex()
-                    .gap_3()
-                    .child("Enter a name for your new Implant Set:")
-                    .child(Input::new(&input))
-                    .when_some(message, |col, message| {
-                        col.child(div().text_sm().text_color(cx.theme().danger).child(message))
-                    })
-                    .child(
-                        h_flex().justify_end().child(
-                            Button::new("implant-set-name-ok")
-                                .primary()
-                                .label("OK")
-                                .on_click(move |_, window, cx| {
-                                    let name = input.read(cx).value().trim().to_owned();
-                                    if name.is_empty() {
-                                        window.close_dialog(cx);
-                                        return;
-                                    }
-                                    let taken = this.upgrade().is_some_and(|g| {
-                                        g.read(cx).saved.implant_sets.iter().any(|s| s.name == name)
-                                    });
-                                    if taken {
-                                        error.update(cx, |e, cx| {
-                                            *e = Some(NAME_TAKEN.into());
-                                            cx.notify();
-                                        });
-                                        window.refresh();
-                                        return;
-                                    }
-                                    window.close_dialog(cx);
-                                    Gyfa::app_update(&this, cx, |g, cx| {
-                                        let set = ImplantSet {
-                                            name: name.clone(),
-                                            implants: implants.to_vec(),
-                                        };
-                                        g.edit_implant_sets(cx, |sets| sets.push(set));
-                                        g.open_implant_set_editor(Some(name), window, cx);
-                                    });
-                                }),
+            // The OK button and Enter both submit; it closes the dialog itself when done.
+            let submit: crate::ui::widgets::Submit = {
+                let (input, error, this, implants) =
+                    (input.clone(), error.clone(), this.clone(), implants.clone());
+                Rc::new(move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                    let name = input.read(cx).value().trim().to_owned();
+                    if name.is_empty() {
+                        window.close_dialog(cx);
+                        return;
+                    }
+                    let taken = this.upgrade().is_some_and(|g| {
+                        g.read(cx).saved.implant_sets.iter().any(|s| s.name == name)
+                    });
+                    if taken {
+                        error.update(cx, |e, cx| {
+                            *e = Some(NAME_TAKEN.into());
+                            cx.notify();
+                        });
+                        window.refresh();
+                        return;
+                    }
+                    window.close_dialog(cx);
+                    Gyfa::app_update(&this, cx, |g, cx| {
+                        let set = ImplantSet {
+                            name: name.clone(),
+                            implants: implants.to_vec(),
+                        };
+                        g.edit_implant_sets(cx, |sets| sets.push(set));
+                        g.open_implant_set_editor(Some(name), window, cx);
+                    });
+                })
+            };
+            dialog
+                .on_ok({
+                    let submit = Rc::clone(&submit);
+                    move |e, w, cx| {
+                        submit(e, w, cx);
+                        false
+                    }
+                })
+                .title("New Implant Set")
+                .w(px(360.))
+                .child(
+                    v_flex()
+                        .gap_3()
+                        .child("Enter a name for your new Implant Set:")
+                        .child(Input::new(&input))
+                        .when_some(message, |col, message| {
+                            col.child(div().text_sm().text_color(cx.theme().danger).child(message))
+                        })
+                        .child(
+                            h_flex().justify_end().child(
+                                Button::new("implant-set-name-ok")
+                                    .primary()
+                                    .label("OK")
+                                    .on_click({
+                                        let submit = Rc::clone(&submit);
+                                        move |e: &ClickEvent, w: &mut Window, cx: &mut App| {
+                                            submit(e, w, cx);
+                                        }
+                                    }),
+                            ),
                         ),
-                    ),
-            )
+                )
         });
     }
 }

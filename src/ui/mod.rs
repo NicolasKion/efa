@@ -44,9 +44,9 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, AppContext, ClickEvent, Context, Entity, FocusHandle, InteractiveElement,
-    IntoElement, MouseUpEvent, ParentElement, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window, WindowBounds,
-    WindowOptions, div, prelude::FluentBuilder, px, size,
+    IntoElement, MouseUpEvent, ParentElement, Render, ScrollHandle, ScrollStrategy, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Task, UniformListScrollHandle, WeakEntity,
+    Window, WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, size,
 };
 
 pub use actions::{Action, AddKind, RowRef, Scope};
@@ -181,14 +181,28 @@ pub struct Gyfa {
     /// The fit whose name and notes the inputs currently show.
     inputs_show: Option<usize>,
     expanded_groups: HashSet<i32>,
+    /// What the market's results pane lists while the search box is empty.
+    listing: Option<crate::market::Listing>,
     /// Item to scroll the market to and highlight, after a market group jump.
     market_highlight: Option<TypeId>,
+    /// Items picked in the market results, for dragging or acting on several at once.
+    market_selection: Vec<TypeId>,
+    market_anchor: Option<TypeId>,
+    /// The items the results pane lists, top to bottom, for Shift-click ranges.
+    market_order: Rc<Vec<TypeId>>,
     market_scroll_pending: bool,
-    market_scroll: ScrollHandle,
+    market_scroll: UniformListScrollHandle,
+    market_tree_scroll: ScrollHandle,
     /// Which market items the meta group buttons let through.
     meta_filter: crate::market::MetaFilter,
-    /// The last market search and what it found, so a redraw does not search again.
-    search_results: Option<(String, Rc<Vec<TypeId>>)>,
+    /// The results pane's own filter box, which narrows what it lists.
+    results_filter: Entity<InputState>,
+    results_filter_text: String,
+    /// The results pane hides what the current fit cannot use.
+    fits_ship_only: bool,
+    /// What the results pane last listed before its filters, so a redraw does not search or
+    /// sort again.
+    results_cache: Option<(side::ResultsKey, Rc<Vec<crate::market::Section>>)>,
     /// Where the fittings browser is.
     ship_browser: crate::ship_browser::Browser,
     /// The fittings browser's search box, for ships and fits by name.
@@ -241,6 +255,8 @@ impl Gyfa {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search items"));
         let fit_search =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search ships and fits"));
+        let results_filter =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Filter these items"));
         let name_input = cx.new(|cx| InputState::new(window, cx).placeholder("Fit name"));
         let notes_input = cx.new(|cx| TextareaState::new(window, cx).rows(6).placeholder("Notes"));
         let subscriptions = vec![
@@ -248,6 +264,13 @@ impl Gyfa {
                 if matches!(event, InputEvent::Change) {
                     let text = input.read(cx).value().to_string();
                     this.search_after_delay(text, cx);
+                }
+            }),
+            cx.subscribe(&results_filter, |this, input, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.results_filter_text = input.read(cx).value().to_string();
+                    this.market_scroll.scroll_to_item(0, ScrollStrategy::Top);
+                    cx.notify();
                 }
             }),
             cx.subscribe(&fit_search, |this, input, event: &InputEvent, cx| {
@@ -324,11 +347,19 @@ impl Gyfa {
             notes_input,
             inputs_show: None,
             expanded_groups: HashSet::new(),
+            listing: None,
             market_highlight: None,
+            market_selection: Vec::new(),
+            market_anchor: None,
+            market_order: Rc::default(),
             market_scroll_pending: false,
-            market_scroll: ScrollHandle::new(),
+            market_scroll: UniformListScrollHandle::new(),
+            market_tree_scroll: ScrollHandle::new(),
             meta_filter: crate::market::MetaFilter::default(),
-            search_results: None,
+            results_filter,
+            results_filter_text: String::new(),
+            fits_ship_only: false,
+            results_cache: None,
             ship_browser: crate::ship_browser::Browser::default(),
             fit_search,
             selection: Vec::new(),
@@ -785,26 +816,46 @@ impl Gyfa {
         let this = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _, _| {
             let (text, this) = (text.clone(), this.clone());
-            dialog.title("Import Fits").w(px(560.)).child(
-                v_flex()
-                    .gap_3()
-                    .child(Textarea::new(&text).h(px(320.)))
-                    .child(
-                        h_flex().justify_end().child(
-                            Button::new("import-eft")
-                                .primary()
-                                .label("Import")
-                                .on_click(move |_, window, cx| {
-                                    let value = text.read(cx).value().to_string();
-                                    let _ = this.update(cx, |this, cx| {
-                                        this.import(&value);
-                                        this.changed(cx);
-                                    });
-                                    window.close_dialog(cx);
-                                }),
+            // The OK button and Enter both submit; it closes the dialog itself when done.
+            let submit: crate::ui::widgets::Submit = {
+                let (text, this) = (text.clone(), this.clone());
+                Rc::new(move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                    let value = text.read(cx).value().to_string();
+                    let _ = this.update(cx, |this, cx| {
+                        this.import(&value);
+                        this.changed(cx);
+                    });
+                    window.close_dialog(cx);
+                })
+            };
+            dialog
+                .on_ok({
+                    let submit = Rc::clone(&submit);
+                    move |e, w, cx| {
+                        submit(e, w, cx);
+                        false
+                    }
+                })
+                .title("Import Fits")
+                .w(px(560.))
+                .child(
+                    v_flex()
+                        .gap_3()
+                        .child(Textarea::new(&text).h(px(320.)))
+                        .child(
+                            h_flex().justify_end().child(
+                                Button::new("import-eft")
+                                    .primary()
+                                    .label("Import")
+                                    .on_click({
+                                        let submit = Rc::clone(&submit);
+                                        move |e: &ClickEvent, w: &mut Window, cx: &mut App| {
+                                            submit(e, w, cx);
+                                        }
+                                    }),
+                            ),
                         ),
-                    ),
-            )
+                )
         });
     }
 
@@ -1088,19 +1139,48 @@ impl Gyfa {
         cx: &mut Context<Self>,
     ) {
         let Some(loaded) = self.loaded() else { return };
-        self.browser_tab = BrowserTab::Market;
-        self.search_text.clear();
-        self.search
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.expanded_groups.extend(loaded.catalog.market_path(id));
-        // The item would not show with its meta button off.
+        self.show_in_market(window, cx);
+        let path = loaded.catalog.market_path(id);
+        if let Some(&group) = path.last() {
+            self.listing = Some(crate::market::Listing::Group(group));
+        }
+        self.expanded_groups.extend(path);
+        // The item would not show with its meta button off, or with the ship filter on.
         if let Some(t) = loaded.catalog.get(id) {
             self.meta_filter
                 .enable(crate::market::MetaCategory::of_item(t));
         }
+        self.fits_ship_only = false;
         self.market_highlight = Some(id);
         self.market_scroll_pending = true;
         cx.notify();
+    }
+
+    /// List every charge a module can load in the market's results pane.
+    pub(super) fn show_charges_for(
+        &mut self,
+        module: TypeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_in_market(window, cx);
+        self.listing = Some(crate::market::Listing::ModuleCharges(module));
+        self.market_highlight = None;
+        self.market_scroll.scroll_to_item(0, ScrollStrategy::Top);
+        cx.notify();
+    }
+
+    /// Bring up the market tab with its search and the results filter cleared, so what is
+    /// listed next shows in full.
+    fn show_in_market(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.browser_tab = BrowserTab::Market;
+        self.search_text.clear();
+        self.search_debounce = None;
+        self.search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.results_filter_text.clear();
+        self.results_filter
+            .update(cx, |input, cx| input.set_value("", window, cx));
     }
 
     /// Show one ship's fits in the fittings browser, pyfa's shipJump.
@@ -1248,6 +1328,10 @@ impl Render for Gyfa {
 impl Gyfa {
     fn search_input(&self) -> Input {
         Input::new(&self.search).small()
+    }
+
+    fn results_filter_input(&self) -> Input {
+        Input::new(&self.results_filter).small().cleanable(true)
     }
 
     fn fit_search_input(&self) -> Input {

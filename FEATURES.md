@@ -33,21 +33,22 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 
 ## Market browser
 
-- [x] Market group tree (builtinMarketBrowser/marketTree.py)
-- [x] Search box (builtinMarketBrowser/searchBox.py, pfSearchBox.py)
+- [x] Market group tree (builtinMarketBrowser/marketTree.py), over the results pane with a draggable divider, as in pyfa's splitter; the split is saved. Clicking a group lists its items, or all its subgroups' items when it has none of its own, and the tree stays put
+- [x] Search box (builtinMarketBrowser/searchBox.py, pfSearchBox.py): searches the whole market into the results pane; clearing it goes back to the picked group
 - [x] Double-click to add to fit (builtinMarketBrowser/itemView.py)
 - [x] Item icons (itemView.py), from the client CDN, cached on disk
-- [x] Meta group filter buttons (builtinMarketBrowser/metaButton.py): pyfa's four, Normal (T1, T2, T3 and everything else), Faction (faction, storyline, structure faction), Complex and Officer; a click shows one, Ctrl+click toggles one, buttons for categories the list lacks are greyed out, and a list the buttons would empty presses the leftmost useful one (pyfa's default). They filter the tree, search, recent items and charges alike
-- [x] Recently used items (itemView.py, service/market.py): pyfa's "Recently Used Items" tree entry, the last 20 items added from the market (double-click, menus, drags), saved with the fits
-- [x] "Charges For Active Fit" tree entry (itemView.py): every charge the fit's modules take, in market order
+- [x] Meta group filter buttons (builtinMarketBrowser/metaButton.py): pyfa's four, Normal (T1, T2, T3 and everything else), Faction (faction, storyline, structure faction), Complex and Officer; a click shows one, Ctrl+click toggles one, buttons for categories the list lacks are greyed out, and a list the buttons would empty presses the leftmost useful one (pyfa's default). They sit in the results pane's filter bar and filter whatever it lists
+- [x] Recently used items (itemView.py, service/market.py): pyfa's "Recently Used Items" tree entry, listed in the results pane, the last 20 items added from the market (double-click, menus, drags), saved with the fits
+- [x] "Charges For Active Fit" tree entry (itemView.py), listed in the results pane: every charge the fit's modules take, in market order
 - [~] Search delay and meta button behaviour prefs (pyfaMarketPreferences.py), search delay done; the meta buttons always behave as pyfa's defaults
-- [x] Jump to market group from an item (builtinContextMenus/itemMarketJump.py): from search results and recently used items, and the fit's, additions' and projected items' menus; the jump presses the item's meta button so it shows
+- [x] Jump to market group from an item (builtinContextMenus/itemMarketJump.py): from anything the results pane lists outside the item's own group, and the fit's, additions' and projected items' menus; the jump picks the group, presses the item's meta button and clears the pane's filters so it shows
 - [x] Drag item from market onto fit/slot/additions (itemView.py, fittingView.py)
 - [x] Item tooltip with name, Omega, price and the start of the description (gyfa extra: pyfa's item list has none); the description loads with the stats window's data on first hover
 - [x] Omega-only marker (builtinViewColumns/omega.py) behind pyfa's "Show Omega icons" preference, off by default; pyfa reads an attribute the current data no longer sets, gyfa marks items needing a skill level beyond the Alpha clone caps from clonegrades.json
 - [x] Items listed in pyfa's order (Market.itemSort): category, market group, variation parent, meta button, meta level, name, so variations sit next to their T1 item
 - [x] Jargon/abbreviation search, e.g. "lse", "hml" (service/jargon/): pyfa's default jargon file, a user_jargon.yaml next to the saved fits on top, `*` and `?` wildcards, `re:` regex queries, and pyfa's minimum of three characters after expansion
-- Hiding items that do not fit the current ship: pyfa has no such market filter, only "Charges For Active Fit"
+- [x] Results pane filter bar (gyfa extra): a filter box narrowing what is listed (name substring, or a market search with jargon), the meta buttons, a "Fits current ship" toggle and a count; an empty state with "Clear filters" when the filters hide everything. The ship filter checks the catalog only: rack slots and hardpoints after subsystems, rig size, canFitShipGroup/Type limits, structure vs ship modules, charges some fitted module loads, a drone or fighter bay; CPU, powergrid and max-group limits are not checked
+- [x] Compatible charges for a module (gyfa extra): "Show Compatible Charges" on fitted and projected modules lists every charge the module loads in the results pane, under headings the way the Charge submenu groups them (turret families, missile damage types)
 
 ## Ship browser
 
