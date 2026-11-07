@@ -21,7 +21,7 @@ pub fn caption(text: &str, cx: &App) -> impl IntoElement {
 }
 
 /// Height of a setting's row.
-pub const ROW_H: f32 = 24.;
+pub const ROW_H: f32 = 28.;
 
 /// A setting: its name, then its control; the description shows on hover.
 pub fn row(
@@ -49,8 +49,8 @@ pub fn row(
 /// A labelled group of rows.
 pub fn section(title: &str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
     v_flex()
-        .gap_0p5()
-        .child(div().pb_1().child(caption(title, cx)))
+        .gap_1p5()
+        .child(caption(title, cx))
         .children(rows)
         .into_any_element()
 }

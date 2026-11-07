@@ -48,6 +48,8 @@ pub struct General {
     pub omega_icons: bool,
     /// Name mutated items after their mutaplasmid and base item rather than the abyssal type.
     pub expanded_mutant_names: bool,
+    /// The fit's own implants and boosters travel in the cargo hold, so they count against it.
+    pub implants_in_cargo: bool,
 }
 
 impl Default for General {
@@ -65,6 +67,7 @@ impl Default for General {
             ship_browser_tooltips: true,
             omega_icons: false,
             expanded_mutant_names: false,
+            implants_in_cargo: true,
         }
     }
 }

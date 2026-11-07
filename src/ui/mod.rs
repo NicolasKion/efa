@@ -1254,9 +1254,12 @@ impl Render for Gyfa {
                 v_resizable("center")
                     .child(resizable_panel().child(self.fitting_view(&loaded, window, cx)))
                     .child(
+                        // The additions drawer keeps its height as the window resizes; the
+                        // fitting view above takes the change and scrolls.
                         resizable_panel()
                             .size(px(200.))
                             .size_range(px(80.)..px(600.))
+                            .fixed()
                             .child(self.additions(&loaded, window, cx)),
                     )
                     .into_any_element()

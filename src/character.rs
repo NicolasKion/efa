@@ -119,21 +119,12 @@ pub struct Characters {
 impl Characters {
     /// What was saved last time, or none if there is nothing readable.
     pub fn load() -> Self {
-        path()
-            .and_then(|path| std::fs::read(path).ok())
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+        path().map_or_else(Self::default, |path| crate::persist::load(&path))
     }
 
-    /// Write the characters out, through a temporary file so a crash cannot lose them.
+    /// Write the characters out, keeping the previous file as a backup.
     pub fn save(&self) -> Result<(), String> {
-        let path = path().ok_or("no home directory")?;
-        let dir = path.parent().ok_or("no data directory")?;
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        let json = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, json).map_err(|e| format!("{}: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, &path).map_err(|e| format!("{}: {e}", path.display()))
+        crate::persist::save(&path().ok_or("no home directory")?, self)
     }
 
     pub fn get(&self, id: CharacterId) -> Option<&Character> {

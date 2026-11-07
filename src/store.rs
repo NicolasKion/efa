@@ -44,9 +44,10 @@ pub struct Saved {
     /// Items last added from the market, newest first: pyfa's Recently Used Items.
     #[serde(default)]
     pub recent_items: Vec<crate::data::TypeId>,
-    /// Height of the market tree over the results pane, in pixels, once the user dragged it.
+    /// Height of the market results pane, in pixels, once the user dragged its divider. It
+    /// keeps that height when the window resizes; the tree above takes the change.
     #[serde(default)]
-    pub market_split: Option<f32>,
+    pub market_results: Option<f32>,
     /// The fitting wizard's last bling choices, which the next fit starts from.
     #[serde(default)]
     pub wizard: crate::wizard::Bling,
@@ -78,10 +79,7 @@ impl Saved {
         let Some(path) = path() else {
             return Self::default();
         };
-        let mut saved: Self = std::fs::read(&path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default();
+        let mut saved: Self = crate::persist::load(&path);
         saved.open.retain(|&i| i < saved.fits.len());
         saved.current = saved.current.filter(|c| saved.open.contains(c));
         saved.dedupe_uids();
@@ -148,15 +146,9 @@ impl Saved {
         }
     }
 
-    /// Write the fits out. Goes through a temporary file so a crash mid-write cannot lose them.
+    /// Write the fits out, keeping the previous file as a backup.
     pub fn save(&self) -> Result<(), String> {
-        let path = path().ok_or("no home directory")?;
-        let dir = path.parent().ok_or("no data directory")?;
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        let json = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, json).map_err(|e| format!("{}: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, &path).map_err(|e| format!("{}: {e}", path.display()))
+        crate::persist::save(&path().ok_or("no home directory")?, self)
     }
 }
 

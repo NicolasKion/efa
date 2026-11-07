@@ -1,8 +1,8 @@
 # pyfa context menus
 
 152 menu entries in 35 right-click contexts (pyfa ContextMenu registry plus 4 hand-built menus).
-gyfa progress is tracked per line below; fitting rows have Shift/Ctrl selection and Ctrl/Alt "all similar" now.
-Biggest gaps: market item actions, generic links, additions copy/paste, stats-pane and graph options.
+gyfa progress is tracked per line below; fitting rows, additions rows and market results have Shift/Ctrl selection, and Ctrl/Alt "all similar" works where pyfa has it.
+Biggest gaps: Stats entries on fighters, projected items and skills; Change Fighter Skills; Generic Links; Ctrl to show entries hidden by preference.
 
 Legend: `[x]` in gyfa, `[~]` partial, `[ ]` missing. Line format: label | when it shows | what it does | pyfa file (in gui/builtinContextMenus/ unless a path is given).
 
@@ -10,7 +10,7 @@ Legend: `[x]` in gyfa, `[~]` partial, `[ ]` missing. Line format: label | when i
 
 - gui/contextMenu.py: `getMenu(callingWindow, mainItem, selection, *fullContexts)`. For each fullContext `(srcContext, itemContext)` in order, every registered menu class is asked `display()`; matching entries are appended in registration order (gui/builtinContextMenus/__init__.py). A separator goes between consecutive source contexts that produced entries. No separators inside one context.
 - itemContext is the clicked item's market category display name ("Module", "Charge", "Drone", "Implant", ...) and fills `{}` in labels.
-- Holding Ctrl while opening shows entries hidden by preference (`visibilitySetting`: ammoPattern, changeAffectingSkills, metaSwap, project, moduleFill, spoolup, additionsCopyPaste; all on by default).
+- Holding Ctrl while opening shows entries hidden by preference (`visibilitySetting`: ammoPattern, changeAffectingSkills, metaSwap, project, moduleFill, spoolup, additionsCopyPaste; all on by default). gyfa honours every preference but has no Ctrl override: a hidden entry stays hidden until the preference is switched back on.
 - Ctrl/Alt while clicking an action applies it to all "similar" items (same type) instead of the selection, where noted. "multi" = acts on the whole selection.
 - Registration order (= order inside a context): fitOpenNewTab, fitAddBrowse, fitAddCurrentlyOpen, envEffectAdd, commandFitAdd, commandLinkAdd, targetProfile/adder, graphFitAmmoPicker | shipModeChange, moduleAmmoChange, moduleSpool, moduleRahPattern, boosterSideEffects, fighterAbilities, resistMode, targetProfile/editor | itemStats, itemMarketJump, fitSystemSecurity, fitPilotSecurity, shipJump | itemRemove, itemAmountChange, itemProjectionRange, droneSplitStack, itemVariationChange, itemMutations, moduleFill, moduleMutatedExport, skillAffectors | itemFill, droneAddStack, cargoAdd, cargoFill, cargoAddAmmo, itemProject, ammoToDmgPattern, implantSetApply, implantSetSave | priceOptions | damagePatternChange | factorReload, targetProfile/switcher | graph options | additionsExport*/Import. (The `|` groups are code comments only, not visible separators.)
 
@@ -29,7 +29,7 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 - [x] Apply Mutaplasmid / Revert to {base} | item has mutaplasmids or is mutated | not mutated: submenu of mutaplasmids (Glorified sorted after base name); mutated: plain entry reverting to base item. GuiConvertMutatedLocalModuleCommand / GuiRevertMutatedLocalModuleCommand | itemMutations.py
 - [x] Fill With {Module} | always (pref moduleFill) | clones the module into all free slots of that rack. GuiFillWithClonedLocalModulesCommand | moduleFill.py
 - [x] Copy Module to Clipboard | module is mutated | copies EFT mutant block (item, mutaplasmid, attrs) | moduleMutatedExport.py
-- [x] Change {Module} Skills | some skill modifies a non-zero attr of the item (pref changeAffectingSkills) | submenu per affecting skill, each with "Not Learned", "Level 0".."Level 5" (checked current); changes character skill level and refreshes fit | skillAffectors.py. gyfa lists the skill's current level after its name and greys the levels out for All 0/All 5, which ignore changes in pyfa too; no visibility pref yet
+- [x] Change {Module} Skills | some skill modifies a non-zero attr of the item (pref changeAffectingSkills) | submenu per affecting skill, each with "Not Learned", "Level 0".."Level 5" (checked current); changes character skill level and refreshes fit | skillAffectors.py. gyfa lists the skill's current level after its name and greys the levels out for All 0/All 5, which ignore changes in pyfa too
 
 ### fittingCharge
 - [x] {Charge} Stats | charge loaded | stats window for the charge | itemStats.py
@@ -71,12 +71,12 @@ Contexts: droneItem (row clicked), separator, droneItemMisc (always).
 
 ### fighterItem
 - [x] Abilities | row clicked | checkable list of implemented abilities; toggles on selection, Ctrl/Alt on all similar. GuiToggleLocalFighterAbilityStateCommand | fighterAbilities.py
-- [ ] Fighter Stats | row clicked | stats window | itemStats.py
+- [ ] Fighter Stats | row clicked | stats window | itemStats.py. Missing in gyfa: the fighter row menu has no Stats entry (src/ui/additions/fighters.rs)
 - [x] Fighter Market Group | has market group | market jump | itemMarketJump.py
 - [x] Remove Fighter | row clicked | removes selection, Ctrl/Alt all similar. GuiRemoveLocalFightersCommand | itemRemove.py
 - [x] Change Fighter Quantity | row clicked | dialog, sets squadron size. GuiChangeLocalFighterAmountCommand | itemAmountChange.py
 - [x] Variations | 2+ variations | variation swap, Ctrl/Alt similar. GuiChangeLocalFighterMetasCommand | itemVariationChange.py
-- [ ] Change Fighter Skills | skills affect fighter | skill level submenu | skillAffectors.py
+- [ ] Change Fighter Skills | skills affect fighter | skill level submenu | skillAffectors.py. Missing in gyfa (src/ui/characters.rs skills_submenu is not called from fighters.rs)
 
 ### fighterItemMisc
 - [x] Copy Selected Fighters | selection | clipboard export | additionsExportSelection.py
@@ -227,7 +227,7 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 ## Character editor (gui/characterEditor.py)
 
 ### skillItem (skill tree leaf)
-- [ ] Skill Stats | always | stats window | itemStats.py
+- [ ] Skill Stats | always | stats window | itemStats.py. Missing in gyfa: the skill menu has only Unlearn and the levels (src/ui/character_editor.rs)
 - [x] Unlearn, Level 0 .. Level 5 | character is not "All 0"/"All 5" (appended after separator) | sets skill level | gui/characterEditor.py. Keys 0-5 too
 
 ### implantEditor (character implants list)
@@ -285,9 +285,10 @@ Context marketItemGroup (browsing a group) or marketItemMisc (search / recent).
 
 ## gyfa-only today
 - Module row State submenu (offline/online/active/overheated): pyfa has no menu for this, it uses clicks on the state column.
-- Fittings browser Delete: pyfa does this with a button on the fit row, not a menu.
+- Fittings browser Delete: pyfa does this with a button on the fit row, not a menu, and asks for confirmation unless Shift is held; gyfa deletes without asking.
 - Rig/subsystem Remove: same entry as pyfa's fittingModule "Remove Module".
-- No multi-select anywhere in gyfa; pyfa's multi/Ctrl-similar variants are missing even where marked [x].
+- Fit tab menu: Rename, Open in New Window, Close, Close Others, then the ship's entries for the active tab. pyfa's tabs have no menu.
+- Market results: actions on several selected items at once.
 
 # Engine support
 
