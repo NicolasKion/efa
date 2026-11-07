@@ -45,6 +45,26 @@ pub fn row(
         .into_any_element()
 }
 
+/// A setting whose control takes the room its short name leaves, up to `max_w`.
+pub fn fill_row(
+    title: &'static str,
+    description: &'static str,
+    control: impl IntoElement,
+    max_w: f32,
+) -> AnyElement {
+    h_flex()
+        .id(SharedString::from(format!("row-{title}")))
+        .h(px(ROW_H))
+        .gap_2()
+        .justify_between()
+        .child(div().flex_none().child(title))
+        .child(div().flex_1().min_w_0().max_w(px(max_w)).child(control))
+        .tooltip(move |window, cx| {
+            gpui_kit::component::tooltip::Tooltip::new(description).build(window, cx)
+        })
+        .into_any_element()
+}
+
 /// A labelled group of rows.
 pub fn section(title: &str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
     v_flex()
@@ -112,6 +132,8 @@ pub fn choice<T: Copy + PartialEq + 'static>(
         })
         .collect();
     let control = h_flex()
+        .flex_wrap()
+        .max_w_full()
         .gap_0p5()
         .p_0p5()
         .rounded(px(5.))
@@ -119,5 +141,26 @@ pub fn choice<T: Copy + PartialEq + 'static>(
         .border_color(theme.border)
         .bg(theme.background)
         .children(segments);
-    row(title, description, control, cx)
+    // The control drops under its name when the group is too narrow for both on a line.
+    h_flex()
+        .id(SharedString::from(format!("row-{title}")))
+        .flex_wrap()
+        .min_h(px(ROW_H))
+        .gap_x_2()
+        .gap_y_1()
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(CHOICE_TITLE_MIN_W))
+                .truncate()
+                .child(title),
+        )
+        .child(control)
+        .tooltip(move |window, cx| {
+            gpui_kit::component::tooltip::Tooltip::new(description).build(window, cx)
+        })
+        .into_any_element()
 }
+
+/// What a segmented setting's name keeps beside its control before the control wraps under it.
+const CHOICE_TITLE_MIN_W: f32 = 80.;

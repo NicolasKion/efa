@@ -1,6 +1,6 @@
-//! The window's layout: a toolbar with the graph and axis pickers, the plot in a card with the
-//! settings column beside it, and the fit and target lists under both, pyfa's graph frame in
-//! the preferences window's cards.
+//! The window's layout: a toolbar with the graph picker, the plot, the settings strip under it,
+//! and the fit and target lists under that, pyfa's graph frame. A small window wraps the
+//! settings, stacks the lists and scrolls what does not fit under the plot.
 
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
@@ -29,11 +29,27 @@ use crate::{
     ui::widgets::icon_box,
 };
 
-/// The fit and target lists' height.
+/// The fit and target lists' height, and theirs in a short window.
 const LISTS_H: f32 = 240.;
+const LISTS_SHORT_H: f32 = 150.;
+/// Below this height the lists and the plot's least height get smaller.
+const SHORT_H: f32 = 680.;
+/// Below this width the fit and target lists stack instead of sharing a row.
+const STACK_LISTS_W: f32 = 760.;
+/// The plot's least height; below it the area under the toolbar scrolls.
+const PLOT_MIN_H: f32 = 240.;
+const PLOT_SHORT_MIN_H: f32 = 170.;
+/// A settings group's least width; groups wrap onto more lines when they don't fit.
+const SECTION_MIN_W: f32 = 220.;
+/// The axis pickers' widest.
+const AXIS_W: f32 = 200.;
+/// The graph picker's width.
+const GRAPH_W: f32 = 200.;
+/// The plot header's least width beside the graph picker, before it drops under it.
+const HEADER_MIN_W: f32 = 260.;
 
 impl Render for GraphsWindow {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let root = v_flex()
             .size_full()
@@ -50,20 +66,49 @@ impl Render for GraphsWindow {
                 .child("Loading EVE data…")
                 .into_any_element();
         }
-        let lists = h_flex()
-            .flex_none()
-            .h(px(LISTS_H))
-            .gap_2()
-            .p_2()
-            .child(lists::sources(self, cx))
-            .when(self.graph.has_targets(), |row| {
-                row.child(lists::targets(self, cx))
-            });
+        let viewport = window.viewport_size();
+        let (width, height) = (f32::from(viewport.width), f32::from(viewport.height));
+        let short = height < SHORT_H;
+        let lists_h = if short { LISTS_SHORT_H } else { LISTS_H };
+        let has_targets = self.graph.has_targets();
+        let stack = has_targets && width < STACK_LISTS_W;
+        // Each list's width, for how many value columns fit beside the names.
+        let list_w = if has_targets && !stack {
+            (width - 24.) / 2.
+        } else {
+            width - 16.
+        };
+        let sources = lists::sources(self, list_w, cx);
+        let targets = has_targets.then(|| lists::targets(self, list_w, cx));
+        let lists = if stack {
+            v_flex()
+                .flex_none()
+                .gap_2()
+                .p_2()
+                .child(h_flex().h(px(lists_h)).child(sources))
+                .children(targets.map(|t| h_flex().h(px(lists_h)).child(t)))
+        } else {
+            h_flex()
+                .flex_none()
+                .h(px(lists_h))
+                .gap_2()
+                .p_2()
+                .child(sources)
+                .children(targets)
+        };
+        let plot_min = if short { PLOT_SHORT_MIN_H } else { PLOT_MIN_H };
         // pyfa's order, top to bottom: the pickers, the plot, its settings, then the lists.
-        root.child(self.toolbar(cx))
-            .child(self.plot_card(cx))
+        // When the window is too short for all of it, everything under the toolbar scrolls.
+        let body = v_flex()
+            .id("graph-body")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(self.plot_card(plot_min, cx))
             .child(self.settings_panel(cx))
-            .child(lists)
+            .child(lists);
+        root.child(self.toolbar(cx))
+            .child(body)
             // A vector drag ends wherever the button comes up.
             .on_mouse_up(
                 MouseButton::Left,
@@ -113,13 +158,18 @@ impl GraphsWindow {
                 cx,
             )
         });
-        let mut rows = vec![panel::row("Y axis", "What the plot shows.", y_axis, cx)];
+        let mut rows = vec![panel::fill_row(
+            "Y axis",
+            "What the plot shows.",
+            y_axis,
+            AXIS_W,
+        )];
         if let Some(x_axis) = x_axis {
-            rows.push(panel::row(
+            rows.push(panel::fill_row(
                 "X axis",
                 "What it is plotted against.",
                 x_axis,
-                cx,
+                AXIS_W,
             ));
         }
         panel::section("Axes", rows, cx)
@@ -131,10 +181,13 @@ impl GraphsWindow {
         let graph = self.graph_selector(cx);
         let header = self.plot_header(cx);
         let theme = cx.theme();
+        // The header drops under the picker when they don't fit side by side.
         h_flex()
             .flex_none()
+            .flex_wrap()
             .items_center()
-            .gap_4()
+            .gap_x_4()
+            .gap_y_1()
             .px_2()
             .py_1()
             .border_b_1()
@@ -154,7 +207,7 @@ impl GraphsWindow {
         Button::new("graph-select")
             .outline()
             .small()
-            .w(px(200.))
+            .w(px(GRAPH_W))
             .dropdown_caret(true)
             .label(current.name())
             .dropdown_menu(move |menu, _, _| {
@@ -184,7 +237,7 @@ impl GraphsWindow {
         Button::new(id)
             .outline()
             .small()
-            .w(px(200.))
+            .w_full()
             .dropdown_caret(true)
             .label(label)
             .dropdown_menu(move |menu, _, _| {
@@ -261,9 +314,15 @@ impl GraphsWindow {
 
         h_flex()
             .flex_1()
-            .min_w_0()
+            .min_w(px(HEADER_MIN_W))
             .gap_2()
-            .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
+            .child(
+                div()
+                    .min_w_0()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .truncate()
+                    .child(title),
+            )
             .child(
                 div()
                     .flex_1()
@@ -273,11 +332,11 @@ impl GraphsWindow {
                     .truncate()
                     .child(subtitle),
             )
-            .child(div().flex_none().child(aside))
+            .child(div().min_w_0().overflow_hidden().child(aside))
             .into_any_element()
     }
 
-    fn plot_card(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn plot_card(&self, min_h: f32, cx: &mut Context<Self>) -> impl IntoElement {
         let mark = self.hover_mark.or(self.pinned_mark);
         let plot = canvas::render(&self.lines, &self.frame, mark, &self.plot_bounds, cx);
         let theme = cx.theme();
@@ -309,11 +368,11 @@ impl GraphsWindow {
                 )
         });
 
-        v_flex().flex_1().min_h(px(240.)).overflow_hidden().child(
+        v_flex().flex_1().min_h(px(min_h)).overflow_hidden().child(
             div()
                 .relative()
                 .flex_1()
-                .min_h(px(200.))
+                .min_h_0()
                 .child(plot)
                 .children(notice),
         )
@@ -369,28 +428,37 @@ impl GraphsWindow {
             ],
             cx,
         ));
-        // Side by side under the plot, as pyfa lays out its panel; it scrolls sideways if the
-        // window is too narrow.
+        // Side by side under the plot, as pyfa lays out its panel, wrapping onto more lines in
+        // a narrow window. Every group is ruled off on its left and top; the strip pulls them a
+        // pixel up and left, so the rules on the outer edges fall outside and are clipped.
         let theme = cx.theme();
-        h_flex()
+        v_flex()
             .id("graph-settings")
             .flex_none()
-            .items_stretch()
+            .overflow_hidden()
             .border_t_1()
             .border_b_1()
             .border_color(theme.border)
             .bg(theme.sidebar)
-            .overflow_x_scroll()
-            .children(sections.into_iter().enumerate().map(|(n, s)| {
-                // Each group takes an equal share of the width, set off by a rule.
-                div()
-                    .flex_1()
-                    .min_w(px(200.))
-                    .px_3()
-                    .py_2()
-                    .when(n > 0, |d| d.border_l_1().border_color(theme.border))
-                    .child(s)
-            }))
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .items_stretch()
+                    .ml(px(-1.))
+                    .mt(px(-1.))
+                    .children(sections.into_iter().map(|s| {
+                        // Each group takes an equal share of its line's width.
+                        div()
+                            .flex_1()
+                            .min_w(px(SECTION_MIN_W))
+                            .px_3()
+                            .py_2()
+                            .border_l_1()
+                            .border_t_1()
+                            .border_color(theme.border)
+                            .child(s)
+                    })),
+            )
     }
 
     /// An input field: the game's icon, its name and unit, and the field.
@@ -657,7 +725,7 @@ fn hint(icon: AssetIcon, text: SharedString, cx: &Context<GraphsWindow>) -> AnyE
         .text_xs()
         .text_color(muted)
         .child(UiIcon::new(icon).size(px(12.)).text_color(muted))
-        .child(text)
+        .child(div().min_w_0().truncate().child(text))
         .into_any_element()
 }
 
