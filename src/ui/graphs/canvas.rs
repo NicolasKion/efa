@@ -5,9 +5,9 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui_kit::component::{ActiveTheme, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, Bounds, Context, FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton,
-    MouseDownEvent, MouseMoveEvent, ParentElement, PathBuilder, Pixels, StatefulInteractiveElement,
-    Styled, canvas, div, point, prelude::FluentBuilder, px, relative,
+    AnyElement, Bounds, Context, Div, FontWeight, Hsla, InteractiveElement, IntoElement,
+    MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement, PathBuilder, Pixels,
+    StatefulInteractiveElement, Styled, canvas, div, point, prelude::FluentBuilder, px, relative,
 };
 
 use super::{
@@ -349,12 +349,18 @@ pub fn render(
             Some(unit) => format!("{} {unit}", format(x)),
             None => format(x),
         };
+        // Labels sit right of the cursor, or left of it past the middle so they never run
+        // into the plot's edge and wrap.
+        let beside = |label: Div| {
+            let label = label.whitespace_nowrap();
+            if fx > 0.5 {
+                label.right(relative(1.0 - fx)).mr(px(6.))
+            } else {
+                label.left(relative(fx)).ml(px(6.))
+            }
+        };
         let mut labels: Vec<AnyElement> = vec![
-            div()
-                .absolute()
-                .top(px(4.))
-                .left(relative(fx))
-                .ml(px(6.))
+            beside(div().absolute().top(px(4.)))
                 .px_1p5()
                 .rounded(px(4.))
                 .bg(theme.foreground)
@@ -368,11 +374,8 @@ pub fn render(
             let Some(y) = line.series.at(x) else { continue };
             let fy = frac(y, frame.y_range).clamp(0.0, 1.0);
             labels.push(
-                h_flex()
-                    .absolute()
-                    .left(relative(fx))
+                beside(h_flex().absolute())
                     .top(relative(1.0 - fy))
-                    .ml(px(6.))
                     .mt(px(-TICK_LABEL_H))
                     .gap_1()
                     .px_1p5()
