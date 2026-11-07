@@ -10,6 +10,11 @@ use std::{
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+use crate::{
+    market::jargon::{Jargon, Query},
+    ship_browser::Race,
+};
+
 pub mod projection;
 
 pub type TypeId = i32;
@@ -186,6 +191,10 @@ pub struct ItemType {
     pub implant_slot: Option<u8>,
     /// What the item holds, in m³: charges for a module, contents for a container.
     pub capacity: f64,
+    /// Who builds a ship, for the fittings browser's race filter.
+    pub race: Option<Race>,
+    /// Needs a skill level beyond what an Alpha clone can train.
+    pub omega: bool,
 }
 
 impl ItemType {
@@ -261,11 +270,14 @@ pub struct Catalog {
     pub required_skills: HashMap<TypeId, Vec<(TypeId, u8)>>,
     /// Environmental effects, projectable items and fighter data.
     pub projection: projection::Projection,
+    /// Published ships by group, groups by name and ships by race and name, the fittings
+    /// browser's first two stages.
+    pub ship_groups: Vec<(i32, Vec<TypeId>)>,
 }
 
 /// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
 /// instead of loaded.
-const CACHE_FORMAT: u32 = 3;
+const CACHE_FORMAT: u32 = 4;
 const CACHE_FILE: &str = "catalog.bin";
 
 /// The cache on disk: the key it was built for, then the catalog.
@@ -311,6 +323,7 @@ impl Catalog {
         let icons: HashMap<String, SdeIcon> = read(dir, "sde/icons.json")?;
         let meta_groups: HashMap<String, SdeMetaGroup> = read(dir, "sde/metagroups.json")?;
         let graphics: HashMap<String, SdeGraphic> = read(dir, "sde/graphics.json")?;
+        let clone_grades: HashMap<String, SdeCloneGrade> = read(dir, "sde/clonegrades.json")?;
         let icon_files: HashMap<i32, String> = icons
             .into_iter()
             .filter_map(|(id, icon)| Some((id.parse().ok()?, icon.icon_file?)))
@@ -328,6 +341,12 @@ impl Catalog {
         let group_category: HashMap<i32, i32> = groups
             .iter()
             .filter_map(|(id, g)| Some((id.parse().ok()?, g.category_id)))
+            .collect();
+
+        // Skills carry the race a ship's race is read from.
+        let type_races: HashMap<TypeId, i32> = sde_types
+            .iter()
+            .filter_map(|(id, t)| Some((id.parse().ok()?, t.race_id.filter(|&r| r != 0)?)))
             .collect();
 
         let mut projection = projection::Builder::new(&effect_category);
@@ -431,6 +450,13 @@ impl Catalog {
                     Some((skill, attr(level).unwrap_or(0.0) as u8))
                 })
                 .collect();
+            let race = (kind == Kind::Ship).then(|| {
+                let skill_races: Vec<i32> = required
+                    .iter()
+                    .filter_map(|(skill, _)| type_races.get(skill).copied())
+                    .collect();
+                Race::resolve(t.faction_id, &skill_races, t.race_id)
+            });
             if !required.is_empty() {
                 required_skills.insert(id, required);
             }
@@ -508,8 +534,16 @@ impl Catalog {
                     }),
                     implant_slot: attr(attr::IMPLANTNESS).map(|v| v as u8),
                     capacity: t.capacity.unwrap_or(0.0),
+                    race: race.flatten(),
+                    omega: false,
                 },
             );
+        }
+
+        let alpha = alpha_skill_caps(clone_grades.into_values());
+        let mut omega = HashMap::new();
+        for t in types.values_mut() {
+            t.omega = needs_omega(t.id, &required_skills, &alpha, &mut omega);
         }
 
         let projection = projection.finish(dir);
@@ -581,9 +615,7 @@ impl Catalog {
             }
         }
         for group in market_groups.values_mut() {
-            group
-                .types
-                .sort_by(|a, b| types[a].name.cmp(&types[b].name));
+            crate::market::sort_items(&types, &mut group.types);
         }
         prune_and_link(&mut market_groups);
         let mut market_roots: Vec<i32> = market_groups
@@ -615,10 +647,11 @@ impl Catalog {
             .into_iter()
             .filter_map(|(id, g)| Some((id.parse().ok()?, g.name.en)))
             .collect();
-        let group_names = groups
+        let group_names: HashMap<i32, String> = groups
             .into_iter()
             .filter_map(|(id, g)| Some((id.parse().ok()?, g.name.en)))
             .collect();
+        let ship_groups = ship_groups(&types, &group_names);
 
         Ok(Self {
             types,
@@ -633,6 +666,7 @@ impl Catalog {
             cargo_searchable,
             required_skills,
             projection,
+            ship_groups,
         })
     }
 
@@ -690,13 +724,14 @@ impl Catalog {
             .and_then(|id| self.types.get(id))
     }
 
-    /// Published, fittable types whose name contains every word of the query.
+    /// Published, fittable types matching a market search the way pyfa runs it: every word
+    /// found in the name, with pyfa's jargon and wildcards, in pyfa's order. Nothing for a query
+    /// too short to search for.
     pub fn search(&self, query: &str, limit: usize) -> Vec<TypeId> {
-        let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-        if words.is_empty() {
+        let Some(query) = Query::parse(query, Jargon::global()) else {
             return Vec::new();
-        }
-        let mut hits: Vec<&ItemType> = self
+        };
+        let mut hits: Vec<TypeId> = self
             .types
             .values()
             .filter(|t| {
@@ -705,19 +740,78 @@ impl Catalog {
                     && !matches!(t.kind, Kind::Skill | Kind::Mode | Kind::Other)
                     && (t.kind != Kind::Cargo || self.cargo_searchable.contains(&t.id))
             })
-            .filter(|t| {
-                let name = t.name.to_lowercase();
-                words.iter().all(|w| name.contains(w))
-            })
+            .filter(|t| query.matches(&t.name))
+            .map(|t| t.id)
             .collect();
-        hits.sort_by(|a, b| {
-            a.name
-                .len()
-                .cmp(&b.name.len())
-                .then_with(|| a.name.cmp(&b.name))
-        });
-        hits.into_iter().take(limit).map(|t| t.id).collect()
+        crate::market::sort_items(&self.types, &mut hits);
+        hits.truncate(limit);
+        hits
     }
+
+    /// A ship group's published ships, by race and name.
+    pub fn ships_in(&self, group: i32) -> &[TypeId] {
+        self.ship_groups
+            .iter()
+            .find(|(g, _)| *g == group)
+            .map_or(&[], |(_, ships)| ships.as_slice())
+    }
+}
+
+/// Published ships by group, as the fittings browser lists them.
+fn ship_groups(
+    types: &HashMap<TypeId, ItemType>,
+    group_names: &HashMap<i32, String>,
+) -> Vec<(i32, Vec<TypeId>)> {
+    let mut groups: HashMap<i32, Vec<TypeId>> = HashMap::new();
+    for t in types
+        .values()
+        .filter(|t| t.kind == Kind::Ship && t.published)
+    {
+        groups.entry(t.group_id).or_default().push(t.id);
+    }
+    let mut groups: Vec<(i32, Vec<TypeId>)> = groups.into_iter().collect();
+    for (_, ships) in &mut groups {
+        // pyfa puts ships of no known race last.
+        ships.sort_by(|a, b| {
+            let (a, b) = (&types[a], &types[b]);
+            (a.race.is_none(), a.race, &a.name).cmp(&(b.race.is_none(), b.race, &b.name))
+        });
+    }
+    let name = |g: i32| group_names.get(&g).map_or("", String::as_str);
+    groups.sort_by(|a, b| name(a.0).cmp(name(b.0)));
+    groups
+}
+
+/// The highest level any Alpha clone can train each skill to.
+fn alpha_skill_caps(grades: impl Iterator<Item = SdeCloneGrade>) -> HashMap<TypeId, u8> {
+    let mut caps: HashMap<TypeId, u8> = HashMap::new();
+    for skill in grades.flat_map(|g| g.skills) {
+        let cap = caps.entry(skill.type_id).or_default();
+        *cap = (*cap).max(skill.level);
+    }
+    caps
+}
+
+/// Whether a type needs a skill, or a prerequisite of one, beyond the Alpha caps.
+fn needs_omega(
+    id: TypeId,
+    required: &HashMap<TypeId, Vec<(TypeId, u8)>>,
+    alpha: &HashMap<TypeId, u8>,
+    memo: &mut HashMap<TypeId, bool>,
+) -> bool {
+    if let Some(&known) = memo.get(&id) {
+        return known;
+    }
+    // Settles cycles, which the data should not have anyway.
+    memo.insert(id, false);
+    let omega = required.get(&id).is_some_and(|skills| {
+        skills.iter().any(|&(skill, level)| {
+            level > alpha.get(&skill).copied().unwrap_or(0)
+                || needs_omega(skill, required, alpha, memo)
+        })
+    });
+    memo.insert(id, omega);
+    omega
 }
 
 /// Drop market groups with nothing fittable anywhere below them, and fill in child lists.
@@ -858,6 +952,23 @@ struct SdeType {
     #[serde(rename = "packagedVolume")]
     packaged_volume: Option<f64>,
     capacity: Option<f64>,
+    #[serde(rename = "factionID")]
+    faction_id: Option<i32>,
+    #[serde(rename = "raceID")]
+    race_id: Option<i32>,
+}
+
+#[derive(Deserialize)]
+struct SdeCloneGrade {
+    #[serde(default)]
+    skills: Vec<SdeCloneSkill>,
+}
+
+#[derive(Deserialize)]
+struct SdeCloneSkill {
+    #[serde(rename = "typeID")]
+    type_id: TypeId,
+    level: u8,
 }
 
 #[derive(Deserialize)]

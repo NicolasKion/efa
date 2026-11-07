@@ -597,8 +597,7 @@ impl Gyfa {
         if structural {
             self.clear_selection();
         }
-        self.history
-            .record(current, before, &self.saved.fits[current]);
+        self.record_edit(current, before);
         self.changed(cx);
     }
 }

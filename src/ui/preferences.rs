@@ -317,6 +317,22 @@ impl PreferencesWindow {
                 cx,
             ),
             Self::check(
+                "ship-browser-tooltips",
+                "Show ship browser tooltip",
+                None,
+                g.ship_browser_tooltips,
+                |s, v| s.preferences.general.ship_browser_tooltips = v,
+                cx,
+            ),
+            Self::check(
+                "omega-icons",
+                "Show Omega icons for hulls and modules",
+                None,
+                g.omega_icons,
+                |s, v| s.preferences.general.omega_icons = v,
+                cx,
+            ),
+            Self::check(
                 "open-new-tab",
                 "Open fittings in a new page by default",
                 Some("Otherwise the fittings browser opens a fit in place of the current tab."),
