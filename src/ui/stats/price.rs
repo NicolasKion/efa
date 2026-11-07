@@ -191,6 +191,7 @@ mod tests {
                 state: ModuleState::Online,
                 charge: Some(9),
                 spool: None,
+                rah: None,
             })
         };
         let fit = Fit {

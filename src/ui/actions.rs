@@ -11,7 +11,11 @@ use gpui_kit::{ClickEvent, Context, Modifiers};
 use super::Gyfa;
 use crate::{
     data::{Slot, TypeId},
-    fit::{DamageProfile, ImplantSource, Module, ModuleState, cargo::Transfer, trim_rack},
+    fit::{
+        DamageProfile, ImplantSource, Module, ModuleState, RahPattern, SystemSecurity,
+        cargo::Transfer,
+        trim_rack,
+    },
 };
 
 /// A row of the fitting view that holds something.
@@ -52,10 +56,17 @@ impl Scope {
 /// A change to the current fit, from a click or a menu.
 #[derive(Debug, Clone)]
 pub enum Action {
-    CycleState(Slot, usize),
-    SetState(Vec<RowRef>, ModuleState),
+    /// pyfa's state column click: the clicked module steps to its next state, or goes offline
+    /// with `offline`, and `others` follow it as far as each can.
+    CycleState {
+        main: (Slot, usize),
+        others: Vec<RowRef>,
+        offline: bool,
+    },
     SetCharge(Vec<RowRef>, Option<TypeId>),
     SetSpool(Vec<RowRef>, Option<u32>),
+    /// What reactive armor hardeners adapt to; None goes back to the fit's pattern.
+    SetRah(Vec<RowRef>, Option<RahPattern>),
     Remove(Vec<RowRef>),
     /// Swap items for another type, keeping their state and charge.
     SwapType(Vec<RowRef>, TypeId),
@@ -90,6 +101,7 @@ pub enum Action {
     AddAdditions(AddKind, Vec<(TypeId, u32)>),
     SetMode(TypeId),
     SetSecStatus(Option<f64>),
+    SetSystemSecurity(SystemSecurity),
     /// Switch boosters on or off, all the opposite of the clicked one, as pyfa does.
     ToggleBoosters(usize, Vec<usize>),
     /// Switch one side effect of a booster, by effect ID.
@@ -130,7 +142,7 @@ impl Gyfa {
                     return vec![clicked];
                 };
                 match clicked {
-                    RowRef::Module(..) => [Slot::High, Slot::Mid, Slot::Low]
+                    RowRef::Module(..) => [Slot::High, Slot::Mid, Slot::Low, Slot::Service]
                         .into_iter()
                         .flat_map(|slot| {
                             fit.rack(slot)
@@ -205,36 +217,39 @@ impl Gyfa {
         // Kept for undo; recorded only if the action changed the fit.
         let before = self.saved.fits[current].clone();
         let free = |slot: Slot, used: usize, stats: Option<&crate::engine::Stats>| {
-            let total = stats.map_or(0, |s| match slot {
-                Slot::High => s.high.total.unwrap_or(0),
-                Slot::Mid => s.mid.total.unwrap_or(0),
-                Slot::Low => s.low.total.unwrap_or(0),
-                Slot::Rig => s.rig.total.unwrap_or(0),
-                Slot::Subsystem => s.subsystem.total.unwrap_or(0),
-            }) as usize;
+            let total = stats.map_or(0, |s| s.slots(slot).total.unwrap_or(0)) as usize;
             total.saturating_sub(used)
         };
         let stats = self.stats.as_ref();
         let fit = &mut self.saved.fits[current];
         let mut structural = false;
         match action {
-            Action::CycleState(slot, i) => {
+            Action::CycleState {
+                main: (slot, i),
+                others,
+                offline,
+            } => {
                 let Some(Some(m)) = fit.rack_mut(slot).get_mut(i) else {
                     return;
                 };
-                let t = loaded.catalog.get(m.type_id);
-                let activatable = t.is_some_and(|t| t.activatable);
-                let overloadable = t.is_some_and(|t| t.overloadable);
-                m.state = match m.state {
-                    ModuleState::Offline => ModuleState::Online,
-                    ModuleState::Online if activatable => ModuleState::Active,
-                    ModuleState::Active if overloadable => ModuleState::Overload,
-                    _ => ModuleState::Offline,
+                let highest = highest_state(&loaded.catalog, m.type_id);
+                let next = if offline {
+                    ModuleState::Offline
+                } else {
+                    match m.state {
+                        ModuleState::Offline => ModuleState::Online,
+                        ModuleState::Online if highest >= ModuleState::Active => {
+                            ModuleState::Active
+                        }
+                        ModuleState::Active if highest >= ModuleState::Overload => {
+                            ModuleState::Overload
+                        }
+                        _ => ModuleState::Offline,
+                    }
                 };
-            }
-            Action::SetState(rows, new_state) => {
-                for m in modules_mut(fit, &rows) {
-                    m.state = new_state;
+                m.state = next;
+                for m in modules_mut(fit, &others) {
+                    m.state = next.min(highest_state(&loaded.catalog, m.type_id));
                 }
             }
             Action::SetCharge(rows, charge) => {
@@ -251,6 +266,11 @@ impl Gyfa {
             Action::SetSpool(rows, cycles) => {
                 for m in modules_mut(fit, &rows) {
                     m.spool = cycles;
+                }
+            }
+            Action::SetRah(rows, pattern) => {
+                for m in modules_mut(fit, &rows) {
+                    m.rah.clone_from(&pattern);
                 }
             }
             Action::Remove(rows) => {
@@ -286,7 +306,7 @@ impl Gyfa {
                     return;
                 };
                 match slot {
-                    Slot::High | Slot::Mid | Slot::Low => {
+                    Slot::High | Slot::Mid | Slot::Low | Slot::Service => {
                         let rack = fit.rack_mut(slot);
                         if rack.len() <= i {
                             rack.resize_with(i + 1, || None);
@@ -301,6 +321,7 @@ impl Gyfa {
                             state: initial,
                             charge: None,
                             spool: None,
+                            rah: None,
                         });
                     }
                     Slot::Rig => {
@@ -369,7 +390,9 @@ impl Gyfa {
                 let used = match slot {
                     Slot::Rig => fit.rigs.iter().flatten().count(),
                     Slot::Subsystem => fit.subsystems.len(),
-                    Slot::High | Slot::Mid | Slot::Low => fit.rack(slot).iter().flatten().count(),
+                    Slot::High | Slot::Mid | Slot::Low | Slot::Service => {
+                        fit.rack(slot).iter().flatten().count()
+                    }
                 };
                 for _ in 0..free(slot, used, stats) {
                     fit.add(&loaded.catalog, type_id);
@@ -474,6 +497,7 @@ impl Gyfa {
             }
             Action::SetMode(mode) => fit.mode = Some(mode),
             Action::SetSecStatus(sec) => fit.sec_status = sec,
+            Action::SetSystemSecurity(security) => fit.system_security = security,
             Action::SetDamageProfile(profile) => fit.damage_profile = profile,
             Action::SetTargetProfile(profile) => fit.target_profile = profile,
             Action::ToggleBoosters(main, rows) => {
@@ -538,6 +562,16 @@ impl Gyfa {
     }
 }
 
+/// The furthest a module's state goes: passive modules only come online, and only some active
+/// ones overheat.
+fn highest_state(catalog: &crate::data::Catalog, type_id: TypeId) -> ModuleState {
+    match catalog.get(type_id) {
+        Some(t) if t.overloadable => ModuleState::Overload,
+        Some(t) if t.activatable => ModuleState::Active,
+        _ => ModuleState::Online,
+    }
+}
+
 fn modules_mut<'f>(fit: &'f mut crate::fit::Fit, rows: &[RowRef]) -> Vec<&'f mut Module> {
     let wanted: BTreeSet<(Slot, usize)> = rows
         .iter()
@@ -546,8 +580,19 @@ fn modules_mut<'f>(fit: &'f mut crate::fit::Fit, rows: &[RowRef]) -> Vec<&'f mut
             RowRef::Rig(_) | RowRef::Subsystem(_) => None,
         })
         .collect();
-    let crate::fit::Fit { high, mid, low, .. } = fit;
-    [(Slot::High, high), (Slot::Mid, mid), (Slot::Low, low)]
+    let crate::fit::Fit {
+        high,
+        mid,
+        low,
+        services,
+        ..
+    } = fit;
+    [
+        (Slot::High, high),
+        (Slot::Mid, mid),
+        (Slot::Low, low),
+        (Slot::Service, services),
+    ]
         .into_iter()
         .flat_map(|(slot, rack)| {
             rack.iter_mut()

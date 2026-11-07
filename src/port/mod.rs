@@ -195,7 +195,7 @@ pub(crate) fn place(fit: &mut Fit, catalog: &Catalog, type_id: TypeId, count: u3
         return;
     }
     match t.kind {
-        Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low)) => {
+        Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low | Slot::Service)) => {
             let state = if t.activatable {
                 ModuleState::Active
             } else {
@@ -207,6 +207,7 @@ pub(crate) fn place(fit: &mut Fit, catalog: &Catalog, type_id: TypeId, count: u3
                     state,
                     charge: None,
                     spool: None,
+                    rah: None,
                 }));
             }
         }

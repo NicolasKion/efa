@@ -161,6 +161,12 @@ fn add_module(
         Slot::Low => ModRack::Low,
         Slot::Rig => return Some(f.add_rig(type_id).get_item_id()),
         Slot::Subsystem => return Some(f.add_subsystem(type_id).get_item_id()),
+        Slot::Service => {
+            return Some(
+                f.add_service(type_id, rc::ServiceState::Online)
+                    .get_item_id(),
+            );
+        }
     };
     let mut added = f
         .add_module(rack, AddMode::Append, type_id, rc::ModuleState::Online)

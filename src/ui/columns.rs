@@ -2,6 +2,8 @@
 //! user drags its header edge, after which it keeps the width it was given. Widths are kept with
 //! the fits. Double-clicking an edge hands the column back to auto-sizing.
 
+pub mod misc;
+
 use gpui_kit::component::{ActiveTheme, h_flex};
 use gpui_kit::{
     AppContext, ClickEvent, Context, CursorStyle, Div, DragMoveEvent, InteractiveElement,
@@ -15,7 +17,7 @@ use super::{
 };
 use crate::{
     data::{Catalog, Slot},
-    engine::{ModuleInfo, Stats},
+    engine::{FitItem, ModuleInfo, Stats},
     fit::{Fit, Module},
     icons::Icon,
     prices::Prices,
@@ -45,19 +47,25 @@ pub enum Col {
     Cpu,
     Capacitor,
     Range,
+    /// pyfa's Miscellanea: one figure per kind of module.
+    Misc,
     Price,
     Charge,
+    /// Time until an overheated module burns out.
+    Heat,
 }
 
 impl Col {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::Name,
         Self::Powergrid,
         Self::Cpu,
         Self::Capacitor,
         Self::Range,
+        Self::Misc,
         Self::Price,
         Self::Charge,
+        Self::Heat,
     ];
 
     /// Name the width is saved under.
@@ -68,8 +76,10 @@ impl Col {
             Self::Cpu => "cpu",
             Self::Capacitor => "capacitor",
             Self::Range => "range",
+            Self::Misc => "misc",
             Self::Price => "price",
             Self::Charge => "charge",
+            Self::Heat => "heat",
         }
     }
 
@@ -84,26 +94,38 @@ impl Col {
             Self::Cpu => Some((icon::CPU, "CPU")),
             Self::Capacitor => Some((icon::CAPACITOR, "Capacitor use")),
             Self::Range => Some((icon::RANGE, "Optimal + falloff")),
-            Self::Name | Self::Price | Self::Charge => None,
+            Self::Name | Self::Misc | Self::Price | Self::Charge | Self::Heat => None,
         }
     }
 
     fn header_text(self) -> &'static str {
         match self {
             Self::Name => "Name",
+            Self::Misc => "Misc",
             Self::Charge => "Charge",
             Self::Price => "Price",
+            Self::Heat => "Heat",
             Self::Powergrid | Self::Cpu | Self::Capacitor | Self::Range => "",
         }
     }
 
-    /// What a module's cell shows in this column.
+    /// The header's tooltip, for headers that do not say it all.
+    fn header_tooltip(self) -> Option<&'static str> {
+        match self {
+            Self::Misc => Some("Misc data"),
+            Self::Heat => Some("Estimated time till an overheated module burns out"),
+            _ => self.header_icon().map(|(_, tip)| tip),
+        }
+    }
+
+    /// What a module's cell shows in this column. `misc` is the module's Miscellanea text.
     pub fn text(
         self,
         catalog: &Catalog,
         prices: &Prices,
         m: &Module,
         info: &ModuleInfo,
+        misc: Option<&str>,
     ) -> Option<String> {
         match self {
             Self::Name => Some(match (m.spool, info.spool_max) {
@@ -126,7 +148,21 @@ impl Col {
                 .filter(|&p| p > 0.0)
                 .map(stats::format::currency),
             Self::Charge => m.charge.map(|c| catalog.name(c)),
+            Self::Misc => misc.map(str::to_owned),
+            Self::Heat => info.burnout.map(burnout_text),
         }
+    }
+}
+
+/// Time the way pyfa's heat column writes it: minutes and seconds, hours only when there are
+/// any.
+fn burnout_text(seconds: f64) -> String {
+    let total = seconds.max(0.0) as u64;
+    let (h, m, s) = ((total / 3600) % 24, (total / 60) % 60, total % 60);
+    if h > 0 {
+        format!("{h:02}:{m:02}:{s:02}")
+    } else {
+        format!("{m:02}:{s:02}")
     }
 }
 
@@ -141,7 +177,7 @@ pub struct Layout {
 impl Default for Layout {
     fn default() -> Self {
         Self {
-            widths: [140., 56., 56., 66., 106., 70., 190.],
+            widths: [140., 56., 56., 66., 106., 90., 70., 190., 54.],
             name_fixed: false,
         }
     }
@@ -212,6 +248,34 @@ pub(super) fn text_width(window: &Window, text: &str) -> f32 {
 }
 
 impl Gyfa {
+    /// The Miscellanea text and tooltip of a module or subsystem.
+    pub(super) fn misc_of(
+        &self,
+        loaded: &Loaded,
+        fit: &Fit,
+        stats: &Stats,
+        item: FitItem,
+    ) -> Option<(String, String)> {
+        let misc = stats.module_misc.get(&item)?;
+        let (type_id, charge) = match item {
+            FitItem::Module(slot, i) => {
+                let m = fit.rack(slot).get(i)?.as_ref()?;
+                (m.type_id, m.charge)
+            }
+            FitItem::Subsystem(i) => (*fit.subsystems.get(i)?, None),
+            _ => return None,
+        };
+        // Ancillary repairers count in effective HP while the resistances section does.
+        let ehp = (!self.stats_view.raw_hp).then(|| {
+            let ratio = |layer: crate::engine::Layer| layer.mult.unwrap_or(1.0);
+            misc::EhpRatios {
+                shield: ratio(stats.shield),
+                armor: ratio(stats.armor),
+            }
+        });
+        misc::module_misc(&loaded.catalog, type_id, charge, misc, ehp)
+    }
+
     /// Widths for this frame: what the user set, or the widest header or cell plus padding.
     pub(super) fn column_layout(
         &self,
@@ -221,14 +285,23 @@ impl Gyfa {
         window: &Window,
     ) -> Layout {
         let mut layout = Layout::default();
-        let modules: Vec<(&Module, ModuleInfo)> = [Slot::High, Slot::Mid, Slot::Low]
-            .into_iter()
-            .flat_map(|slot| {
-                fit.rack(slot).iter().enumerate().filter_map(move |(i, m)| {
-                    let info = stats.modules.get(&(slot, i)).copied().unwrap_or_default();
-                    m.as_ref().map(|m| (m, info))
+        let modules: Vec<(&Module, ModuleInfo, Option<String>)> =
+            [Slot::High, Slot::Mid, Slot::Low, Slot::Service]
+                .into_iter()
+                .flat_map(|slot| {
+                    fit.rack(slot).iter().enumerate().filter_map(move |(i, m)| {
+                        let info = stats.modules.get(&(slot, i)).copied().unwrap_or_default();
+                        let misc = self
+                            .misc_of(loaded, fit, stats, FitItem::Module(slot, i))
+                            .map(|(text, _)| text);
+                        m.as_ref().map(|m| (m, info, misc))
+                    })
                 })
-            })
+                .collect();
+        // Subsystems show their slot changes in the misc column.
+        let subsystem_misc: Vec<String> = (0..fit.subsystems.len())
+            .filter_map(|i| self.misc_of(loaded, fit, stats, FitItem::Subsystem(i)))
+            .map(|(text, _)| text)
             .collect();
         for col in Col::ALL {
             if let Some(&width) = self.saved.columns.get(col.key()) {
@@ -242,11 +315,19 @@ impl Gyfa {
                 Some(_) => HEADER_ICON,
                 None => text_width(window, col.header_text()),
             };
-            let widest = modules
+            let mut widest = modules
                 .iter()
-                .filter_map(|(m, info)| col.text(&loaded.catalog, &self.prices, m, info))
+                .filter_map(|(m, info, misc)| {
+                    col.text(&loaded.catalog, &self.prices, m, info, misc.as_deref())
+                })
                 .map(|text| text_width(window, &text))
                 .fold(header, f32::max);
+            if col == Col::Misc {
+                widest = subsystem_misc
+                    .iter()
+                    .map(|text| text_width(window, text))
+                    .fold(widest, f32::max);
+            }
             let extra = if col == Col::Charge {
                 CHARGE_ICON + 4.
             } else {
@@ -319,7 +400,7 @@ impl Gyfa {
                     .h_full()
                     .flex()
                     .items_center()
-                    .when_some(col.header_icon(), |cell, (_, tip)| {
+                    .when_some(col.header_tooltip(), |cell, tip| {
                         cell.tooltip(move |window, cx| {
                             gpui_kit::component::tooltip::Tooltip::new(tip).build(window, cx)
                         })

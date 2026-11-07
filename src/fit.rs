@@ -14,7 +14,8 @@ use crate::{
     data::{Catalog, Kind, Slot, TypeId},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Ordered from off to most active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ModuleState {
     Offline,
     Online,
@@ -41,6 +42,17 @@ pub struct Module {
     /// Spool cycles to assume, for modules that spool up. None means fully spooled.
     #[serde(default)]
     pub spool: Option<u32>,
+    /// What a reactive armor hardener adapts to; None takes the fit's damage pattern.
+    #[serde(default)]
+    pub rah: Option<RahPattern>,
+}
+
+/// pyfa's per-module "RAH Damage Pattern": a pattern of its own, or no adapting at all.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RahPattern {
+    /// The hardener keeps its starting resists.
+    DoNotAdapt,
+    Pattern(DamageProfile),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +136,9 @@ pub struct Fit {
     pub low: Vec<Option<Module>>,
     pub rigs: Vec<Option<TypeId>>,
     pub subsystems: Vec<TypeId>,
+    /// An Upwell structure's service modules, by position like the racks.
+    #[serde(default)]
+    pub services: Vec<Option<Module>>,
     pub drones: Vec<DroneStack>,
     pub implants: Vec<TypeId>,
     /// One per booster slot, in slot order.
@@ -137,6 +152,9 @@ pub struct Fit {
     /// Pilot security status; None uses the character's.
     #[serde(default)]
     pub sec_status: Option<f64>,
+    /// Where a structure is anchored, which some structure bonuses depend on.
+    #[serde(default)]
+    pub system_security: SystemSecurity,
     /// Incoming damage the tank numbers assume.
     #[serde(default)]
     pub damage_profile: DamageProfile,
@@ -164,6 +182,30 @@ pub struct Fit {
     pub command: Vec<projected::CommandFit>,
 }
 
+/// The kind of system a structure sits in, pyfa's "Citadel System Security". pyfa assumes null
+/// security until told otherwise.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SystemSecurity {
+    HighSec,
+    LowSec,
+    #[default]
+    NullSec,
+    WSpace,
+}
+
+impl SystemSecurity {
+    pub const ALL: [Self; 4] = [Self::HighSec, Self::LowSec, Self::NullSec, Self::WSpace];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::HighSec => "High Security",
+            Self::LowSec => "Low Security",
+            Self::NullSec => "Null Security",
+            Self::WSpace => "W-Space",
+        }
+    }
+}
+
 /// Incoming damage that effective HP, effective repair rates and the reactive armor hardener
 /// assume, like pyfa's per-fit damage pattern.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -187,11 +229,13 @@ impl Fit {
         }
     }
 
+    /// The modules of a rack. Rigs and subsystems are not modules; they read as the low rack.
     pub fn rack(&self, slot: Slot) -> &Vec<Option<Module>> {
         match slot {
             Slot::High => &self.high,
             Slot::Mid => &self.mid,
-            _ => &self.low,
+            Slot::Service => &self.services,
+            Slot::Low | Slot::Rig | Slot::Subsystem => &self.low,
         }
     }
 
@@ -199,8 +243,19 @@ impl Fit {
         match slot {
             Slot::High => &mut self.high,
             Slot::Mid => &mut self.mid,
-            _ => &mut self.low,
+            Slot::Service => &mut self.services,
+            Slot::Low | Slot::Rig | Slot::Subsystem => &mut self.low,
         }
+    }
+
+    /// Every rack that holds modules, with its slot.
+    pub fn module_racks(&self) -> [(Slot, &Vec<Option<Module>>); 4] {
+        [
+            (Slot::High, &self.high),
+            (Slot::Mid, &self.mid),
+            (Slot::Low, &self.low),
+            (Slot::Service, &self.services),
+        ]
     }
 
     /// Add whatever this type is to the fit, the way double-clicking it in pyfa does. Returns false
@@ -222,7 +277,7 @@ impl Fit {
                 self.ship = Some(type_id);
                 self.mode = catalog.modes_for(type_id).first().copied();
             }
-            Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low)) => {
+            Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low | Slot::Service)) => {
                 let state = if t.activatable {
                     ModuleState::Active
                 } else {
@@ -235,6 +290,7 @@ impl Fit {
                         state,
                         charge: None,
                         spool: None,
+                        rah: None,
                     },
                 );
             }
@@ -444,9 +500,14 @@ impl Fit {
             .map(move |&t| (t, !own || self.implant_active(t)))
     }
 
-    /// High, mid and low modules, in that order.
+    /// High, mid and low modules, then services, in that order.
     pub fn modules(&self) -> impl Iterator<Item = &Module> {
-        self.high.iter().chain(&self.mid).chain(&self.low).flatten()
+        self.high
+            .iter()
+            .chain(&self.mid)
+            .chain(&self.low)
+            .chain(&self.services)
+            .flatten()
     }
 
     pub fn launched(&self) -> u32 {
@@ -534,6 +595,10 @@ impl Fit {
                 .chain(&self.mode)
                 .map(|&s| catalog.name(s))
                 .collect(),
+            self.services
+                .iter()
+                .map(|m| module_line("Service", m))
+                .collect(),
             self.drones
                 .iter()
                 .map(|d| format!("{} x{}", catalog.name(d.type_id), d.count))
@@ -608,6 +673,7 @@ impl Fit {
                     "Med" => fit.mid.push(None),
                     "Low" => fit.low.push(None),
                     "Rig" => fit.rigs.push(None),
+                    "Service" => fit.services.push(None),
                     _ => {}
                 }
                 continue;
@@ -648,7 +714,7 @@ impl Fit {
                     fit.cargo.push((t.id, n));
                 }
                 (Kind::Charge, None) if in_cargo_section => fit.cargo.push((t.id, 1)),
-                (Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low)), None) => {
+                (Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low | Slot::Service)), None) => {
                     let state = match (offline, t.activatable) {
                         (true, _) => ModuleState::Offline,
                         (false, true) => ModuleState::Active,
@@ -666,6 +732,7 @@ impl Fit {
                         state,
                         charge,
                         spool: None,
+                        rah: None,
                     }));
                 }
                 // EFT lists rigs in position, empty slots included.

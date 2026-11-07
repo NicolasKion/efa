@@ -173,6 +173,7 @@ fn eft_options_leave_things_out() {
         mid: 5,
         low: 3,
         rig: 3,
+        service: 0,
     };
     let padded = eft::export(&tengu, &catalog, &bare, Some(sizes));
     assert_eq!(padded.matches("[Empty High slot]").count(), 3, "{padded}");

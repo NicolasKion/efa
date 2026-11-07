@@ -10,7 +10,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, AppContext, ClickEvent, Context, Div, FontWeight, InteractiveElement,
-    IntoElement, Modifiers, MouseButton, MouseDownEvent, ParentElement, Render, SharedString,
+    IntoElement, KeyDownEvent, Modifiers, MouseButton, MouseDownEvent, ParentElement, Render,
+    SharedString,
     Stateful, StatefulInteractiveElement, Styled, WeakEntity, Window, div, img,
     prelude::FluentBuilder, px,
 };
@@ -20,12 +21,14 @@ use super::{
     characters::skills_submenu,
     columns::{Col, ICON_W, STATE_W},
     item_stats::{StatsOf, stats_entry},
+    profile_menus::{PickPattern, damage_pattern_menu},
     widgets::{color, entry, icon, icon_box, icon_label, item_entry, item_label, short},
 };
 use crate::{
+    damage_pattern::DamagePattern,
     data::{Catalog, Hardpoint, ItemType, Kind, Slot, TypeId},
     engine::{FitItem, ModuleInfo, SkillTarget, Stats},
-    fit::{Fit, Module, ModuleState},
+    fit::{DamageProfile, Fit, Module, ModuleState, RahPattern, SystemSecurity},
     icons::Icon,
 };
 
@@ -35,11 +38,16 @@ const MENU_MAX_H: f32 = 480.;
 
 #[derive(Debug, Clone, Copy)]
 enum Row {
+    /// A rack's label, pyfa's "Show Rack Labels".
     Header {
         label: &'static str,
-        icon_id: i32,
+        icon_id: Option<i32>,
         total: u32,
     },
+    /// A blank row between racks, when they are set apart without labels.
+    Separator,
+    /// The label over a tactical destroyer's mode.
+    ModeHeader,
     Item(RowRef),
     Empty(Slot, usize),
     /// A tactical destroyer's mode, shown under the racks like pyfa does.
@@ -52,11 +60,15 @@ impl Gyfa {
         let (Some(fit), Some(stats)) = (self.fit(), self.stats.as_ref()) else {
             return Vec::new();
         };
-        fitting_rows(fit, stats)
+        fitting_rows(fit, stats, self.rack_style())
             .into_iter()
             .filter_map(|row| match row {
                 Row::Item(r) => Some(r),
-                Row::Header { .. } | Row::Empty(..) | Row::Mode(_) => None,
+                Row::Header { .. }
+                | Row::Separator
+                | Row::ModeHeader
+                | Row::Empty(..)
+                | Row::Mode(_) => None,
             })
             .collect()
     }
@@ -85,7 +97,7 @@ impl Gyfa {
         self.column_layout = layout;
         let fit = &self.saved.fits[current];
         let stats = self.stats.as_ref().unwrap_or(&no_stats);
-        let rows = fitting_rows(fit, stats);
+        let rows = fitting_rows(fit, stats, self.rack_style());
 
         let table_head = Self::column_header(loaded, layout, cx);
 
@@ -112,6 +124,10 @@ impl Gyfa {
                             .flex_1()
                             .min_h_0()
                             .overflow_y_scroll()
+                            .track_focus(&self.fitting_focus)
+                            .on_key_down(cx.listener(|g, event: &KeyDownEvent, _, cx| {
+                                g.fitting_key(event, cx);
+                            }))
                             .children(body)
                             .children(stats.problems.iter().map(|p| {
                                 div().px_2().text_color(cx.theme().danger).child(p.clone())
@@ -119,6 +135,32 @@ impl Gyfa {
                     ),
             )
             .into_any_element()
+    }
+
+    /// pyfa's keys in the fitting view: Delete removes the selection, Ctrl+A selects every
+    /// module, Escape clears the selection.
+    fn fitting_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        let keystroke = &event.keystroke;
+        let m = keystroke.modifiers;
+        let plain = !(m.control || m.alt || m.shift || m.platform);
+        match keystroke.key.as_str() {
+            "delete" if plain && !self.selection.is_empty() => {
+                let rows = std::mem::take(&mut self.selection);
+                self.anchor = None;
+                self.apply(Action::Remove(rows), cx);
+            }
+            "a" if m.control && !m.alt && !m.shift => {
+                self.selection = self.row_order();
+                cx.notify();
+            }
+            "escape" if plain => {
+                self.selection.clear();
+                self.anchor = None;
+                cx.notify();
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
     }
 
     #[expect(clippy::too_many_arguments, reason = "one row needs all of these")]
@@ -140,17 +182,19 @@ impl Gyfa {
             Row::Item(RowRef::Module(slot, _)) | Row::Empty(slot, _) => Some(slot),
             Row::Item(RowRef::Rig(_)) => Some(Slot::Rig),
             Row::Item(RowRef::Subsystem(_)) => Some(Slot::Subsystem),
-            Row::Header { .. } | Row::Mode(_) => None,
+            Row::Header { .. } | Row::Separator | Row::ModeHeader | Row::Mode(_) => None,
         }
         .filter(|_| self.saved.preferences.general.color_by_slot)
-        .map(|slot| {
-            match slot {
+        .and_then(|slot| {
+            let tint = match slot {
                 Slot::High => theme.danger,
                 Slot::Mid => theme.info,
                 Slot::Low => theme.success,
                 Slot::Rig | Slot::Subsystem => theme.warning,
-            }
-            .opacity(0.12)
+                // pyfa leaves services untinted.
+                Slot::Service => return None,
+            };
+            Some(tint.opacity(0.12))
         });
         let base = h_flex()
             .id(SharedString::from(format!("fit-row-{n}")))
@@ -168,16 +212,30 @@ impl Gyfa {
                 total,
             } => base
                 .child(div().w(px(STATE_W)).flex_none())
-                .child(div().w(px(ICON_W - 4.)).flex_none().child(icon_box(
-                    catalog,
-                    &loaded.icons,
-                    Icon::Id(icon_id),
-                    18.,
-                )))
+                .child(
+                    div()
+                        .w(px(ICON_W - 4.))
+                        .flex_none()
+                        .children(icon_id.map(|id| {
+                            icon_box(catalog, &loaded.icons, Icon::Id(id), 18.)
+                        })),
+                )
                 .child(
                     div()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child(format!("— {total} {label} —")),
+                        .child(format!("─ {total} {label} ─")),
+                )
+                .context_menu(ship_menu_builder(Self::weak(cx), ship))
+                .into_any_element(),
+            Row::Separator => base
+                .context_menu(ship_menu_builder(Self::weak(cx), ship))
+                .into_any_element(),
+            Row::ModeHeader => base
+                .child(div().w(px(STATE_W + ICON_W)).flex_none())
+                .child(
+                    div()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("─ Tactical Mode ─"),
                 )
                 .context_menu(ship_menu_builder(Self::weak(cx), ship))
                 .into_any_element(),
@@ -223,12 +281,10 @@ impl Gyfa {
                             return div().into_any_element();
                         };
                         let info = stats.modules.get(&(slot, i)).copied().unwrap_or_default();
-                        let total = match slot {
-                            Slot::High => stats.high.total,
-                            Slot::Mid => stats.mid.total,
-                            _ => stats.low.total,
-                        };
-                        let cells = self.module_cells(base, loaded, (slot, i), m, info, cx);
+                        let total = stats.slots(slot).total;
+                        let misc = self.misc_of(loaded, fit, stats, FitItem::Module(slot, i));
+                        let cells =
+                            self.module_cells(base, loaded, (slot, i), m, info, misc, cx);
                         // Fits from before slots were enforced can hold more than the ship has.
                         if i >= total.unwrap_or(0) as usize {
                             cells.text_color(cx.theme().danger).tooltip(|window, cx| {
@@ -259,6 +315,16 @@ impl Gyfa {
                                 [Col::Powergrid, Col::Cpu, Col::Capacitor, Col::Range]
                                     .map(|col| self.column_layout.cell(col)),
                             )
+                            .child(misc_cell(
+                                self.column_layout,
+                                format!("misc-{item:?}"),
+                                match item {
+                                    RowRef::Subsystem(i) => {
+                                        self.misc_of(loaded, fit, stats, FitItem::Subsystem(i))
+                                    }
+                                    _ => None,
+                                },
+                            ))
                             .child(
                                 self.column_layout
                                     .cell(Col::Price)
@@ -280,6 +346,7 @@ impl Gyfa {
         }
     }
 
+    #[expect(clippy::too_many_arguments, reason = "one row needs all of these")]
     fn module_cells(
         &self,
         base: Stateful<Div>,
@@ -287,6 +354,7 @@ impl Gyfa {
         (slot, i): (Slot, usize),
         m: &Module,
         info: ModuleInfo,
+        misc: Option<(String, String)>,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let catalog = &loaded.catalog;
@@ -301,7 +369,8 @@ impl Gyfa {
         };
         let layout = self.column_layout;
         let prices = &self.prices;
-        let text = |col: Col| col.text(catalog, prices, m, &info);
+        let misc_text = misc.as_ref().map(|(text, _)| text.as_str());
+        let text = |col: Col| col.text(catalog, prices, m, &info, misc_text);
         base.child(
             div()
                 .id(SharedString::from(format!("state-{slot:?}-{i}")))
@@ -320,9 +389,25 @@ impl Gyfa {
                         gpui_kit::component::tooltip::Tooltip::new(label).build(window, cx)
                     }
                 })
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                     cx.stop_propagation();
-                    this.apply(Action::CycleState(slot, i), cx);
+                    // Like pyfa: a click on a selected module takes the selection along, Alt
+                    // takes every module of its kind, and Ctrl switches them off.
+                    let modifiers = event.modifiers();
+                    let row = RowRef::Module(slot, i);
+                    let others = if modifiers.alt {
+                        this.targets(row, Scope::Similar)
+                    } else {
+                        this.targets(row, Scope::Selection)
+                    };
+                    this.apply(
+                        Action::CycleState {
+                            main: (slot, i),
+                            others,
+                            offline: modifiers.control,
+                        },
+                        cx,
+                    );
                 })),
         )
         .child(icon_box(catalog, &loaded.icons, Icon::Type(m.type_id), 22.))
@@ -336,15 +421,11 @@ impl Gyfa {
                 .children(text(Col::Name)),
         )
         .children(
-            [
-                Col::Powergrid,
-                Col::Cpu,
-                Col::Capacitor,
-                Col::Range,
-                Col::Price,
-            ]
-            .map(|col| layout.cell(col).truncate().children(text(col))),
+            [Col::Powergrid, Col::Cpu, Col::Capacitor, Col::Range]
+                .map(|col| layout.cell(col).truncate().children(text(col))),
         )
+        .child(misc_cell(layout, format!("misc-{slot:?}-{i}"), misc.clone()))
+        .child(layout.cell(Col::Price).truncate().children(text(Col::Price)))
         .child(layout.cell(Col::Charge).child(h_flex().gap_1().when_some(
             m.charge,
             |cell, charge| {
@@ -352,6 +433,37 @@ impl Gyfa {
                     .child(div().truncate().children(text(Col::Charge)))
             },
         )))
+        .child(
+            layout
+                .cell(Col::Heat)
+                .id(SharedString::from(format!("heat-{slot:?}-{i}")))
+                .truncate()
+                .children(text(Col::Heat))
+                .when(info.burnout.is_some(), |cell| {
+                    cell.tooltip(|window, cx| {
+                        gpui_kit::component::tooltip::Tooltip::new("Estimated time til burnout")
+                            .build(window, cx)
+                    })
+                }),
+        )
+    }
+}
+
+/// The Miscellanea cell, with its tooltip saying what the figure is.
+fn misc_cell(
+    layout: super::columns::Layout,
+    id: String,
+    misc: Option<(String, String)>,
+) -> Stateful<Div> {
+    let cell = layout.cell(Col::Misc).id(SharedString::from(id)).truncate();
+    match misc {
+        Some((text, tooltip)) => cell.child(text).when(!tooltip.is_empty(), |cell| {
+            let tooltip = SharedString::from(tooltip);
+            cell.tooltip(move |window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx)
+            })
+        }),
+        None => cell,
     }
 }
 
@@ -365,7 +477,8 @@ fn item_row_behaviour(
 ) -> AnyElement {
     let this = Gyfa::weak(cx);
     let loaded = Rc::clone(loaded);
-    base.on_click(cx.listener(move |g, event: &ClickEvent, _, cx| {
+    base.on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
+        window.focus(&g.fitting_focus, cx);
         if event.click_count() >= 2 {
             g.apply(Action::Remove(vec![item]), cx);
         } else {
@@ -469,7 +582,7 @@ impl DropOn {
         match self {
             Self::Item(row) => Some(row),
             Self::Empty(Slot::Rig, i) => Some(RowRef::Rig(i)),
-            Self::Empty(slot @ (Slot::High | Slot::Mid | Slot::Low), i) => {
+            Self::Empty(slot @ (Slot::High | Slot::Mid | Slot::Low | Slot::Service), i) => {
                 Some(RowRef::Module(slot, i))
             }
             Self::Empty(Slot::Subsystem, _) => None,
@@ -536,6 +649,8 @@ struct MenuSnapshot {
     type_id: TypeId,
     module: Option<Module>,
     info: ModuleInfo,
+    /// The user's damage patterns, for the reactive armor hardener's menu.
+    patterns: Vec<DamagePattern>,
 }
 
 impl MenuSnapshot {
@@ -564,6 +679,7 @@ impl MenuSnapshot {
             type_id,
             module,
             info,
+            patterns: g.saved.damage_patterns.clone(),
         })
     }
 }
@@ -622,6 +738,9 @@ fn item_menu(
             .filter(|_| t.spools && shown.spoolup)
         {
             menu = spool_submenu(menu, this, item, m.spool, max, window, cx);
+        }
+        if t.group_id == GROUP_RAH {
+            menu = rah_submenu(menu, this, item, m.rah.clone(), &snapshot.patterns, window, cx);
         }
     }
     let fitted = match item {
@@ -743,7 +862,7 @@ pub(super) fn ship_entries(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let Some(g) = this.upgrade() else { return menu };
-    let (loaded, mode, sec_status, character_sec) = {
+    let (loaded, mode, sec_status, character_sec, security) = {
         let g = g.read(cx);
         let fit = g.fit();
         (
@@ -751,10 +870,15 @@ pub(super) fn ship_entries(
             fit.and_then(|f| f.mode),
             fit.and_then(|f| f.sec_status),
             g.characters.sec_status(g.fit_character()),
+            fit.map_or_default(|f| f.system_security),
         )
     };
     let Some(loaded) = loaded else { return menu };
     let ship_name = loaded.catalog.name(ship);
+    let structure = loaded
+        .catalog
+        .get(ship)
+        .is_some_and(ItemType::is_structure);
     let mut menu = menu;
 
     let modes = loaded.catalog.modes_for(ship);
@@ -784,7 +908,28 @@ pub(super) fn ship_entries(
             },
         );
     }
-    menu = menu.item(stats_entry(this, "Ship", StatsOf::Fitted(FitItem::Ship)));
+    let hull = if structure { "Citadel" } else { "Ship" };
+    menu = menu.item(stats_entry(this, hull, StatsOf::Fitted(FitItem::Ship)));
+    if structure {
+        let this = this.clone();
+        menu = menu.submenu_with_element(
+            "Citadel System Security",
+            icon_label(IconName::Globe, "Citadel System Security"),
+            window,
+            cx,
+            move |menu, _, _| {
+                SystemSecurity::ALL.into_iter().fold(menu, |menu, option| {
+                    menu.item(
+                        PopupMenuItem::new(option.label())
+                            .checked(security == option)
+                            .on_click(handler(&this, move |g, _, _, cx| {
+                                g.apply(Action::SetSystemSecurity(option), cx);
+                            })),
+                    )
+                })
+            },
+        );
+    }
     if SEC_STATUS_SHIPS.contains(&ship_name.as_str()) {
         let this = this.clone();
         menu = menu.submenu_with_element(
@@ -1042,6 +1187,63 @@ fn spool_submenu(
     )
 }
 
+/// pyfa's Armor Resistance Shift Hardener group, the reactive armor hardeners.
+const GROUP_RAH: i32 = 1150;
+
+/// pyfa's "RAH Damage Pattern": the fit's pattern, no adapting, or any damage pattern.
+fn rah_submenu(
+    menu: PopupMenu,
+    this: &WeakEntity<Gyfa>,
+    item: RowRef,
+    current: Option<RahPattern>,
+    user: &[DamagePattern],
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let (this, user) = (this.clone(), user.to_vec());
+    menu.submenu_with_element(
+        "RAH Damage Pattern",
+        icon_label(IconName::ChartPie, "RAH Damage Pattern"),
+        window,
+        cx,
+        move |menu, window, cx| {
+            let set = |pattern: Option<RahPattern>| {
+                scoped(&this, item, Scope::Selection, move |rows| {
+                    Action::SetRah(rows, pattern.clone())
+                })
+            };
+            let menu = menu
+                .item(
+                    PopupMenuItem::new("Fit Pattern")
+                        .checked(current.is_none())
+                        .on_click(set(None)),
+                )
+                .item(
+                    PopupMenuItem::new("Do Not Adapt")
+                        .checked(current == Some(RahPattern::DoNotAdapt))
+                        .on_click(set(Some(RahPattern::DoNotAdapt))),
+                )
+                .separator();
+            // Nothing in the pattern list is checked while the fit's pattern or no adapting is.
+            let checked = match &current {
+                Some(RahPattern::Pattern(profile)) => profile.clone(),
+                _ => DamageProfile::Pattern {
+                    name: String::new(),
+                    amounts: [0.0; 4],
+                },
+            };
+            let this = this.clone();
+            let pick: PickPattern = Rc::new(move |profile, _, cx| {
+                Gyfa::app_update(&this, cx, |g, cx| {
+                    let rows = g.targets(item, Scope::Selection);
+                    g.apply(Action::SetRah(rows, Some(RahPattern::Pattern(profile))), cx);
+                });
+            });
+            damage_pattern_menu(menu, &user, &checked, &pick, window, cx)
+        },
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "the submenu needs the row's whole context"
@@ -1179,31 +1381,66 @@ pub(super) fn structure_charges(
     }
 }
 
-/// The fitting view's rows: each rack under its header, padded with empty slots to what the ship
-/// has.
-fn fitting_rows(fit: &Fit, stats: &Stats) -> Vec<Row> {
+/// How the fitting view sets racks apart: pyfa's "Separate Racks" and "Show Rack Labels".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RackStyle {
+    /// One list, racks back to back.
+    Plain,
+    /// A blank row between racks.
+    Separators,
+    /// A labelled row over each rack.
+    Labels,
+}
+
+impl Gyfa {
+    fn rack_style(&self) -> RackStyle {
+        let general = &self.saved.preferences.general;
+        match (general.rack_slots, general.rack_labels) {
+            (false, _) => RackStyle::Plain,
+            (true, false) => RackStyle::Separators,
+            (true, true) => RackStyle::Labels,
+        }
+    }
+}
+
+/// The fitting view's rows: each rack padded with empty slots to what the ship has, set apart
+/// the way `style` says.
+fn fitting_rows(fit: &Fit, stats: &Stats, style: RackStyle) -> Vec<Row> {
     let mut rows = Vec::new();
-    let mut rack = |slot: Slot,
+    // pyfa puts a separator before every rack but the first, and a label before every one.
+    let set_apart = |rows: &mut Vec<Row>, header: Row| match style {
+        RackStyle::Plain => {}
+        RackStyle::Separators if rows.is_empty() => {}
+        RackStyle::Separators => rows.push(Row::Separator),
+        RackStyle::Labels => rows.push(header),
+    };
+    let rack = |rows: &mut Vec<Row>,
+                    slot: Slot,
                     label: &'static str,
-                    icon_id: i32,
+                    icon_id: Option<i32>,
                     slots: crate::engine::Slots,
                     filled: Vec<bool>| {
         let total = slots.total.unwrap_or(0);
         if total == 0 && !filled.contains(&true) {
             return;
         }
-        rows.push(Row::Header {
-            label,
-            icon_id,
-            total,
-        });
+        set_apart(
+            rows,
+            Row::Header {
+                label,
+                icon_id,
+                total,
+            },
+        );
         let positions = filled.len().max(total as usize);
         for pos in 0..positions {
             if filled.get(pos).copied().unwrap_or(false) {
                 rows.push(Row::Item(match slot {
                     Slot::Rig => RowRef::Rig(pos),
                     Slot::Subsystem => RowRef::Subsystem(pos),
-                    Slot::High | Slot::Mid | Slot::Low => RowRef::Module(slot, pos),
+                    Slot::High | Slot::Mid | Slot::Low | Slot::Service => {
+                        RowRef::Module(slot, pos)
+                    }
                 }));
             } else {
                 rows.push(Row::Empty(slot, pos));
@@ -1211,11 +1448,12 @@ fn fitting_rows(fit: &Fit, stats: &Stats) -> Vec<Row> {
         }
     };
     for (slot, label, icon_id, slots) in [
-        (Slot::High, "High Slots", icon::HIGH, stats.high),
-        (Slot::Mid, "Med Slots", icon::MID, stats.mid),
-        (Slot::Low, "Low Slots", icon::LOW, stats.low),
+        (Slot::High, "High Slots", Some(icon::HIGH), stats.high),
+        (Slot::Mid, "Med Slots", Some(icon::MID), stats.mid),
+        (Slot::Low, "Low Slots", Some(icon::LOW), stats.low),
     ] {
         rack(
+            &mut rows,
             slot,
             label,
             icon_id,
@@ -1224,20 +1462,31 @@ fn fitting_rows(fit: &Fit, stats: &Stats) -> Vec<Row> {
         );
     }
     rack(
+        &mut rows,
         Slot::Rig,
         "Rig Slots",
-        icon::RIG,
+        Some(icon::RIG),
         stats.rig,
         fit.rigs.iter().map(Option::is_some).collect(),
     );
     rack(
+        &mut rows,
         Slot::Subsystem,
         "Subsystem Slots",
-        icon::SUBSYSTEM,
+        Some(icon::SUBSYSTEM),
         stats.subsystem,
         vec![true; fit.subsystems.len()],
     );
+    rack(
+        &mut rows,
+        Slot::Service,
+        "Service Slots",
+        None,
+        stats.service,
+        fit.services.iter().map(Option::is_some).collect(),
+    );
     if let Some(mode) = fit.mode {
+        set_apart(&mut rows, Row::ModeHeader);
         rows.push(Row::Mode(mode));
     }
     rows
@@ -1264,5 +1513,6 @@ fn slot_name(slot: Slot) -> &'static str {
         Slot::Low => "Low",
         Slot::Rig => "Rig",
         Slot::Subsystem => "Subsystem",
+        Slot::Service => "Service",
     }
 }

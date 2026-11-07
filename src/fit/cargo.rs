@@ -64,7 +64,7 @@ impl Fit {
     /// The item at a position and its loaded charge, if anything is there.
     fn fitted(&self, (slot, i): (Slot, usize)) -> Option<(TypeId, Option<TypeId>)> {
         match slot {
-            Slot::High | Slot::Mid | Slot::Low => {
+            Slot::High | Slot::Mid | Slot::Low | Slot::Service => {
                 let m = self.rack(slot).get(i)?.as_ref()?;
                 Some((m.type_id, m.charge))
             }
@@ -75,7 +75,7 @@ impl Fit {
 
     fn clear_position(&mut self, (slot, i): (Slot, usize)) {
         match slot {
-            Slot::High | Slot::Mid | Slot::Low => {
+            Slot::High | Slot::Mid | Slot::Low | Slot::Service => {
                 let rack = self.rack_mut(slot);
                 if let Some(position) = rack.get_mut(i) {
                     *position = None;
@@ -120,6 +120,7 @@ impl Fit {
                 .as_ref()
                 .and_then(|m| m.spool)
                 .filter(|_| t.is_some_and(|t| t.spools)),
+            rah: old.as_ref().and_then(|m| m.rah.clone()),
         };
         let mut to_cargo = None;
         let mut from_cargo = None;

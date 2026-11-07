@@ -274,6 +274,7 @@ impl Gyfa {
             mid: size(stats.mid.total),
             low: size(stats.low.total),
             rig: size(stats.rig.total),
+            service: size(stats.service.total),
         })
     }
 

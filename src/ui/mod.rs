@@ -58,6 +58,7 @@ fn slot_label(slot: Slot) -> &'static str {
         Slot::Low => "low",
         Slot::Rig => "rig",
         Slot::Subsystem => "subsystem",
+        Slot::Service => "service",
     }
 }
 
@@ -149,6 +150,17 @@ enum AdditionsTab {
     Command,
 }
 
+impl AdditionsTab {
+    /// Tabs pyfa disables for structures: they fly no drones, take no implants or boosters, give
+    /// no fleet boosts and keep no notes.
+    fn ship_only(self) -> bool {
+        matches!(
+            self,
+            Self::Drones | Self::Implants | Self::Boosters | Self::Command | Self::Notes
+        )
+    }
+}
+
 #[expect(
     clippy::struct_excessive_bools,
     reason = "independent view flags of one window, not a state machine"
@@ -198,6 +210,8 @@ pub struct Gyfa {
     additions_focus: FocusHandle,
     /// Takes the drones pane's keys: Delete, Escape, Ctrl+A.
     drones_focus: FocusHandle,
+    /// Takes the fitting view's keys: Delete, Escape, Ctrl+A.
+    fitting_focus: FocusHandle,
     collapsed_sections: HashSet<&'static str>,
     /// Undo and redo steps per fit.
     history: history::History,
@@ -315,6 +329,7 @@ impl Gyfa {
             additions_anchor: None,
             additions_focus: cx.focus_handle(),
             drones_focus: cx.focus_handle(),
+            fitting_focus: cx.focus_handle(),
             // Which sections show at all is a preference; bombing is off by default, as in pyfa.
             collapsed_sections: HashSet::new(),
             history: history::History::default(),
@@ -717,19 +732,14 @@ impl Gyfa {
         let (Some(fit), Some(stats)) = (self.fit(), &self.stats) else {
             return 0;
         };
-        let (total, used) = match slot {
-            Slot::High | Slot::Mid | Slot::Low => (
-                match slot {
-                    Slot::High => stats.high.total,
-                    Slot::Mid => stats.mid.total,
-                    _ => stats.low.total,
-                },
-                fit.rack(slot).iter().flatten().count(),
-            ),
-            Slot::Rig => (stats.rig.total, fit.rigs.iter().flatten().count()),
-            Slot::Subsystem => (stats.subsystem.total, fit.subsystems.len()),
+        let used = match slot {
+            Slot::High | Slot::Mid | Slot::Low | Slot::Service => {
+                fit.rack(slot).iter().flatten().count()
+            }
+            Slot::Rig => fit.rigs.iter().flatten().count(),
+            Slot::Subsystem => fit.subsystems.len(),
         };
-        (total.unwrap_or(0) as usize).saturating_sub(used)
+        (stats.slots(slot).total.unwrap_or(0) as usize).saturating_sub(used)
     }
 
     fn open_import_dialog(window: &mut Window, cx: &mut Context<Self>) {
