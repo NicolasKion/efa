@@ -85,7 +85,7 @@ impl Target {
     }
 }
 
-const ROW_H: f32 = 28.;
+const ROW_H: f32 = 24.;
 /// The line sample's column, and the ship icon's.
 const SWATCH_W: f32 = 36.;
 const ICON: f32 = 20.;
@@ -163,8 +163,8 @@ fn header(cols: &[Column], first: &'static str, cx: &App) -> impl IntoElement {
     let theme = cx.theme();
     h_flex()
         .flex_none()
-        .h(px(26.))
-        .px_3()
+        .h(px(22.))
+        .px_2()
         .gap_2()
         .border_b_1()
         .border_color(theme.border)
@@ -198,9 +198,9 @@ fn title_bar(
     h_flex()
         .flex_none()
         .gap_2()
-        .pl_3()
-        .pr_2()
-        .py_1p5()
+        .pl_2()
+        .pr_1()
+        .py_0p5()
         .border_b_1()
         .border_color(theme.border)
         .child(
@@ -229,11 +229,11 @@ fn empty_state(icon: AssetIcon, title: &'static str, hint: &'static str, cx: &Ap
         .flex_1()
         .items_center()
         .justify_center()
-        .gap_1()
-        .py_4()
+        .gap_0p5()
+        .py_2()
         .child(
             UiIcon::new(icon)
-                .size(px(20.))
+                .size(px(16.))
                 .text_color(theme.muted_foreground),
         )
         .child(div().font_weight(FontWeight::MEDIUM).child(title))
@@ -252,10 +252,9 @@ fn card(cx: &App) -> Div {
         .flex_1()
         .min_w_0()
         .h_full()
-        .rounded(px(8.))
+        .rounded(px(4.))
         .border_1()
         .border_color(theme.border)
-        .bg(theme.sidebar)
         .overflow_hidden()
 }
 
@@ -292,7 +291,6 @@ fn row_frame(id: SharedString, selected: bool, cx: &App) -> gpui_kit::Stateful<D
         .mx_1()
         .px_2()
         .gap_2()
-        .rounded(px(5.))
         .text_xs()
         .when(selected, |r| r.bg(theme.list_active))
         .when(!selected, |r| r.hover(|s| s.bg(theme.list_hover)))

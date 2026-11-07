@@ -29,10 +29,8 @@ use crate::{
     ui::widgets::icon_box,
 };
 
-/// The settings column's width.
-const PANEL_W: f32 = 320.;
 /// The fit and target lists' height.
-const LISTS_H: f32 = 230.;
+const LISTS_H: f32 = 170.;
 
 impl Render for GraphsWindow {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -55,28 +53,17 @@ impl Render for GraphsWindow {
         let lists = h_flex()
             .flex_none()
             .h(px(LISTS_H))
-            .gap_4()
+            .gap_2()
+            .p_2()
             .child(lists::sources(self, cx))
             .when(self.graph.has_targets(), |row| {
                 row.child(lists::targets(self, cx))
             });
+        // pyfa's order, top to bottom: the pickers, the plot, its settings, then the lists.
         root.child(self.toolbar(cx))
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .gap_4()
-                    .p_4()
-                    .child(
-                        h_flex()
-                            .flex_1()
-                            .min_h_0()
-                            .gap_4()
-                            .child(self.plot_card(cx))
-                            .child(self.settings_panel(cx)),
-                    )
-                    .child(lists),
-            )
+            .child(self.plot_card(cx))
+            .child(self.settings_panel(cx))
+            .child(lists)
             // A vector drag ends wherever the button comes up.
             .on_mouse_up(
                 MouseButton::Left,
@@ -128,29 +115,15 @@ impl GraphsWindow {
             )
         });
         let theme = cx.theme();
-        let tile = div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_center()
-            .size(px(36.))
-            .rounded(px(8.))
-            .bg(theme.primary.opacity(0.15))
-            .child(
-                UiIcon::new(AssetIcon::ChartSpline)
-                    .size(px(18.))
-                    .text_color(theme.primary),
-            );
         h_flex()
             .flex_none()
-            .items_end()
+            .items_center()
             .gap_4()
-            .px_4()
-            .py_3()
+            .px_2()
+            .py_1()
             .border_b_1()
             .border_color(theme.border)
             .bg(theme.sidebar)
-            .child(tile)
             .child(picker("Graph", graph, cx))
             .child(picker("Y axis", y_axis, cx))
             .when_some(x_axis, |bar, x_axis| {
@@ -275,26 +248,18 @@ impl GraphsWindow {
         };
 
         let header = h_flex()
-            .gap_3()
-            .px_4()
-            .pt_3()
+            .gap_2()
+            .px_2()
+            .pt_1()
+            .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
             .child(
-                v_flex()
+                div()
                     .flex_1()
                     .min_w_0()
-                    .child(
-                        div()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .truncate()
-                            .child(title),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .truncate()
-                            .child(subtitle),
-                    ),
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .truncate()
+                    .child(subtitle),
             )
             .child(div().flex_none().child(aside));
 
@@ -327,12 +292,7 @@ impl GraphsWindow {
 
         v_flex()
             .flex_1()
-            .min_w_0()
-            .h_full()
-            .rounded(px(8.))
-            .border_1()
-            .border_color(theme.border)
-            .bg(theme.sidebar)
+            .min_h(px(240.))
             .overflow_hidden()
             .child(header)
             .child(
@@ -395,14 +355,28 @@ impl GraphsWindow {
             ],
             cx,
         ));
-        v_flex()
+        // Side by side under the plot, as pyfa lays out its panel; it scrolls sideways if the
+        // window is too narrow.
+        let theme = cx.theme();
+        h_flex()
             .id("graph-settings")
             .flex_none()
-            .w(px(PANEL_W))
-            .h_full()
-            .gap_4()
-            .overflow_y_scroll()
-            .children(sections)
+            .items_stretch()
+            .border_t_1()
+            .border_b_1()
+            .border_color(theme.border)
+            .bg(theme.sidebar)
+            .overflow_x_scroll()
+            .children(sections.into_iter().enumerate().map(|(n, s)| {
+                // Each group takes an equal share of the width, set off by a rule.
+                div()
+                    .flex_1()
+                    .min_w(px(200.))
+                    .px_3()
+                    .py_2()
+                    .when(n > 0, |d| d.border_l_1().border_color(theme.border))
+                    .child(s)
+            }))
     }
 
     /// An input field: the game's icon, its name and unit, and the field.
@@ -421,10 +395,10 @@ impl GraphsWindow {
             .loaded
             .as_ref()
             .filter(|_| def.icon > 0)
-            .map(|l| icon_box(&l.catalog, &l.icons, Icon::Id(def.icon), 20.));
+            .map(|l| icon_box(&l.catalog, &l.icons, Icon::Id(def.icon), 16.));
         let input = Input::new(&field.state)
             .small()
-            .w(px(if main { 120. } else { 104. }))
+            .w(px(if main { 110. } else { 90. }))
             .when_some(def.unit.label(), |input, unit| {
                 input.suffix(
                     div()
@@ -438,15 +412,15 @@ impl GraphsWindow {
                 "field-{:?}-{:?}",
                 def.param, def.unit
             )))
-            .gap_2p5()
-            .px_3()
-            .py_2()
+            .h(px(panel::ROW_H))
+            .gap_1p5()
             .children(icon)
-            .child(panel::text(def.label, description, cx))
+            .child(div().flex_1().min_w_0().truncate().child(def.label))
             .child(div().flex_none().child(input))
-            .when_some(tooltip, |d, tip| {
-                d.tooltip(move |window, cx| Tooltip::new(tip).build(window, cx))
-            })
+            .when_some(
+                tooltip.or((!description.is_empty()).then_some(description)),
+                |d, tip| d.tooltip(move |window, cx| Tooltip::new(tip).build(window, cx)),
+            )
             .into_any_element()
     }
 
@@ -458,9 +432,14 @@ impl GraphsWindow {
             return None;
         }
         let dials = h_flex()
-            .justify_around()
-            .px_3()
-            .py_3()
+            .id("graph-dials")
+            .gap_4()
+            .tooltip(|window, cx| {
+                Tooltip::new(
+                    "Drag in a circle to set speed and heading. 0° points at the other ship.",
+                )
+                .build(window, cx)
+            })
             .when_some(src, |row, def| {
                 row.child(vector::render(
                     &self.atk_vector,
@@ -477,15 +456,9 @@ impl GraphsWindow {
                     cx,
                 ))
             });
-        let help = div()
-            .px_3()
-            .pt_2p5()
-            .text_xs()
-            .text_color(cx.theme().muted_foreground)
-            .child("Drag in a circle to set speed and heading. 0° points at the other ship.");
         Some(panel::section(
             "Movement",
-            vec![v_flex().child(help).child(dials).into_any_element()],
+            vec![dials.into_any_element()],
             cx,
         ))
     }
@@ -651,9 +624,14 @@ impl GraphsWindow {
 
 /// A picker with its small label above it.
 fn picker(label: &str, control: impl IntoElement, cx: &Context<GraphsWindow>) -> impl IntoElement {
-    v_flex()
-        .gap_1()
-        .child(panel::caption(label, cx))
+    h_flex()
+        .gap_1p5()
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(label.to_owned()),
+        )
         .child(control)
 }
 

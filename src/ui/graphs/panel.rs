@@ -1,5 +1,5 @@
-//! The settings column next to the plot, drawn like the preferences window: titled cards of
-//! rows with the text on the left and the control on the right.
+//! The settings strip under the plot: small labelled groups of tight rows, like pyfa's panel,
+//! with each setting's explanation on hover rather than taking room.
 
 use gpui_kit::component::{ActiveTheme, Sizable, h_flex, switch::Switch, v_flex};
 use gpui_kit::{
@@ -20,58 +20,38 @@ pub fn caption(text: &str, cx: &App) -> impl IntoElement {
         .child(text.to_uppercase())
 }
 
-/// A setting's title with its description under it.
-pub fn text(title: impl Into<SharedString>, description: &str, cx: &App) -> impl IntoElement {
-    v_flex()
-        .flex_1()
-        .min_w_0()
-        .gap_0p5()
-        .child(div().font_weight(FontWeight::MEDIUM).child(title.into()))
-        .when(!description.is_empty(), |d| {
-            d.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(SharedString::from(description.to_owned())),
-            )
-        })
-}
+/// Height of a setting's row.
+pub const ROW_H: f32 = 24.;
 
-/// A setting: its text on the left, its control on the right.
+/// A setting: its name, then its control; the description shows on hover.
 pub fn row(
     title: impl Into<SharedString>,
     description: &str,
     control: impl IntoElement,
-    cx: &App,
+    _cx: &App,
 ) -> AnyElement {
+    let title: SharedString = title.into();
+    let tip: SharedString = description.to_owned().into();
     h_flex()
-        .gap_4()
-        .px_3()
-        .py_2p5()
-        .child(text(title, description, cx))
+        .id(SharedString::from(format!("row-{title}")))
+        .h(px(ROW_H))
+        .gap_2()
+        .child(div().flex_1().min_w_0().truncate().child(title))
         .child(div().flex_none().child(control))
+        .when(!tip.is_empty(), |d| {
+            d.tooltip(move |window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+            })
+        })
         .into_any_element()
 }
 
-/// A titled card of rows, divided by hairlines.
+/// A labelled group of rows.
 pub fn section(title: &str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
-    let theme = cx.theme();
-    let mut card = v_flex()
-        .rounded(px(8.))
-        .border_1()
-        .border_color(theme.border)
-        .bg(theme.sidebar)
-        .overflow_hidden();
-    for (n, row) in rows.into_iter().enumerate() {
-        if n > 0 {
-            card = card.child(div().h_px().mx_3().bg(theme.border));
-        }
-        card = card.child(row);
-    }
     v_flex()
-        .gap_1p5()
-        .child(caption(title, cx))
-        .child(card)
+        .gap_0p5()
+        .child(div().pb_1().child(caption(title, cx)))
+        .children(rows)
         .into_any_element()
 }
 
@@ -109,11 +89,9 @@ pub fn choice<T: Copy + PartialEq + 'static>(
             let selected = current == value;
             div()
                 .id(SharedString::from(format!("{id}-{n}")))
-                .flex_1()
                 .flex()
                 .justify_center()
                 .px_2()
-                .py_0p5()
                 .rounded(px(5.))
                 .text_xs()
                 .whitespace_nowrap()
@@ -132,19 +110,12 @@ pub fn choice<T: Copy + PartialEq + 'static>(
         })
         .collect();
     let control = h_flex()
-        .w_full()
         .gap_0p5()
         .p_0p5()
-        .rounded(px(7.))
+        .rounded(px(5.))
         .border_1()
         .border_color(theme.border)
         .bg(theme.background)
         .children(segments);
-    v_flex()
-        .gap_2()
-        .px_3()
-        .py_2p5()
-        .child(text(title, description, cx))
-        .child(control)
-        .into_any_element()
+    row(title, description, control, cx)
 }
