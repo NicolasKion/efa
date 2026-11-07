@@ -67,6 +67,14 @@ pub fn export(fits: &[&Fit], catalog: &Catalog) -> String {
                 mutant_attrs(catalog, d.mutation.as_ref())
             );
         }
+        for f in &fit.fighters {
+            let _ = writeln!(
+                out,
+                "\t\t<hardware qty=\"{}\" slot=\"fighter bay\" type=\"{}\"/>",
+                f.size(catalog),
+                escape_xml(&catalog.name(f.type_id))
+            );
+        }
         for &(type_id, count) in &fit.cargo {
             add_charge(catalog.name(type_id), count);
         }

@@ -342,3 +342,111 @@ fn junk_is_not_a_fit() {
     assert!(port::import(&catalog, "hello there", None).is_err());
     assert!(port::import(&catalog, "   ", None).is_err());
 }
+
+/// A carrier with full and short squadrons, plus a spare squadron in cargo.
+const THANATOS: &str = "[Thanatos, Fighter Thanatos]
+Fighter Support Unit II
+
+Firbolg I x9
+Firbolg I x5
+Ametat I x3
+
+Firbolg I x9
+Nanite Repair Paste x50
+";
+
+/// Squadrons as (type, size), sorted, for formats that keep neither order nor state.
+fn squadrons(catalog: &Catalog, fit: &Fit) -> Vec<(i32, u32)> {
+    let mut squadrons: Vec<(i32, u32)> = fit
+        .fighters
+        .iter()
+        .map(|f| (f.type_id, f.size(catalog)))
+        .collect();
+    squadrons.sort_unstable();
+    squadrons
+}
+
+#[test]
+fn fighters_survive_every_format() {
+    let Some(catalog) = catalog() else { return };
+    let original = fit(&catalog, THANATOS);
+    let firbolg = catalog.find("Firbolg I").expect("the fighter exists").id;
+    assert_eq!(original.fighters.len(), 3, "the fighter bay section");
+    assert_eq!(original.cargo.len(), 2, "the spare squadron stays in cargo");
+    assert!(original.drones.is_empty());
+    assert!(
+        original
+            .fighters
+            .iter()
+            .any(|f| f.type_id == firbolg && f.amount == Some(5)),
+        "the short squadron keeps its size"
+    );
+    let expected = squadrons(&catalog, &original);
+    let cargo = |fit: &Fit| {
+        let mut cargo = fit.cargo.clone();
+        cargo.sort_unstable();
+        cargo
+    };
+
+    let check = |format: &str, again: &Fit| {
+        assert!(
+            again.drones.is_empty(),
+            "{format}: fighters in the drone bay"
+        );
+        assert_eq!(squadrons(&catalog, again), expected, "{format}");
+        assert_eq!(fitted(again), fitted(&original), "{format}");
+    };
+
+    let options = eft::Options::default();
+    let text = eft::export(&original, &catalog, &options, None);
+    let again = one(port::import(&catalog, &text, None).expect("the EFT imports"));
+    check("EFT", &again);
+    assert_eq!(
+        cargo(&again),
+        cargo(&original),
+        "EFT keeps the spare squadron"
+    );
+    assert_eq!(eft::export(&again, &catalog, &options, None), text);
+
+    let plain = dna::export(&original, &catalog, &dna::Options { formatting: false });
+    assert!(plain.contains(&format!(":{firbolg};5:")), "{plain}");
+    check(
+        "DNA",
+        &one(port::import(&catalog, &plain, None).expect("the DNA imports")),
+    );
+
+    let json = esi::export(&original, &catalog).expect("the fit exports");
+    assert!(json.contains(r#""flag":158"#), "{json}");
+    let again = one(port::import(&catalog, &json, None).expect("the JSON imports"));
+    check("ESI", &again);
+    assert_eq!(
+        cargo(&again),
+        cargo(&original),
+        "ESI keeps the spare squadron"
+    );
+
+    let doc = xml::export(&[&original], &catalog);
+    assert!(
+        doc.contains(r#"<hardware qty="5" slot="fighter bay" type="Firbolg I"/>"#),
+        "{doc}"
+    );
+    let again = one(port::import(&catalog, &doc, None).expect("the XML imports"));
+    check("XML", &again);
+    assert_eq!(
+        cargo(&again),
+        cargo(&original),
+        "XML keeps the spare squadron"
+    );
+
+    let list = multibuy::export(&original, &catalog, &multibuy::Options::default());
+    // Squadrons at full size count as the type's size before skills, the spare one as 9.
+    let firbolgs: u32 = expected
+        .iter()
+        .filter(|&&(t, _)| t == firbolg)
+        .map(|&(_, n)| n)
+        .sum::<u32>()
+        + 9;
+    let line = format!("Firbolg I x{firbolgs}");
+    assert!(list.lines().any(|l| l == line), "{list}");
+    assert!(list.lines().any(|l| l == "Ametat I x3"), "{list}");
+}

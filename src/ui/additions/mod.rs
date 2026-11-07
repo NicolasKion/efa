@@ -5,7 +5,7 @@ mod boosters;
 mod cargo;
 mod command;
 mod drones;
-mod fighters;
+pub(in crate::ui) mod fighters;
 mod implants;
 mod linked;
 mod notes;

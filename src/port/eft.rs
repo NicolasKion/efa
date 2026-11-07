@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use super::{Imported, muta::Blocks, sort_cargo};
 use crate::{
     data::{Catalog, Kind, Slot},
-    fit::{DroneStack, Fit, Module, ModuleState},
+    fit::{DroneStack, Fit, Module, ModuleState, fighters::Fighter},
 };
 
 /// pyfa's EFT export options, with its defaults.
@@ -108,16 +108,7 @@ pub fn export(fit: &Fit, catalog: &Catalog, options: &Options, sizes: Option<Rac
         ));
     }
     if !fit.fighters.is_empty() {
-        sections.push(stack_lines(
-            catalog,
-            fit.fighters.iter().map(|f| {
-                let size = f
-                    .amount
-                    .or_else(|| catalog.projection.squadron_size(f.type_id))
-                    .unwrap_or(1);
-                (f.type_id, size)
-            }),
-        ));
+        sections.push(fighter_lines(catalog, &fit.fighters));
     }
     let mut character = Vec::new();
     if options.implants && !fit.implants.is_empty() {
@@ -198,6 +189,18 @@ pub fn parse_drones(catalog: &Catalog, text: &str) -> Vec<DroneStack> {
             Some(stack)
         })
         .collect()
+}
+
+/// pyfa's order for the fighter section: light, heavy, then support, each by name.
+fn fighter_lines(catalog: &Catalog, fighters: &[Fighter]) -> String {
+    let mut sorted: Vec<&Fighter> = fighters.iter().collect();
+    sorted.sort_by_cached_key(|f| {
+        (
+            crate::fit::fighters::group_rank(catalog, f.type_id),
+            catalog.name(f.type_id),
+        )
+    });
+    stack_lines(catalog, sorted.iter().map(|f| (f.type_id, f.size(catalog))))
 }
 
 fn stack_lines(catalog: &Catalog, stacks: impl IntoIterator<Item = (i32, u32)>) -> String {
@@ -302,10 +305,8 @@ pub fn import_config(catalog: &Catalog, ship_name: &str, text: &str) -> Result<I
         };
         match (entry.kind, t.kind) {
             (ConfigKind::Drones { .. }, Kind::Fighter) => {
-                fit.fighters.push(crate::fit::fighters::Fighter {
-                    amount: Some(entry.count),
-                    ..crate::fit::fighters::Fighter::new(t.id)
-                });
+                fit.fighters
+                    .push(Fighter::with_size(catalog, t.id, entry.count));
             }
             (ConfigKind::Drones { active }, Kind::Drone) => {
                 let launched = if active { entry.count } else { 0 };

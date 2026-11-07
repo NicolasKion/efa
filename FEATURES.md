@@ -1,7 +1,7 @@
 # Feature parity with pyfa
 
 Rough coverage: fitting, stats, additions, item stats, graphs, editors, context menus and the file formats are mostly there. What is left is mainly ESI/SSO, attribute overrides, alpha clones, Optimize Fit Price, EFS export, generic command links and a tail of smaller items (the [ ] and [~] lines).
-Biggest gaps: ESI/SSO (skills, fittings), attribute overrides, fighters in the DNA/XML/ESI/multibuy formats, alpha clones, global character and damage pattern.
+Biggest gaps: ESI/SSO (skills, fittings), attribute overrides, alpha clones, global character and damage pattern.
 Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
 Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time, abstract target profiles for applied damage, lock/warp time formulas (all done graph-side in src/graphs).
 
@@ -214,14 +214,14 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] EFT export to clipboard (service/port/eft.py exportEft)
 - [x] EFT import of cargo, charges and mutated items' blocks (eft.py), pyfa's /offline and several fits per paste
 - [x] EFT export options: implants, boosters, cargo, mutations, loaded charges (eft.py, gui/copySelectDialog.py), in pyfa's layout with empty slots up to the ship's count
-- [~] Import from clipboard with format autodetect (port.py importAuto), item lists go to the additions tabs or fit a single module; a list of fighters goes to cargo instead of the Fighters tab, and ESI dynamic item links are not fetched
+- [~] Import from clipboard with format autodetect (port.py importAuto), item lists go to the additions tabs (fighters to the Fighters tab) or fit a single module; ESI dynamic item links are not fetched
 - [ ] Renamed item conversions on import (service/conversions/, applied in service/market.py getItem): old item names in EFT and other text formats are not mapped to today's names, so they are skipped as unknown
 - [x] Import from file dialog, multiple files (port.py importFitsThreaded)
 - [x] EFT .cfg legacy format (port.py importEftCfg); notes come from Description= lines, with | as line breaks
-- [~] DNA import/export (service/port/dna.py), chat links and the DNA: variant too; fighters are not exported and import into the drone bay
-- [~] XML import/export (EVE client format) (service/port/xml.py); notes are the description, exported cut to 400 characters with line breaks as <br>; fighters are not exported and import into the drone bay (Backup All Fittings loses them too)
-- [~] ESI JSON import/export (service/port/esi.py); notes are the description, exported cut to 400 characters; fighters (flag 158) are not exported and import into the drone bay
-- [~] Multibuy export (service/port/multibuy.py), no Optimize Prices option, fighters left out
+- [x] DNA import/export (service/port/dna.py), chat links and the DNA: variant too; fighters as `typeid;size`
+- [~] XML import/export (EVE client format) (service/port/xml.py); notes are the description, exported cut to 400 characters with line breaks as <br>; fighters as "fighter bay" hardware with the squadron size
+- [~] ESI JSON import/export (service/port/esi.py); notes are the description, exported cut to 400 characters; fighters with flag 158 and the squadron size
+- [~] Multibuy export (service/port/multibuy.py), no Optimize Prices option
 - [ ] EFS stats JSON export (service/port/efs.py), the copy dialog's "EFS" format
 - [x] Ship stats export (service/port/shipstats.py), the copy dialog's "Stats" format
 - [x] Mutated item (muta) format (service/port/muta.py): pasting one mutated item fits it into the current fit, drone copy/paste carries mutations; ESI dynamic item links are not fetched (no ESI)
