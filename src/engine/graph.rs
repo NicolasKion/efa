@@ -20,6 +20,7 @@ use crate::{
     data::{Catalog, Hardpoint},
     fit::{Fit, ModuleState},
     graphs::{
+        ammo::{self, AmmoOption, AmmoQuality, WeaponGroup},
         math::{self, Gun},
         snapshot::{
             CapUser, Cycle, Dmg, Ewar, EwarKind, FitSnapshot, Layers, RemoteRep, Ship, Weapon,
@@ -75,6 +76,24 @@ mod attr {
     pub const NOS_OVERRIDE: i32 = 1945;
     pub const FALLOFF_EFFECTIVENESS: i32 = 2044;
     pub const DOOMSDAY_AOE_RANGE: i32 = 2279;
+    pub const SCAN_RESOLUTION_BONUS: i32 = 566;
+    pub const ACTIVATION_BLOCKED: i32 = 1350;
+    pub const BREACHER_RESIST: i32 = 6255;
+    pub const FTR_ATTACK_OPTIMAL: i32 = 2236;
+    pub const FTR_ATTACK_FALLOFF: i32 = 2237;
+    pub const FTR_ATTACK_DRF: i32 = 2231;
+    pub const FTR_ATTACK_DRS: i32 = 2232;
+    pub const FTR_ATTACK_ER: i32 = 2234;
+    pub const FTR_ATTACK_EV: i32 = 2235;
+    pub const FTR_MISSILES_RANGE: i32 = 2149;
+    pub const FTR_MISSILES_DRF: i32 = 2127;
+    pub const FTR_MISSILES_DRS: i32 = 2128;
+    pub const FTR_MISSILES_ER: i32 = 2125;
+    pub const FTR_MISSILES_EV: i32 = 2126;
+    pub const FTR_KAMIKAZE_RANGE: i32 = 2330;
+    pub const FTR_WEB_PENALTY: i32 = 2184;
+    pub const FTR_WEB_OPTIMAL: i32 = 2186;
+    pub const FTR_WEB_FALLOFF: i32 = 2187;
     pub const MAX_FOF_RANGE: i32 = 2700;
 }
 
@@ -103,6 +122,11 @@ mod effect {
     pub const DRONE_TD: i32 = 6694;
     pub const DRONE_ECM: i32 = 6695;
     pub const VORTON: i32 = 8037;
+    pub const SCRAM: [i32; 2] = [5934, 6222];
+    pub const DISRUPT_SPHERE: i32 = 3380;
+    pub const FOCUSED_SCRIPT: i32 = 6848;
+    /// Microwarpdrives and micro jump drives, which a scram shuts down.
+    pub const SCRAMMABLE: [i32; 3] = [6730, 4921, 6208];
 }
 
 /// Group IDs the graphs treat specially, as pyfa does by group name.
@@ -124,6 +148,20 @@ mod group {
     pub const NOT_IN_WARP: [i32; 8] = [46, 2008, 330, 515, 588, 658, 815, 590];
 }
 
+/// Fighter abilities by what they do, as refine maps abilities to effects.
+mod ability {
+    pub const ATTACK: [i32; 8] = [22, 23, 24, 25, 26, 27, 44, 45];
+    pub const MISSILES: [i32; 12] = [18, 19, 20, 21, 29, 30, 31, 32, 33, 34, 35, 36];
+    pub const BOMB: i32 = 7;
+    pub const KAMIKAZE: i32 = 38;
+    pub const WEB: i32 = 2;
+    pub const NEUT: i32 = 11;
+    pub const ECM: i32 = 12;
+}
+
+/// Fighter ECM strength per sensor type.
+const FTR_ECM_STRENGTH: [i32; 4] = [2246, 2247, 2248, 2249];
+
 /// The civilian launcher has no launcher hardpoint but fires missiles.
 const CIVILIAN_LAUNCHER: i32 = 32461;
 
@@ -132,6 +170,15 @@ struct Placed {
     id: ItemId,
     type_id: i32,
     state: ModuleState,
+}
+
+/// What [`Engine::place`] put into the solar system.
+struct Placement {
+    ship: ItemId,
+    modules: Vec<Placed>,
+    drones: Vec<PlacedDrones>,
+    /// Launched squadrons.
+    fighters: Vec<ItemId>,
 }
 
 /// A drone stack: its first drone stands for all, as every drone in a stack is the same.
@@ -149,7 +196,13 @@ impl Engine {
         }
         let stats = self.compute_for(fit, pilot, CalcOptions::default());
         let mut sol = SolOwned::new(&self.src);
-        let Some((ship_id, modules, drones)) = Self::place(&mut sol, fit, pilot) else {
+        let Some(Placement {
+            ship: ship_id,
+            modules,
+            drones,
+            fighters,
+        }) = Self::place(&mut sol, fit, pilot)
+        else {
             return snap;
         };
 
@@ -176,6 +229,11 @@ impl Engine {
             dps: stats.dps.total(),
             volley: stats.volley.total(),
             rr: stats.outgoing.reps,
+            ehp: [stats.shield, stats.armor, stats.hull]
+                .iter()
+                .map(|l| l.ehp.unwrap_or(l.hp))
+                .sum(),
+            drone_dps: stats.drone_dps,
             ..Ship::default()
         };
         // Against uniform damage a layer's EHP is its HP over the average resonance.
@@ -200,10 +258,13 @@ impl Engine {
             ship.shield_capacity = get(attr::SHIELD_CAPACITY);
             ship.shield_recharge = get(attr::SHIELD_RECHARGE_RATE) / 1000.0;
         }
+        // Ships without the attribute take breacher damage in full.
+        ship.breacher_resist = attr_opt(&mut sol, ship_id, attr::BREACHER_RESIST).unwrap_or(1.0);
         ship.subwarp_speed = self
             .subwarp_speed(fit, pilot, catalog)
             .unwrap_or(ship.max_velocity);
 
+        let mut scrammable = Vec::new();
         for placed in &modules {
             let Some(item_type) = catalog.get(placed.type_id) else {
                 continue;
@@ -215,6 +276,19 @@ impl Engine {
             let group = item_type.group_id;
             let effects = effects_of(&mut sol, placed.id);
             let charge = charge_of(&mut sol, placed.id);
+            if effect::SCRAMMABLE.iter().any(|e| effects.contains(e)) {
+                scrammable.push(placed.type_id);
+            }
+            let scrams = effect::SCRAM.iter().any(|e| effects.contains(e))
+                && attr_of(&mut sol, placed.id, attr::ACTIVATION_BLOCKED) != 0.0
+                || effects.contains(&effect::DISRUPT_SPHERE)
+                    && charge
+                        .as_ref()
+                        .is_some_and(|c| c.effects.contains(&effect::FOCUSED_SCRIPT));
+            if scrams {
+                let range = max_range(&mut sol, placed.id);
+                snap.scram_range = Some(snap.scram_range.unwrap_or(0.0).max(range));
+            }
             if let Some(weapon) = module_weapon(
                 &mut sol,
                 placed,
@@ -253,8 +327,120 @@ impl Engine {
                 snap.reps.push(rep);
             }
         }
+        for &id in &fighters {
+            snap.weapons.extend(fighter_weapons(&mut sol, id));
+            snap.ewar.extend(fighter_ewar(&mut sol, id));
+        }
+        if !scrammable.is_empty() {
+            ship.scrammed = Some(self.without(fit, pilot, &scrammable));
+        }
         snap.ship = ship;
         snap
+    }
+
+    /// The fit's turret or launcher groups, whichever it has more of, each with every charge of
+    /// `quality` it takes loaded in turn, for the Application Profile graph.
+    pub fn graph_ammo(
+        &self,
+        fit: &Fit,
+        pilot: &Pilot,
+        catalog: &Catalog,
+        quality: AmmoQuality,
+    ) -> Vec<WeaponGroup> {
+        let mut sol = SolOwned::new(&self.src);
+        let Some(placement) = Self::place(&mut sol, fit, pilot) else {
+            return Vec::new();
+        };
+        let ship_radius = attr_of(&mut sol, placement.ship, attr::RADIUS);
+        let running = |p: &&Placed| matches!(p.state, ModuleState::Active | ModuleState::Overload);
+        let weapon_of = |p: &Placed| {
+            catalog
+                .get(p.type_id)
+                .filter(|t| !t.mining)
+                .map(|t| t.hardpoint)
+                .filter(|h| *h != Hardpoint::None)
+        };
+        let count = |hardpoint: Hardpoint| {
+            placement
+                .modules
+                .iter()
+                .filter(running)
+                .filter(|p| weapon_of(p) == Some(hardpoint))
+                .count()
+        };
+        // pyfa plots the fit's main weapon system only.
+        let hardpoint = if count(Hardpoint::Turret) >= count(Hardpoint::Launcher) {
+            Hardpoint::Turret
+        } else {
+            Hardpoint::Launcher
+        };
+        let mut types: Vec<i32> = Vec::new();
+        for p in placement.modules.iter().filter(running) {
+            if weapon_of(p) == Some(hardpoint) && !types.contains(&p.type_id) {
+                types.push(p.type_id);
+            }
+        }
+        let mut groups = Vec::new();
+        for module in types {
+            let members: Vec<&Placed> = placement
+                .modules
+                .iter()
+                .filter(running)
+                .filter(|p| p.type_id == module)
+                .collect();
+            let group = catalog.get(module).map_or(0, |t| t.group_id);
+            let mut options = Vec::new();
+            for charge in ammo::charges_for(catalog, module, quality) {
+                for p in &members {
+                    if let Ok(mut m) = sol.get_module(&p.id) {
+                        m.set_charge_type_id(ItemTypeId::from_i32(charge));
+                    }
+                }
+                let weapons: Vec<Weapon> = members
+                    .iter()
+                    .filter_map(|p| {
+                        let effects = effects_of(&mut sol, p.id);
+                        let loaded = charge_of(&mut sol, p.id);
+                        module_weapon(
+                            &mut sol,
+                            p,
+                            hardpoint,
+                            group,
+                            &effects,
+                            loaded.as_ref(),
+                            ship_radius,
+                        )
+                    })
+                    .collect();
+                if !weapons.is_empty() {
+                    options.push(AmmoOption {
+                        charge,
+                        name: catalog.name(charge),
+                        weapons,
+                    });
+                }
+            }
+            groups.push(WeaponGroup { module, options });
+        }
+        groups
+    }
+
+    /// Speed and signature with the given module types switched to online.
+    fn without(&self, fit: &Fit, pilot: &Pilot, types: &[i32]) -> (f64, f64) {
+        let mut grounded = fit.clone();
+        for module in [&mut grounded.high, &mut grounded.mid, &mut grounded.low]
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            if types.contains(&module.type_id)
+                && matches!(module.state, ModuleState::Active | ModuleState::Overload)
+            {
+                module.state = ModuleState::Online;
+            }
+        }
+        let stats = self.compute_for(&grounded, pilot, CalcOptions::default());
+        (stats.speed.unwrap_or(0.0), stats.sig_radius.unwrap_or(0.0))
     }
 
     /// Top speed with the modules that cannot run in warp switched off.
@@ -282,11 +468,7 @@ impl Engine {
     }
 
     /// Put the fit into `sol` the way [`Engine::compute_with`] does, keeping item IDs.
-    fn place(
-        sol: &mut SolOwned,
-        fit: &Fit,
-        pilot: &Pilot,
-    ) -> Option<(ItemId, Vec<Placed>, Vec<PlacedDrones>)> {
+    fn place(sol: &mut SolOwned, fit: &Fit, pilot: &Pilot) -> Option<Placement> {
         let ship = fit.ship?;
         let mut f = sol.add_fit();
         pilot.board(&mut f);
@@ -371,7 +553,17 @@ impl Engine {
                 }
             }
         }
-        Some((ship_id, placed, drones))
+        let fighters = super::surroundings::add_fighters(&mut f, &fit.fighters)
+            .into_iter()
+            .zip(&fit.fighters)
+            .filter_map(|(id, fighter)| fighter.active.then_some(id))
+            .collect();
+        Some(Placement {
+            ship: ship_id,
+            modules: placed,
+            drones,
+            fighters,
+        })
     }
 }
 
@@ -381,6 +573,14 @@ fn attr_of(sol: &mut SolOwned, id: ItemId, attr: i32) -> f64 {
         .ok()
         .and_then(|mut item| item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr))).ok())
         .map_or(0.0, |v| v.modified.into_f64())
+}
+
+/// An attribute after bonuses, None when the item lacks it.
+fn attr_opt(sol: &mut SolOwned, id: ItemId, attr: i32) -> Option<f64> {
+    sol.get_item(&id)
+        .ok()
+        .and_then(|mut item| item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr))).ok())
+        .map(|v| v.modified.into_f64())
 }
 
 /// The first of `attrs` the item has a nonzero value for.
@@ -504,7 +704,7 @@ fn module_weapon(
     let burst = item_dmg(sol, id, StatTimeOptions::default())?;
     let (dps, volley) = (dmg(&burst.dps), dmg(&burst.volley));
     if dps.iter().sum::<f64>() <= 0.0 {
-        return None;
+        return breacher_weapon(sol, id, &burst, charge, ship_radius);
     }
     let kind = if effects.contains(&effect::VORTON) {
         WeaponKind::Vorton {
@@ -594,6 +794,215 @@ fn module_weapon(
             delay: 0.0,
         },
     })
+}
+
+/// A breacher pod launcher: its damage is a share of the target's HP, so the weapon carries
+/// the cap and the share, and application picks the smaller for the target at hand.
+fn breacher_weapon(
+    sol: &mut SolOwned,
+    id: ItemId,
+    burst: &StatDmg,
+    charge: Option<&Charge>,
+    ship_radius: f64,
+) -> Option<Weapon> {
+    let pair = |e: &rc::stats::StatDmgEntry| {
+        [
+            e.breacher.absolute_max.into_f64(),
+            e.breacher.relative_max.into_f64(),
+            0.0,
+            0.0,
+        ]
+    };
+    let (dps, volley) = (pair(&burst.dps), pair(&burst.volley));
+    if dps[0] <= 0.0 && dps[1] <= 0.0 {
+        return None;
+    }
+    let c = charge?.id;
+    let range = math::missile_range(
+        attr_of(sol, c, attr::VELOCITY),
+        attr_of(sol, c, attr::EXPLOSION_DELAY),
+        attr_of(sol, c, attr::MASS),
+        attr_of(sol, c, attr::AGILITY),
+        ship_radius,
+        None,
+    );
+    let duration = first_attr(sol, id, &[attr::RATE_OF_FIRE, attr::DURATION]) / 1000.0;
+    let (shots, reload) = reload_of(sol, id);
+    Some(Weapon {
+        kind: WeaponKind::Breacher { range },
+        dps,
+        volley,
+        cycle: Cycle {
+            duration: if duration > 0.0 { duration } else { 1.0 },
+            shots,
+            reload,
+            // pyfa has the pod start eating a second after launch.
+            amounts: vec![dps],
+            delay: 1.0,
+        },
+    })
+}
+
+/// Every damaging ability of a launched squadron as a weapon of its own, read from refine by
+/// switching the squadron's other abilities off in turn.
+fn fighter_weapons(sol: &mut SolOwned, id: ItemId) -> Vec<Weapon> {
+    let states = abilities(sol, id);
+    let speed = attr_of(sol, id, attr::VELOCITY);
+    let radius = attr_of(sol, id, attr::RADIUS);
+    let mut out = Vec::new();
+    for &(ability_id, on) in &states {
+        let attack = ability::ATTACK.contains(&ability_id);
+        let missiles = ability::MISSILES.contains(&ability_id);
+        let plain = ability_id == ability::BOMB || ability_id == ability::KAMIKAZE;
+        if !on || !(attack || missiles || plain) {
+            continue;
+        }
+        for &(other, other_on) in &states {
+            set_ability(sol, id, other, other == ability_id && other_on);
+        }
+        let burst = item_dmg(sol, id, StatTimeOptions::default());
+        for &(other, other_on) in &states {
+            set_ability(sol, id, other, other_on);
+        }
+        let Some(burst) = burst else { continue };
+        let (dps, volley) = (dmg(&burst.dps), dmg(&burst.volley));
+        let Some(duration) = cycle_of(&volley, &dps) else {
+            continue;
+        };
+        let kind = if attack {
+            WeaponKind::Fighter {
+                optimal: attr_of(sol, id, attr::FTR_ATTACK_OPTIMAL),
+                falloff: attr_of(sol, id, attr::FTR_ATTACK_FALLOFF),
+                er: attr_of(sol, id, attr::FTR_ATTACK_ER),
+                ev: attr_of(sol, id, attr::FTR_ATTACK_EV),
+                drf: aggregated_drf(sol, id, attr::FTR_ATTACK_DRF, attr::FTR_ATTACK_DRS),
+                speed,
+                radius,
+                plain: false,
+            }
+        } else if missiles {
+            WeaponKind::Fighter {
+                optimal: attr_of(sol, id, attr::FTR_MISSILES_RANGE),
+                falloff: 0.0,
+                er: attr_of(sol, id, attr::FTR_MISSILES_ER),
+                ev: attr_of(sol, id, attr::FTR_MISSILES_EV),
+                drf: aggregated_drf(sol, id, attr::FTR_MISSILES_DRF, attr::FTR_MISSILES_DRS),
+                speed,
+                radius,
+                plain: false,
+            }
+        } else {
+            WeaponKind::Fighter {
+                optimal: attr_of(sol, id, attr::FTR_KAMIKAZE_RANGE),
+                falloff: 0.0,
+                er: 0.0,
+                ev: 0.0,
+                drf: 0.0,
+                speed,
+                radius,
+                plain: true,
+            }
+        };
+        out.push(Weapon {
+            kind,
+            dps,
+            volley,
+            cycle: Cycle {
+                duration,
+                // pyfa's rearm model for fighter charges is left out of the timelines.
+                shots: None,
+                reload: 0.0,
+                amounts: vec![volley],
+                delay: 0.0,
+            },
+        });
+    }
+    out
+}
+
+/// Fighters give their damage reduction as a factor and a sensitivity; pyfa folds them into
+/// one exponent.
+fn aggregated_drf(sol: &mut SolOwned, id: ItemId, factor: i32, sensitivity: i32) -> f64 {
+    let (f, s) = (attr_of(sol, id, factor), attr_of(sol, id, sensitivity));
+    if f > 0.0 && s > 0.0 && (s - 1.0).abs() > f64::EPSILON {
+        f.ln() / s.ln()
+    } else {
+        0.0
+    }
+}
+
+/// A squadron's abilities and whether each runs.
+fn abilities(sol: &mut SolOwned, id: ItemId) -> Vec<(i32, bool)> {
+    use rc::Lender;
+
+    let mut out = Vec::new();
+    if let Ok(mut fighter) = sol.get_fighter(&id) {
+        let mut iter = fighter.iter_abilities();
+        while let Some(ability) = iter.next() {
+            out.push((ability.get_id().into_i32(), ability.get_state()));
+        }
+    }
+    out
+}
+
+fn set_ability(sol: &mut SolOwned, id: ItemId, ability: i32, on: bool) {
+    if let Ok(mut fighter) = sol.get_fighter(&id)
+        && let Ok(mut a) = fighter.get_ability(&rc::AbilityId::from_i32(ability))
+        && a.get_state() != on
+    {
+        a.set_state(on);
+    }
+}
+
+/// Webs, neutralizers and ECM a launched squadron carries, pyfa's fighter ewar.
+fn fighter_ewar(sol: &mut SolOwned, id: ItemId) -> Vec<Ewar> {
+    let count = sol
+        .get_fighter(&id)
+        .ok()
+        .and_then(|f| f.get_count())
+        .map_or(1.0, |c| f64::from(c.current.into_u32()));
+    let mut out = Vec::new();
+    for (ability_id, on) in abilities(sol, id) {
+        if !on {
+            continue;
+        }
+        let (kind, strength, optimal, falloff) = match ability_id {
+            ability::WEB => (
+                EwarKind::Web,
+                attr_of(sol, id, attr::FTR_WEB_PENALTY) * count,
+                attr_of(sol, id, attr::FTR_WEB_OPTIMAL),
+                attr_of(sol, id, attr::FTR_WEB_FALLOFF),
+            ),
+            ability::NEUT => (EwarKind::Neut, item_nps(sol, id), f64::INFINITY, 0.0),
+            ability::ECM => (
+                EwarKind::Ecm,
+                FTR_ECM_STRENGTH
+                    .iter()
+                    .map(|&a| attr_of(sol, id, a))
+                    .fold(0.0, f64::max)
+                    * count,
+                f64::INFINITY,
+                0.0,
+            ),
+            _ => continue,
+        };
+        out.push(Ewar {
+            kind,
+            strength,
+            strength2: 0.0,
+            optimal,
+            falloff,
+            needs_lock: true,
+            needs_dcr: false,
+            mobile: (kind == EwarKind::Web).then(|| {
+                (
+                    attr_of(sol, id, attr::VELOCITY),
+                    attr_of(sol, id, attr::RADIUS),
+                )
+            }),
+        });
+    }
+    out
 }
 
 /// Seconds per cycle, from what refine says one volley and one second deal.
@@ -690,11 +1099,12 @@ fn module_ewar(sol: &mut SolOwned, id: ItemId, effects: &HashSet<i32>) -> Vec<Ew
         push(EwarKind::Ecm, ecm, 0.0, true);
     }
     let damp = attr_of(sol, id, attr::MAX_TARGET_RANGE_BONUS);
+    let damp_res = attr_of(sol, id, attr::SCAN_RESOLUTION_BONUS);
     if has(&effect::DAMP) {
-        push(EwarKind::Damp, damp, 0.0, false);
+        push(EwarKind::Damp, damp, damp_res, false);
     }
     if effects.contains(&effect::DD_DAMP) {
-        push(EwarKind::Damp, damp, 0.0, true);
+        push(EwarKind::Damp, damp, damp_res, true);
     }
     let td = attr_of(sol, id, attr::MAX_RANGE_BONUS);
     if has(&effect::TD) {
@@ -753,12 +1163,17 @@ fn drone_ewar(sol: &mut SolOwned, stack: &PlacedDrones, effects: &HashSet<i32>) 
                 attr_of(sol, id, attr::SIGNATURE_RADIUS_BONUS)
             }
         };
+        let strength2 = if kind == EwarKind::Damp {
+            attr_of(sol, id, attr::SCAN_RESOLUTION_BONUS)
+        } else {
+            0.0
+        };
         // pyfa counts each drone of the stack on its own, so stacking penalties apply.
         for _ in 0..stack.active {
             out.push(Ewar {
                 kind,
                 strength,
-                strength2: 0.0,
+                strength2,
                 optimal,
                 falloff,
                 needs_lock: true,
@@ -981,9 +1396,12 @@ Damage Control II
     /// surface, before resists.
     fn refine_applied(engine: &Engine, attacker: &Fit, target: &Fit, distance: f64) -> f64 {
         let mut sol = SolOwned::new(&engine.src);
-        let (atk_ship, modules, _) =
-            Engine::place(&mut sol, attacker, engine.all5()).expect("attacker places");
-        let (tgt_ship, _, _) =
+        let Placement {
+            ship: atk_ship,
+            modules,
+            ..
+        } = Engine::place(&mut sol, attacker, engine.all5()).expect("attacker places");
+        let Placement { ship: tgt_ship, .. } =
             Engine::place(&mut sol, target, engine.all5()).expect("target places");
         let c2c = distance
             + attr_of(&mut sol, atk_ship, attr::RADIUS)
@@ -1025,13 +1443,13 @@ Damage Control II
     fn graph_dps(engine: &Engine, catalog: &Catalog, attacker: &Fit, target: &Fit) -> plot::Series {
         let src = engine.graph_snapshot(attacker, engine.all5(), catalog);
         let tgt = engine.graph_snapshot(target, engine.all5(), catalog);
-        let target = TargetData {
-            max_velocity: tgt.ship.max_velocity,
-            sig_radius: tgt.ship.sig_radius,
-            radius: tgt.ship.radius,
-            resists: [0.0; 4],
-            hp: None,
-        };
+        let target = TargetData::profile(
+            tgt.ship.max_velocity,
+            tgt.ship.sig_radius,
+            tgt.ship.radius,
+            [0.0; 4],
+            None,
+        );
         let graph = Graph::DamageStats;
         let req = Request {
             graph,
@@ -1090,7 +1508,8 @@ Damage Control II
         let attacker = fit(&catalog, RUPTURE);
         let snap = engine.graph_snapshot(&attacker, engine.all5(), &catalog);
         let mut sol = SolOwned::new(&engine.src);
-        let (ship, _, _) = Engine::place(&mut sol, &attacker, engine.all5()).expect("places");
+        let Placement { ship, .. } =
+            Engine::place(&mut sol, &attacker, engine.all5()).expect("places");
         let fit_id = sol.get_ship(&ship).expect("ship").get_fit_id();
         for time in [30.0, 61.0, 125.0] {
             let options = StatTimeOptions::Sim(rc::stats::StatTimeOptionsSim {
@@ -1115,6 +1534,114 @@ Damage Control II
                 "{time} s: graph {ours}, refine {theirs}"
             );
         }
+    }
+
+    #[test]
+    fn fighters_become_weapons() {
+        let Some((catalog, engine)) = setup() else {
+            return;
+        };
+        let carrier = fit(&catalog, "[Thanatos, Fighters]\n\nTemplar II x9\n");
+        assert_eq!(carrier.fighters.len(), 1, "the squadron parsed");
+        let snap = engine.graph_snapshot(&carrier, engine.all5(), &catalog);
+        let fighter = snap
+            .weapons
+            .iter()
+            .find(|w| matches!(w.kind, WeaponKind::Fighter { plain: false, .. }))
+            .expect("the attack ability is a weapon");
+        assert!(fighter.dps.iter().sum::<f64>() > 0.0);
+        assert!(matches!(fighter.kind, WeaponKind::Fighter { er, .. } if er > 0.0));
+    }
+
+    #[test]
+    fn breacher_pods_cap_by_target_hp() {
+        let Some((catalog, engine)) = setup() else {
+            return;
+        };
+        let kestrel = fit(
+            &catalog,
+            "[Kestrel, Breacher]\n\nSmall Breacher Pod Launcher, SCARAB Breacher Pod S\n",
+        );
+        let snap = engine.graph_snapshot(&kestrel, engine.all5(), &catalog);
+        let pod = snap
+            .weapons
+            .iter()
+            .find(|w| matches!(w.kind, WeaponKind::Breacher { .. }))
+            .expect("the launcher is a breacher weapon");
+        let (cap, share) = (pod.dps[0], pod.dps[1]);
+        assert!(cap > 0.0 && share > 0.0, "{:?}", pod.dps);
+        // Against a small target the share of its HP is what gets through.
+        let small_hp = cap / share / 10.0;
+        let graph = Graph::DamageStats;
+        let req = Request {
+            graph,
+            x: graph.x_defs(true)[0],
+            y: graph.y_defs(true, true)[0],
+            range: (0.0, 1.0),
+            misc: HashMap::new(),
+            checkboxes: HashMap::new(),
+            options: Options::default(),
+        };
+        let tgt = TargetData::profile(0.0, 40.0, 0.0, [0.5; 4], Some(small_hp));
+        let series = plot::plot(&req, &snap, Some(&tgt)).expect("a line");
+        let want = share * small_hp;
+        assert!(
+            (series.ys[0] - want).abs() < want * 1e-6,
+            "{} vs {want}",
+            series.ys[0]
+        );
+    }
+
+    #[test]
+    fn scrams_turn_off_microwarpdrives() {
+        let Some((catalog, engine)) = setup() else {
+            return;
+        };
+        let tackle = fit(&catalog, "[Rifter, Tackle]\n\nWarp Scrambler II\n");
+        let runner = fit(&catalog, "[Rifter, Runner]\n\n5MN Microwarpdrive II\n");
+        let tackle = engine.graph_snapshot(&tackle, engine.all5(), &catalog);
+        let runner = engine.graph_snapshot(&runner, engine.all5(), &catalog);
+        assert!(tackle.scram_range.is_some_and(|r| r > 5_000.0));
+        let (speed, sig) = runner.ship.scrammed.expect("the MWD can be scrammed");
+        assert!(speed < runner.ship.max_velocity / 2.0, "{speed}");
+        assert!(sig < runner.ship.sig_radius);
+    }
+
+    #[test]
+    fn ammo_groups_load_every_charge() {
+        let Some((catalog, engine)) = setup() else {
+            return;
+        };
+        let groups = engine.graph_ammo(
+            &fit(&catalog, RUPTURE),
+            engine.all5(),
+            &catalog,
+            AmmoQuality::Navy,
+        );
+        assert_eq!(groups.len(), 1, "one autocannon group");
+        let names: Vec<&str> = groups[0].options.iter().map(|o| o.name.as_str()).collect();
+        assert!(
+            names.contains(&"Barrage M") && names.contains(&"EMP M"),
+            "{names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n.starts_with("Arch Angel")),
+            "{names:?}"
+        );
+        // Every option carries all four guns, and a long range charge reaches further.
+        assert!(groups[0].options.iter().all(|o| o.weapons.len() == 4));
+        let falloff = |name: &str| {
+            groups[0]
+                .options
+                .iter()
+                .find(|o| o.name == name)
+                .and_then(|o| match o.weapons[0].kind {
+                    WeaponKind::Turret(g) => Some(g.falloff),
+                    _ => None,
+                })
+                .expect("a turret")
+        };
+        assert!(falloff("Barrage M") > falloff("EMP M"));
     }
 
     #[test]

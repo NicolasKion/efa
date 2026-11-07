@@ -22,6 +22,9 @@ pub struct FitSnapshot {
     pub ewar: Vec<Ewar>,
     pub reps: Vec<RemoteRep>,
     pub cap_users: Vec<CapUser>,
+    /// Longest warp scrambler range that also shuts down microwarpdrives, for "apply
+    /// projected".
+    pub scram_range: Option<f64>,
 }
 
 /// Ship numbers after every bonus, in base units (m, m/s, s, kg, GJ, HP).
@@ -66,6 +69,14 @@ pub struct Ship {
     pub cap_lasts: Option<f64>,
     /// Stable capacitor level as a fraction, when stable.
     pub cap_stable: Option<f64>,
+    /// Speed and signature with microwarpdrives and micro jump drives off, when any run: what a
+    /// scram leaves of the ship as a target.
+    pub scrammed: Option<(f64, f64)>,
+    /// Multiplier on breacher pod damage taken.
+    pub breacher_resist: f64,
+    /// Effective HP of all layers against the fit's damage profile.
+    pub ehp: f64,
+    pub drone_dps: f64,
 }
 
 /// One cycling item that does damage: a module, or one drone stack.
@@ -115,6 +126,24 @@ pub enum WeaponKind {
         /// Single-target doomsdays need a lock.
         needs_lock: bool,
     },
+    /// Breacher pods: damage per second of a share of the target's HP, capped. The weapon's
+    /// damage holds the cap in its first slot and the share in its second.
+    Breacher {
+        range: Option<MissileRange>,
+    },
+    /// A fighter ability: missile-like application over a range, flown by fighters that may
+    /// follow the target.
+    Fighter {
+        optimal: f64,
+        falloff: f64,
+        er: f64,
+        ev: f64,
+        drf: f64,
+        speed: f64,
+        radius: f64,
+        /// Bombs and kamikaze runs need no lock and ignore application.
+        plain: bool,
+    },
     Drone {
         gun: Gun,
         speed: f64,
@@ -144,7 +173,8 @@ pub struct Ewar {
     pub kind: EwarKind,
     /// Strength in the effect's own unit: GJ/s for neuts, percent for the rest, ECM points.
     pub strength: f64,
-    /// Guidance disruptors change two things; this is the flight time part.
+    /// Guidance disruptors change two things; this is the flight time part. Sensor dampeners
+    /// keep their scan resolution part here.
     pub strength2: f64,
     pub optimal: f64,
     pub falloff: f64,

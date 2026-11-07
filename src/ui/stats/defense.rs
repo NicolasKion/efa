@@ -102,6 +102,11 @@ pub(super) fn resistances(p: &Pane<'_>, this: &WeakEntity<Gyfa>, cx: &Context<Gy
         .tooltip("Click to toggle between effective HP and raw HP")
         .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
             this.stats_view.raw_hp = !this.stats_view.raw_hp;
+            let raw = this.stats_view.raw_hp;
+            this.hub.update(cx, |hub, cx| {
+                hub.raw_hp = raw;
+                cx.notify();
+            });
             cx.notify();
         }));
     let head = h_flex()

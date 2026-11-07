@@ -39,6 +39,14 @@ pub enum Param {
     BumpDistance,
     WarpTime,
     LockTime,
+    // The hidden ECM burst graph.
+    TgtDps,
+    TgtScanRes,
+    UptimeAdj,
+    UptimeAmtLimit,
+    SrcDmg,
+    TgtLockTime,
+    TgtLockUptime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -59,6 +67,7 @@ pub enum Unit {
     Mkg,
     GkgMPerS,
     Degrees,
+    Mm,
 }
 
 impl Unit {
@@ -81,6 +90,7 @@ impl Unit {
             Self::Mkg => "Mkg",
             Self::GkgMPerS => "Gkg⋅m/s",
             Self::Degrees => "°",
+            Self::Mm => "mm",
         })
     }
 }
@@ -142,6 +152,8 @@ pub struct CheckboxDef {
 pub enum Checkbox {
     AncReload,
     UseCapsim,
+    ApplyDamps,
+    ApplyDrones,
 }
 
 /// Speed and heading inputs drawn as a vector, as pyfa's damage graph does.
@@ -159,6 +171,7 @@ pub enum Column {
     Volley,
     Speed,
     Radius,
+    DampScanRes,
     ShieldRr,
     ArmorRr,
     HullRr,
@@ -182,6 +195,7 @@ impl Column {
             Self::Volley => "Volley",
             Self::Speed => "Speed",
             Self::Radius => "Radius",
+            Self::DampScanRes => "Damp scanres",
             Self::ShieldRr => "Shield RR",
             Self::ArmorRr => "Armor RR",
             Self::HullRr => "Hull RR",
@@ -203,6 +217,8 @@ impl Column {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Graph {
     DamageStats,
+    /// The best ammo at each distance, pyfa's ammo optimal DPS graph.
+    ApplicationProfile,
     EwarStats,
     RemoteReps,
     ShieldRegen,
@@ -210,6 +226,8 @@ pub enum Graph {
     Mobility,
     WarpTime,
     LockTime,
+    /// pyfa hides this one behind Ctrl+Alt+G: one player's ECM burst and damp frigate study.
+    EcmBurstDamps,
 }
 
 const DISTANCE_ICON: i32 = 1391;
@@ -222,9 +240,10 @@ const DISTANCE_TIP: &str =
     "Distance between the attacker and the target, as seen in overview (surface-to-surface)";
 
 impl Graph {
-    /// In pyfa's menu order.
-    pub const ALL: [Self; 8] = [
+    /// In pyfa's menu order, without the hidden graph.
+    pub const ALL: [Self; 9] = [
         Self::DamageStats,
+        Self::ApplicationProfile,
         Self::EwarStats,
         Self::RemoteReps,
         Self::ShieldRegen,
@@ -244,7 +263,14 @@ impl Graph {
             Self::Mobility => "Mobility",
             Self::WarpTime => "Warp Time",
             Self::LockTime => "Lock Time",
+            Self::ApplicationProfile => "Application Profile",
+            Self::EcmBurstDamps => "ECM Burst + Scanres Damps",
         }
+    }
+
+    /// The graphs pyfa only lists when opened with Ctrl+Alt+G.
+    pub fn hidden(self) -> bool {
+        self == Self::EcmBurstDamps
     }
 
     /// The damage graph names its outputs "effective" unless resists are ignored, and the shield
@@ -263,6 +289,22 @@ impl Graph {
             selector: Some(selector),
         };
         match self {
+            Self::ApplicationProfile => {
+                let (dps, volley) = if ignore_resists {
+                    ("DPS", "Volley")
+                } else {
+                    ("Effective DPS", "Effective Volley")
+                };
+                vec![
+                    y(Param::Dps, Unit::None, dps),
+                    y(Param::Volley, Unit::None, volley),
+                ]
+            }
+            Self::EcmBurstDamps => vec![
+                y(Param::SrcDmg, Unit::None, "Damage inflicted"),
+                y(Param::TgtLockTime, Unit::S, "Lock time"),
+                y(Param::TgtLockUptime, Unit::S, "Lock uptime"),
+            ],
             Self::DamageStats => {
                 let (dps, volley, damage) = if ignore_resists {
                     ("DPS", "Volley", "Damage inflicted")
@@ -466,6 +508,26 @@ impl Graph {
                 "Target signature radius",
                 (Param::TgtSigRad, Unit::M),
             )],
+            Self::ApplicationProfile => vec![x(
+                Param::Distance,
+                Unit::Km,
+                "Distance",
+                (Param::Distance, Unit::Km),
+            )],
+            Self::EcmBurstDamps => vec![
+                x(
+                    Param::TgtDps,
+                    Unit::None,
+                    "Enemy DPS",
+                    (Param::TgtDps, Unit::None),
+                ),
+                x(
+                    Param::TgtScanRes,
+                    Unit::Mm,
+                    "Enemy scanres",
+                    (Param::TgtScanRes, Unit::Mm),
+                ),
+            ],
         }
     }
 
@@ -709,6 +771,60 @@ impl Graph {
                 None,
                 (25.0, 500.0),
             )],
+            Self::ApplicationProfile => vec![InputDef {
+                main_tooltip: Some("Distance to target"),
+                ..input(
+                    Param::Distance,
+                    Unit::Km,
+                    "Distance",
+                    DISTANCE_ICON,
+                    None,
+                    (0.0, 100.0),
+                )
+            }],
+            Self::EcmBurstDamps => {
+                let damage = &[(None, Some((Param::SrcDmg, Unit::None)))];
+                vec![
+                    input(
+                        Param::TgtScanRes,
+                        Unit::Mm,
+                        "Enemy scanres",
+                        74,
+                        Some(700.0),
+                        (100.0, 1000.0),
+                    ),
+                    input(
+                        Param::TgtDps,
+                        Unit::None,
+                        "Enemy DPS",
+                        1432,
+                        Some(200.0),
+                        (100.0, 600.0),
+                    ),
+                    InputDef {
+                        conditions: damage,
+                        ..input(
+                            Param::UptimeAdj,
+                            Unit::S,
+                            "Uptime adjustment",
+                            TIME_ICON,
+                            Some(1.0),
+                            (0.0, 0.0),
+                        )
+                    },
+                    InputDef {
+                        conditions: damage,
+                        ..input(
+                            Param::UptimeAmtLimit,
+                            Unit::None,
+                            "Max amount of uptimes",
+                            1397,
+                            Some(3.0),
+                            (0.0, 0.0),
+                        )
+                    },
+                ]
+            }
         }
     }
 
@@ -729,16 +845,35 @@ impl Graph {
                     Some((Param::CapAmount, Unit::Gj)),
                 )],
             }],
+            Self::EcmBurstDamps => &[
+                CheckboxDef {
+                    key: Checkbox::ApplyDamps,
+                    label: "Apply sensor dampeners",
+                    default: true,
+                    conditions: ALWAYS,
+                },
+                CheckboxDef {
+                    key: Checkbox::ApplyDrones,
+                    label: "Use drones",
+                    default: true,
+                    conditions: &[(None, Some((Param::SrcDmg, Unit::None)))],
+                },
+            ],
             _ => &[],
         }
     }
 
     pub fn has_targets(self) -> bool {
-        self == Self::DamageStats
+        matches!(self, Self::DamageStats | Self::ApplicationProfile)
+    }
+
+    /// Lines split into segments by the ammo that does best there.
+    pub fn has_segments(self) -> bool {
+        self == Self::ApplicationProfile
     }
 
     pub fn src_vector(self) -> Option<VectorDef> {
-        (self == Self::DamageStats).then_some(VectorDef {
+        self.has_targets().then_some(VectorDef {
             length: Param::AtkSpeed,
             angle: Param::AtkAngle,
             label: "Attacker",
@@ -746,7 +881,7 @@ impl Graph {
     }
 
     pub fn tgt_vector(self) -> Option<VectorDef> {
-        (self == Self::DamageStats).then_some(VectorDef {
+        self.has_targets().then_some(VectorDef {
             length: Param::TgtSpeed,
             angle: Param::TgtAngle,
             label: "Target",
@@ -763,6 +898,14 @@ impl Graph {
             Self::Mobility => &[Column::Speed, Column::Agility],
             Self::WarpTime => &[Column::WarpSpeed, Column::WarpDistance],
             Self::LockTime => &[Column::ScanResolution],
+            Self::ApplicationProfile => &[
+                Column::Dps,
+                Column::Volley,
+                Column::Speed,
+                Column::SigRadius,
+                Column::Radius,
+            ],
+            Self::EcmBurstDamps => &[Column::SigRadius, Column::DampScanRes],
         }
     }
 
@@ -771,18 +914,19 @@ impl Graph {
         if !ignore_resists {
             cols.push(Column::TargetResists);
         }
-        cols.extend([
-            Column::Speed,
-            Column::SigRadius,
-            Column::Radius,
-            Column::FullHp,
-        ]);
+        cols.extend([Column::Speed, Column::SigRadius, Column::Radius]);
+        if self == Self::DamageStats {
+            cols.push(Column::FullHp);
+        }
         cols
     }
 
     /// The graph options menu (pyfa's ☰ icon) has entries for these graphs.
     pub fn has_options(self) -> bool {
-        matches!(self, Self::DamageStats | Self::RemoteReps | Self::EwarStats)
+        matches!(
+            self,
+            Self::DamageStats | Self::ApplicationProfile | Self::RemoteReps | Self::EwarStats
+        )
     }
 }
 
@@ -800,7 +944,7 @@ mod tests {
 
     #[test]
     fn every_x_axis_has_its_main_input() {
-        for graph in Graph::ALL {
+        for graph in Graph::ALL.into_iter().chain([Graph::EcmBurstDamps]) {
             let inputs = graph.inputs();
             for x in graph.x_defs(true) {
                 assert!(

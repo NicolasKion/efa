@@ -5,8 +5,9 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    damage_pattern::DamagePattern, fit::Fit, implant_set::ImplantSet, port::ExportSettings,
-    preferences::Preferences, target_profile::TargetProfile,
+    damage_pattern::DamagePattern, fit::Fit, graphs::settings::GraphSettings,
+    implant_set::ImplantSet, port::ExportSettings, preferences::Preferences,
+    target_profile::TargetProfile,
 };
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -37,6 +38,9 @@ pub struct Saved {
     /// The copy dialog's last format and options.
     #[serde(default)]
     pub export: ExportSettings,
+    /// The graph window's options.
+    #[serde(default)]
+    pub graphs: GraphSettings,
 }
 
 /// What besides ship and fittings the price total includes, with pyfa's defaults.
