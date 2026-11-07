@@ -454,7 +454,12 @@ impl Gyfa {
 
     fn drop_on_projected(&mut self, dragged: &Dragged, cx: &mut Context<Self>) {
         match dragged.source {
-            DragSource::Market | DragSource::Row(RowRef::Module(..)) => {
+            DragSource::Market => {
+                for id in dragged.types() {
+                    self.project_item(id, cx);
+                }
+            }
+            DragSource::Row(RowRef::Module(..)) => {
                 self.project_item(dragged.type_id, cx);
             }
             _ => {}

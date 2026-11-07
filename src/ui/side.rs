@@ -14,9 +14,9 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, AnyView, App, AppContext, ClickEvent, Context, InteractiveElement, IntoElement,
-    MouseButton, MouseUpEvent, ParentElement, ScrollStrategy, SharedString,
-    StatefulInteractiveElement, Styled, WeakEntity, Window, div, prelude::FluentBuilder, px,
-    uniform_list,
+    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement, ScrollStrategy,
+    SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
+    prelude::FluentBuilder, px, uniform_list,
 };
 
 use super::{
@@ -417,6 +417,19 @@ impl Gyfa {
             filter_results(catalog, sections, text.as_ref(), room.as_ref(), meta)
         });
         let key = results.map(|(key, _)| key);
+        self.market_order = Rc::new(
+            filtered
+                .rows
+                .iter()
+                .filter_map(|row| match row {
+                    ResultRow::Item(id) => Some(*id),
+                    ResultRow::Heading(_) => None,
+                })
+                .collect(),
+        );
+        // Only what is listed stays selected, so nothing hidden is dragged along.
+        let order = Rc::clone(&self.market_order);
+        self.market_selection.retain(|id| order.contains(id));
         if jump
             && let Some(target) = self.market_highlight
             && let Some(index) = filtered
@@ -607,7 +620,18 @@ impl Gyfa {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let name = loaded.catalog.name(id);
-        let highlighted = self.market_highlight == Some(id);
+        let selected = self.market_selection.contains(&id);
+        let highlighted = selected || self.market_highlight == Some(id);
+        // Dragging a selected item takes the rest of the selection along.
+        let more: Vec<TypeId> = if selected {
+            self.market_selection
+                .iter()
+                .copied()
+                .filter(|&other| other != id)
+                .collect()
+        } else {
+            Vec::new()
+        };
         let price = self.prices.get(id).filter(|&p| p > 0.0);
         let weak = Self::weak(cx);
         h_flex()
@@ -632,10 +656,24 @@ impl Gyfa {
                 if event.click_count() >= 2 {
                     this.used_from_market(id);
                     this.market_double_click(id, event.modifiers(), cx);
+                } else {
+                    this.select_market_item(id, event.modifiers());
+                    cx.notify();
                 }
             }))
+            // A right-click on an unselected item makes it the selection, as list views do.
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                    if !this.market_selection.contains(&id) {
+                        this.market_selection = vec![id];
+                        this.market_anchor = Some(id);
+                        cx.notify();
+                    }
+                }),
+            )
             .when_some(
-                Dragged::of(loaded, DragSource::Market, Some(id)),
+                Dragged::of(loaded, DragSource::Market, Some(id)).map(|d| d.with_more(more)),
                 |row, dragged| {
                     row.on_drag(dragged, move |dragged, _, _, cx| {
                         let _ = weak.update(cx, |g, _| g.used_from_market(id));
@@ -648,6 +686,32 @@ impl Gyfa {
                 move |menu, _, cx| market_menu(menu, &this, id, context, cx)
             })
             .into_any_element()
+    }
+
+    /// Click selection in the market results: a plain click picks one item, Ctrl adds or
+    /// removes one, Shift takes the range from the last clicked item.
+    fn select_market_item(&mut self, id: TypeId, modifiers: Modifiers) {
+        let order = Rc::clone(&self.market_order);
+        if modifiers.shift
+            && let Some(anchor) = self.market_anchor
+            && let (Some(a), Some(b)) = (
+                order.iter().position(|&o| o == anchor),
+                order.iter().position(|&o| o == id),
+            )
+        {
+            self.market_selection = order[a.min(b)..=a.max(b)].to_vec();
+            return;
+        }
+        if modifiers.control {
+            if let Some(at) = self.market_selection.iter().position(|&s| s == id) {
+                self.market_selection.remove(at);
+            } else {
+                self.market_selection.push(id);
+            }
+        } else {
+            self.market_selection = vec![id];
+        }
+        self.market_anchor = Some(id);
     }
 
     /// Search ships and fits from the fittings browser's box; clearing it goes back.
@@ -1409,7 +1473,20 @@ fn market_menu(
     let Some(t) = loaded.catalog.get(id) else {
         return menu;
     };
-    let category = t.category_label();
+    // A right-click inside a selection of several acts on all of them.
+    let ids: Rc<Vec<TypeId>> = Rc::new(
+        if g.market_selection.len() > 1 && g.market_selection.contains(&id) {
+            g.market_selection.clone()
+        } else {
+            vec![id]
+        },
+    );
+    let several = ids.len() > 1;
+    let category = if several {
+        format!("{} Items", ids.len())
+    } else {
+        t.category_label().to_string()
+    };
     let has_fit = g.fit().is_some_and(|f| f.ship.is_some());
     let structure = g
         .fit()
@@ -1422,13 +1499,16 @@ fn market_menu(
             Gyfa::app_update(&this, cx, |g, cx| f(g, id, window, cx));
         }
     };
-    // Adding an item from here counts as using it, as pyfa's commands remember it.
+    // Adding an item from here counts as using it, as pyfa's commands remember it. Done for
+    // every selected item.
     let use_with = |f: fn(&mut Gyfa, TypeId, &mut Window, &mut Context<Gyfa>)| {
-        let this = this.clone();
+        let (this, ids) = (this.clone(), Rc::clone(&ids));
         move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
             Gyfa::app_update(&this, cx, |g, cx| {
-                g.used_from_market(id);
-                f(g, id, window, cx);
+                for &id in ids.iter() {
+                    g.used_from_market(id);
+                    f(g, id, window, cx);
+                }
             });
         }
     };
@@ -1444,14 +1524,14 @@ fn market_menu(
 
     let mut menu = menu.item(item_stats::stats_entry(
         this,
-        category,
+        t.category_label(),
         item_stats::StatsOf::Type(id),
     ));
     // Ice products are found by search but sit outside the market tree, so there is no group.
     let listed = t
         .market_group
         .is_some_and(|g| loaded.catalog.market_groups.contains_key(&g));
-    if context == MarketContext::Search && listed {
+    if context == MarketContext::Search && listed && !several {
         menu = menu.item(
             entry(IconName::Search, format!("{category} Market Group"))
                 .on_click(on(super::Gyfa::jump_to_market)),
@@ -1463,15 +1543,22 @@ fn market_menu(
                 .on_click(use_with(|g, id, _, cx| g.add_item(id, cx))),
         );
     }
+    if several {
+        menu = menu.item(
+            entry(IconName::Plus, format!("Add {category} to Fit"))
+                .on_click(use_with(|g, id, _, cx| g.add_item(id, cx))),
+        );
+    }
     if let Kind::Module(slot) = t.kind
         && slot != Slot::Subsystem
         && g.saved.preferences.context_menus.module_fill
+        && !several
     {
         menu = menu.item(
             entry(IconName::Plus, "Fill With Module").on_click(apply(Action::FillRack(slot, id))),
         );
     }
-    if t.kind == Kind::Drone {
+    if t.kind == Kind::Drone && !several {
         let amount = g.drone_stack_size(&loaded, id);
         if amount >= 1 {
             let label = if amount == 1 {
@@ -1484,11 +1571,13 @@ fn market_menu(
         }
     }
     let to_cargo = |count: u32| {
-        let this = this.clone();
+        let (this, ids) = (this.clone(), Rc::clone(&ids));
         move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
             Gyfa::app_update(&this, cx, |g, cx| {
-                g.used_from_market(id);
-                g.add_to_cargo(id, count, cx);
+                for &id in ids.iter() {
+                    g.used_from_market(id);
+                    g.add_to_cargo(id, count, cx);
+                }
             });
         }
     };
@@ -1497,7 +1586,7 @@ fn market_menu(
         menu = menu
             .item(entry(IconName::Inbox, format!("Add {category} to Cargo")).on_click(to_cargo(1)));
     }
-    if goes_to_cargo(t.kind) && g.saved.preferences.context_menus.cargo_fill {
+    if goes_to_cargo(t.kind) && g.saved.preferences.context_menus.cargo_fill && !several {
         menu = menu.item(
             entry(IconName::Inbox, format!("Fill Cargo With {category}"))
                 .on_click(use_with(|g, id, _, cx| g.fill_cargo_with(id, cx))),
@@ -1518,7 +1607,7 @@ fn market_menu(
         );
     }
     let shown = super::hub::preferences(cx).context_menus;
-    if shown.ammo_pattern && t.damage.iter().any(|&d| d > 0.0) {
+    if shown.ammo_pattern && t.damage.iter().any(|&d| d > 0.0) && !several {
         let profile = crate::fit::DamageProfile::Pattern {
             name: crate::damage_pattern::SELECTED_AMMO.to_owned(),
             amounts: t.damage,
@@ -1538,7 +1627,7 @@ fn market_menu(
     }
     if shown.project && !structure && loaded.catalog.projection.projectable.contains(&id) {
         menu = menu.item(
-            entry(IconName::Globe, format!("Project {category} onto Fit")).on_click(on(
+            entry(IconName::Globe, format!("Project {category} onto Fit")).on_click(use_with(
                 |g, id, _, cx| {
                     g.project_item(id, cx);
                     if g.additions_tab != AdditionsTab::Projected {

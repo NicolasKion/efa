@@ -381,7 +381,11 @@ impl Gyfa {
                 let transfer = drop_transfer(modifiers);
                 self.apply(Action::ModuleToCargo(row_position(row), onto, transfer), cx);
             }
-            DragSource::Market => self.add_to_cargo(dragged.type_id, 1, cx),
+            DragSource::Market => {
+                for id in dragged.types() {
+                    self.add_to_cargo(id, 1, cx);
+                }
+            }
             // Drones dragged off the drones pane stay drones; pyfa does not move them to cargo.
             DragSource::Cargo | DragSource::Drone(_) => {}
         }

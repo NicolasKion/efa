@@ -605,6 +605,8 @@ pub enum DragSource {
 pub struct Dragged {
     pub source: DragSource,
     pub type_id: TypeId,
+    /// Further items dragged along, from a selection in the market results.
+    pub more: Vec<TypeId>,
     label: SharedString,
     icon: Option<std::path::PathBuf>,
 }
@@ -615,9 +617,26 @@ impl Dragged {
         Some(Self {
             source,
             type_id,
+            more: Vec::new(),
             label: loaded.catalog.name(type_id).into(),
             icon: loaded.icons.path(&loaded.catalog, Icon::Type(type_id)),
         })
+    }
+}
+
+impl Dragged {
+    /// Drag `more` along with the item.
+    pub fn with_more(mut self, more: Vec<TypeId>) -> Self {
+        if !more.is_empty() {
+            self.label = format!("{} items", more.len() + 1).into();
+        }
+        self.more = more;
+        self
+    }
+
+    /// Every item dragged, the grabbed one first.
+    pub fn types(&self) -> impl Iterator<Item = TypeId> + '_ {
+        std::iter::once(self.type_id).chain(self.more.iter().copied())
     }
 }
 
@@ -704,6 +723,18 @@ impl Gyfa {
             }
             // Drone stacks only move within the drones pane.
             DragSource::Drone(_) => {}
+            // Several from the market: the grabbed one goes where it was dropped, the rest
+            // wherever they fit, as a double-click would put them.
+            DragSource::Market if !dragged.more.is_empty() => {
+                let single = Dragged {
+                    more: Vec::new(),
+                    ..dragged.clone()
+                };
+                self.drop_on(on, &single, modifiers, cx);
+                for &id in &dragged.more {
+                    self.add_item(id, cx);
+                }
+            }
             DragSource::Market => match (t.kind, on.position()) {
                 (Kind::Module(slot), Some((target, pos))) if slot == target => {
                     self.apply(Action::Place(slot, pos, t.id), cx);

@@ -804,19 +804,17 @@ impl Gyfa {
             }
             DragSource::Market => {
                 let Some(loaded) = self.loaded() else { return };
-                if loaded
-                    .catalog
-                    .get(dragged.type_id)
-                    .is_none_or(|t| t.kind != Kind::Drone)
-                {
-                    return;
+                for id in dragged.types() {
+                    if loaded.catalog.get(id).is_none_or(|t| t.kind != Kind::Drone) {
+                        continue;
+                    }
+                    let amount = if modifiers.alt {
+                        self.drone_stack_size(&loaded, id).max(1)
+                    } else {
+                        1
+                    };
+                    self.apply(Action::AddDrones(id, amount), cx);
                 }
-                let amount = if modifiers.alt {
-                    self.drone_stack_size(&loaded, dragged.type_id).max(1)
-                } else {
-                    1
-                };
-                self.apply(Action::AddDrones(dragged.type_id, amount), cx);
             }
             DragSource::Row(_) | DragSource::Cargo => {}
         }

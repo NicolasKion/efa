@@ -574,12 +574,18 @@ impl Gyfa {
     /// A fighter from the market goes in like one double-clicked there.
     fn drop_on_fighters(&mut self, dragged: &Dragged, cx: &mut Context<Self>) {
         let Some(loaded) = self.loaded() else { return };
-        let is_fighter = loaded
-            .catalog
-            .get(dragged.type_id)
-            .is_some_and(|t| t.kind == Kind::Fighter);
-        if matches!(dragged.source, DragSource::Market) && is_fighter {
-            self.add_fighter_squadrons(vec![Fighter::new(dragged.type_id)], cx);
+        let squadrons: Vec<_> = dragged
+            .types()
+            .filter(|&id| {
+                loaded
+                    .catalog
+                    .get(id)
+                    .is_some_and(|t| t.kind == Kind::Fighter)
+            })
+            .map(Fighter::new)
+            .collect();
+        if matches!(dragged.source, DragSource::Market) && !squadrons.is_empty() {
+            self.add_fighter_squadrons(squadrons, cx);
         }
     }
 }

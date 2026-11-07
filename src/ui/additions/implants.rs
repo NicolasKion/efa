@@ -140,12 +140,17 @@ impl Gyfa {
     /// pyfa only takes implants dropped from the market.
     fn drop_implant(&mut self, dragged: &Dragged, cx: &mut Context<Self>) {
         let Some(loaded) = self.loaded() else { return };
-        let is_implant = loaded
-            .catalog
-            .get(dragged.type_id)
-            .is_some_and(|t| t.kind == Kind::Implant);
-        if matches!(dragged.source, DragSource::Market) && is_implant {
-            self.apply(Action::AddImplants(vec![dragged.type_id]), cx);
+        let implants: Vec<_> = dragged
+            .types()
+            .filter(|&id| {
+                loaded
+                    .catalog
+                    .get(id)
+                    .is_some_and(|t| t.kind == Kind::Implant)
+            })
+            .collect();
+        if matches!(dragged.source, DragSource::Market) && !implants.is_empty() {
+            self.apply(Action::AddImplants(implants), cx);
         }
     }
 

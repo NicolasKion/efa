@@ -184,6 +184,11 @@ pub struct Gyfa {
     listing: Option<crate::market::Listing>,
     /// Item to scroll the market to and highlight, after a market group jump.
     market_highlight: Option<TypeId>,
+    /// Items picked in the market results, for dragging or acting on several at once.
+    market_selection: Vec<TypeId>,
+    market_anchor: Option<TypeId>,
+    /// The items the results pane lists, top to bottom, for Shift-click ranges.
+    market_order: Rc<Vec<TypeId>>,
     market_scroll_pending: bool,
     market_scroll: UniformListScrollHandle,
     market_tree_scroll: ScrollHandle,
@@ -343,6 +348,9 @@ impl Gyfa {
             expanded_groups: HashSet::new(),
             listing: None,
             market_highlight: None,
+            market_selection: Vec::new(),
+            market_anchor: None,
+            market_order: Rc::default(),
             market_scroll_pending: false,
             market_scroll: UniformListScrollHandle::new(),
             market_tree_scroll: ScrollHandle::new(),
