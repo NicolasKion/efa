@@ -179,7 +179,20 @@ impl Gyfa {
     ) -> AnyElement {
         let catalog = &loaded.catalog;
         let theme = cx.theme();
-        let selected = matches!(row, Row::Item(r) if self.selection.contains(&r));
+        // In a grouped rack a module is linked to the others of its type: selecting one shows
+        // them all selected, since whatever is done to one is done to all.
+        let group = match row {
+            Row::Item(RowRef::Module(slot, i)) => self
+                .fit()
+                .map_or_else(Vec::new, |f| f.group(slot, i))
+                .into_iter()
+                .map(|j| RowRef::Module(slot, j))
+                .collect(),
+            Row::Item(r) => vec![r],
+            _ => Vec::new(),
+        };
+        let selected = group.iter().any(|r| self.selection.contains(r));
+        let linked = group.len() > 1;
         // pyfa's "Color fitting view by slot": a faint tint per rack.
         let slot_tint = match row {
             Row::Item(RowRef::Module(slot, _)) | Row::Empty(slot, _) => Some(slot),
@@ -205,7 +218,19 @@ impl Gyfa {
             .px_1()
             .gap_1()
             .when_some(slot_tint, Styled::bg)
-            .when(selected, |r| r.bg(theme.table_active));
+            .when(selected, |r| r.bg(theme.table_active))
+            // A bar down the left edge marks modules linked by grouping.
+            .when(linked, |r| {
+                r.relative().child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .h_full()
+                        .w(px(2.))
+                        .bg(theme.accent),
+                )
+            });
         // Rack labels are section bands, set off from the rack above; without labels, racks are
         // only set apart by the gap and border. Only real rows highlight.
         let base = match row {
@@ -419,7 +444,7 @@ impl Gyfa {
         let expanded = self.saved.preferences.general.expanded_mutant_names;
         let misc_text = misc.map(|(text, _)| text.as_str());
         let text = |col: Col| col.text(catalog, prices, m, &info, expanded, misc_text);
-        let group = self.fit().map_or(1, |f| f.group(slot, i).len());
+
         base.child(
             div()
                 .id(SharedString::from(format!("state-{slot:?}-{i}")))
@@ -467,7 +492,6 @@ impl Gyfa {
                 .when(m.state == ModuleState::Offline, |d| {
                     d.text_color(theme.muted_foreground)
                 })
-                .when(group > 1, |d| d.child(format!("{group}x ")))
                 .children(text(Col::Name)),
         )
         .children(
@@ -1528,7 +1552,6 @@ fn fitting_rows(fit: &Fit, stats: &Stats, style: RackStyle) -> Vec<Row> {
                     Slot::High | Slot::Mid | Slot::Low | Slot::Service => RowRef::Module(slot, pos),
                 })),
                 Cell::Empty => rows.push(Row::Empty(slot, pos)),
-                Cell::Grouped => {}
             }
         }
     };
@@ -1582,8 +1605,6 @@ fn fitting_rows(fit: &Fit, stats: &Stats, style: RackStyle) -> Vec<Row> {
 enum Cell {
     Empty,
     Item,
-    /// In a grouped rack, a module the first of its type stands for.
-    Grouped,
 }
 
 impl Cell {
@@ -1592,20 +1613,11 @@ impl Cell {
     }
 }
 
-/// A module rack's positions; in a grouped rack only the first module of each type shows.
+/// A module rack's positions.
 fn rack_cells(fit: &Fit, slot: Slot) -> Vec<Cell> {
-    let grouped = fit.grouped.contains(&slot);
-    let mut seen = Vec::new();
     fit.rack(slot)
         .iter()
-        .map(|m| match m {
-            None => Cell::Empty,
-            Some(m) if grouped && seen.contains(&m.type_id) => Cell::Grouped,
-            Some(m) => {
-                seen.push(m.type_id);
-                Cell::Item
-            }
-        })
+        .map(|m| Cell::of(m.is_some()))
         .collect()
 }
 
