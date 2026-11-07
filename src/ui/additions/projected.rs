@@ -1037,6 +1037,19 @@ fn projected_item_menu(
             },
         ));
     }
+    if let Row::Module(i) = row {
+        let module = projected.modules[i].type_id;
+        if !compatible_charges(catalog, module).is_empty() {
+            let this = this.clone();
+            menu = menu.item(
+                entry(IconName::BatteryCharging, "Show Compatible Charges").on_click(
+                    move |_, window, cx| {
+                        Gyfa::app_update(&this, cx, |g, cx| g.show_charges_for(module, window, cx));
+                    },
+                ),
+            );
+        }
+    }
     menu
 }
 

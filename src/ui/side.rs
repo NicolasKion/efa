@@ -1,39 +1,53 @@
 //! The left side: market browser and fittings browser.
 
-use std::{collections::HashSet, rc::Rc};
+use std::{collections::HashSet, ops::Range, rc::Rc};
 
+use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
     ActiveTheme, Disableable, Icon as LucideIcon, IconName, Selectable, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
     menu::{ContextMenuExt, PopupMenu},
+    resizable::{resizable_panel, v_resizable},
     tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
     AnyElement, AnyView, App, AppContext, ClickEvent, Context, InteractiveElement, IntoElement,
-    MouseButton, MouseUpEvent, ParentElement, SharedString, StatefulInteractiveElement, Styled,
-    WeakEntity, Window, div, prelude::FluentBuilder, px,
+    MouseButton, MouseUpEvent, ParentElement, ScrollStrategy, SharedString,
+    StatefulInteractiveElement, Styled, WeakEntity, Window, div, prelude::FluentBuilder, px,
+    uniform_list,
 };
 
 use super::{
     Action, AdditionsTab, BrowserTab, Gyfa, Loaded,
     additions::{FitDrag, Link, goes_to_cargo},
-    fitting::{DragPreview, DragSource, Dragged},
+    fitting::{
+        ChargeMenu, DragPreview, DragSource, Dragged, compatible_charges, structure_charges,
+    },
     item_stats,
     stats::format,
     widgets::{entry, icon_box},
 };
 use crate::{
-    data::{Kind, Slot, TypeId},
+    data::{Catalog, Kind, Slot, TypeId},
     icons::Icon,
-    market::{MetaCategory, charges_for_fit},
+    market::{
+        Filtered, Listing, MetaCategory, ResultRow, Section, ShipRoom, TextFilter, charges_for_fit,
+        filter_results, group_items, jargon::Jargon,
+    },
     ship_browser::{self, Race, Stage},
 };
 
-/// Search results shown at most, to keep the list quick to draw.
-const SEARCH_LIMIT: usize = 300;
+/// Search results shown at most, to keep the list quick to build.
+const SEARCH_LIMIT: usize = 500;
 const INDENT: f32 = 14.;
+/// Height of every results row, items and headings alike, as the list needs.
+const RESULT_ROW_H: f32 = 26.;
+/// Height of the market tree over the results until the user drags the divider.
+const DEFAULT_SPLIT: f32 = 260.;
+/// Least height either half of the market keeps.
+const MIN_PANE: f32 = 80.;
 /// Drones that can be in space at once without skills, the floor for a stack's size.
 const BASE_ACTIVE_DRONES: u32 = 5;
 /// Charges "Add to Cargo" puts in at once, and the smaller batch for scan probes.
@@ -42,6 +56,7 @@ const PROBE_BATCH: u32 = 8;
 /// pyfa's market tree entries that are not market groups, kept apart by negative IDs.
 const RECENT_GROUP: i32 = -1;
 const CHARGES_GROUP: i32 = -2;
+const MODULE_CHARGES_GROUP: i32 = -3;
 /// The Omega clone icon pyfa marks hulls and items with.
 const OMEGA_ICON: i32 = 25874;
 /// Widest a hover text gets before it wraps.
@@ -49,27 +64,30 @@ const TOOLTIP_W: f32 = 380.;
 /// Longest description excerpt a market tooltip shows.
 const DESCRIPTION_MAX: usize = 400;
 
-/// Whether the market list shows search results or browses groups, as pyfa tells them apart:
-/// recently used items count as a search, charges for the fit as a group.
+/// Whether an item is listed in its own market group or away from it, as pyfa tells its
+/// marketItemGroup and marketItemMisc menus apart: only the latter jump to the group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MarketContext {
     Group,
     Search,
 }
 
-/// A line of the market list before it is drawn, so the meta buttons can look at what it holds.
-enum MarketEntry {
-    Group {
-        id: i32,
-        depth: usize,
-        name: SharedString,
-        icon: GroupIcon,
-    },
-    Item {
-        id: TypeId,
-        depth: usize,
-        context: MarketContext,
-    },
+/// What the results pane's list was built from, to know when to build it again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ResultsKey {
+    Search(String),
+    Listing(Listing),
+}
+
+/// A line of the market group tree: a market group or one of pyfa's virtual entries.
+struct TreeEntry {
+    id: i32,
+    depth: usize,
+    name: SharedString,
+    icon: GroupIcon,
+    /// Has subgroups to open.
+    branch: bool,
+    listing: Listing,
 }
 
 enum GroupIcon {
@@ -123,171 +141,434 @@ impl Gyfa {
         self.save();
     }
 
-    /// The market search's results, searched again only when the text changed.
-    fn search_results(&mut self, loaded: &Loaded) -> Option<Rc<Vec<TypeId>>> {
+    /// The market's results before the pane's filters: the search's matches while there is a
+    /// search, otherwise whatever the tree picked. Searches and group lists are cached.
+    fn market_results(&mut self, loaded: &Loaded) -> Option<(ResultsKey, Rc<Vec<Section>>)> {
         let text = self.search_text.trim();
         // pyfa goes back to the tree while there is nothing but wildcards.
-        if text.replace(['*', '?'], "").is_empty() {
-            return None;
-        }
-        if let Some((cached, results)) = &self.search_results
-            && cached == text
+        let key = if text.replace(['*', '?'], "").is_empty() {
+            ResultsKey::Listing(self.listing?)
+        } else {
+            ResultsKey::Search(text.to_owned())
+        };
+        // The fit and the recent items change under these, and they are quick to list.
+        let cached = !matches!(
+            key,
+            ResultsKey::Listing(Listing::Recent | Listing::FitCharges)
+        );
+        if cached
+            && let Some((last, sections)) = &self.results_cache
+            && *last == key
         {
-            return Some(Rc::clone(results));
+            return Some((key, Rc::clone(sections)));
         }
-        let results = Rc::new(loaded.catalog.search(text, SEARCH_LIMIT));
-        self.search_results = Some((text.to_owned(), Rc::clone(&results)));
-        Some(results)
-    }
-
-    fn market_entries(&mut self, loaded: &Loaded) -> Vec<MarketEntry> {
-        let mut entries = Vec::new();
-        if let Some(results) = self.search_results(loaded) {
-            entries.extend(results.iter().map(|&id| MarketEntry::Item {
-                id,
-                depth: 0,
-                context: MarketContext::Search,
-            }));
-            return entries;
-        }
-        for &root in &loaded.catalog.market_roots {
-            self.market_group(loaded, root, 0, &mut entries);
-        }
-        entries.push(MarketEntry::Group {
-            id: RECENT_GROUP,
-            depth: 0,
-            name: "Recently Used Items".into(),
-            icon: GroupIcon::Lucide(IconName::Calendar),
-        });
-        if self.expanded_groups.contains(&RECENT_GROUP) {
-            entries.extend(
+        let catalog = &loaded.catalog;
+        let sections = Rc::new(match &key {
+            ResultsKey::Search(text) => {
+                vec![Section::untitled(catalog.search(text, SEARCH_LIMIT))]
+            }
+            ResultsKey::Listing(Listing::Group(group)) => {
+                vec![Section::untitled(group_items(catalog, *group))]
+            }
+            ResultsKey::Listing(Listing::Recent) => vec![Section::untitled(
                 self.saved
                     .recent_items
                     .iter()
-                    .filter(|&&id| loaded.catalog.get(id).is_some())
-                    .map(|&id| MarketEntry::Item {
-                        id,
-                        depth: 1,
-                        context: MarketContext::Search,
-                    }),
-            );
-        }
-        entries.push(MarketEntry::Group {
-            id: CHARGES_GROUP,
-            depth: 0,
-            name: "Charges For Active Fit".into(),
-            icon: GroupIcon::Lucide(IconName::Asterisk),
-        });
-        if self.expanded_groups.contains(&CHARGES_GROUP)
-            && let Some(fit) = self.fit()
-        {
-            entries.extend(charges_for_fit(&loaded.catalog, fit).into_iter().map(|id| {
-                MarketEntry::Item {
-                    id,
-                    depth: 1,
-                    context: MarketContext::Group,
-                }
-            }));
-        }
-        entries
-    }
-
-    fn market_group(&self, loaded: &Loaded, id: i32, depth: usize, out: &mut Vec<MarketEntry>) {
-        let Some(group) = loaded.catalog.market_groups.get(&id) else {
-            return;
-        };
-        out.push(MarketEntry::Group {
-            id,
-            depth,
-            name: group.name.clone().into(),
-            icon: GroupIcon::Game(group.icon_id),
-        });
-        if !self.expanded_groups.contains(&id) {
-            return;
-        }
-        for &child in &group.children {
-            self.market_group(loaded, child, depth + 1, out);
-        }
-        out.extend(group.types.iter().map(|&t| MarketEntry::Item {
-            id: t,
-            depth: depth + 1,
-            context: MarketContext::Group,
-        }));
-    }
-
-    fn market(&mut self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
-        let searching = self.search_results(loaded).is_some();
-        let entries = self.market_entries(loaded);
-        let present: HashSet<MetaCategory> = entries
-            .iter()
-            .filter_map(|e| match e {
-                MarketEntry::Item { id, .. } => loaded.catalog.get(*id),
-                MarketEntry::Group { .. } => None,
-            })
-            .map(MetaCategory::of_item)
-            .collect();
-        // pyfa never leaves a list empty because of the buttons.
-        self.meta_filter.show_something(&present);
-        let filter = self.meta_filter;
-        let rows: Vec<(Option<TypeId>, AnyElement)> = entries
-            .into_iter()
-            .filter_map(|entry| match entry {
-                MarketEntry::Group {
-                    id,
-                    depth,
-                    name,
-                    icon,
-                } => Some((None, self.group_row(loaded, id, depth, name, icon, cx))),
-                MarketEntry::Item { id, depth, context } => {
-                    let t = loaded.catalog.get(id)?;
-                    filter
-                        .allows(t)
-                        .then(|| (Some(id), self.item_row(loaded, id, depth, context, cx)))
-                }
-            })
-            .collect();
-        if self.market_scroll_pending {
-            self.market_scroll_pending = false;
-            let target = self.market_highlight;
-            if let Some(index) = rows
-                .iter()
-                .position(|row| row.0.is_some() && row.0 == target)
-            {
-                self.market_scroll.scroll_to_item(index);
+                    .copied()
+                    .filter(|&id| catalog.get(id).is_some())
+                    .collect(),
+            )],
+            ResultsKey::Listing(Listing::FitCharges) => vec![Section::untitled(
+                self.fit()
+                    .map_or_default(|fit| charges_for_fit(catalog, fit)),
+            )],
+            ResultsKey::Listing(Listing::ModuleCharges(module)) => {
+                module_charge_sections(catalog, *module)
             }
+        });
+        if cached {
+            self.results_cache = Some((key.clone(), Rc::clone(&sections)));
         }
-        let empty_search = searching && rows.is_empty();
+        Some((key, sections))
+    }
+
+    /// What the current fit has room for, for the "Fits current ship" filter.
+    fn ship_room<'a>(&self, catalog: &'a Catalog) -> Option<ShipRoom<'a>> {
+        let fit = self.fit()?;
+        let ship = catalog.get(fit.ship?)?;
+        let stats = self.stats.as_ref()?;
+        let total = |slots: crate::engine::Slots| slots.total.unwrap_or(0);
+        let holders = [Slot::High, Slot::Mid, Slot::Low]
+            .into_iter()
+            .flat_map(|slot| fit.rack(slot).iter().flatten())
+            .filter_map(|m| catalog.get(m.type_id))
+            .filter(|m| !m.charge_groups.is_empty())
+            .collect();
+        Some(ShipRoom {
+            ship,
+            slots: [
+                Slot::High,
+                Slot::Mid,
+                Slot::Low,
+                Slot::Rig,
+                Slot::Subsystem,
+                Slot::Service,
+            ]
+            .map(|slot| total(stats.slots(slot))),
+            turrets: total(stats.turret),
+            launchers: total(stats.launcher),
+            drones: stats.drone_bay.output.is_some_and(|v| v > 0.0),
+            fighters: total(stats.fighter_tubes) > 0,
+            holders,
+        })
+    }
+
+    /// The market tab: the search box, then the group tree over the results pane, split by a
+    /// divider the user can drag.
+    fn market(&mut self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
+        let jump = std::mem::take(&mut self.market_scroll_pending);
+        let results = self.results_pane(loaded, jump, cx);
+        let tree = self.market_tree(loaded, jump, cx);
+        let split = self.saved.market_split.unwrap_or(DEFAULT_SPLIT);
+        let weak = Self::weak(cx);
         v_flex()
             .flex_1()
             .min_h_0()
             .child(div().p_1().child(self.search_input()))
             .child(
-                v_flex()
-                    .id("market-list")
+                div()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.market_scroll)
-                    .when(empty_search, |list| {
-                        list.child(
-                            div()
-                                .p_2()
-                                .text_color(cx.theme().muted_foreground)
-                                .child("No matching items."),
-                        )
-                    })
-                    .children(rows.into_iter().map(|row| row.1)),
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        v_resizable("market-split")
+                            .on_resize(move |state, _, cx| {
+                                let Some(&height) = state.read(cx).sizes().first() else {
+                                    return;
+                                };
+                                let _ = weak.update(cx, |g, _| {
+                                    g.saved.market_split = Some(f32::from(height));
+                                    g.save();
+                                });
+                            })
+                            .child(
+                                resizable_panel()
+                                    .size(px(split))
+                                    .size_range(px(MIN_PANE)..px(f32::MAX))
+                                    .child(tree),
+                            )
+                            .child(
+                                resizable_panel()
+                                    .size_range(px(MIN_PANE)..px(f32::MAX))
+                                    .child(results),
+                            ),
+                    ),
             )
-            .child(self.meta_buttons(&present, cx))
     }
 
-    /// pyfa's meta group toggles under the market list. A click shows one category, Ctrl+click
-    /// adds or removes one; categories the list does not hold are greyed out.
+    fn market_tree(&self, loaded: &Loaded, jump: bool, cx: &mut Context<Self>) -> AnyElement {
+        let mut entries = Vec::new();
+        for &root in &loaded.catalog.market_roots {
+            self.tree_group(loaded, root, 0, &mut entries);
+        }
+        entries.push(TreeEntry {
+            id: RECENT_GROUP,
+            depth: 0,
+            name: "Recently Used Items".into(),
+            icon: GroupIcon::Lucide(IconName::Calendar),
+            branch: false,
+            listing: Listing::Recent,
+        });
+        entries.push(TreeEntry {
+            id: CHARGES_GROUP,
+            depth: 0,
+            name: "Charges For Active Fit".into(),
+            icon: GroupIcon::Lucide(IconName::Asterisk),
+            branch: false,
+            listing: Listing::FitCharges,
+        });
+        if let Some(listing @ Listing::ModuleCharges(module)) = self.listing {
+            entries.push(TreeEntry {
+                id: MODULE_CHARGES_GROUP,
+                depth: 0,
+                name: format!("Charges for {}", loaded.catalog.name(module)).into(),
+                icon: GroupIcon::Lucide(IconName::BatteryCharging),
+                branch: false,
+                listing,
+            });
+        }
+        if jump && let Some(index) = entries.iter().position(|e| Some(e.listing) == self.listing) {
+            self.market_tree_scroll.scroll_to_item(index);
+        }
+        v_flex()
+            .id("market-tree")
+            .size_full()
+            .overflow_y_scroll()
+            .track_scroll(&self.market_tree_scroll)
+            .children(
+                entries
+                    .into_iter()
+                    .map(|entry| self.group_row(loaded, entry, cx)),
+            )
+            .into_any_element()
+    }
+
+    fn tree_group(&self, loaded: &Loaded, id: i32, depth: usize, out: &mut Vec<TreeEntry>) {
+        let Some(group) = loaded.catalog.market_groups.get(&id) else {
+            return;
+        };
+        out.push(TreeEntry {
+            id,
+            depth,
+            name: group.name.clone().into(),
+            icon: GroupIcon::Game(group.icon_id),
+            branch: !group.children.is_empty(),
+            listing: Listing::Group(id),
+        });
+        if self.expanded_groups.contains(&id) {
+            for &child in &group.children {
+                self.tree_group(loaded, child, depth + 1, out);
+            }
+        }
+    }
+
+    fn group_row(&self, loaded: &Loaded, entry: TreeEntry, cx: &mut Context<Self>) -> AnyElement {
+        let TreeEntry {
+            id,
+            depth,
+            name,
+            icon,
+            branch,
+            listing,
+        } = entry;
+        let expanded = self.expanded_groups.contains(&id);
+        let selected = self.listing == Some(listing);
+        h_flex()
+            .id(SharedString::from(format!("group-{id}")))
+            .gap_1()
+            .h(px(22.))
+            .flex_none()
+            .pl(px(4. + INDENT * depth as f32))
+            .when(selected, |row| row.bg(cx.theme().list_active))
+            .hover(|s| s.bg(cx.theme().list_hover))
+            .child(
+                div()
+                    .w(px(10.))
+                    .flex_none()
+                    .text_xs()
+                    .when(branch, |d| d.child(if expanded { "▾" } else { "▸" })),
+            )
+            .map(|row| match icon {
+                GroupIcon::Game(Some(icon_id)) => row.child(icon_box(
+                    &loaded.catalog,
+                    &loaded.icons,
+                    Icon::Id(icon_id),
+                    18.,
+                )),
+                GroupIcon::Game(None) => row,
+                GroupIcon::Lucide(name) => row.child(
+                    div()
+                        .size(px(18.))
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .justify_center()
+                        .child(LucideIcon::new(name).size(px(14.))),
+                ),
+            })
+            .child(div().truncate().child(name))
+            // A click lists the entry's items and opens it; a second click closes it again.
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                if branch && (!selected || !this.expanded_groups.remove(&id)) {
+                    this.expanded_groups.insert(id);
+                }
+                this.select_listing(listing, window, cx);
+            }))
+            .into_any_element()
+    }
+
+    /// List something in the results pane, leaving the search so it shows.
+    fn select_listing(&mut self, listing: Listing, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.search_text.is_empty() || self.search_debounce.is_some() {
+            self.search_text.clear();
+            self.search_debounce = None;
+            self.search
+                .update(cx, |input, cx| input.set_value("", window, cx));
+        }
+        if self.listing != Some(listing) {
+            self.listing = Some(listing);
+            self.market_highlight = None;
+            self.market_scroll.scroll_to_item(0, ScrollStrategy::Top);
+        }
+        cx.notify();
+    }
+
+    /// The results pane: what it lists, its filter bar, and the list itself.
+    fn results_pane(&mut self, loaded: &Loaded, jump: bool, cx: &mut Context<Self>) -> AnyElement {
+        let catalog = &loaded.catalog;
+        let results = self.market_results(loaded);
+        let room = self.ship_room(catalog);
+        let can_filter_ship = room.is_some();
+        let room = room.filter(|_| self.fits_ship_only);
+        let text = TextFilter::new(&self.results_filter_text, Jargon::global());
+        let mut meta = self.meta_filter;
+        let filtered = results.as_ref().map_or_default(|(_, sections)| {
+            filter_results(catalog, sections, text.as_ref(), room.as_ref(), &mut meta)
+        });
+        self.meta_filter = meta;
+        let key = results.map(|(key, _)| key);
+        if jump
+            && let Some(target) = self.market_highlight
+            && let Some(index) = filtered
+                .rows
+                .iter()
+                .position(|row| *row == ResultRow::Item(target))
+        {
+            self.market_scroll
+                .scroll_to_item(index, ScrollStrategy::Center);
+        }
+        let (muted, border) = (cx.theme().muted_foreground, cx.theme().border);
+        let title = results_title(catalog, key.as_ref());
+        let count = count_label(&filtered);
+        let body = if filtered.rows.is_empty() {
+            self.results_empty(key.as_ref(), &filtered, cx)
+        } else {
+            let rows = Rc::new(filtered.rows);
+            let group = match key {
+                Some(ResultsKey::Listing(Listing::Group(group))) => Some(group),
+                _ => None,
+            };
+            uniform_list(
+                "market-results",
+                rows.len(),
+                cx.processor(move |this, range: Range<usize>, _, cx| {
+                    let Some(loaded) = this.loaded() else {
+                        return Vec::new();
+                    };
+                    rows[range]
+                        .iter()
+                        .map(|row| match row {
+                            ResultRow::Heading(title) => heading_row(title, cx),
+                            ResultRow::Item(id) => {
+                                let own = loaded.catalog.get(*id).and_then(|t| t.market_group);
+                                let context = if group.is_some() && own == group {
+                                    MarketContext::Group
+                                } else {
+                                    MarketContext::Search
+                                };
+                                this.item_row(&loaded, *id, context, cx)
+                            }
+                        })
+                        .collect()
+                }),
+            )
+            .track_scroll(&self.market_scroll)
+            .flex_1()
+            .min_h_0()
+            .into_any_element()
+        };
+        v_flex()
+            .size_full()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .text_xs()
+                    .text_color(muted)
+                    .border_b_1()
+                    .border_color(border)
+                    .child(div().flex_1().min_w_0().truncate().child(title))
+                    .children(count.map(|c| div().flex_none().child(c))),
+            )
+            .child(
+                h_flex()
+                    .gap_1()
+                    .px_1()
+                    .pt_1()
+                    .child(div().flex_1().min_w_0().child(self.results_filter_input()))
+                    .child(
+                        Button::new("market-fits-ship")
+                            .ghost()
+                            .xsmall()
+                            .icon(LucideIcon::new(AssetIcon::Rocket))
+                            .tooltip(if can_filter_ship {
+                                "Fits current ship: hide what this fit cannot use"
+                            } else {
+                                "Fits current ship: needs a fit with a ship"
+                            })
+                            .selected(self.fits_ship_only && can_filter_ship)
+                            .disabled(!can_filter_ship)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.fits_ship_only = !this.fits_ship_only;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(self.meta_buttons(&filtered.present, cx))
+            .child(body)
+            .into_any_element()
+    }
+
+    /// What the results pane says when it has nothing to show.
+    fn results_empty(
+        &self,
+        key: Option<&ResultsKey>,
+        filtered: &Filtered,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let message = match key {
+            _ if filtered.total > 0 => {
+                let n = filtered.total;
+                let items = if n == 1 { "item" } else { "items" };
+                format!("The filters hide all {n} {items}.")
+            }
+            None => "Pick a market group, or search the market.".to_owned(),
+            Some(ResultsKey::Search(_)) => "No matching items.".to_owned(),
+            Some(ResultsKey::Listing(Listing::Group(_))) => "Nothing in this group.".to_owned(),
+            Some(ResultsKey::Listing(Listing::Recent)) => {
+                "Items you add from the market show up here.".to_owned()
+            }
+            Some(ResultsKey::Listing(Listing::FitCharges)) => {
+                "The fit has nothing that takes charges.".to_owned()
+            }
+            Some(ResultsKey::Listing(Listing::ModuleCharges(_))) => {
+                "This module takes no charges.".to_owned()
+            }
+        };
+        let filters_on = !self.results_filter_text.trim().is_empty() || self.fits_ship_only;
+        v_flex()
+            .flex_1()
+            .gap_2()
+            .p_2()
+            .items_start()
+            .text_color(cx.theme().muted_foreground)
+            .child(message)
+            .when(filtered.total > 0 && filters_on, |pane| {
+                pane.child(
+                    Button::new("market-clear-filters")
+                        .xsmall()
+                        .label("Clear filters")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.results_filter_text.clear();
+                            this.results_filter
+                                .update(cx, |input, cx| input.set_value("", window, cx));
+                            this.fits_ship_only = false;
+                            cx.notify();
+                        })),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// pyfa's meta group toggles, over the results. A click shows one category, Ctrl+click
+    /// adds or removes one; categories the results do not hold are greyed out.
     fn meta_buttons(&self, present: &HashSet<MetaCategory>, cx: &mut Context<Self>) -> AnyElement {
         h_flex()
             .gap_1()
             .p_1()
-            .border_t_1()
+            .border_b_1()
             .border_color(cx.theme().border)
             .children(MetaCategory::ALL.into_iter().map(|category| {
                 div().flex_1().child(
@@ -308,55 +589,6 @@ impl Gyfa {
             .into_any_element()
     }
 
-    fn group_row(
-        &self,
-        loaded: &Loaded,
-        id: i32,
-        depth: usize,
-        name: SharedString,
-        icon: GroupIcon,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let expanded = self.expanded_groups.contains(&id);
-        h_flex()
-            .id(SharedString::from(format!("group-{id}")))
-            .gap_1()
-            .h(px(22.))
-            .pl(px(4. + INDENT * depth as f32))
-            .hover(|s| s.bg(cx.theme().list_hover))
-            .child(
-                div()
-                    .w(px(10.))
-                    .text_xs()
-                    .child(if expanded { "▾" } else { "▸" }),
-            )
-            .map(|row| match icon {
-                GroupIcon::Game(Some(icon_id)) => row.child(icon_box(
-                    &loaded.catalog,
-                    &loaded.icons,
-                    Icon::Id(icon_id),
-                    18.,
-                )),
-                GroupIcon::Game(None) => row,
-                GroupIcon::Lucide(name) => row.child(
-                    div()
-                        .size(px(18.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(LucideIcon::new(name).size(px(14.))),
-                ),
-            })
-            .child(name)
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                if !this.expanded_groups.remove(&id) {
-                    this.expanded_groups.insert(id);
-                }
-                cx.notify();
-            }))
-            .into_any_element()
-    }
-
     /// The Omega marker, when the preference shows it and the type needs Omega.
     fn omega_marker(&self, loaded: &Loaded, id: TypeId, size: f32) -> Option<AnyElement> {
         let omega = loaded.catalog.get(id).is_some_and(|t| t.omega);
@@ -369,7 +601,6 @@ impl Gyfa {
         &self,
         loaded: &Loaded,
         id: TypeId,
-        depth: usize,
         context: MarketContext,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -380,8 +611,8 @@ impl Gyfa {
         h_flex()
             .id(SharedString::from(format!("item-{id}")))
             .gap_2()
-            .h(px(26.))
-            .pl(px(18. + INDENT * depth as f32))
+            .h(px(RESULT_ROW_H))
+            .px_1()
             .when(highlighted, |row| row.bg(cx.theme().list_active))
             .hover(|s| s.bg(cx.theme().list_hover))
             .children(self.omega_marker(loaded, id, 16.))
@@ -937,6 +1168,87 @@ impl Gyfa {
             return 0;
         }
         (free / volume).floor() as u32
+    }
+}
+
+/// What the results pane shows, for its title.
+fn results_title(catalog: &Catalog, key: Option<&ResultsKey>) -> String {
+    match key {
+        None => "Items".to_owned(),
+        Some(ResultsKey::Search(text)) => format!("Search: {text}"),
+        Some(ResultsKey::Listing(Listing::Group(group))) => catalog
+            .market_groups
+            .get(group)
+            .map_or_else(String::new, |g| g.name.clone()),
+        Some(ResultsKey::Listing(Listing::Recent)) => "Recently Used Items".to_owned(),
+        Some(ResultsKey::Listing(Listing::FitCharges)) => "Charges For Active Fit".to_owned(),
+        Some(ResultsKey::Listing(Listing::ModuleCharges(module))) => {
+            format!("Charges for {}", catalog.name(*module))
+        }
+    }
+}
+
+/// "12 items", or "3 of 12" while filters hide some.
+fn count_label(filtered: &Filtered) -> Option<String> {
+    match (filtered.count, filtered.total) {
+        (_, 0) => None,
+        (1, 1) => Some("1 item".to_owned()),
+        (shown, total) if shown == total => Some(format!("{total} items")),
+        (shown, total) => Some(format!("{shown} of {total}")),
+    }
+}
+
+/// A heading over a run of results, such as a charge family.
+fn heading_row(title: &str, cx: &App) -> AnyElement {
+    div()
+        .h(px(RESULT_ROW_H))
+        .flex()
+        .items_end()
+        .px_2()
+        .pb_0p5()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .border_b_1()
+        .border_color(cx.theme().border)
+        .child(title.to_owned())
+        .into_any_element()
+}
+
+/// Every charge a module loads, grouped the way its Charge menu groups them: turret ammo by
+/// family from long range to short, missiles by damage type, anything else in one list.
+fn module_charge_sections(catalog: &Catalog, module: TypeId) -> Vec<Section> {
+    let Some(m) = catalog.get(module) else {
+        return Vec::new();
+    };
+    let charges = compatible_charges(catalog, module);
+    match structure_charges(catalog, m, &charges) {
+        ChargeMenu::Turret(families) => {
+            let (grades, singles): (Vec<_>, Vec<_>) =
+                families.into_iter().partition(|f| f.len() > 1);
+            let mut sections: Vec<Section> = grades
+                .into_iter()
+                .map(|family| Section {
+                    title: Some(catalog.name(family[0])),
+                    items: family,
+                })
+                .collect();
+            let singles: Vec<TypeId> = singles.into_iter().flatten().collect();
+            if !singles.is_empty() {
+                sections.push(Section {
+                    title: Some("Other charges".to_owned()),
+                    items: singles,
+                });
+            }
+            sections
+        }
+        ChargeMenu::Missile(by_type) => by_type
+            .into_iter()
+            .map(|(label, items)| Section {
+                title: Some(label.to_owned()),
+                items,
+            })
+            .collect(),
+        ChargeMenu::Flat(list) => vec![Section::untitled(list)],
     }
 }
 

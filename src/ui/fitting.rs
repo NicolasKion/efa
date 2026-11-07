@@ -809,9 +809,11 @@ fn item_menu(
     let mut menu = menu;
     let shown = super::hub::preferences(cx).context_menus;
 
+    let mut takes_charges = false;
     if let Some(m) = &snapshot.module {
         let charges = compatible_charges(catalog, type_id);
-        if !charges.is_empty() {
+        takes_charges = !charges.is_empty();
+        if takes_charges {
             let structure = structure_charges(catalog, t, &charges);
             menu = charge_submenu(menu, this, loaded, item, structure, m.charge, window, cx);
         }
@@ -928,6 +930,16 @@ fn item_menu(
                 this,
                 move |g, _, window, cx| {
                     g.jump_to_market(charge, window, cx);
+                },
+            )),
+        );
+    }
+    if takes_charges {
+        menu = menu.item(
+            entry(IconName::BatteryCharging, "Show Compatible Charges").on_click(handler(
+                this,
+                move |g, _, window, cx| {
+                    g.show_charges_for(type_id, window, cx);
                 },
             )),
         );
