@@ -7,6 +7,7 @@ mod cargo;
 mod characters;
 mod columns;
 mod drones;
+mod efs;
 mod eft;
 mod implants;
 mod item_stats;

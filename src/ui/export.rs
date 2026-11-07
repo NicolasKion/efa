@@ -80,7 +80,7 @@ impl Gyfa {
 
 impl ExportWindow {
     /// The fit in the chosen format, with its options.
-    fn render_text(&self) -> Result<String, String> {
+    fn render_text(&self, cx: &App) -> Result<String, String> {
         let catalog = &self.loaded.catalog;
         let fit = &self.fit;
         match self.settings.format {
@@ -89,6 +89,22 @@ impl ExportWindow {
             Format::Esi => port::esi::export(fit, catalog),
             Format::Dna => Ok(dna::export(fit, catalog, &self.settings.dna)),
             Format::Xml => Ok(xml::export(&[fit], catalog)),
+            Format::Efs => {
+                let hub = self.hub.read(cx);
+                let characters = &hub.characters;
+                let pilot = characters.pilot(fit.character, catalog);
+                let id = characters.resolve(fit.character);
+                let name = characters.name(id);
+                let exporter = format!("gyfa {}", env!("CARGO_PKG_VERSION"));
+                let context = crate::engine::EfsContext {
+                    catalog,
+                    fits: &hub.saved.fits,
+                    pilot: &pilot,
+                    character: (id != crate::character::CharacterId::All5).then_some(name.as_str()),
+                    exporter: &exporter,
+                };
+                port::efs::export(&self.loaded.engine, fit, &context)
+            }
             Format::Stats => {
                 let stats = self.stats.as_ref().ok_or("no stats for this fit yet")?;
                 let ship = fit.ship.map_or_default(|s| catalog.name(s));
@@ -98,7 +114,7 @@ impl ExportWindow {
     }
 
     fn copy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.render_text() {
+        match self.render_text(cx) {
             Ok(text) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
                 let settings = self.settings;
@@ -197,7 +213,7 @@ impl ExportWindow {
                     s.dna.formatting = v;
                 },
             )],
-            Format::Esi | Format::Stats | Format::Xml => Vec::new(),
+            Format::Esi | Format::Efs | Format::Stats | Format::Xml => Vec::new(),
         };
         boxes
             .into_iter()
