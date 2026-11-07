@@ -676,16 +676,41 @@ impl Gyfa {
         let stage = self.ship_browser.stage.clone();
         let mut races = Vec::new();
         let rows: Vec<AnyElement> = match &stage {
-            Stage::Groups => loaded
-                .catalog
-                .ship_groups
-                .iter()
-                .filter_map(|(group, _)| {
-                    let count = ship_browser::group_fit_count(&loaded.catalog, *group, &counts);
-                    (!self.ship_browser.hide_empty || count > 0)
-                        .then(|| Self::ship_group_row(loaded, *group, count, cx))
-                })
-                .collect(),
+            Stage::Groups => {
+                // Ships first, then structures in a section of their own.
+                let shown = |structures: bool| {
+                    loaded
+                        .catalog
+                        .ship_groups
+                        .iter()
+                        .filter(move |(_, types)| {
+                            types
+                                .first()
+                                .and_then(|&t| loaded.catalog.get(t))
+                                .is_some_and(|t| t.is_structure() == structures)
+                        })
+                        .filter_map(|(group, _)| {
+                            let count =
+                                ship_browser::group_fit_count(&loaded.catalog, *group, &counts);
+                            (!self.ship_browser.hide_empty || count > 0).then_some((*group, count))
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let (ships, structures) = (shown(false), shown(true));
+                let mut rows = Vec::new();
+                for (title, groups) in [("Ships", ships), ("Structures", structures)] {
+                    if groups.is_empty() {
+                        continue;
+                    }
+                    rows.push(section_header(title, cx));
+                    rows.extend(
+                        groups
+                            .into_iter()
+                            .map(|(group, count)| Self::ship_group_row(loaded, group, count, cx)),
+                    );
+                }
+                rows
+            }
             Stage::Ships(group) => {
                 let ships = loaded.catalog.ships_in(*group);
                 let present: HashSet<Race> = ships
@@ -756,7 +781,7 @@ impl Gyfa {
                     .children(rows),
             )
             .when(!races.is_empty(), |pane| {
-                pane.child(self.race_filter(&races, cx))
+                pane.child(self.race_filter(loaded, &races, cx))
             })
     }
 
@@ -888,29 +913,65 @@ impl Gyfa {
                 })
                 .into_any_element()
             }
+            Stage::Ships(group) => row
+                .children(crate::brackets::ship_bracket(*group).map(|b| {
+                    icon_box(&loaded.catalog, &loaded.icons, Icon::Bracket(b), 16.)
+                }))
+                .child(title)
+                .into_any_element(),
             _ => row.child(title).into_any_element(),
         }
     }
 
     /// The race toggles under a group's ships, pyfa's race selector.
-    fn race_filter(&self, races: &[Race], cx: &mut Context<Self>) -> AnyElement {
+    /// The race filter under a group's ships: one faction logo per race, the name on hover.
+    fn race_filter(&self, loaded: &Loaded, races: &[Race], cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let buttons: Vec<AnyElement> = races
+            .iter()
+            .map(|&race| {
+                let on = self.ship_browser.races.contains(&race);
+                let label = race.label();
+                let button = div()
+                    .id(SharedString::from(format!("race-{race:?}")))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .h(px(30.))
+                    .min_w(px(30.))
+                    .rounded(px(5.))
+                    .border_1()
+                    .when(on, |d| d.bg(theme.secondary).border_color(theme.primary))
+                    .when(!on, |d| {
+                        d.border_color(gpui_kit::transparent_black())
+                            .opacity(0.6)
+                            .hover(|s| s.opacity(1.).bg(theme.secondary))
+                    })
+                    .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.ship_browser.toggle_race(race);
+                        cx.notify();
+                    }));
+                match race.logo_corp() {
+                    Some(corp) => button
+                        .child(icon_box(
+                            &loaded.catalog,
+                            &loaded.icons,
+                            Icon::CorpLogo(corp),
+                            24.,
+                        ))
+                        .into_any_element(),
+                    None => button.px_2().text_xs().child(label).into_any_element(),
+                }
+            })
+            .collect();
         h_flex()
             .flex_wrap()
             .gap_1()
             .p_1()
             .border_t_1()
-            .border_color(cx.theme().border)
-            .children(races.iter().map(|&race| {
-                Button::new(SharedString::from(format!("race-{race:?}")))
-                    .xsmall()
-                    .label(race.label())
-                    .toggled(self.ship_browser.races.contains(&race))
-                    .selected(self.ship_browser.races.contains(&race))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.ship_browser.toggle_race(race);
-                        cx.notify();
-                    }))
-            }))
+            .border_color(theme.border)
+            .children(buttons)
             .into_any_element()
     }
 
@@ -932,6 +993,13 @@ impl Gyfa {
             .px_2()
             .h(px(26.))
             .hover(|s| s.bg(cx.theme().list_hover))
+            .child(
+                div().w(px(16.)).flex_none().children(
+                    crate::brackets::ship_bracket(group).map(|b| {
+                        icon_box(&loaded.catalog, &loaded.icons, Icon::Bracket(b), 16.)
+                    }),
+                ),
+            )
             .child(div().flex_1().truncate().child(name))
             .when(count > 0, |row| {
                 row.child(
@@ -1481,4 +1549,22 @@ fn market_menu(
         );
     }
     menu
+}
+
+/// A band over a run of rows in the fittings browser, like the fitting view's rack labels.
+fn section_header(title: &'static str, cx: &App) -> AnyElement {
+    let theme = cx.theme();
+    div()
+        .mt_2()
+        .px_2()
+        .py_1()
+        .bg(theme.secondary)
+        .border_t_1()
+        .border_b_1()
+        .border_color(theme.border)
+        .text_xs()
+        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+        .text_color(theme.muted_foreground)
+        .child(title)
+        .into_any_element()
 }
