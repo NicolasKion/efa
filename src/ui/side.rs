@@ -44,8 +44,8 @@ const SEARCH_LIMIT: usize = 500;
 const INDENT: f32 = 14.;
 /// Height of every results row, items and headings alike, as the list needs.
 const RESULT_ROW_H: f32 = 26.;
-/// Height of the market tree over the results until the user drags the divider.
-const DEFAULT_SPLIT: f32 = 260.;
+/// Height of the market results pane until the user drags the divider.
+const DEFAULT_RESULTS: f32 = 420.;
 /// Least height either half of the market keeps.
 const MIN_PANE: f32 = 80.;
 /// Drones that can be in space at once without skills, the floor for a stack's size.
@@ -229,7 +229,7 @@ impl Gyfa {
         let jump = std::mem::take(&mut self.market_scroll_pending);
         let results = self.results_pane(loaded, jump, cx);
         let tree = self.market_tree(loaded, jump, cx);
-        let split = self.saved.market_split.unwrap_or(DEFAULT_SPLIT);
+        let results_height = self.saved.market_results.unwrap_or(DEFAULT_RESULTS);
         let weak = Self::weak(cx);
         v_flex()
             .flex_1()
@@ -244,23 +244,25 @@ impl Gyfa {
                     .child(
                         v_resizable("market-split")
                             .on_resize(move |state, _, cx| {
-                                let Some(&height) = state.read(cx).sizes().first() else {
+                                let Some(&height) = state.read(cx).sizes().last() else {
                                     return;
                                 };
                                 let _ = weak.update(cx, |g, _| {
-                                    g.saved.market_split = Some(f32::from(height));
+                                    g.saved.market_results = Some(f32::from(height));
                                     g.save();
                                 });
                             })
                             .child(
                                 resizable_panel()
-                                    .size(px(split))
                                     .size_range(px(MIN_PANE)..px(f32::MAX))
                                     .child(tree),
                             )
+                            // The results keep their height as the window resizes.
                             .child(
                                 resizable_panel()
+                                    .size(px(results_height))
                                     .size_range(px(MIN_PANE)..px(f32::MAX))
+                                    .fixed()
                                     .child(results),
                             ),
                     ),
