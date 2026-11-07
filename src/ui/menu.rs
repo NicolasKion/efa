@@ -612,6 +612,13 @@ impl Gyfa {
                     Some(Box::new(ImplantSetEditor)),
                     |g, window, cx| g.open_implant_set_editor(None, window, cx),
                 ))
+                .item(command(
+                    &this,
+                    IconName::Inbox,
+                    "Cargo Presets",
+                    None,
+                    |g, _, cx| g.open_cargo_preset_editor(None, cx),
+                ))
                 .item(
                     PopupMenuItem::new("Damage Pattern Editor")
                         .icon(IconName::Settings2)

@@ -3,9 +3,11 @@
 
 mod actions;
 mod additions;
+mod cargo_presets;
 mod character_editor;
 mod characters;
 mod columns;
+mod editor_kit;
 mod error_dialog;
 mod esi;
 mod export;

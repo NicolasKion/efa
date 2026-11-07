@@ -1,4 +1,5 @@
 pub mod brackets;
+pub mod cargo_preset;
 pub mod cdn;
 pub mod character;
 pub mod damage_pattern;

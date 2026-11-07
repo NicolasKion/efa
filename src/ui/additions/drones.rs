@@ -816,7 +816,7 @@ impl Gyfa {
                     self.apply(Action::AddDrones(id, amount), cx);
                 }
             }
-            DragSource::Row(_) | DragSource::Cargo => {}
+            DragSource::Row(_) | DragSource::Cargo | DragSource::Listed => {}
         }
     }
 }

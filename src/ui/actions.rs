@@ -142,6 +142,8 @@ pub enum Action {
     /// pyfa's Optimize Fit Price: swap items for their cheapest replacement at the current
     /// prices, leaving out swaps the fitting rules refuse.
     OptimizePrice,
+    /// Put a cargo preset into the hold as its policy says.
+    ApplyCargoPreset(crate::cargo_preset::CargoPreset),
 }
 
 /// What a mutaplasmid is applied to.
@@ -266,6 +268,7 @@ impl Gyfa {
         let stats = self.stats.as_ref();
         let prices = std::rc::Rc::clone(&self.prices);
         let mut report: Option<String> = None;
+        let implants_in_cargo = self.saved.preferences.general.implants_in_cargo;
         let fit = &mut self.saved.fits[current];
         // In a grouped rack, whatever happens to a module happens to its whole group.
         let action = with_groups(fit, action);
@@ -581,6 +584,27 @@ impl Gyfa {
             }
             Action::SetDronesActive(i, n) => fit.drones[i].active = n.min(fit.drones[i].count),
             Action::AddCargo(type_id, count) => fit.add_cargo(type_id, count),
+            Action::ApplyCargoPreset(preset) => {
+                let applied = crate::cargo_preset::apply(&preset, &mut fit.cargo);
+                let noun = crate::cargo_preset::noun(&loaded.catalog, &preset);
+                let mut text = format!("{}: {}", preset.name, applied.summary(&noun));
+                let capacity = stats.and_then(|s| s.cargo_capacity);
+                let used = fit.hold_volume(&loaded.catalog, implants_in_cargo);
+                if let Some(capacity) = capacity
+                    && applied.changed()
+                    && used > capacity + 1e-6
+                {
+                    use std::fmt::Write;
+                    let _ = write!(
+                        text,
+                        ". The hold is overfull: {} / {} m³",
+                        super::widgets::short(used),
+                        super::widgets::short(capacity)
+                    );
+                }
+                report = Some(text);
+                structural = applied.removed > 0;
+            }
             Action::AddDrones(type_id, count) => fit.add_drones(type_id, count),
             Action::RemoveAdditions(kind, rows) => {
                 let rows: BTreeSet<usize> = rows.into_iter().collect();
