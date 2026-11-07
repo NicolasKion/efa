@@ -708,7 +708,48 @@ fn charge_misc(catalog: &Catalog, charge: TypeId, m: &ModuleMisc) -> Option<(Str
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
+    use crate::{
+        data::Slot,
+        engine::{Engine, FitItem},
+        fit::Fit,
+    };
+
+    /// pyfa's texts for a few modules of a real fit.
+    #[test]
+    fn texts_match_pyfa() {
+        const DATA: &str = "data/eve";
+        if !Path::new(DATA).join("phobos/metadata.json").exists() {
+            eprintln!("no EVE data in {DATA}, skipping");
+            return;
+        }
+        let catalog = Catalog::load(Path::new(DATA)).expect("the dump loads");
+        let engine = Engine::load(
+            Path::new(DATA),
+            Path::new("data/cache"),
+            catalog.skills.clone(),
+        )
+        .expect("the engine loads");
+        let eft = "[Vexor, Misc]\nDamage Control II\n\nStasis Webifier II\nWarp Scrambler II\n";
+        let (fit, _) = Fit::from_eft(&catalog, eft).expect("parses");
+        let stats = engine.compute(&fit);
+        let text = |slot: Slot, i: usize| {
+            let m = fit.rack(slot)[i].as_ref().expect("fitted");
+            let misc = &stats.module_misc[&FitItem::Module(slot, i)];
+            module_misc(&catalog, m.type_id, m.charge, misc, None).expect("a text")
+        };
+        assert_eq!(
+            text(Slot::Mid, 0),
+            ("-60%".to_owned(), "Speed reduction".to_owned())
+        );
+        assert_eq!(
+            text(Slot::Mid, 1),
+            ("-2".to_owned(), "Warp core strength modification".to_owned())
+        );
+        assert_eq!(text(Slot::Low, 0).1, "Assault ability duration");
+    }
 
     #[test]
     fn strongest_bonus_takes_every_name_of_its_size() {

@@ -2,7 +2,7 @@
 
 152 menu entries in 35 right-click contexts (pyfa ContextMenu registry plus 4 hand-built menus).
 gyfa progress is tracked per line below; fitting rows have Shift/Ctrl selection and Ctrl/Alt "all similar" now.
-Biggest gaps: market item actions (9), module extras (variations, mutaplasmids, spool, RAH, fill, skills), generic links, ship menu (tactical mode, sec status), additions copy/paste, stats-pane and graph options.
+Biggest gaps: market item actions, mutaplasmids, generic links, additions copy/paste, stats-pane and graph options.
 
 Legend: `[x]` in gyfa, `[~]` partial, `[ ]` missing. Line format: label | when it shows | what it does | pyfa file (in gui/builtinContextMenus/ unless a path is given).
 
@@ -21,7 +21,7 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 ### fittingModule
 - [x] Charge | module has loadable charges (fitting or projected module) | submenu by module kind: turrets "Long Range" list with per-family submenus ("Less Damage"/"More Damage"), missiles by damage type (EM/Thermal/Explosive/Kinetic/Mixed), mining crystals by ore class, else flat list; last item "Empty" unloads. Applies to all similar modules by default (pref ammoChangeAll), Ctrl/Alt inverts to selection only. GuiChangeLocalModuleChargesCommand | moduleAmmoChange.py
 - [x] Spoolup Cycles | module group "Precursor Weapon" or "Mutadaptive Remote Armor Repairer" (pref spoolup) | checkable list of cycle counts (default marked "(default)", min..max, current) + "Reset". GuiChangeLocalModuleSpoolCommand | moduleSpool.py
-- [ ] RAH Damage Pattern | module group "Armor Resistance Shift Hardener" | checkable: "Fit Pattern", "Do Not Adapt", separator, damage profiles tree (builtin + user, categories as submenus). sFit.setRahPattern | moduleRahPattern.py, shared/patterns.py
+- [x] RAH Damage Pattern | module group "Armor Resistance Shift Hardener" | checkable: "Fit Pattern", "Do Not Adapt", separator, damage profiles tree (builtin + user, categories as submenus). sFit.setRahPattern | moduleRahPattern.py, shared/patterns.py
 - [x] {Module} Stats | always | opens item stats window (Shift reuses last window) | itemStats.py
 - [x] {Module} Market Group | item has a market group (mutated: base item's) | jumps market browser to the item | itemMarketJump.py
 - [x] Remove {Module} | always | removes selection (multi); Ctrl/Alt removes all similar. GuiRemoveLocalModuleCommand | itemRemove.py
@@ -41,11 +41,11 @@ Contexts in order: fittingModule (non-empty module, incl. rigs/subsystems), fitt
 
 ### fittingShip
 - [x] Tactical Mode | ship has modes (T3 destroyers) | radio submenu Defense/Propulsion/Sharpshooter (or Primary/Secondary/Tertiary). GuiChangeShipModeCommand | shipModeChange.py
-- [x] Ship Stats / Citadel Stats | always | stats window for the ship | itemStats.py (no citadels in gyfa yet)
-- [ ] Citadel System Security | fit is a structure | radio: High Security, Low Security, Null Security, W-Space. GuiChangeFitSystemSecurityCommand | fitSystemSecurity.py
+- [x] Ship Stats / Citadel Stats | always | stats window for the ship | itemStats.py
+- [x] Citadel System Security | fit is a structure | radio: High Security, Low Security, Null Security, W-Space. GuiChangeFitSystemSecurityCommand | fitSystemSecurity.py
 - [x] Pilot Security Status | ship is Pacifier, Enforcer, Marshal, Sidewinder, Cobra or Python | radio: "Character (x.xx)", "Custom (x)" (dialog, -10..5), separator, presets -10,-8,-6,-4,-2,0,1,2,3,4,5. GuiChangeFitPilotSecurityCommand | fitPilotSecurity.py
 - [x] Open in Fitting Browser | unless fitting browser already shows this ship's fit list | switches to fittings tab, stage 3 for the ship | shipJump.py
-- [x] Change Ship Skills / Change Citadel Skills | skills affect ship attrs | skill level submenu as above | skillAffectors.py. Always "Ship": gyfa has no citadel fits
+- [x] Change Ship Skills / Change Citadel Skills | skills affect ship attrs | skill level submenu as above | skillAffectors.py
 
 ## Drones pane (gui/builtinAdditionPanes/droneView.py)
 
@@ -292,7 +292,7 @@ refine API paths are under refine-core/src/api. "ui only" = no engine involvemen
 ## fittingModule
 - Charge: yes, Module::set_charge_type_id; charge removal via Charge::remove.
 - Spoolup Cycles: yes, Module::set_spool_override(Spool::Cycles), Module::get_spool_cycle_count for the range.
-- RAH Damage Pattern: partial, Fit::set_rah_incoming_dps is per fit not per module; "Do Not Adapt" maybe via ItemMut::set_effect_mode on the RAH effect.
+- RAH Damage Pattern: yes, Fit::set_rah_incoming_dps is per fit, which is enough with one hardener per fit; "Do Not Adapt" is an all-zero profile, so the hardener never shifts.
 - Module Stats: yes, ItemMut::iter_attrs / get_attr / iter_modifiers (affected by), ItemMut::stats.
 - Market Group: ui only.
 - Remove: yes, Module::remove.
