@@ -42,6 +42,29 @@ pub enum Race {
 }
 
 impl Race {
+    /// The corporation whose logo stands for the race: its faction's.
+    pub fn logo_corp(self) -> Option<i32> {
+        Some(match self {
+            Self::Amarr => 1_000_084,
+            Self::Caldari => 1_000_035,
+            Self::Gallente => 1_000_120,
+            Self::Minmatar => 1_000_051,
+            Self::Sisters => 1_000_130,
+            Self::Ore => 1_000_129,
+            Self::Concord => 1_000_137,
+            Self::Serpentis => 1_000_135,
+            Self::Angel => 1_000_138,
+            Self::Blood => 1_000_134,
+            Self::Sansha => 1_000_162,
+            Self::Guristas => 1_000_127,
+            Self::Mordu => 1_000_128,
+            Self::Deathless => 1_000_441,
+            Self::Jove => 1_000_149,
+            Self::Triglavian => 1_000_298,
+            Self::Upwell => return None,
+        })
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Amarr => "Amarr",

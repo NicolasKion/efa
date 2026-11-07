@@ -24,6 +24,10 @@ pub enum Icon {
     Id(i32),
     /// An item's own icon.
     Type(i32),
+    /// An overview bracket, by texture base name; see [`crate::brackets`].
+    Bracket(&'static str),
+    /// A corporation's logo from CCP's image server, such as a faction's.
+    CorpLogo(i32),
 }
 
 #[derive(Debug)]
@@ -107,6 +111,19 @@ impl Icons {
                 self.cache_dir.join("types").join(format!("{id}.png")),
                 catalog.get(id).and_then(|t| t.icon.clone()),
             ),
+            // The 32 pixel textures, so the icons stay sharp when scaled.
+            Icon::Bracket(name) => (
+                None,
+                self.cache_dir.join("brackets").join(format!("{name}.png")),
+                Some(format!("res:/ui/texture/shared/brackets/{name}_32.png")),
+            ),
+            Icon::CorpLogo(id) => (
+                None,
+                self.cache_dir.join("corps").join(format!("{id}.png")),
+                Some(format!(
+                    "https://images.evetech.net/corporations/{id}/logo?size=64"
+                )),
+            ),
         };
         let on_disk = dumped
             .filter(|p| p.exists())
@@ -141,11 +158,22 @@ fn fetch(
     res_path: &str,
     dest: &Path,
 ) -> Result<(), String> {
-    let cdn = cdn
-        .get_or_init(|| Cdn::connect(cache))
-        .as_ref()
-        .map_err(Clone::clone)?;
-    let bytes = cdn.fetch(res_path)?;
+    let bytes = if res_path.starts_with("https://") {
+        // The image server, not the game's resource CDN.
+        let response = reqwest::blocking::Client::builder()
+            .user_agent(crate::prices::user_agent())
+            .build()
+            .and_then(|client| client.get(res_path).send())
+            .and_then(reqwest::blocking::Response::error_for_status)
+            .map_err(|e| e.to_string())?;
+        response.bytes().map_err(|e| e.to_string())?.to_vec()
+    } else {
+        let cdn = cdn
+            .get_or_init(|| Cdn::connect(cache))
+            .as_ref()
+            .map_err(Clone::clone)?;
+        cdn.fetch(res_path)?
+    };
     std::fs::create_dir_all(dest.parent().unwrap_or(dest)).map_err(|e| e.to_string())?;
     std::fs::write(dest, bytes).map_err(|e| e.to_string())
 }
