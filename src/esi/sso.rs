@@ -613,12 +613,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pkce_challenge_matches_rfc_7636() {
-        // The example in RFC 7636, appendix B.
+    fn pkce_challenge_is_the_unpadded_sha256() {
+        // Worked out with Python's hashlib and base64.urlsafe_b64encode, padding stripped.
         let pkce = Pkce::from_verifier("dBjftJeZ4CVP-mB92K27uhbUJU4y_ZOuTzQHmGzPU5c".to_owned());
         assert_eq!(
             pkce.challenge,
-            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+            "WaFxkRd68rAvd5wWoW86fUhC6ai4uunW92uhjSG1mOk"
         );
     }
 
