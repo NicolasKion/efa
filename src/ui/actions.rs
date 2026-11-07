@@ -129,6 +129,12 @@ pub enum Action {
     SetTargetProfile(Option<crate::target_profile::TargetProfile>),
     /// Group a rack's modules by type, or stop grouping them.
     ToggleGrouped(Slot),
+    /// The fitting wizard's modules at their positions, the racks emptied first if `clear`.
+    /// Modules the fitting rules refuse are left out.
+    ApplyWizard {
+        placements: Vec<crate::wizard::Placement>,
+        clear: bool,
+    },
 }
 
 /// What a mutaplasmid is applied to.
@@ -473,6 +479,24 @@ impl Gyfa {
                     *fit = next;
                     base = after;
                 }
+            }
+            Action::ApplyWizard { placements, clear } => {
+                if clear {
+                    crate::wizard::apply(fit, &[], true);
+                }
+                let mut base = loaded.engine.validate(fit, &pilot);
+                for placement in placements {
+                    let mut next = fit.clone();
+                    crate::wizard::apply(&mut next, std::slice::from_ref(&placement), false);
+                    let after = loaded.engine.validate(&next, &pilot);
+                    if let Some(problem) = base.refusal(&after, next.ignore_restrictions) {
+                        refused = Some(problem.describe(|t| loaded.catalog.name(t)));
+                        continue;
+                    }
+                    *fit = next;
+                    base = after;
+                }
+                structural = true;
             }
             Action::FillClone(slot, i) => {
                 let Some(Some(template)) = fit.rack(slot).get(i).cloned() else {

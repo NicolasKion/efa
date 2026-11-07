@@ -19,3 +19,4 @@ pub mod store;
 pub mod target_profile;
 pub mod theme;
 pub mod ui;
+pub mod wizard;

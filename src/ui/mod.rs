@@ -23,6 +23,7 @@ mod side;
 mod stats;
 mod validation;
 mod widgets;
+mod wizard;
 
 use std::{
     collections::HashSet,

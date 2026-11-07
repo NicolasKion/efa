@@ -42,6 +42,7 @@ gpui_kit::actions!(
         CharacterEditor,
         Graphs,
         HiddenGraphs,
+        FittingWizard,
         Quit,
     ]
 );
@@ -64,13 +65,14 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-q", Quit, Some(CONTEXT)),
         KeyBinding::new("ctrl-g", Graphs, Some(CONTEXT)),
         KeyBinding::new("ctrl-alt-g", HiddenGraphs, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-w", FittingWizard, Some(CONTEXT)),
     ]);
 }
 
 /// A menu entry that runs `f` on the window and shows `action`'s shortcut.
 fn command(
     this: &WeakEntity<Gyfa>,
-    icon: IconName,
+    icon: impl Into<gpui_kit::component::Icon>,
     label: &'static str,
     action: Option<Box<dyn gpui_kit::Action>>,
     f: fn(&mut Gyfa, &mut Window, &mut Context<Gyfa>),
@@ -113,6 +115,9 @@ impl Gyfa {
             }))
             .on_action(cx.listener(|g, _: &Graphs, _, cx| g.open_graphs(cx)))
             .on_action(cx.listener(|g, _: &HiddenGraphs, _, cx| g.open_hidden_graphs(cx)))
+            .on_action(cx.listener(|g, _: &FittingWizard, window, cx| {
+                g.open_wizard(window, cx);
+            }))
             .on_action(cx.listener(|_, _: &Quit, _, cx| cx.quit()))
     }
 
@@ -132,6 +137,7 @@ impl Gyfa {
     pub(super) fn menu_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let this = cx.entity().downgrade();
         let has_fit = self.saved.current.is_some();
+        let has_ship = self.fit().is_some_and(|f| f.ship.is_some());
         let has_fits = !self.saved.fits.is_empty();
         let unrestricted = self.fit().is_some_and(|f| f.ignore_restrictions);
         let (can_undo, can_redo) = (self.can_undo(), self.can_redo());
@@ -232,6 +238,17 @@ impl Gyfa {
                         |g, _, cx| g.redo(cx),
                     )
                     .disabled(!can_redo),
+                )
+                .separator()
+                .item(
+                    command(
+                        &this,
+                        gpui_kit::assets::IconName::WandSparkles,
+                        "Fitting Wizard…",
+                        Some(Box::new(FittingWizard)),
+                        Gyfa::open_wizard,
+                    )
+                    .disabled(!has_ship),
                 )
                 .separator()
                 .item(
