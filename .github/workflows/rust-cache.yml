@@ -71,7 +71,7 @@ jobs:
       - name: Restore EVE data
         if: runner.os == 'Linux'
         id: data
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: data/eve
           key: deimos-${{ steps.deimos.outputs.tag }}

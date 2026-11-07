@@ -106,7 +106,7 @@ jobs:
       - name: Restore pack
         if: steps.deimos.outputs.script == 'true'
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: assets/data/efa-data.pack
           key: efa-pack-${{ steps.deimos.outputs.tag }}-${{ hashFiles('scripts/build-pack.sh', 'build.rs', 'Cargo.lock', 'src/**') }}
