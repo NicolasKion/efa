@@ -86,9 +86,14 @@ jobs:
 
   # The EVE data pack the app embeds, built once per deimos release. Skipped (and the app built
   # without one) while scripts/build-pack.sh does not exist.
+  # It builds efa in the dev profile on CI's runner with CI's settings, so it compiles on top of
+  # the cache rust-cache.yml saves on main, and reuses CI's copy of the EVE data.
   pack:
     name: Data pack
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     outputs:
       built: ${{ steps.result.outputs.built }}
     steps:
@@ -120,6 +125,19 @@ jobs:
       - name: Install Rust
         if: steps.deimos.outputs.script == 'true' && steps.cache.outputs.cache-hit != 'true'
         run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.deimos.outputs.script == 'true' && steps.cache.outputs.cache-hit != 'true'
+        with:
+          shared-key: ci
+          save-if: false
+
+      - name: Restore EVE data
+        if: steps.deimos.outputs.script == 'true' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v6
+        with:
+          path: data/eve
+          key: deimos-${{ steps.deimos.outputs.tag }}
 
       - name: Build pack
         if: steps.deimos.outputs.script == 'true' && steps.cache.outputs.cache-hit != 'true'

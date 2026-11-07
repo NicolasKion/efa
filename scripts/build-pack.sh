@@ -10,9 +10,10 @@ OUT=${1:-$ROOT/assets/data/efa-data.pack}
 
 "$ROOT/scripts/fetch-data.sh"
 # The builder is efa itself, which needs no pack to build one (EFA_PACK may name the file this
-# script is about to write, which build.rs would refuse as missing).
-env -u EFA_PACK cargo build --release --manifest-path "$ROOT/Cargo.toml"
+# script is about to write, which build.rs would refuse as missing). The pack comes out the same
+# from any profile, and a dev build is much quicker to compile than the release one.
+env -u EFA_PACK cargo build --manifest-path "$ROOT/Cargo.toml"
 target=$(cargo metadata --format-version 1 --no-deps --manifest-path "$ROOT/Cargo.toml" | jq -r .target_directory)
-exe="$target/release/efa"
+exe="$target/debug/efa"
 [ -x "$exe" ] || exe="$exe.exe"
 "$exe" --build-pack "$ROOT/data/eve" "$OUT"
