@@ -259,6 +259,9 @@ pub struct Fit {
     /// red.
     #[serde(default)]
     pub ignore_restrictions: bool,
+    /// Racks whose modules of one type act as one: shown as a single row, edited together.
+    #[serde(default)]
+    pub grouped: std::collections::BTreeSet<Slot>,
 }
 
 /// Incoming damage that effective HP, effective repair rates and the reactive armor hardener
@@ -282,6 +285,27 @@ impl Fit {
             name: name.into(),
             ..Self::default()
         }
+    }
+
+    /// Positions of the module at `slot`/`i` and, in a grouped rack, every other module of its
+    /// type and rolls. Empty when nothing is there.
+    pub fn group(&self, slot: Slot, i: usize) -> Vec<usize> {
+        let rack = self.rack(slot);
+        let Some(Some(m)) = rack.get(i) else {
+            return Vec::new();
+        };
+        if !self.grouped.contains(&slot) {
+            return vec![i];
+        }
+        rack.iter()
+            .enumerate()
+            // Mutated modules only group with ones rolled the same.
+            .filter(|(_, o)| {
+                o.as_ref()
+                    .is_some_and(|o| o.type_id == m.type_id && o.mutation == m.mutation)
+            })
+            .map(|(j, _)| j)
+            .collect()
     }
 
     pub fn rack(&self, slot: Slot) -> &Vec<Option<Module>> {
