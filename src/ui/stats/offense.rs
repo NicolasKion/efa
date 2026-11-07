@@ -12,7 +12,7 @@ use gpui_kit::{
 use super::{Pane, Section, format, ids, muted, tip, title};
 use crate::{
     engine::{Damage, FirepowerDetail, MiningRate, SpoolRange},
-    target_profile::applied,
+    target_profile::{applied, applied_breacher},
     ui::{
         Gyfa,
         actions::Action,
@@ -32,7 +32,7 @@ fn has_spool(spool: SpoolRange) -> bool {
 }
 
 /// pyfa's firepower tooltip: the spool range if there is one, then each damage type's share.
-fn dps_tooltip(normal: Damage, spool: SpoolRange) -> String {
+fn dps_tooltip(normal: Damage, pure: f64, spool: SpoolRange) -> String {
     let spooling = has_spool(spool);
     let mut lines = Vec::new();
     if spooling {
@@ -42,7 +42,7 @@ fn dps_tooltip(normal: Damage, spool: SpoolRange) -> String {
             format::amount(spool.full, PREC, 0, 0)
         ));
     }
-    let total = normal.total();
+    let total = normal.total() + pure;
     if total != 0.0 {
         if spooling {
             lines.push(String::new());
@@ -54,6 +54,7 @@ fn dps_tooltip(normal: Damage, spool: SpoolRange) -> String {
             ("Thermal", normal.thermal),
             ("Kinetic", normal.kinetic),
             ("Explosive", normal.explosive),
+            ("Pure", pure),
         ] {
             if value != 0.0 {
                 lines.push(format!(
@@ -85,6 +86,10 @@ fn minus(a: Damage, b: Damage) -> Damage {
         thermal: a.thermal - b.thermal,
         kinetic: a.kinetic - b.kinetic,
         explosive: a.explosive - b.explosive,
+        breacher: crate::engine::Breacher {
+            absolute: a.breacher.absolute - b.breacher.absolute,
+            relative: a.breacher.relative - b.breacher.relative,
+        },
     }
 }
 
@@ -144,15 +149,21 @@ pub(super) fn firepower(
         pre: drone.total(),
         full: drone.total(),
     };
+    // Breacher pods ignore resists; against a profile they are capped by its HP.
     let value = |key: &str, normal: Damage, spool: SpoolRange, suffix: &str| {
+        let pure = applied_breacher(normal, target);
+        let spool = SpoolRange {
+            pre: spool.pre + pure,
+            full: spool.full + pure,
+        };
         let mark = if has_spool(spool) { SPOOL_MARK } else { "" };
         tip(
             format!("fp-{key}"),
             format!(
                 "{}{mark}{suffix}",
-                format::amount(normal.total(), PREC, 0, 0)
+                format::amount(normal.total() + pure, PREC, 0, 0)
             ),
-            dps_tooltip(normal, spool),
+            dps_tooltip(normal, pure, spool),
         )
         .into_any_element()
     };
