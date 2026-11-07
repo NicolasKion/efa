@@ -48,6 +48,13 @@ pub struct General {
     pub omega_icons: bool,
     /// Name mutated items after their mutaplasmid and base item rather than the abyssal type.
     pub expanded_mutant_names: bool,
+    /// Every fit flies the character picked last, pyfa's "Use global character".
+    pub global_character: bool,
+    /// Every fit takes the damage pattern picked last, pyfa's "Use global damage pattern".
+    pub global_damage_pattern: bool,
+    /// The missing skills tooltip lists each skill once rather than per item, pyfa's "Compact
+    /// skills needed tooltip".
+    pub compact_skills: bool,
 }
 
 impl Default for General {
@@ -65,6 +72,9 @@ impl Default for General {
             ship_browser_tooltips: true,
             omega_icons: false,
             expanded_mutant_names: false,
+            global_character: false,
+            global_damage_pattern: false,
+            compact_skills: true,
         }
     }
 }

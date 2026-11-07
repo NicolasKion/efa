@@ -139,6 +139,15 @@ impl Prices {
             .unwrap_or_default()
     }
 
+    /// Forget every price and the copy on disk, pyfa's "Delete All Prices". The next refresh
+    /// fetches them again.
+    pub fn delete_cached(cache_dir: &Path) -> Result<(), String> {
+        match std::fs::remove_file(cache_dir.join(CACHE_FILE)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+            _ => Ok(()),
+        }
+    }
+
     pub fn get(&self, type_id: TypeId) -> Option<f64> {
         self.by_type.get(&type_id).copied()
     }
