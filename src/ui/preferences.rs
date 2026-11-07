@@ -28,6 +28,16 @@ use crate::{
     store::{PriceTotals, Saved},
 };
 
+/// Below this width the page list shows only its icons and the page sits closer to the edges.
+const NARROW_W: f32 = 720.;
+/// A setting's text keeps this much beside its control before the control drops under it.
+const TEXT_MIN_W: f32 = 200.;
+/// Below this height the page's title scrolls with its settings.
+const SHORT_H: f32 = 520.;
+/// The page list's width, and with icons only.
+const PAGES_W: f32 = 200.;
+const PAGES_NARROW_W: f32 = 48.;
+
 /// A switch: id, title, description, whether it is on, and how to set it.
 type Toggle = (
     &'static str,
@@ -1164,8 +1174,8 @@ fn text(
         .into_any_element()
 }
 
-/// A setting: its text on the left, its control on the right. `nested` indents it under the
-/// setting before it.
+/// A setting: its text on the left, its control on the right, or under the text when the row
+/// is too narrow for both. `nested` indents it under the setting before it.
 fn row(
     title: impl Into<SharedString>,
     description: &'static str,
@@ -1175,12 +1185,19 @@ fn row(
     cx: &App,
 ) -> AnyElement {
     h_flex()
-        .gap_6()
+        .flex_wrap()
+        .gap_x_6()
+        .gap_y_2()
         .px_4()
         .py_3()
         .when(nested, Styled::pl_10)
-        .child(text(title, description, disabled, cx))
-        .child(div().flex_none().child(control))
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(TEXT_MIN_W))
+                .child(text(title, description, disabled, cx)),
+        )
+        .child(div().flex_none().max_w_full().child(control))
         .into_any_element()
 }
 
@@ -1214,7 +1231,11 @@ pub(super) fn section(title: &'static str, rows: Vec<AnyElement>, cx: &App) -> A
 }
 
 impl Render for PreferencesWindow {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let viewport = window.viewport_size();
+        let narrow = viewport.width < px(NARROW_W);
+        // A short window scrolls the page's title away with its settings.
+        let short = viewport.height < px(SHORT_H);
         let (prefs, factor_reload, totals) = {
             let saved = &self.hub.read(cx).saved;
             (
@@ -1239,10 +1260,12 @@ impl Render for PreferencesWindow {
             let selected = page == self.page;
             h_flex()
                 .id(page.title())
+                .flex_none()
                 .gap_2p5()
                 .px_2p5()
                 .py_1p5()
                 .rounded(px(6.))
+                .when(narrow, |d| d.justify_center())
                 .when(selected, |d| {
                     d.bg(theme.secondary)
                         .text_color(theme.foreground)
@@ -1263,7 +1286,12 @@ impl Render for PreferencesWindow {
                             theme.muted_foreground
                         }),
                 )
-                .child(page.title())
+                .when(!narrow, |d| d.child(page.title()))
+                .when(narrow, |d| {
+                    d.tooltip(move |window, cx| {
+                        gpui_kit::component::tooltip::Tooltip::new(page.title()).build(window, cx)
+                    })
+                })
                 .on_mouse_down(
                     gpui_kit::MouseButton::Left,
                     cx.listener(move |this, _: &gpui_kit::MouseDownEvent, _, cx| {
@@ -1273,13 +1301,14 @@ impl Render for PreferencesWindow {
                 )
         });
         let header = h_flex()
+            .flex_none()
             .gap_3()
-            .px_8()
-            .pt_6()
-            .pb_4()
+            .when(narrow, |d| d.px_4().pt_4().pb_3())
+            .when(!narrow, |d| d.px_8().pt_6().pb_4())
             .child(
                 div()
                     .flex()
+                    .flex_none()
                     .items_center()
                     .justify_center()
                     .size(px(36.))
@@ -1293,6 +1322,8 @@ impl Render for PreferencesWindow {
             )
             .child(
                 v_flex()
+                    .flex_1()
+                    .min_w_0()
                     .child(
                         div()
                             .text_lg()
@@ -1306,6 +1337,11 @@ impl Render for PreferencesWindow {
                             .child(self.page.summary()),
                     ),
             );
+        let (scrolled_header, fixed_header) = if short {
+            (Some(header), None)
+        } else {
+            (None, Some(header))
+        };
         h_flex()
             .size_full()
             .items_start()
@@ -1314,37 +1350,52 @@ impl Render for PreferencesWindow {
             .text_sm()
             .child(
                 v_flex()
-                    .w(px(200.))
+                    .id("preferences-pages")
+                    .flex_none()
+                    .w(px(if narrow { PAGES_NARROW_W } else { PAGES_W }))
                     .h_full()
+                    .overflow_y_scroll()
                     .px_2()
-                    .py_4()
+                    .when(narrow, |d| d.py_2())
+                    .when(!narrow, |d| d.py_4())
                     .gap_0p5()
                     .border_r_1()
                     .border_color(theme.border)
                     .bg(theme.sidebar)
-                    .child(
-                        div()
-                            .px_2p5()
-                            .pb_3()
-                            .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme.muted_foreground)
-                            .child("PREFERENCES"),
-                    )
+                    .when(!narrow, |d| {
+                        d.child(
+                            div()
+                                .px_2p5()
+                                .pb_3()
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(theme.muted_foreground)
+                                .child("PREFERENCES"),
+                        )
+                    })
                     .children(pages),
             )
             .child(
-                v_flex().flex_1().h_full().min_w_0().child(header).child(
-                    v_flex()
-                        .id("preferences-page")
-                        .flex_1()
-                        .min_h_0()
-                        .overflow_y_scroll()
-                        .px_8()
-                        .pb_8()
-                        .gap_6()
-                        .children(body),
-                ),
+                v_flex()
+                    .flex_1()
+                    .h_full()
+                    .min_w_0()
+                    .children(fixed_header)
+                    .child(
+                        v_flex()
+                            .id("preferences-page")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .children(scrolled_header)
+                            .child(
+                                v_flex()
+                                    .flex_none()
+                                    .when(narrow, |d| d.px_4().pb_4().gap_4())
+                                    .when(!narrow, |d| d.px_8().pb_8().gap_6())
+                                    .children(body),
+                            ),
+                    ),
             )
     }
 }
