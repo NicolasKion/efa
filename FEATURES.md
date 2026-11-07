@@ -1,7 +1,7 @@
 # Feature parity with pyfa
 
-Rough coverage: fitting, stats, additions, item stats, graphs, editors, context menus and the file formats are mostly there. What is left is mainly ESI/SSO, attribute overrides, alpha clones, Optimize Fit Price, EFS export, generic command links and a tail of smaller items (the [ ] and [~] lines).
-Biggest gaps: ESI/SSO (skills, fittings), attribute overrides, fighters in the DNA/XML/ESI/multibuy formats, alpha clones, global character and damage pattern.
+Rough coverage: fitting, stats, additions, item stats, graphs, editors, context menus and the file formats are mostly there. What is left is mainly ESI/SSO, alpha clones, Optimize Fit Price, EFS export, generic command links and a tail of smaller items (the [ ] and [~] lines).
+Biggest gaps: ESI/SSO (skills, fittings), fighters in the DNA/XML/ESI/multibuy formats, alpha clones, global character and damage pattern.
 Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
 Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time, abstract target profiles for applied damage, lock/warp time formulas (all done graph-side in src/graphs).
 
@@ -280,7 +280,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [ ] Logging (pyfaLoggingPreferences.py)
 - [ ] Update checks (pyfaUpdatePreferences.py, service/update.py)
 - [x] HTML export path (pyfaHTMLExportPreferences.py)
-- [ ] Attribute overrides editor (gui/propertyEditor.py, eos/saveddata/override.py, mainMenuBar.py Global > Attribute Overrides and Turn Overrides On/Off): per type and attribute values applied to every item of that type while overrides are on, kept with the saved data; refine: set_value on items if exposed
+- [x] Attribute overrides editor (gui/propertyEditor.py, eos/saveddata/override.py, mainMenuBar.py Global > Attribute Overrides and Turn Overrides On/Off): a window to search a type or pick an overridden one, type a base value per attribute, reset one or all of a type, clear all, and import/export pyfa's override CSV; overrides and the on/off switch are saved; while on they replace the type's base value for every item of it, in projected and command fits, graphs and item stats too, and the item stats window marks them. refine has no API for base values, so the engine's adapted data is patched on load and rebuilt in the background when overrides change. The search leaves out skills; pyfa searches everything
 
 ## ESI and SSO
 

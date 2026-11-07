@@ -15,6 +15,7 @@ mod implant_sets;
 mod item_stats;
 mod menu;
 mod mutations;
+mod overrides;
 mod port;
 mod preferences;
 pub mod profile_editor;
@@ -1197,7 +1198,7 @@ impl Gyfa {
     }
 }
 
-fn load(data_dir: &Path) -> Result<Loaded, String> {
+fn load(data_dir: &Path, overrides: &crate::overrides::Values) -> Result<Loaded, String> {
     if !data_dir.join("phobos/metadata.json").exists() {
         return Err(format!(
             "No EVE data in {}.\nRun scripts/fetch-data.sh, or point GYFA_DATA at a deimos dump.",
@@ -1207,6 +1208,9 @@ fn load(data_dir: &Path) -> Result<Loaded, String> {
     let cache_dir = data_dir.parent().unwrap_or(data_dir).join("cache");
     let catalog = Catalog::load_cached(data_dir, &cache_dir)?;
     let engine = Engine::load(data_dir, &cache_dir, catalog.skills.clone())?;
+    if !overrides.is_empty() {
+        engine.apply_overrides(overrides)?;
+    }
     let icons = Icons::new(data_dir, &cache_dir);
     Ok(Loaded {
         catalog,

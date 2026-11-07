@@ -47,6 +47,9 @@ pub struct Saved {
     /// Height of the market tree over the results pane, in pixels, once the user dragged it.
     #[serde(default)]
     pub market_split: Option<f32>,
+    /// pyfa's attribute overrides and whether they are on.
+    #[serde(default)]
+    pub overrides: crate::overrides::Overrides,
 }
 
 /// What besides ship and fittings the price total includes, with pyfa's defaults.

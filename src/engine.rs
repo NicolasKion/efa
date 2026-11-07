@@ -4,14 +4,17 @@
 mod column;
 mod graph;
 mod inspect;
+mod overrides;
 mod pane;
 mod pilot;
 mod surroundings;
 mod validate;
 
-use std::path::Path;
-
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    sync::RwLock,
+};
 
 use rc::{
     AddMode, AttrId, EveAttrId, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack, SolOwned,
@@ -29,6 +32,7 @@ use crate::{
 
 pub use column::{ModuleMisc, RackHeat, ShipHeat, misc_attr};
 pub use inspect::{AttrValue, FitItem, Inspection, ModOp, Modifier, Source, SourceKind};
+pub use overrides::Overridden;
 pub use pane::{
     CalcOptions, CapDetail, FirepowerDetail, Mining, MiningRate, Misc, Outgoing, SpoolRange, Tank,
 };
@@ -40,7 +44,11 @@ pub use validate::{Budget, ItemRef, MissingSkill, Problem, Validation};
 const CHARACTER: i32 = 1373;
 
 pub struct Engine {
-    src: Src,
+    /// refine's data, with the attribute overrides in [`Engine::overrides`] applied.
+    src: RwLock<Src>,
+    overrides: RwLock<crate::overrides::Values>,
+    data_dir: PathBuf,
+    cache_dir: PathBuf,
     /// The built-in All 5 character, which [`Engine::compute`] flies fits with.
     all5: Pilot,
 }
@@ -317,14 +325,52 @@ impl Engine {
     /// Load refine's data from a Phobos-layout dump. The adapted data is cached in `cache_dir`, so
     /// only the first start after a data update pays for converting it.
     pub fn load(data_dir: &Path, cache_dir: &Path, skills: Vec<TypeId>) -> Result<Self, String> {
-        let edh = redh::PhbFsEdh::new(data_dir).into();
-        let adc = radc::PostcardZfsAdc::new(cache_dir, "tq").into();
-        let src = Src::new(&edh, Some(&adc)).map_err(|e| format!("loading engine data: {e}"))?;
+        let src = overrides::load_src(data_dir, cache_dir, &crate::overrides::Values::new())?;
         let all5 = Pilot {
             skills: skills.into_iter().map(|s| (s, MAX_LEVEL)).collect(),
             ..Pilot::default()
         };
-        Ok(Self { src, all5 })
+        Ok(Self {
+            src: RwLock::new(src),
+            overrides: RwLock::default(),
+            data_dir: data_dir.to_owned(),
+            cache_dir: cache_dir.to_owned(),
+            all5,
+        })
+    }
+
+    /// A solar system on the engine's data.
+    fn sol(&self) -> SolOwned {
+        SolOwned::new(&self.src.read().expect("engine data lock"))
+    }
+
+    /// The attribute overrides the engine calculates with.
+    pub fn overrides(&self) -> crate::overrides::Values {
+        self.overrides.read().expect("overrides lock").clone()
+    }
+
+    /// The attributes of a type whose base value the engine takes from an override.
+    pub fn overridden_attrs(&self, type_id: TypeId) -> Vec<i32> {
+        self.overrides
+            .read()
+            .expect("overrides lock")
+            .get(&type_id)
+            .map_or_default(|attrs| attrs.keys().copied().collect())
+    }
+
+    /// Calculate with data [`Overridden::load`] built from now on.
+    pub fn set_overrides(&self, data: Overridden) {
+        *self.src.write().expect("engine data lock") = data.src;
+        *self.overrides.write().expect("overrides lock") = data.values;
+    }
+
+    /// Calculate with these attribute overrides from now on, building the data right here.
+    pub fn apply_overrides(&self, values: &crate::overrides::Values) -> Result<(), String> {
+        if *self.overrides.read().expect("overrides lock") == *values {
+            return Ok(());
+        }
+        self.set_overrides(Overridden::load(&self.data_dir, &self.cache_dir, values)?);
+        Ok(())
     }
 
     /// The built-in All 5 character.
@@ -356,7 +402,7 @@ impl Engine {
         options: CalcOptions,
     ) -> Stats {
         let mut stats = Stats::default();
-        let mut sol = SolOwned::new(&self.src);
+        let mut sol = self.sol();
         sol.set_sec_zone(sec_zone(fit.system_security));
         if let Some(spool) = options.default_spool {
             sol.set_default_spool(rc::Spool::SpoolScale(rc::UnitInterval::from_f64_clamped(

@@ -486,7 +486,7 @@ impl Engine {
     /// environment. Cheaper than [`Engine::compute_among`], which carries the same result in
     /// [`super::Stats::validation`]; this is for trying out a change before keeping it.
     pub fn validate(&self, fit: &Fit, pilot: &Pilot) -> Validation {
-        let mut sol = rc::SolOwned::new(&self.src);
+        let mut sol = self.sol();
         let mut f = sol.add_fit();
         let Some(local) = super::build_local(&mut f, fit, pilot, &mut Vec::new()) else {
             return Validation::default();

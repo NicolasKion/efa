@@ -813,7 +813,7 @@ fn row(
 }
 
 /// A titled card of settings, divided by hairlines.
-fn section(title: &'static str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
+pub(super) fn section(title: &'static str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
     let theme = cx.theme();
     let mut card = v_flex()
         .rounded(px(8.))
