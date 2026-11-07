@@ -200,8 +200,8 @@ impl ModuleMisc {
     }
 }
 
-fn attrs_of(sol: &mut SolOwned, id: &ItemId, wanted: &[i32]) -> HashMap<i32, f64> {
-    let Ok(mut item) = sol.get_item(id) else {
+fn attrs_of(sol: &mut SolOwned, id: ItemId, wanted: &[i32]) -> HashMap<i32, f64> {
+    let Ok(mut item) = sol.get_item(&id) else {
         return HashMap::new();
     };
     wanted
@@ -225,7 +225,7 @@ fn burst_at(spool: f64) -> StatTimeOptions {
 /// whatever its state, so the numbers come from the item switched on.
 pub(super) fn module_misc(sol: &mut SolOwned, id: ItemId) -> ModuleMisc {
     let mut misc = ModuleMisc {
-        attrs: attrs_of(sol, &id, &misc_attr::MODULE),
+        attrs: attrs_of(sol, id, &misc_attr::MODULE),
         ..ModuleMisc::default()
     };
     if let Ok(item) = sol.get_item(&id)
@@ -246,7 +246,7 @@ pub(super) fn module_misc(sol: &mut SolOwned, id: ItemId) -> ModuleMisc {
     if let Ok(mut module) = sol.get_module(&id) {
         if let Some(charge) = module.get_charge() {
             let charge = charge.get_item_id();
-            misc.charge_attrs = attrs_of(sol, &charge, &misc_attr::CHARGE);
+            misc.charge_attrs = attrs_of(sol, charge, &misc_attr::CHARGE);
         }
         if let Ok(mut module) = sol.get_module(&id) {
             misc.charged_cycles = module.get_charged_cycle_count().map(rc::Count::into_u32);
@@ -338,7 +338,7 @@ impl ShipHeat {
             .iter()
             .filter(|&&other| other != pos)
             .map(|&other| {
-                let distance = other.abs_diff(pos) as i32;
+                let distance = i32::try_from(other.abs_diff(pos)).unwrap_or(i32::MAX);
                 1.0 - rack.attenuation.powi(distance) * self.slot_factor * rack_heat
             })
             .product();
@@ -360,7 +360,7 @@ impl ShipHeat {
             return None;
         }
         // pyfa stops once the chance settles at five decimals.
-        let rounded = |p: f64| (p * 1e5).round();
+        let rounded = |p: f64| (p * 1e5).round() as i64;
         let mut chances = Vec::new();
         let (mut t, mut last) = (step, 0.0);
         while t < HEAT_SIM_TIME {
@@ -403,7 +403,7 @@ impl ShipHeat {
 pub(super) fn ship_heat(sol: &mut SolOwned, ship: ItemId) -> (f64, [f64; 3]) {
     let attrs = attrs_of(
         sol,
-        &ship,
+        ship,
         &[
             heat_attr::HEAT_GENERATION_MULTIPLIER,
             heat_attr::HEAT_ATTENUATION_HI,
@@ -430,7 +430,7 @@ pub(super) fn ship_heat(sol: &mut SolOwned, ship: ItemId) -> (f64, [f64; 3]) {
 pub(super) fn module_heat(sol: &mut SolOwned, id: ItemId) -> (f64, f64, f64) {
     let attrs = attrs_of(
         sol,
-        &id,
+        id,
         &[
             heat_attr::HEAT_ABSORBTION_RATE_MODIFIER,
             heat_attr::HP,

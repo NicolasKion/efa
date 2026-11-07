@@ -104,12 +104,14 @@ impl Gyfa {
     /// Change Skills menus do.
     fn change_skill_level(&mut self, skill: TypeId, level: Option<u8>, cx: &mut Context<Self>) {
         let id = self.fit_character();
+        let strict = self.saved.preferences.engine.strict_skill_levels;
         self.edit_characters(cx, |c, loaded| {
-            c.change_level(
+            c.change_level_with(
                 id,
                 skill,
                 level,
                 crate::character::Keep::Pending,
+                strict,
                 &loaded.catalog,
             );
         });

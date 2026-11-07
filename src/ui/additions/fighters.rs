@@ -19,13 +19,14 @@ use gpui_kit::{
 use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, drones::format_amount, price_text};
 use crate::{
     data::{Catalog, Kind, TypeId, projection::FighterClass},
-    engine::{FighterInfo, Slots, Stats, drone_attr},
+    engine::{FighterInfo, ItemRef, Slots, Stats, drone_attr},
     fit::{Fit, fighters::Fighter, split_count},
     icons::Icon,
     ui::{
         Gyfa, Loaded,
         columns::{ICON_W, STATE_W},
         fitting::{DragSource, Dragged},
+        validation::flag,
         widgets::{color, entry, icon, icon_box, icon_label, item_entry},
     },
 };
@@ -451,6 +452,9 @@ impl Gyfa {
             .when(n % 2 == 1, |r| r.bg(theme.table_even))
             .when(selected, |r| r.bg(theme.table_active))
             .hover(|s| s.bg(theme.table_hover))
+            .when_some(self.problems_of(loaded, ItemRef::Fighter(i)), |row, why| {
+                flag(row, why, theme.danger)
+            })
             .child(
                 div()
                     .id(SharedString::from(format!("fighter-state-{n}")))

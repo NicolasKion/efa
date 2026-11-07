@@ -11,8 +11,7 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, App, AppContext, ClickEvent, Context, Div, FontWeight, InteractiveElement,
     IntoElement, KeyDownEvent, Modifiers, MouseButton, MouseDownEvent, ParentElement, Render,
-    SharedString,
-    Stateful, StatefulInteractiveElement, Styled, WeakEntity, Window, div, img,
+    SharedString, Stateful, StatefulInteractiveElement, Styled, WeakEntity, Window, div, img,
     prelude::FluentBuilder, px,
 };
 
@@ -22,12 +21,13 @@ use super::{
     columns::{Col, ICON_W, STATE_W},
     item_stats::{StatsOf, stats_entry},
     profile_menus::{PickPattern, damage_pattern_menu},
+    validation::flag,
     widgets::{color, entry, icon, icon_box, icon_label, item_entry, item_label, short},
 };
 use crate::{
     damage_pattern::DamagePattern,
     data::{Catalog, Hardpoint, ItemType, Kind, Slot, TypeId},
-    engine::{FitItem, ModuleInfo, SkillTarget, Stats},
+    engine::{FitItem, ItemRef, ModuleInfo, SkillTarget, Stats},
     fit::{DamageProfile, Fit, Module, ModuleState, RahPattern, SystemSecurity},
     icons::Icon,
 };
@@ -201,10 +201,24 @@ impl Gyfa {
             .h(px(ROW_HEIGHT))
             .px_1()
             .gap_1()
-            .when(n % 2 == 1, |r| r.bg(theme.table_even))
             .when_some(slot_tint, Styled::bg)
-            .when(selected, |r| r.bg(theme.table_active))
-            .hover(|s| s.bg(theme.table_hover));
+            .when(selected, |r| r.bg(theme.table_active));
+        // Rack labels are section bands, set off from the rack above; without labels, racks are
+        // only set apart by the gap and border. Only real rows highlight.
+        let base = match row {
+            Row::Header { .. } | Row::ModeHeader => base
+                .when(n > 0, Styled::mt_2)
+                .bg(theme.secondary)
+                .border_t_1()
+                .border_b_1()
+                .border_color(theme.border),
+            Row::Separator => base
+                .h(px(1.))
+                .mt_2()
+                .border_t_1()
+                .border_color(theme.border),
+            _ => base.hover(|s| s.bg(theme.table_hover)),
+        };
         match row {
             Row::Header {
                 label,
@@ -212,18 +226,14 @@ impl Gyfa {
                 total,
             } => base
                 .child(div().w(px(STATE_W)).flex_none())
+                .child(div().w(px(ICON_W - 4.)).flex_none().children(
+                    icon_id.map(|id| icon_box(catalog, &loaded.icons, Icon::Id(id), 18.)),
+                ))
+                .child(div().font_weight(FontWeight::SEMIBOLD).child(label))
                 .child(
                     div()
-                        .w(px(ICON_W - 4.))
-                        .flex_none()
-                        .children(icon_id.map(|id| {
-                            icon_box(catalog, &loaded.icons, Icon::Id(id), 18.)
-                        })),
-                )
-                .child(
-                    div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(format!("─ {total} {label} ─")),
+                        .text_color(theme.muted_foreground)
+                        .child(total.to_string()),
                 )
                 .context_menu(ship_menu_builder(Self::weak(cx), ship))
                 .into_any_element(),
@@ -231,15 +241,18 @@ impl Gyfa {
                 .context_menu(ship_menu_builder(Self::weak(cx), ship))
                 .into_any_element(),
             Row::ModeHeader => base
-                .child(div().w(px(STATE_W + ICON_W)).flex_none())
+                .child(div().w(px(STATE_W + ICON_W - 4.)).flex_none())
                 .child(
                     div()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child("─ Tactical Mode ─"),
+                        .child("Tactical Mode"),
                 )
                 .context_menu(ship_menu_builder(Self::weak(cx), ship))
                 .into_any_element(),
             Row::Mode(mode) => base
+                .when_some(self.problems_of(loaded, ItemRef::Mode), |row, why| {
+                    flag(row, why, theme.danger)
+                })
                 .child(div().w(px(STATE_W)).flex_none())
                 .child(icon_box(catalog, &loaded.icons, Icon::Type(mode), 22.))
                 .child(
@@ -281,21 +294,8 @@ impl Gyfa {
                             return div().into_any_element();
                         };
                         let info = stats.modules.get(&(slot, i)).copied().unwrap_or_default();
-                        let total = stats.slots(slot).total;
                         let misc = self.misc_of(loaded, fit, stats, FitItem::Module(slot, i));
-                        let cells =
-                            self.module_cells(base, loaded, (slot, i), m, info, misc, cx);
-                        // Fits from before slots were enforced can hold more than the ship has.
-                        if i >= total.unwrap_or(0) as usize {
-                            cells.text_color(cx.theme().danger).tooltip(|window, cx| {
-                                gpui_kit::component::tooltip::Tooltip::new(
-                                    "The ship has no slot for this module",
-                                )
-                                .build(window, cx)
-                            })
-                        } else {
-                            cells
-                        }
+                        self.module_cells(base, loaded, (slot, i), m, info, misc.as_ref(), cx)
                     }
                     RowRef::Rig(i) | RowRef::Subsystem(i) => {
                         let id = match item {
@@ -333,6 +333,12 @@ impl Gyfa {
                             )
                     }
                 };
+                // pyfa's red rows: whatever breaks a fitting rule or needs skills the
+                // character lacks, with the reasons on hover.
+                let danger = cx.theme().danger;
+                let base = base.when_some(self.problems_of(loaded, item.into()), |row, why| {
+                    flag(row, why, danger)
+                });
                 let dragged = Dragged::of(loaded, DragSource::Row(item), self.row_type(item));
                 let base = drop_target(base, DropOn::Item(item), cx);
                 let base = match dragged {
@@ -354,7 +360,7 @@ impl Gyfa {
         (slot, i): (Slot, usize),
         m: &Module,
         info: ModuleInfo,
-        misc: Option<(String, String)>,
+        misc: Option<&(String, String)>,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let catalog = &loaded.catalog;
@@ -369,7 +375,7 @@ impl Gyfa {
         };
         let layout = self.column_layout;
         let prices = &self.prices;
-        let misc_text = misc.as_ref().map(|(text, _)| text.as_str());
+        let misc_text = misc.map(|(text, _)| text.as_str());
         let text = |col: Col| col.text(catalog, prices, m, &info, misc_text);
         base.child(
             div()
@@ -424,8 +430,17 @@ impl Gyfa {
             [Col::Powergrid, Col::Cpu, Col::Capacitor, Col::Range]
                 .map(|col| layout.cell(col).truncate().children(text(col))),
         )
-        .child(misc_cell(layout, format!("misc-{slot:?}-{i}"), misc.clone()))
-        .child(layout.cell(Col::Price).truncate().children(text(Col::Price)))
+        .child(misc_cell(
+            layout,
+            format!("misc-{slot:?}-{i}"),
+            misc.cloned(),
+        ))
+        .child(
+            layout
+                .cell(Col::Price)
+                .truncate()
+                .children(text(Col::Price)),
+        )
         .child(layout.cell(Col::Charge).child(h_flex().gap_1().when_some(
             m.charge,
             |cell, charge| {
@@ -740,7 +755,15 @@ fn item_menu(
             menu = spool_submenu(menu, this, item, m.spool, max, window, cx);
         }
         if t.group_id == GROUP_RAH {
-            menu = rah_submenu(menu, this, item, m.rah.clone(), &snapshot.patterns, window, cx);
+            menu = rah_submenu(
+                menu,
+                this,
+                item,
+                m.rah.clone(),
+                &snapshot.patterns,
+                window,
+                cx,
+            );
         }
     }
     let fitted = match item {
@@ -875,10 +898,7 @@ pub(super) fn ship_entries(
     };
     let Some(loaded) = loaded else { return menu };
     let ship_name = loaded.catalog.name(ship);
-    let structure = loaded
-        .catalog
-        .get(ship)
-        .is_some_and(ItemType::is_structure);
+    let structure = loaded.catalog.get(ship).is_some_and(ItemType::is_structure);
     let mut menu = menu;
 
     let modes = loaded.catalog.modes_for(ship);
@@ -1415,11 +1435,11 @@ fn fitting_rows(fit: &Fit, stats: &Stats, style: RackStyle) -> Vec<Row> {
         RackStyle::Labels => rows.push(header),
     };
     let rack = |rows: &mut Vec<Row>,
-                    slot: Slot,
-                    label: &'static str,
-                    icon_id: Option<i32>,
-                    slots: crate::engine::Slots,
-                    filled: Vec<bool>| {
+                slot: Slot,
+                label: &'static str,
+                icon_id: Option<i32>,
+                slots: crate::engine::Slots,
+                filled: Vec<bool>| {
         let total = slots.total.unwrap_or(0);
         if total == 0 && !filled.contains(&true) {
             return;
@@ -1438,9 +1458,7 @@ fn fitting_rows(fit: &Fit, stats: &Stats, style: RackStyle) -> Vec<Row> {
                 rows.push(Row::Item(match slot {
                     Slot::Rig => RowRef::Rig(pos),
                     Slot::Subsystem => RowRef::Subsystem(pos),
-                    Slot::High | Slot::Mid | Slot::Low | Slot::Service => {
-                        RowRef::Module(slot, pos)
-                    }
+                    Slot::High | Slot::Mid | Slot::Low | Slot::Service => RowRef::Module(slot, pos),
                 }));
             } else {
                 rows.push(Row::Empty(slot, pos));

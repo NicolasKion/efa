@@ -1,8 +1,8 @@
 //! The menu bar and its keyboard shortcuts, laid out like pyfa's (gui/mainMenuBar.py): File,
 //! Fit, Character, Global, Editors, Help.
 //!
-//! Left out: ESI fittings and character management (they need EVE SSO), attribute overrides,
-//! Optimize Fit Price and the fitting restrictions toggle. Entries that belong to windows built
+//! Left out: ESI fittings and character management (they need EVE SSO), attribute overrides and
+//! Optimize Fit Price. Entries that belong to windows built
 //! elsewhere are marked "Hook:" below and stay disabled until those windows exist.
 
 use gpui_kit::component::{
@@ -41,6 +41,7 @@ gpui_kit::actions!(
         ImplantSetEditor,
         CharacterEditor,
         Graphs,
+        HiddenGraphs,
         Quit,
     ]
 );
@@ -62,6 +63,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-k", CharacterEditor, Some(CONTEXT)),
         KeyBinding::new("ctrl-q", Quit, Some(CONTEXT)),
         KeyBinding::new("ctrl-g", Graphs, Some(CONTEXT)),
+        KeyBinding::new("ctrl-alt-g", HiddenGraphs, Some(CONTEXT)),
     ]);
 }
 
@@ -110,6 +112,7 @@ impl Gyfa {
                 g.open_implant_set_editor(None, window, cx);
             }))
             .on_action(cx.listener(|g, _: &Graphs, _, cx| g.open_graphs(cx)))
+            .on_action(cx.listener(|g, _: &HiddenGraphs, _, cx| g.open_hidden_graphs(cx)))
             .on_action(cx.listener(|_, _: &Quit, _, cx| cx.quit()))
     }
 
@@ -130,6 +133,7 @@ impl Gyfa {
         let this = cx.entity().downgrade();
         let has_fit = self.saved.current.is_some();
         let has_fits = !self.saved.fits.is_empty();
+        let unrestricted = self.fit().is_some_and(|f| f.ignore_restrictions);
         let (can_undo, can_redo) = (self.can_undo(), self.can_redo());
         let menu =
             |id: &'static str, label: &'static str, build: Box<dyn Fn(PopupMenu) -> PopupMenu>| {
@@ -280,6 +284,21 @@ impl Gyfa {
                     Some(Box::new(Graphs)),
                     |g, _, cx| g.open_graphs(cx),
                 ))
+                .separator()
+                .item(
+                    command(
+                        &this,
+                        IconName::TriangleAlert,
+                        if unrestricted {
+                            "Enable Fitting Restrictions"
+                        } else {
+                            "Disable Fitting Restrictions"
+                        },
+                        None,
+                        Gyfa::confirm_restrictions_toggle,
+                    )
+                    .disabled(!has_fit),
+                )
                 .separator()
                 .item(
                     command(&this, IconName::Copy, "Duplicate Fit", None, |g, _, cx| {

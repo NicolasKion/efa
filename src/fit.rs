@@ -180,6 +180,10 @@ pub struct Fit {
     /// Fleet boosters, pyfa's command fits.
     #[serde(default)]
     pub command: Vec<projected::CommandFit>,
+    /// pyfa's "Disable Fitting Restrictions": anything goes on, and what breaks the rules shows
+    /// red.
+    #[serde(default)]
+    pub ignore_restrictions: bool,
 }
 
 /// The kind of system a structure sits in, pyfa's "Citadel System Security". pyfa assumes null
@@ -714,7 +718,10 @@ impl Fit {
                     fit.cargo.push((t.id, n));
                 }
                 (Kind::Charge, None) if in_cargo_section => fit.cargo.push((t.id, 1)),
-                (Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low | Slot::Service)), None) => {
+                (
+                    Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low | Slot::Service)),
+                    None,
+                ) => {
                     let state = match (offline, t.activatable) {
                         (true, _) => ModuleState::Offline,
                         (false, true) => ModuleState::Active,

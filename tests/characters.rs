@@ -110,6 +110,20 @@ fn levels_train_prerequisites_and_unlearn_dependents() {
 }
 
 #[test]
+fn without_strict_levels_dependents_stay() {
+    let Some((catalog, _)) = setup() else { return };
+    let mut characters = Characters::default();
+    let pilot = characters.create("Pilot");
+    let gunnery = id(catalog, "Gunnery");
+    let rapid = id(catalog, "Rapid Firing");
+
+    characters.change_level(pilot, rapid, Some(3), Keep::Saved, catalog);
+    characters.change_level_with(pilot, gunnery, Some(1), Keep::Saved, false, catalog);
+    assert_eq!(characters.level(pilot, gunnery), Some(1));
+    assert_eq!(characters.level(pilot, rapid), Some(3));
+}
+
+#[test]
 fn missing_skills_and_granting_them() {
     let Some((catalog, _)) = setup() else { return };
     let fit = rifter(catalog);

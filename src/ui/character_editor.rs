@@ -149,8 +149,15 @@ impl CharacterEditor {
         if id.is_builtin() {
             return;
         }
+        let strict = self
+            .hub
+            .read(cx)
+            .saved
+            .preferences
+            .engine
+            .strict_skill_levels;
         self.edit(cx, |c, loaded| {
-            c.change_level(id, skill, level, Keep::Saved, &loaded.catalog);
+            c.change_level_with(id, skill, level, Keep::Saved, strict, &loaded.catalog);
         });
     }
 

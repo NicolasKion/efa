@@ -20,6 +20,7 @@ pub mod profile_editor;
 pub mod profile_menus;
 mod side;
 mod stats;
+mod validation;
 mod widgets;
 
 use std::{
@@ -49,18 +50,6 @@ use gpui_kit::{
 pub use actions::{Action, AddKind, RowRef, Scope};
 pub use hub::Hub;
 pub use menu::init as init_menus;
-
-/// How pyfa names a rack in messages.
-fn slot_label(slot: Slot) -> &'static str {
-    match slot {
-        Slot::High => "high",
-        Slot::Mid => "med",
-        Slot::Low => "low",
-        Slot::Rig => "rig",
-        Slot::Subsystem => "subsystem",
-        Slot::Service => "service",
-    }
-}
 
 /// Which window this is: the main one, whose tabs are remembered, or one torn off for a fit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,7 +90,7 @@ impl Render for TabPreview {
 
 use crate::{
     character::{CharacterId, Characters},
-    data::{Catalog, Kind, Slot, TypeId},
+    data::{Catalog, Kind, TypeId},
     engine::{Engine, Pilot, Stats},
     fit::Fit,
     icons::{Icon, Icons},
@@ -680,14 +669,6 @@ impl Gyfa {
             cx.notify();
             return;
         };
-        // Like pyfa, a module only goes on when its rack has a free slot.
-        if let Some(Kind::Module(slot)) = catalog.get(id).map(|t| t.kind)
-            && self.free_slots(slot) == 0
-        {
-            self.status = Some(format!("No free {} slot", slot_label(slot)).into());
-            cx.notify();
-            return;
-        }
         // pyfa launches a new squadron only when a tube of its class is free.
         if catalog.get(id).is_some_and(|t| t.kind == Kind::Fighter) {
             self.status = None;
@@ -695,6 +676,19 @@ impl Gyfa {
             return;
         }
         let added = self.saved.fits[i].add(catalog, id);
+        // Like pyfa, a module only goes on when the ship has room for it and, with the fitting
+        // restrictions on, can take it.
+        if let Some(before) = &before
+            && catalog
+                .get(id)
+                .is_some_and(|t| matches!(t.kind, Kind::Module(_)))
+            && let Some(reason) = self.refusal(&loaded, before, &self.saved.fits[i].clone())
+        {
+            self.saved.fits[i] = before.clone();
+            self.status = Some(format!("{}: {reason}", catalog.name(id)).into());
+            cx.notify();
+            return;
+        }
         // pyfa brings the Boosters tab up even when the booster was already there.
         if catalog.get(id).is_some_and(|t| t.kind == Kind::Booster)
             && self.additions_tab != AdditionsTab::Boosters
@@ -724,22 +718,6 @@ impl Gyfa {
             self.history.record(i, before, &self.saved.fits[i]);
         }
         self.changed(cx);
-    }
-
-    /// Empty slots left in a rack: the ship's total after bonuses, which subsystems change, less
-    /// what is fitted.
-    pub(super) fn free_slots(&self, slot: Slot) -> usize {
-        let (Some(fit), Some(stats)) = (self.fit(), &self.stats) else {
-            return 0;
-        };
-        let used = match slot {
-            Slot::High | Slot::Mid | Slot::Low | Slot::Service => {
-                fit.rack(slot).iter().flatten().count()
-            }
-            Slot::Rig => fit.rigs.iter().flatten().count(),
-            Slot::Subsystem => fit.subsystems.len(),
-        };
-        (stats.slots(slot).total.unwrap_or(0) as usize).saturating_sub(used)
     }
 
     fn open_import_dialog(window: &mut Window, cx: &mut Context<Self>) {

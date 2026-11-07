@@ -14,15 +14,16 @@ use gpui_kit::{
 use super::{ROW_HEIGHT, addition_menu, misc_entries, price_text};
 use crate::{
     data::{Catalog, Kind},
-    engine::{DroneInfo, Stats, drone_attr, drone_effect},
+    engine::{DroneInfo, ItemRef, Stats, drone_attr, drone_effect},
     fit::DroneStack,
     icons::Icon,
     prices::Prices,
     ui::{
         Action, AddKind, Gyfa, Loaded,
         columns::{ICON_W, STATE_W, text_width},
-        stats::format::{capitalize, format_list},
         fitting::{DragPreview, DragSource, Dragged},
+        stats::format::{capitalize, format_list},
+        validation::flag,
         widgets::{color, icon, icon_box},
     },
 };
@@ -590,6 +591,9 @@ impl Gyfa {
             .when(n % 2 == 1, |r| r.bg(theme.table_even))
             .when(selected, |r| r.bg(theme.table_active))
             .hover(|s| s.bg(theme.table_hover))
+            .when_some(self.problems_of(loaded, ItemRef::Drone(i)), |row, why| {
+                flag(row, why, theme.danger)
+            })
             .child(state)
             .child(div().w(px(ICON_W)).flex_none().child(icon_box(
                 catalog,

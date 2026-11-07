@@ -128,12 +128,16 @@ fn strongest<'n>(bonuses: &[(Option<f64>, &'n str)]) -> Option<(f64, Vec<&'n str
     }
     let names = bonuses
         .iter()
-        .filter(|&&(v, _)| v.is_some_and(|v| v.abs() == display.abs()))
+        .filter(|&&(v, _)| v.is_some_and(|v| (v.abs() - display.abs()).abs() < f64::EPSILON))
         .map(|&(_, name)| name)
         .collect();
     Some((display, names))
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "shaped like the column's answer, so every match arm reads alike"
+)]
 fn text(text: String, tooltip: impl Into<String>) -> Option<(String, String)> {
     Some((text, tooltip.into()))
 }
@@ -153,7 +157,10 @@ pub fn module_misc(
     let nonzero = |id| m.attr(id).filter(|&v| v != 0.0);
     let cycle_ms = nonzero(a::DURATION).or_else(|| nonzero(a::SPEED));
     let effect_in = |effect| m.has_effect(effect);
-    let burst = matches!(t.group_id, g::STRUCTURE_BURST_PROJECTOR | g::BURST_PROJECTORS);
+    let burst = matches!(
+        t.group_id,
+        g::STRUCTURE_BURST_PROJECTOR | g::BURST_PROJECTORS
+    );
     let percent = |v: f64| format!("{}%", short(v));
     let percent_signed = |v: f64| format!("{}%", short_signed(v));
 
@@ -173,9 +180,12 @@ pub fn module_misc(
     }
 
     match t.group_id {
-        g::SUPER_WEAPON | g::STRUCTURE_DOOMSDAY => {
-            (m.volley > 0.0).then(|| (format!("{} dmg", amount(m.volley, 3, 0, 6)), "Raw damage done".to_owned()))
-        }
+        g::SUPER_WEAPON | g::STRUCTURE_DOOMSDAY => (m.volley > 0.0).then(|| {
+            (
+                format!("{} dmg", amount(m.volley, 3, 0, 6)),
+                "Raw damage done".to_owned(),
+            )
+        }),
         g::ENERGY_WEAPON | g::HYBRID_WEAPON | g::PROJECTILE_WEAPON => {
             let tracking = nonzero(a::TRACKING_SPEED)?;
             let sig = nonzero(a::OPTIMAL_SIG_RADIUS)?;
@@ -206,7 +216,10 @@ pub fn module_misc(
         g::ENERGY_NEUTRALIZER | g::STRUCTURE_NEUTRALIZER => neut(m, a::NEUT_AMOUNT, cycle_ms),
         _ if burst && effect_in(effect::DOOMSDAY_AOE_NEUT) => neut(m, a::NEUT_AMOUNT, cycle_ms),
         g::ENERGY_NOSFERATU => neut(m, a::NOS_AMOUNT, cycle_ms),
-        g::SALVAGER => text(percent(nonzero(a::ACCESS_DIFFICULTY_BONUS)?), "Item retrieval chance"),
+        g::SALVAGER => text(
+            percent(nonzero(a::ACCESS_DIFFICULTY_BONUS)?),
+            "Item retrieval chance",
+        ),
         g::DATA_MINERS => {
             let strength = nonzero(a::VIRUS_STRENGTH)?;
             let coherence = nonzero(a::VIRUS_COHERENCE)?;
@@ -269,9 +282,10 @@ pub fn module_misc(
             }
             text(texts.join(" | "), tips.join(" and "))
         }
-        g::DRONE_DAMAGE_MODULES => {
-            text(percent_signed(nonzero(a::DRONE_DAMAGE_BONUS)?), "Drone DPS boost")
-        }
+        g::DRONE_DAMAGE_MODULES => text(
+            percent_signed(nonzero(a::DRONE_DAMAGE_BONUS)?),
+            "Drone DPS boost",
+        ),
         g::ECM | g::BURST_JAMMER | g::STRUCTURE_ECM_BATTERY => jammer(m),
         _ if burst && effect_in(effect::DOOMSDAY_AOE_ECM) => jammer(m),
         g::REMOTE_SENSOR_BOOSTER
@@ -359,9 +373,8 @@ pub fn module_misc(
         ),
         g::SIEGE_MODULE | g::CYNOSURAL_FIELD_GENERATOR => {
             let units = nonzero(a::CONSUMPTION_QUANTITY)?;
-            let fuel = attr(a::CONSUMPTION_TYPE).map_or_else(String::new, |id| {
-                catalog.name(id as TypeId)
-            });
+            let fuel =
+                attr(a::CONSUMPTION_TYPE).map_or_else(String::new, |id| catalog.name(id as TypeId));
             text(format!("{} units", short(units)), fuel)
         }
         g::ANCILLARY_ARMOR_REPAIRER
@@ -419,7 +432,8 @@ fn painter(m: &ModuleMisc) -> Option<(String, String)> {
 fn dampener(m: &ModuleMisc) -> Option<(String, String)> {
     let lock = m.attr(a::MAX_TARGET_RANGE_BONUS)?;
     let scan = m.attr(a::SCAN_RESOLUTION_BONUS)?;
-    let (display, names) = strongest(&[(Some(lock), "lock range"), (Some(scan), "scan resolution")])?;
+    let (display, names) =
+        strongest(&[(Some(lock), "lock range"), (Some(scan), "scan resolution")])?;
     text(
         format!("{}%", short_signed(display)),
         capitalize(&format!("{} dampening", format_list(&names))),
@@ -445,10 +459,7 @@ fn disruptor(m: &ModuleMisc) -> Option<(String, String)> {
     for bonuses in [&tracking[..], &guidance[..]] {
         if let Some((display, names)) = strongest(bonuses) {
             texts.push(format!("{}%", short_signed(display)));
-            tips.push(capitalize(&format!(
-                "{} disruption",
-                format_list(&names)
-            )));
+            tips.push(capitalize(&format!("{} disruption", format_list(&names))));
         }
     }
     if texts.is_empty() {
@@ -465,7 +476,7 @@ fn jammer(m: &ModuleMisc) -> Option<(String, String)> {
     let all = [grav, ladar, radar, magnet];
     let max = all.into_iter().fold(f64::MIN, f64::max);
     let min = all.into_iter().fold(f64::MAX, f64::min);
-    let shown = if max == min {
+    let shown = if (max - min).abs() < f64::EPSILON {
         short(max)
     } else {
         format!("{} | {}", short(max), short(min))
@@ -656,9 +667,10 @@ fn charge_misc(catalog: &Catalog, charge: TypeId, m: &ModuleMisc) -> Option<(Str
         );
     }
     match charge_group {
-        g::BOMB | g::GUIDED_BOMB => {
-            text(format!("{}m", short(get(a::AOE_CLOUD_SIZE)?)), "Explosion radius")
-        }
+        g::BOMB | g::GUIDED_BOMB => text(
+            format!("{}m", short(get(a::AOE_CLOUD_SIZE)?)),
+            "Explosion radius",
+        ),
         g::SCANNER_PROBE => {
             let strength = get(a::BASE_SENSOR_STRENGTH)?;
             let range = get(a::BASE_SCAN_RANGE)?;
