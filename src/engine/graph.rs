@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use rc::{
-    AttrId, Count, EveAttrId, ItemCommon, ItemId, ItemTypeId, SolOwned, Spool,
+    AttrId, Count, EveAttrId, FitId, ItemCommon, ItemId, ItemTypeId, SolOwned, Spool,
     stats::{
         ItemStatsCommon, StatCritOptions, StatDmg, StatItemChargeOptions, StatTimeOptions,
         StatTimeOptionsBurst,
@@ -201,16 +201,17 @@ impl Engine {
         if fit.ship.is_none() {
             return snap;
         }
-        let stats = self.compute_among(fit, fits, pilot, CalcOptions::default());
         let Some(mut built) = self.build(fit, pilot, BuildOptions::among(fits)) else {
             return snap;
         };
+        let stats = super::stats_of(&mut built, fit, CalcOptions::default());
         let Placement {
             ship: ship_id,
             modules,
             drones,
             fighters,
         } = placement(fit, &built.fit);
+        let fit_id = built.fit.fit_id;
         let sol = &mut built.sol;
 
         let mut ship = Ship {
@@ -267,24 +268,27 @@ impl Engine {
         }
         // Ships without the attribute take breacher damage in full.
         ship.breacher_resist = attr_opt(sol, ship_id, attr::BREACHER_RESIST).unwrap_or(1.0);
-        ship.subwarp_speed = self
-            .subwarp_speed(fit, fits, pilot, catalog)
-            .unwrap_or(ship.max_velocity);
+        // Warps start from the speed without the modules that cannot run in warp.
+        ship.subwarp_speed = grounded(sol, fit_id, &modules, |p| {
+            catalog
+                .get(p.type_id)
+                .is_some_and(|t| group::NOT_IN_WARP.contains(&t.group_id))
+        })
+        .map_or(ship.max_velocity, |(speed, _)| speed);
 
         let mut scrammable = Vec::new();
         for placed in &modules {
             let Some(item_type) = catalog.get(placed.type_id) else {
                 continue;
             };
-            let running = matches!(placed.state, ModuleState::Active | ModuleState::Overload);
-            if !running {
+            if !placed.state.is_running() {
                 continue;
             }
             let group = item_type.group_id;
             let effects = effects_of(sol, placed.id);
             let charge = charge_of(sol, placed.id);
             if effect::SCRAMMABLE.iter().any(|e| effects.contains(e)) {
-                scrammable.push(placed.type_id);
+                scrammable.push(placed.id);
             }
             let scrams = effect::SCRAM.iter().any(|e| effects.contains(e))
                 && attr_of(sol, placed.id, attr::ACTIVATION_BLOCKED) != 0.0
@@ -338,9 +342,8 @@ impl Engine {
             snap.weapons.extend(fighter_weapons(sol, id));
             snap.ewar.extend(fighter_ewar(sol, id));
         }
-        if !scrammable.is_empty() {
-            ship.scrammed = Some(self.without(fit, fits, pilot, &scrammable));
-        }
+        // What a scram leaves of the ship as a target.
+        ship.scrammed = grounded(sol, fit_id, &modules, |p| scrammable.contains(&p.id));
         snap.ship = ship;
         snap
     }
@@ -362,8 +365,7 @@ impl Engine {
         let placement = placement(fit, &built.fit);
         let sol = &mut built.sol;
         let ship_radius = attr_of(sol, placement.ship, attr::RADIUS);
-        let running =
-            |p: &&PlacedModule| matches!(p.state, ModuleState::Active | ModuleState::Overload);
+        let running = |p: &&PlacedModule| p.state.is_running();
         let weapon_of = |p: &PlacedModule| {
             catalog
                 .get(p.type_id)
@@ -435,54 +437,37 @@ impl Engine {
         }
         groups
     }
+}
 
-    /// Speed and signature with the given module types switched to online.
-    fn without(&self, fit: &Fit, fits: &[Fit], pilot: &Pilot, types: &[i32]) -> (f64, f64) {
-        let mut grounded = fit.clone();
-        for module in [&mut grounded.high, &mut grounded.mid, &mut grounded.low]
-            .into_iter()
-            .flatten()
-            .flatten()
-        {
-            if types.contains(&module.type_id)
-                && matches!(module.state, ModuleState::Active | ModuleState::Overload)
-            {
-                module.state = ModuleState::Online;
-            }
-        }
-        let stats = self.compute_among(&grounded, fits, pilot, CalcOptions::default());
-        (stats.speed.unwrap_or(0.0), stats.sig_radius.unwrap_or(0.0))
+/// Speed and signature with the running modules `off` picks switched to online, None when it
+/// picks none. The build is left as it was.
+fn grounded(
+    sol: &mut SolOwned,
+    fit_id: FitId,
+    modules: &[PlacedModule],
+    mut off: impl FnMut(&PlacedModule) -> bool,
+) -> Option<(f64, f64)> {
+    let ids: Vec<ItemId> = modules
+        .iter()
+        .filter(|p| p.state.is_running())
+        .filter(|p| off(p))
+        .map(|p| p.id)
+        .collect();
+    if ids.is_empty() {
+        return None;
     }
-
-    /// Top speed with the modules that cannot run in warp switched off.
-    fn subwarp_speed(
-        &self,
-        fit: &Fit,
-        fits: &[Fit],
-        pilot: &Pilot,
-        catalog: &Catalog,
-    ) -> Option<f64> {
-        let mut grounded = fit.clone();
-        let mut changed = false;
-        for module in [&mut grounded.high, &mut grounded.mid, &mut grounded.low]
-            .into_iter()
-            .flatten()
-            .flatten()
-        {
-            let stops = catalog
-                .get(module.type_id)
-                .is_some_and(|t| group::NOT_IN_WARP.contains(&t.group_id));
-            if stops && matches!(module.state, ModuleState::Active | ModuleState::Overload) {
-                module.state = ModuleState::Online;
-                changed = true;
-            }
+    let mut tx = sol.begin_tx();
+    for id in &ids {
+        if let Ok(mut module) = tx.get_module(id) {
+            module.set_state(rc::ModuleState::Online);
         }
-        if !changed {
-            return None;
-        }
-        self.compute_among(&grounded, fits, pilot, CalcOptions::default())
-            .speed
     }
+    let mut f = tx.get_fit(&fit_id).ok()?;
+    let mut s = f.stats();
+    Some((
+        s.get_stat_speed().map_or(0.0, rc::PValue::into_f64),
+        s.get_stat_sig_radius().map_or(0.0, rc::PValue::into_f64),
+    ))
 }
 
 /// The modules, drone stacks and launched squadrons of a fit built into a solar system.

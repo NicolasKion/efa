@@ -35,6 +35,11 @@ impl ModuleState {
             Self::Overload => "Overheated",
         }
     }
+
+    /// Whether the module cycles: active or overheated.
+    pub fn is_running(self) -> bool {
+        matches!(self, Self::Active | Self::Overload)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -696,6 +701,14 @@ impl Fit {
             .chain(&self.mid)
             .chain(&self.low)
             .chain(&self.services)
+            .flatten()
+    }
+
+    /// The modules in the high, mid and low racks, to change.
+    pub fn modules_mut(&mut self) -> impl Iterator<Item = &mut Module> {
+        [&mut self.high, &mut self.mid, &mut self.low]
+            .into_iter()
+            .flatten()
             .flatten()
     }
 
