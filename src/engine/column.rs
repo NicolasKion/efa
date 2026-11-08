@@ -3,6 +3,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use super::{FitItem, Stats};
+use crate::{
+    data::Slot,
+    fit::{Fit, ModuleState},
+};
+
 use rc::{
     AttrId, EveAttrId, ItemCommon, ItemId, SolOwned, Spool, UnitInterval,
     stats::{
@@ -449,6 +455,120 @@ pub(super) fn module_heat(sol: &mut SolOwned, id: ItemId) -> (f64, f64, f64) {
         get(heat_attr::HP),
         get(heat_attr::HEAT_DAMAGE),
     )
+}
+
+/// pyfa's heat column: how long each overheated module lasts before it burns out.
+pub(super) fn burnout(
+    sol: &mut SolOwned,
+    fit: &Fit,
+    ship_id: ItemId,
+    module_ids: &[(Slot, usize, ItemId)],
+    stats: &mut Stats,
+) {
+    const RACKS: [Slot; 3] = [Slot::High, Slot::Mid, Slot::Low];
+    let overheated = |slot: Slot, i: usize| {
+        fit.rack(slot)
+            .get(i)
+            .and_then(Option::as_ref)
+            .is_some_and(|m| m.state == ModuleState::Overload)
+    };
+    if !module_ids.iter().any(|&(slot, i, _)| overheated(slot, i)) {
+        return;
+    }
+    let (generation, attenuation) = ship_heat(sol, ship_id);
+    // Share of the ship's slots doing something: pyfa counts the empty and offline ones out, and
+    // rig slots in.
+    let total: u32 = RACKS
+        .iter()
+        .map(|&slot| stats.slots(slot).total.unwrap_or(0))
+        .sum();
+    let busy = RACKS
+        .iter()
+        .flat_map(|&slot| fit.rack(slot).iter().flatten())
+        .filter(|m| m.state != ModuleState::Offline)
+        .count();
+    let all = total + stats.rig.total.unwrap_or(0);
+    let ship = ShipHeat {
+        generation,
+        slot_factor: if all > 0 {
+            busy as f64 / f64::from(all)
+        } else {
+            0.0
+        },
+    };
+    let mut heat = HashMap::new();
+    for &(slot, i, id) in module_ids {
+        if RACKS.contains(&slot) {
+            heat.insert((slot, i), module_heat(sol, id));
+        }
+    }
+    for (n, &slot) in RACKS.iter().enumerate() {
+        let hot: Vec<usize> = heat
+            .keys()
+            .filter(|&&(s, i)| s == slot && overheated(s, i))
+            .map(|&(_, i)| i)
+            .collect();
+        let rack = RackHeat {
+            attenuation: attenuation[n],
+            absorption: hot.iter().map(|&i| heat[&(slot, i)].0).sum(),
+            overheated: hot.clone(),
+        };
+        // Each overheated module's step and cycle, in seconds.
+        let mut timings = Vec::new();
+        for &i in &rack.overheated {
+            let Some(misc) = stats.module_misc.get(&FitItem::Module(slot, i)) else {
+                continue;
+            };
+            // pyfa steps the simulation by rate of fire first, but times the result by
+            // duration first.
+            let seconds = |a: i32| misc.attr(a).filter(|&v| v > 0.0).map(|ms| ms / 1000.0);
+            let (speed, duration) = (seconds(misc_attr::SPEED), seconds(misc_attr::DURATION));
+            if let (Some(step), Some(cycle)) = (speed.or(duration), duration.or(speed)) {
+                timings.push((i, step, cycle));
+            }
+        }
+        for &(i, step, cycle) in &timings {
+            let (_, hp, heat_damage) = heat[&(slot, i)];
+            if let Some(info) = stats.modules.get_mut(&(slot, i)) {
+                info.burnout = ship
+                    .burn_cycles(&rack, i, step, hp, heat_damage)
+                    .map(|cycles| cycles * cycle);
+            }
+        }
+        // The rest of the rack takes damage from its overheated neighbours: at the pace of the
+        // quickest of them, and as much per hit as they take on average.
+        let Some(&(_, step, cycle)) = timings.iter().min_by(|a, b| a.1.total_cmp(&b.1)) else {
+            continue;
+        };
+        let damages: Vec<f64> = timings
+            .iter()
+            .map(|&(i, _, _)| heat[&(slot, i)].2)
+            .collect();
+        let neighbour_damage = damages.iter().sum::<f64>() / damages.len() as f64;
+        let cold: Vec<usize> = heat
+            .keys()
+            .filter(|&&(s, i)| s == slot && !overheated(s, i))
+            .filter(|&&(s, i)| {
+                fit.rack(s)
+                    .get(i)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|m| m.state != ModuleState::Offline)
+            })
+            .map(|&(_, i)| i)
+            .collect();
+        for i in cold {
+            let (_, hp, _) = heat[&(slot, i)];
+            if hp <= 0.0 {
+                continue;
+            }
+            if let Some(info) = stats.modules.get_mut(&(slot, i)) {
+                info.burnout = ship
+                    .burn_cycles(&rack, i, step, hp, neighbour_damage)
+                    .map(|cycles| cycles * cycle);
+                info.burnout_from_neighbours = info.burnout.is_some();
+            }
+        }
+    }
 }
 
 #[cfg(test)]
