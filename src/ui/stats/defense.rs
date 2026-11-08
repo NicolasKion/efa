@@ -59,7 +59,6 @@ fn gauge_row(
     text: &str,
     fractions: [f64; 4],
     value: AnyElement,
-    cx: &App,
 ) -> AnyElement {
     h_flex()
         .w_full()
@@ -69,7 +68,7 @@ fn gauge_row(
             fractions
                 .into_iter()
                 .zip(DAMAGE_COLORS)
-                .map(|(f, fill)| gauge(f, fill, format!("{:.1}%", f * 100.0), 0., cx)),
+                .map(|(f, fill)| gauge(f, fill, format!("{:.1}%", f * 100.0), 0.)),
         )
         .child(h_flex().w(px(VALUE)).justify_center().child(value))
         .into_any_element()
@@ -152,7 +151,7 @@ pub(super) fn resistances(p: &Pane<'_>, controls: Option<&Controls<'_>>, cx: &Ap
             hover,
         )
         .into_any_element();
-        body = body.child(gauge_row(p, name, icon_id, text, layer.resists, value, cx));
+        body = body.child(gauge_row(p, name, icon_id, text, layer.resists, value));
     }
 
     // The pattern row shows each type's share; pyfa empties it while raw HP is shown.
@@ -172,7 +171,6 @@ pub(super) fn resistances(p: &Pane<'_>, controls: Option<&Controls<'_>>, cx: &Ap
             "Incoming damage pattern",
             shares,
             div().into_any_element(),
-            cx,
         ));
 
     let menu = controls.map(|controls| -> MenuFn {

@@ -100,7 +100,7 @@ pub(super) fn section(p: &Pane<'_>, cx: &App) -> Section {
                         format!("{:.1}/{out:.1}", r.used),
                     ))
                     .child(
-                        gauge(fraction, fill, format!("{:.2}%", fraction * 100.0), 0., cx)
+                        gauge(fraction, fill, format!("{:.2}%", fraction * 100.0), 0.)
                             // In a column, filling the room means full width rather than flex.
                             .w_full(),
                     ),

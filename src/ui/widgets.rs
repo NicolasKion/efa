@@ -86,13 +86,7 @@ const GAUGE_DARKEN: f32 = 0.35;
 /// A filled bar with its text centered on top, drawn like pyfa's gauges: a dark track, a fill
 /// that darkens along its length, and white text with a drop shadow, so the label stays legible
 /// over both the fill and the track in any theme.
-pub fn gauge(
-    fraction: f64,
-    fill: Rgb,
-    text: impl Into<SharedString>,
-    width: f32,
-    _cx: &App,
-) -> Div {
+pub fn gauge(fraction: f64, fill: Rgb, text: impl Into<SharedString>, width: f32) -> Div {
     let fraction = fraction.clamp(0.0, 1.0) as f32;
     let text: SharedString = text.into();
     let start = color(fill);

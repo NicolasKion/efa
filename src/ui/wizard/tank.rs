@@ -845,7 +845,6 @@ impl TankSection {
                             palette.accent,
                             format!("{:.0}%", fraction * 100.0),
                             0.,
-                            cx,
                         )
                         .w_full(),
                     ),
