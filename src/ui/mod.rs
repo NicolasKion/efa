@@ -27,6 +27,7 @@ pub mod profile_editor;
 pub mod profile_menus;
 mod side;
 mod stats;
+mod status_bar;
 mod updates;
 mod validation;
 mod widgets;
@@ -127,6 +128,8 @@ pub struct Loaded {
     pub cache_dir: PathBuf,
     /// The pack or dump the data came from, for what is only read when first needed.
     pub source: crate::pack::Source,
+    /// How long reading the data took, for the status bar.
+    pub load_time: std::time::Duration,
 }
 
 enum Loading {
@@ -644,7 +647,6 @@ impl Efa {
             then(self, cx);
             return;
         }
-        self.status = Some("Fetching prices...".into());
         cx.notify();
         let mut all = self.saved_fit_types();
         all.extend(&types);
@@ -1397,10 +1399,11 @@ fn load(overrides: &crate::overrides::Values) -> Result<Loaded, String> {
     let source = crate::pack::Source::detect()?;
     let catalog = source.catalog()?;
     let engine = Engine::from_source(source.engine(), catalog.skills.clone())?;
+    let load_time = start.elapsed();
     eprintln!(
         "loaded {} in {} ms",
         source.describe(),
-        start.elapsed().as_millis()
+        load_time.as_millis()
     );
     if !overrides.is_empty() {
         engine.apply_overrides(overrides)?;
@@ -1413,6 +1416,7 @@ fn load(overrides: &crate::overrides::Values) -> Result<Loaded, String> {
         icons,
         cache_dir,
         source,
+        load_time,
     })
 }
 
@@ -1434,19 +1438,28 @@ impl Render for Efa {
         let root = Self::bind_actions(root, cx);
         let loaded = match &self.loading {
             Loading::Ready(loaded) => Rc::clone(loaded),
-            Loading::Pending => {
+            // The menu bar stays, so the window can still be moved and closed when efa draws
+            // its own window buttons.
+            Loading::Pending | Loading::Failed(_) => {
+                let failed = match &self.loading {
+                    Loading::Failed(e) => Some(e.clone()),
+                    _ => None,
+                };
                 return root
-                    .items_center()
-                    .justify_center()
-                    .child("Loading EVE data…")
-                    .into_any_element();
-            }
-            Loading::Failed(e) => {
-                return root
-                    .items_center()
-                    .justify_center()
-                    .text_color(cx.theme().danger)
-                    .child(e.clone())
+                    .child(self.menu_bar(window, cx))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_h_0()
+                            .p_4()
+                            .items_center()
+                            .justify_center()
+                            .map(|body| match failed {
+                                Some(e) => body.text_color(cx.theme().danger).child(e),
+                                None => body.child("Loading EVE data…"),
+                            }),
+                    )
+                    .child(self.status_bar(cx))
                     .into_any_element();
             }
         };
@@ -1554,6 +1567,7 @@ impl Render for Efa {
                     )
                 }),
         )
+        .child(self.status_bar(cx))
         .into_any_element()
     }
 }

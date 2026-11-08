@@ -232,6 +232,17 @@ impl Source {
     }
 
     /// For the log: which data this is.
+    /// The deimos release the data came from, `sde-<build>-client-<build>`, when it says.
+    pub fn version(&self) -> Option<String> {
+        match self {
+            Self::Pack(pack) => Some(pack.version().to_owned()),
+            Self::Dump { dir, .. } => std::fs::read_to_string(dir.join("VERSION"))
+                .ok()
+                .map(|v| v.trim().to_owned())
+                .filter(|v| !v.is_empty()),
+        }
+    }
+
     pub fn describe(&self) -> String {
         match self {
             Self::Pack(pack) => format!("the embedded data pack ({})", pack.version()),

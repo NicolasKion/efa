@@ -688,18 +688,6 @@ impl Efa {
             .child(menu("menu-global", "Global", global))
             .child(menu("menu-editors", "Editors", editors))
             .child(menu("menu-help", "Help", help))
-            .when_some(self.status.clone(), |bar, status| {
-                bar.child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .ml_4()
-                        .truncate()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(status),
-                )
-            })
             // With the window buttons in the bar, the room left over moves the window.
             .when(builtin, |bar| {
                 bar.child(
