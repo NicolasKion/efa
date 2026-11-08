@@ -216,7 +216,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] EFT import of cargo, charges and mutated items' blocks (eft.py), pyfa's /offline and several fits per paste
 - [x] EFT export options: implants, boosters, cargo, mutations, loaded charges (eft.py, gui/copySelectDialog.py), in pyfa's layout with empty slots up to the ship's count
 - [~] Import from clipboard with format autodetect (port.py importAuto), item lists go to the additions tabs (fighters to the Fighters tab) or fit a single module; ESI dynamic item links are not fetched
-- [x] Renamed item conversions on import (service/conversions/, applied in service/market.py getItem): pyfa's tables in src/port/renames.tsv (scripts/renames.py rebuilds it), applied in every name lookup with chains followed
+- [x] Renamed item conversions on import (service/conversions/, applied in service/market.py getItem): pyfa's tables in src/data/renames.tsv (scripts/renames.py rebuilds it), applied in every name lookup with chains followed
 - [x] Import from file dialog, multiple files (port.py importFitsThreaded)
 - [x] EFT .cfg legacy format (port.py importEftCfg); notes come from Description= lines, with | as line breaks
 - [x] DNA import/export (service/port/dna.py), chat links and the DNA: variant too; fighters as `typeid;size`

@@ -17,6 +17,7 @@ use crate::{
 
 pub mod muta;
 pub mod projection;
+pub mod renames;
 mod publish;
 
 pub type TypeId = i32;
@@ -882,7 +883,7 @@ impl Catalog {
     /// first, as pyfa's `getItem` does, so old fits still import.
     pub fn find(&self, name: &str) -> Option<&ItemType> {
         let key = name.trim().to_lowercase();
-        crate::port::renames::current_name(&key)
+        renames::current_name(&key)
             .and_then(|current| self.by_name.get(current))
             .or_else(|| self.by_name.get(&key))
             .and_then(|id| self.types.get(id))

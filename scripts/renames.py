@@ -1,6 +1,6 @@
-"""Write pyfa's renamed-item table (service/conversions) as src/port/renames.tsv.
+"""Write pyfa's renamed-item table (service/conversions) as src/data/renames.tsv.
 
-Usage: python3 -I scripts/renames.py /path/to/pyfa src/port/renames.tsv
+Usage: python3 -I scripts/renames.py /path/to/pyfa src/data/renames.tsv
 
 pyfa merges the packs in module name order, later ones winning; this does the same.
 """

@@ -11,7 +11,6 @@ pub mod esi;
 pub mod html;
 pub mod multibuy;
 pub mod muta;
-pub mod renames;
 pub mod xml;
 
 use serde::{Deserialize, Serialize};
