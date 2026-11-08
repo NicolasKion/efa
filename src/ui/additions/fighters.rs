@@ -16,7 +16,7 @@ use gpui_kit::{
 };
 
 use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, drones::format_amount, price_text};
-use crate::ui::widgets::{DropHighlight, TipExt};
+use crate::ui::widgets::{DropHighlight, TipExt, empty_line};
 use crate::{
     data::{Catalog, Kind, TypeId, projection::FighterClass},
     dogma::attr as drone_attr,
@@ -292,15 +292,11 @@ impl Efa {
         };
         let catalog = &loaded.catalog;
         let order = display_order(catalog, &fit.fighters, self.stats.as_ref());
-        let theme = cx.theme();
         let mut rows: Vec<AnyElement> = Vec::with_capacity(order.len() + 1);
         if order.is_empty() {
             rows.push(
-                div()
+                empty_line("Double-click fighters in the market to add them.", cx)
                     .id("fighters-empty")
-                    .p_2()
-                    .text_color(theme.muted_foreground)
-                    .child("Double-click fighters in the market to add them.")
                     .context_menu({
                         let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
                         move |menu, _, cx| fighter_misc(menu, &this, &loaded, None, cx)

@@ -20,7 +20,7 @@ use super::{
     drones::format_amount,
     linked::{Link, add_fit_entries},
 };
-use crate::ui::widgets::DropHighlight;
+use crate::ui::widgets::{DropHighlight, empty_line};
 use crate::{
     data::{Catalog, Kind, TypeId, projection::EnvMenu},
     engine::{FighterInfo, FitItem, Stats},
@@ -477,15 +477,14 @@ impl Efa {
             return div().into_any_element();
         };
         let rows = rows(&loaded.catalog, &self.saved, fit);
-        let theme = cx.theme();
         let mut content: Vec<AnyElement> = Vec::with_capacity(rows.len() + 1);
         if rows.is_empty() {
             content.push(
-                div()
-                    .p_2()
-                    .text_color(theme.muted_foreground)
-                    .child("Drag an item or fit, or use right-click menu for wormhole effects")
-                    .into_any_element(),
+                empty_line(
+                    "Drag an item or fit, or use right-click menu for wormhole effects",
+                    cx,
+                )
+                .into_any_element(),
             );
         }
         for (n, &row) in rows.iter().enumerate() {
