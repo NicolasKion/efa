@@ -27,7 +27,7 @@ use super::{
     },
     item_stats,
     stats::format,
-    widgets::{entry, icon_box},
+    widgets::{band, entry, icon_box},
 };
 use crate::{
     data::{Catalog, Kind, Slot, TypeId},
@@ -1701,14 +1701,7 @@ fn market_menu(
 /// A band over a run of rows in the fittings browser, like the fitting view's rack labels.
 fn section_header(title: &'static str, cx: &App) -> AnyElement {
     let theme = cx.theme();
-    div()
-        .mt_2()
-        .px_2()
-        .py_1()
-        .bg(theme.secondary)
-        .border_t_1()
-        .border_b_1()
-        .border_color(theme.border)
+    band(div().mt_2().px_2().py_1(), cx)
         .text_xs()
         .font_weight(gpui_kit::FontWeight::SEMIBOLD)
         .text_color(theme.muted_foreground)

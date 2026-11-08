@@ -8,11 +8,9 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     h_flex, v_flex,
 };
-use gpui_kit::{
-    AnyElement, App, ClickEvent, Context, IntoElement, ParentElement, Styled, WeakEntity, div, px,
-};
+use gpui_kit::{AnyElement, App, ClickEvent, IntoElement, ParentElement, Styled, div, px};
 
-use super::{Pane, Section, format, ids, tip, title};
+use super::{Controls, MenuFn, Pane, Section, format, ids, muted, tip, title};
 use crate::{
     engine::Layer,
     ui::{
@@ -77,7 +75,7 @@ fn gauge_row(
         .into_any_element()
 }
 
-pub(super) fn resistances(p: &Pane<'_>, this: &WeakEntity<Efa>, cx: &Context<Efa>) -> Section {
+pub(super) fn resistances(p: &Pane<'_>, controls: Option<&Controls<'_>>, cx: &App) -> Section {
     let raw = p.view.raw_hp;
     let total: f64 = layers(p).iter().map(|&(_, _, l, _)| shown_hp(l, raw)).sum();
     let (label, hover) = if raw {
@@ -95,20 +93,31 @@ pub(super) fn resistances(p: &Pane<'_>, this: &WeakEntity<Efa>, cx: &Context<Efa
         .child(title(")"))
         .into_any_element();
 
-    let toggle = Button::new("resist-ehp-toggle")
-        .ghost()
-        .xsmall()
-        .label(if raw { "HP" } else { "EHP" })
-        .tooltip("Click to toggle between effective HP and raw HP")
-        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-            this.stats_view.raw_hp = !this.stats_view.raw_hp;
-            let raw = this.stats_view.raw_hp;
-            this.hub.update(cx, |hub, cx| {
-                hub.raw_hp = raw;
-                cx.notify();
-            });
-            cx.notify();
-        }));
+    let shown = if raw { "HP" } else { "EHP" };
+    // Read-only, the toggle's place says which it shows.
+    let toggle = match controls {
+        Some(controls) => {
+            let efa = controls.efa.clone();
+            Button::new("resist-ehp-toggle")
+                .ghost()
+                .xsmall()
+                .label(shown)
+                .tooltip("Click to toggle between effective HP and raw HP")
+                .on_click(move |_: &ClickEvent, _, cx| {
+                    Efa::app_update(&efa, cx, |this, cx| {
+                        this.stats_view.raw_hp = !this.stats_view.raw_hp;
+                        let raw = this.stats_view.raw_hp;
+                        this.hub.update(cx, |hub, cx| {
+                            hub.raw_hp = raw;
+                            cx.notify();
+                        });
+                        cx.notify();
+                    });
+                })
+                .into_any_element()
+        }
+        None => muted(shown, cx).into_any_element(),
+    };
     let head = h_flex()
         .w_full()
         .gap_1()
@@ -166,21 +175,24 @@ pub(super) fn resistances(p: &Pane<'_>, this: &WeakEntity<Efa>, cx: &Context<Efa
             cx,
         ));
 
-    let this = this.clone();
-    let pick: PickPattern = Rc::new(move |profile, _, cx| {
-        Efa::app_update(&this, cx, |g, cx| {
-            g.apply(Action::SetDamageProfile(profile), cx);
+    let menu = controls.map(|controls| -> MenuFn {
+        let this = controls.efa.clone();
+        let pick: PickPattern = Rc::new(move |profile, _, cx| {
+            Efa::app_update(&this, cx, |g, cx| {
+                g.apply(Action::SetDamageProfile(profile), cx);
+            });
         });
+        let (current, user) = (p.fit.damage_profile.clone(), p.damage_patterns.clone());
+        Rc::new(move |menu, window, cx| {
+            damage_pattern_menu(menu, &user, &current, &pick, window, cx)
+        })
     });
-    let (current, user) = (p.fit.damage_profile.clone(), p.damage_patterns.clone());
     Section {
         action: None,
         key: "Resistances",
         title: header,
         body: body.into_any_element(),
-        menu: Some(Rc::new(move |menu, window, cx| {
-            damage_pattern_menu(menu, &user, &current, &pick, window, cx)
-        })),
+        menu,
     }
 }
 

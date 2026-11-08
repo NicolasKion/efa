@@ -3,11 +3,9 @@
 use std::rc::Rc;
 
 use gpui_kit::component::{h_flex, menu::PopupMenuItem, v_flex};
-use gpui_kit::{
-    App, Div, IntoElement, ParentElement, Styled, WeakEntity, div, prelude::FluentBuilder,
-};
+use gpui_kit::{App, Div, IntoElement, ParentElement, Styled, div, prelude::FluentBuilder};
 
-use super::{Pane, Section, format, ids, muted, tip, title};
+use super::{Controls, MenuFn, Pane, Section, format, ids, muted, tip, title};
 use crate::{
     data::TypeId,
     fit::Fit,
@@ -81,7 +79,7 @@ fn isk(v: f64) -> String {
     format!("{} ISK", format::currency(v))
 }
 
-pub(super) fn section(p: &Pane<'_>, this: &WeakEntity<Efa>, cx: &App) -> Section {
+pub(super) fn section(p: &Pane<'_>, controls: Option<&Controls<'_>>, cx: &App) -> Section {
     let totals = p.price_totals;
     let price =
         FitPrice::with_character_implants(p.fit, p.character_implants, |id| p.prices.get(id));
@@ -156,13 +154,9 @@ pub(super) fn section(p: &Pane<'_>, this: &WeakEntity<Efa>, cx: &App) -> Section
         })
         .into_any_element();
 
-    let this = this.clone();
-    Section {
-        action: None,
-        key: "Price",
-        title: header,
-        body,
-        menu: Some(Rc::new(move |menu, _, _| {
+    let menu = controls.map(|controls| -> MenuFn {
+        let this = controls.efa.clone();
+        Rc::new(move |menu, _, _| {
             let toggle = |label: &'static str, on: bool, flip: fn(&mut PriceTotals)| {
                 let this = this.clone();
                 PopupMenuItem::new(label)
@@ -180,7 +174,14 @@ pub(super) fn section(p: &Pane<'_>, this: &WeakEntity<Efa>, cx: &App) -> Section
                 .item(toggle("Implants && Boosters", totals.character, |t| {
                     t.character = !t.character;
                 }))
-        })),
+        })
+    });
+    Section {
+        action: None,
+        key: "Price",
+        title: header,
+        body,
+        menu,
     }
 }
 

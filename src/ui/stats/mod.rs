@@ -9,7 +9,7 @@ mod price;
 mod resources;
 pub(super) mod text;
 
-use std::rc::Rc;
+use std::{collections::HashSet, rc::Rc};
 
 use gpui_kit::component::{
     ActiveTheme, IconName, Sizable,
@@ -21,8 +21,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, ClickEvent, Context, Div, ElementId, InteractiveElement, IntoElement,
-    ParentElement, SharedString, Stateful, StatefulInteractiveElement, Styled, Window, div,
-    prelude::FluentBuilder, px,
+    ParentElement, SharedString, Stateful, StatefulInteractiveElement, Styled, WeakEntity, Window,
+    div, prelude::FluentBuilder, px,
 };
 
 use super::{
@@ -60,7 +60,7 @@ mod ids {
 }
 
 /// Everything a section needs to draw itself.
-struct Pane<'a> {
+pub(in crate::ui) struct Pane<'a> {
     loaded: &'a Loaded,
     stats: &'a Stats,
     fit: &'a Fit,
@@ -71,6 +71,8 @@ struct Pane<'a> {
     /// A price fetch is out.
     prices_updating: bool,
     price_totals: PriceTotals,
+    /// Firepower counts reloads.
+    factor_reload: bool,
     /// The user's patterns and profiles, for the header menus.
     damage_patterns: Rc<Vec<crate::damage_pattern::DamagePattern>>,
     target_profiles: Rc<Vec<crate::target_profile::TargetProfile>>,
@@ -78,6 +80,118 @@ struct Pane<'a> {
     character_implants: &'a [crate::data::TypeId],
     /// The fit's implants and boosters count against the cargo hold.
     implants_in_cargo: bool,
+}
+
+/// The view a window that only shows sections draws them in: effective HP, firepower.
+static PLAIN_VIEW: View = View {
+    raw_hp: false,
+    mining: false,
+};
+
+impl<'a> Pane<'a> {
+    /// A fit's sections as another window shows them, with pyfa's defaults for what the main
+    /// window lets the user switch.
+    pub(in crate::ui) fn plain(
+        loaded: &'a Loaded,
+        stats: &'a Stats,
+        fit: &'a Fit,
+        palette: Palette,
+        prices: &'a Prices,
+    ) -> Self {
+        Self {
+            loaded,
+            stats,
+            fit,
+            view: &PLAIN_VIEW,
+            palette,
+            additions_tab: AdditionsTab::Drones,
+            prices,
+            prices_updating: false,
+            price_totals: PriceTotals::default(),
+            factor_reload: false,
+            damage_patterns: Rc::default(),
+            target_profiles: Rc::default(),
+            character_implants: &[],
+            implants_in_cargo: false,
+        }
+    }
+}
+
+/// The sections, in pyfa's order. Firepower is mining yield while the view is swapped to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) enum SectionKind {
+    Resources,
+    Resistances,
+    Recharge,
+    Firepower,
+    Outgoing,
+    Capacitor,
+    Targeting,
+    Bombing,
+    Price,
+}
+
+impl SectionKind {
+    pub(in crate::ui) const ALL: [Self; 9] = [
+        Self::Resources,
+        Self::Resistances,
+        Self::Recharge,
+        Self::Firepower,
+        Self::Outgoing,
+        Self::Capacitor,
+        Self::Targeting,
+        Self::Bombing,
+        Self::Price,
+    ];
+
+    /// The name the preferences and the collapsed set know the section by.
+    pub(in crate::ui) fn key(self) -> &'static str {
+        match self {
+            Self::Resources => "Resources",
+            Self::Resistances => "Resistances",
+            Self::Recharge => "Recharge",
+            Self::Firepower => "Firepower",
+            Self::Outgoing => "Outgoing",
+            Self::Capacitor => "Capacitor",
+            Self::Targeting => "Targeting",
+            Self::Bombing => "Bombing",
+            Self::Price => "Price",
+        }
+    }
+}
+
+/// What the main window adds to its sections: header menus, the toggles and collapsing. A
+/// window without them shows the same sections read-only.
+pub(in crate::ui) struct Controls<'a> {
+    pub efa: WeakEntity<Efa>,
+    pub collapsed: &'a HashSet<&'static str>,
+}
+
+/// `which` sections of the pane's fit, each under its header.
+pub(in crate::ui) fn render_sections(
+    pane: &Pane<'_>,
+    which: &[SectionKind],
+    controls: Option<&Controls<'_>>,
+    cx: &App,
+) -> Vec<AnyElement> {
+    which
+        .iter()
+        .map(|&kind| {
+            let section = match kind {
+                SectionKind::Resources => resources::section(pane, cx),
+                SectionKind::Resistances => defense::resistances(pane, controls, cx),
+                SectionKind::Recharge => defense::recharge(pane),
+                SectionKind::Firepower if pane.view.mining => offense::mining(pane, controls),
+                SectionKind::Firepower => offense::firepower(pane, controls, cx),
+                SectionKind::Outgoing => offense::outgoing(pane),
+                SectionKind::Capacitor => misc::capacitor(pane),
+                SectionKind::Targeting => misc::targeting(pane, cx),
+                SectionKind::Bombing => defense::bombing(pane),
+                SectionKind::Price => price::section(pane, controls, cx),
+            };
+            frame(section, controls)
+        })
+        .collect()
 }
 
 impl Pane<'_> {
@@ -141,7 +255,7 @@ struct Section {
 /// Width of the stats pane. pyfa sizes its pane to the content and keeps it there.
 pub const PANE_WIDTH: f32 = 300.;
 /// pyfa draws its stats pane in 8 point text on Linux, about 11 pixels.
-const TEXT_SIZE: f32 = 11.;
+pub(in crate::ui) const TEXT_SIZE: f32 = 11.;
 
 impl Efa {
     pub(super) fn stats_panel(&self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
@@ -165,27 +279,21 @@ impl Efa {
             prices: &self.prices,
             prices_updating: self.prices_fetch.is_some(),
             price_totals: self.saved.price_totals,
+            factor_reload: self.saved.factor_reload,
             damage_patterns: Rc::new(self.saved.damage_patterns.clone()),
             target_profiles: Rc::new(self.saved.target_profiles.clone()),
             character_implants: self.character_implants(),
             implants_in_cargo: self.saved.preferences.general.implants_in_cargo,
         };
-        let this = Self::weak(cx);
-        let sections = [
-            resources::section(&pane, cx),
-            defense::resistances(&pane, &this, cx),
-            defense::recharge(&pane),
-            if self.stats_view.mining {
-                offense::mining(&pane, cx)
-            } else {
-                offense::firepower(&pane, &this, self.saved.factor_reload, cx)
-            },
-            offense::outgoing(&pane),
-            misc::capacitor(&pane),
-            misc::targeting(&pane, cx),
-            defense::bombing(&pane),
-            price::section(&pane, &this, cx),
-        ];
+        let which: Vec<SectionKind> = SectionKind::ALL
+            .into_iter()
+            .filter(|s| self.saved.preferences.stats.shows(s.key()))
+            .collect();
+        let controls = Controls {
+            efa: Self::weak(cx),
+            collapsed: &self.collapsed_sections,
+        };
+        let sections = render_sections(&pane, &which, Some(&controls), cx);
         v_flex()
             .size_full()
             .bg(theme.sidebar)
@@ -199,67 +307,74 @@ impl Efa {
                     .overflow_y_scroll()
                     .p_2()
                     .gap_2()
-                    .children(
-                        sections
-                            .into_iter()
-                            .filter(|s| self.saved.preferences.stats.shows(s.key))
-                            .map(|s| self.section(s, cx)),
-                    ),
+                    .children(sections),
             )
             .into_any_element()
     }
+}
 
-    fn section(&self, section: Section, cx: &mut Context<Self>) -> AnyElement {
-        let Section {
-            key,
-            title,
-            body,
-            menu,
-            action,
-        } = section;
-        let collapsed = self.collapsed_sections.contains(key);
-        let header = h_flex()
+/// A section under its header. With the main window's controls, a click on the title folds it
+/// and the header carries the section's menu.
+fn frame(section: Section, controls: Option<&Controls<'_>>) -> AnyElement {
+    let Section {
+        key,
+        title,
+        body,
+        menu,
+        action,
+    } = section;
+    let Some(controls) = controls else {
+        return v_flex()
             .gap_1()
-            .child(
-                h_flex()
-                    .id(SharedString::from(format!("section-{key}")))
-                    .flex_1()
-                    .gap_1()
-                    .child(div().w(px(10.)).child(if collapsed { "▸" } else { "▾" }))
-                    .child(title)
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+            .child(h_flex().gap_1().child(title).children(action))
+            .child(div().pl_1().child(body))
+            .into_any_element();
+    };
+    let collapsed = controls.collapsed.contains(key);
+    let efa = controls.efa.clone();
+    let header = h_flex()
+        .gap_1()
+        .child(
+            h_flex()
+                .id(SharedString::from(format!("section-{key}")))
+                .flex_1()
+                .gap_1()
+                .child(div().w(px(10.)).child(if collapsed { "▸" } else { "▾" }))
+                .child(title)
+                .on_click(move |_: &ClickEvent, _, cx| {
+                    Efa::app_update(&efa, cx, |this, cx| {
                         if !this.collapsed_sections.remove(key) {
                             this.collapsed_sections.insert(key);
                         }
                         cx.notify();
-                    })),
+                    });
+                }),
+        )
+        .children(action)
+        .when_some(menu.clone(), |h, menu| {
+            h.child(
+                Button::new(SharedString::from(format!("section-menu-{key}")))
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Menu)
+                    .dropdown_menu(move |m, window, cx| menu(m, window, cx)),
             )
-            .children(action)
-            .when_some(menu.clone(), |h, menu| {
-                h.child(
-                    Button::new(SharedString::from(format!("section-menu-{key}")))
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::Menu)
-                        .dropdown_menu(move |m, window, cx| menu(m, window, cx)),
-                )
-            });
-        let body = div()
-            .id(SharedString::from(format!("section-body-{key}")))
-            .pl_1()
-            .child(body);
-        let body = match menu {
-            Some(menu) => body
-                .context_menu(move |m, window, cx| menu(m, window, cx))
-                .into_any_element(),
-            None => body.into_any_element(),
-        };
-        v_flex()
-            .gap_1()
-            .child(header)
-            .when(!collapsed, |s| s.child(body))
-            .into_any_element()
-    }
+        });
+    let body = div()
+        .id(SharedString::from(format!("section-body-{key}")))
+        .pl_1()
+        .child(body);
+    let body = match menu {
+        Some(menu) => body
+            .context_menu(move |m, window, cx| menu(m, window, cx))
+            .into_any_element(),
+        None => body.into_any_element(),
+    };
+    v_flex()
+        .gap_1()
+        .child(header)
+        .when(!collapsed, |s| s.child(body))
+        .into_any_element()
 }
 
 /// A plain section title.
