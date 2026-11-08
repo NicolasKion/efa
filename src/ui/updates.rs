@@ -11,8 +11,8 @@ use gpui_kit::component::{
     h_flex,
 };
 use gpui_kit::{
-    App, AppContext, Context, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled,
-    Task, WeakEntity, div, prelude::FluentBuilder,
+    App, AppContext, Context, Entity, FontWeight, IntoElement, ParentElement, Render, SharedString,
+    Styled, Subscription, Task, WeakEntity, Window, div, prelude::FluentBuilder,
 };
 
 use crate::update::{self, Available, Progress};
@@ -198,9 +198,35 @@ impl Updates {
     }
 }
 
+/// The strip under the main window's menu bar, a view of its own so a download's progress
+/// redraws only the strip and not the whole window.
+pub struct UpdateNotice {
+    updates: Entity<Updates>,
+    _watch: Subscription,
+}
+
+impl UpdateNotice {
+    pub fn new(updates: Entity<Updates>, cx: &mut Context<Self>) -> Self {
+        let watch = cx.observe(&updates, |_, _, cx| cx.notify());
+        Self {
+            updates,
+            _watch: watch,
+        }
+    }
+}
+
+impl Render for UpdateNotice {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        match notice(&self.updates, cx) {
+            Some(notice) => notice.into_any_element(),
+            None => div().into_any_element(),
+        }
+    }
+}
+
 /// The strip under the main window's menu bar while a release is waiting. None when there is
 /// nothing to say.
-pub fn notice(updates: &Entity<Updates>, cx: &App) -> Option<impl IntoElement> {
+fn notice(updates: &Entity<Updates>, cx: &App) -> Option<impl IntoElement> {
     let state = &updates.read(cx).state;
     let (available, text, error): (&Arc<Available>, String, bool) = match state {
         State::Idle => return None,

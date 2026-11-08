@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicU64, Ordering},
         mpsc::{self, Sender},
     },
     time::{Duration, Instant},
@@ -62,8 +62,8 @@ pub struct Icons {
     states: States,
     /// None without a client to download with.
     fetch: Option<Sender<(Icon, String, PathBuf)>>,
-    /// Set when a download lands, so the UI knows to redraw.
-    updated: Arc<AtomicBool>,
+    /// Counts landed downloads, so the UI can tell it has icons to redraw with.
+    updated: Arc<AtomicU64>,
 }
 
 impl Icons {
@@ -75,7 +75,7 @@ impl Icons {
         http: Option<reqwest::blocking::Client>,
     ) -> Self {
         let states: States = Arc::default();
-        let updated = Arc::new(AtomicBool::new(false));
+        let updated = Arc::new(AtomicU64::new(0));
         let fetch = http.map(|http| {
             let (tx, rx) = mpsc::channel::<(Icon, String, PathBuf)>();
             let rx = Arc::new(Mutex::new(rx));
@@ -105,7 +105,7 @@ impl Icons {
                             .lock()
                             .expect("icon state lock poisoned")
                             .insert(icon, state);
-                        updated.store(true, Ordering::Release);
+                        updated.fetch_add(1, Ordering::Release);
                     }
                 });
             }
@@ -178,9 +178,10 @@ impl Icons {
         None
     }
 
-    /// Whether any icon arrived since the last call.
-    pub fn take_updated(&self) -> bool {
-        self.updated.swap(false, Ordering::AcqRel)
+    /// How many downloads have landed so far: when it moved on since a window last looked,
+    /// the window has icons to redraw with.
+    pub fn generation(&self) -> u64 {
+        self.updated.load(Ordering::Acquire)
     }
 }
 

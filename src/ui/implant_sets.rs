@@ -252,7 +252,7 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 }
 
 /// A drag of these implants out of the tree, shown under `label` when there are several.
-fn tree_drag(loaded: &Loaded, implants: &[TypeId], label: Option<&str>) -> Option<Dragged> {
+fn tree_drag(loaded: &Rc<Loaded>, implants: &[TypeId], label: Option<&str>) -> Option<Dragged> {
     let (&first, rest) = implants.split_first()?;
     let dragged = Dragged::of(loaded, DragSource::Market, Some(first))?.with_more(rest.to_vec());
     Some(match label {

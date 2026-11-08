@@ -4,14 +4,20 @@
 //! publishes its copy here when it changes, and every other window pulls the new one in. Each
 //! window keeps its own tabs; only the main window's are remembered between runs.
 
-use std::rc::Rc;
+use std::{rc::Rc, time::Duration};
 
 use gpui_kit::{App, AppContext, Context, Entity, Global, SharedString, Task, WeakEntity, Window};
 
 use super::{Loaded, load};
 use crate::{
-    character::Characters, engine::Overridden, fit::Fit, overrides::Overrides,
-    preferences::Preferences, prices::Prices, store::Saved,
+    character::Characters,
+    engine::Overridden,
+    fit::Fit,
+    overrides::Overrides,
+    preferences::Preferences,
+    prices::Prices,
+    store::Saved,
+    theme::{self, Palette},
 };
 
 /// The current preferences for code that has no window to ask, such as menu builders. The hub
@@ -117,7 +123,19 @@ pub struct Hub {
     /// The database the fits, characters and logins are written to. None when it could not be
     /// opened, which was reported; changes are then not saved.
     store: Option<crate::db::Store>,
+    /// The theme's colors, followed as Omarchy switches theme.
+    pub palette: Palette,
+    /// The theme switch the palette is from, as Omarchy numbers them.
+    theme_generation: Option<String>,
+    /// The icon downloads every window has been redrawn for.
+    icon_generation: u64,
+    _ticker: Task<()>,
 }
+
+/// How often the hub looks for icons that finished downloading.
+const TICK: Duration = Duration::from_millis(250);
+/// Ticks between looks at the theme, which means reading a file.
+const THEME_TICKS: u32 = 4;
 
 impl Hub {
     pub fn new(import: Option<String>, cx: &mut Context<Self>) -> Self {
@@ -150,6 +168,18 @@ impl Hub {
         }
         let revisions: Vec<u64> = (1..=saved.fits.len() as u64).collect();
         cx.set_global(CurrentPreferences(saved.settings.preferences.clone()));
+        let palette = Palette::current().unwrap_or_default();
+        super::widgets::apply_palette(&palette, cx);
+        let ticker = cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let mut ticks = 0_u32;
+            loop {
+                cx.background_executor().timer(TICK).await;
+                ticks = ticks.wrapping_add(1);
+                if this.update(cx, |hub, cx| hub.tick(ticks, cx)).is_err() {
+                    break;
+                }
+            }
+        });
         Self {
             loading: HubLoading::Pending,
             saved,
@@ -169,6 +199,10 @@ impl Hub {
             overrides_task: None,
             updates: cx.new(super::updates::Updates::new),
             store,
+            palette,
+            theme_generation: theme::generation(),
+            icon_generation: 0,
+            _ticker: ticker,
         }
     }
 
@@ -320,6 +354,28 @@ impl Hub {
             .is_none_or(|p| p.0 != self.saved.settings.preferences);
         if changed {
             cx.set_global(CurrentPreferences(self.saved.settings.preferences.clone()));
+        }
+    }
+
+    /// Redraw every window once icons landed, and restyle them all for a theme switch.
+    fn tick(&mut self, ticks: u32, cx: &mut Context<Self>) {
+        if let HubLoading::Ready(loaded) = &self.loading {
+            let icons = loaded.icons.generation();
+            if icons != self.icon_generation {
+                self.icon_generation = icons;
+                cx.refresh_windows();
+            }
+        }
+        if ticks.is_multiple_of(THEME_TICKS) {
+            let generation = theme::generation();
+            if generation != self.theme_generation {
+                self.theme_generation = generation;
+                if let Some(palette) = Palette::current() {
+                    self.palette = palette;
+                    super::widgets::apply_palette(&palette, cx);
+                    cx.notify();
+                }
+            }
         }
     }
 

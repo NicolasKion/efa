@@ -111,7 +111,7 @@ use crate::{
     icons::{Icon, Icons},
     prices::Prices,
     store::Saved,
-    theme::{self, Palette},
+    theme::Palette,
 };
 
 /// The settings the stats are calculated with, besides the fits and characters: when these
@@ -132,7 +132,7 @@ const PRICE_RETRY: Duration = Duration::from_secs(600);
 /// What runs once prices for some types are in, or could not be had.
 type PriceWaiter = Box<dyn FnOnce(&mut Efa, &mut Context<Efa>)>;
 
-/// How often background work is checked: icons that finished downloading, theme switches.
+/// How often background work is checked: prices, errors to show, changes to publish.
 const POLL: Duration = Duration::from_millis(250);
 
 pub struct Loaded {
@@ -220,6 +220,8 @@ pub struct Efa {
     synced: u64,
     /// The hub's engine generation the stats were calculated with.
     engine_synced: u64,
+    /// The strip announcing a new release, in the main window.
+    update_notice: Option<Entity<updates::UpdateNotice>>,
     /// Fits this window deleted since it last published, for the other windows' tabs.
     pending_deletions: Vec<usize>,
     /// The active tab shows the name field instead of the name.
@@ -274,6 +276,17 @@ pub struct Efa {
     unsaved: bool,
     /// The fitting view's column widths for the frame being drawn.
     column_layout: columns::Layout,
+    /// Bumped by every recalculation, which every change to the fits makes: what is worked out
+    /// from the fits for drawing is kept until it moves on.
+    calc_generation: u64,
+    /// The fitting view's column widths and Miscellanea texts, as last worked out.
+    fitting_cache: Option<columns::FittingCache>,
+    /// The types every saved fit uses, as of a calculation generation.
+    fit_types: Option<(u64, Rc<HashSet<TypeId>>)>,
+    /// The fittings browser's lines, and what they were listed from.
+    browser_cache: Option<(side::BrowserKey, Rc<side::BrowserRows>)>,
+    /// The market results after the pane's filters, and what they were filtered with.
+    filtered_cache: Option<(side::FilterKey, Rc<crate::market::Filtered>)>,
     /// Selected rows of the open additions tab, by their place in the list as shown. Tabs that
     /// sort their rows map these to the fit's own indices before acting on them.
     additions_selection: ListSelection<usize>,
@@ -292,8 +305,8 @@ pub struct Efa {
     search_debounce: Option<Task<()>>,
     stats_view: stats::View,
     status: Option<status_bar::Status>,
+    /// The hub's theme colors, as of its last change.
     palette: Palette,
-    theme_generation: Option<String>,
     /// Item prices; replaced, not mutated, when a refresh lands.
     prices: Rc<Prices>,
     prices_fetch: Option<Task<()>>,
@@ -316,8 +329,7 @@ pub struct Efa {
 
 impl Efa {
     pub fn new(hub: Entity<Hub>, role: Role, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let palette = Palette::current().unwrap_or_default();
-        widgets::apply_palette(&palette, cx);
+        let palette = hub.read(cx).palette;
 
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search items"));
         let fit_search =
@@ -387,10 +399,10 @@ impl Efa {
 
         let mut subscriptions = subscriptions;
         subscriptions.push(cx.observe(&hub, |g, _, cx| g.pull(cx)));
-        if role == Role::Main {
+        let update_notice = (role == Role::Main).then(|| {
             let updates = hub.read(cx).updates.clone();
-            subscriptions.push(cx.observe(&updates, |_, _, cx| cx.notify()));
-        }
+            cx.new(|cx| updates::UpdateNotice::new(updates, cx))
+        });
         let (mut saved, synced, characters) = {
             let hub = hub.read(cx);
             (
@@ -408,6 +420,7 @@ impl Efa {
             role,
             synced,
             engine_synced: 0,
+            update_notice,
             pending_deletions: Vec::new(),
             renaming: false,
             tab_dragging: false,
@@ -441,6 +454,11 @@ impl Efa {
             selection: ListSelection::default(),
             unsaved: false,
             column_layout: columns::Layout::default(),
+            calc_generation: 0,
+            fitting_cache: None,
+            fit_types: None,
+            filtered_cache: None,
+            browser_cache: None,
             additions_selection: ListSelection::default(),
             additions_focus: cx.focus_handle(),
             drones_focus: cx.focus_handle(),
@@ -453,7 +471,6 @@ impl Efa {
             stats_view: stats::View::default(),
             status: None,
             palette,
-            theme_generation: theme::generation(),
             prices: Rc::new(Prices::default()),
             prices_fetch: None,
             prices_retry: None,
@@ -490,6 +507,10 @@ impl Efa {
         }
         if !Rc::ptr_eq(&self.prices, &hub.prices) {
             self.prices = Rc::clone(&hub.prices);
+            redraw = true;
+        }
+        if self.palette != hub.palette {
+            self.palette = hub.palette;
             redraw = true;
         }
         if !Rc::ptr_eq(&self.characters, &hub.characters) {
@@ -659,13 +680,23 @@ impl Efa {
         network.enabled && network.prices
     }
 
-    /// Every type the saved fits use, what the price sources are asked about.
-    fn saved_fit_types(&self) -> HashSet<TypeId> {
-        self.saved
-            .fits
-            .iter()
-            .flat_map(|fit| crate::port::fit_types(fit))
-            .collect()
+    /// Every type the saved fits use, what the price sources are asked about. Gathered again
+    /// only after the fits changed.
+    fn saved_fit_types(&mut self) -> Rc<HashSet<TypeId>> {
+        if let Some((generation, types)) = &self.fit_types
+            && *generation == self.calc_generation
+        {
+            return Rc::clone(types);
+        }
+        let types: Rc<HashSet<TypeId>> = Rc::new(
+            self.saved
+                .fits
+                .iter()
+                .flat_map(|fit| crate::port::fit_types(fit))
+                .collect(),
+        );
+        self.fit_types = Some((self.calc_generation, Rc::clone(&types)));
+        types
     }
 
     /// Fetch newer prices in the background when the ones we have are stale. After a failure it
@@ -680,7 +711,7 @@ impl Efa {
         }
         let types = self.saved_fit_types();
         if self.prices.is_stale_for(self.price_origin(), &types) {
-            self.start_price_fetch(types, cx);
+            self.start_price_fetch((*types).clone(), cx);
         }
     }
 
@@ -697,7 +728,7 @@ impl Efa {
             return;
         }
         cx.notify();
-        let mut all = self.saved_fit_types();
+        let mut all = (*self.saved_fit_types()).clone();
         all.extend(&types);
         self.price_waiters.push((types, Box::new(then)));
         if self.prices_fetch.is_none() {
@@ -750,7 +781,8 @@ impl Efa {
         }));
     }
 
-    /// Redraw for downloaded icons, restyle for a theme switch.
+    /// Background work only the window can do: prices and error reports in the main window,
+    /// and handing its changes to the hub.
     fn poll(&mut self, cx: &mut Context<Self>) {
         // One window fetching prices is enough; the hub hands them to the rest. The same goes
         // for showing errors.
@@ -764,17 +796,6 @@ impl Efa {
         if std::mem::take(&mut self.unsaved) {
             self.publish(cx);
         }
-        if self.loaded().is_some_and(|l| l.icons.take_updated()) {
-            cx.notify();
-        }
-        let generation = theme::generation();
-        if generation != self.theme_generation {
-            self.theme_generation = generation;
-            if let Some(palette) = Palette::current() {
-                self.palette = palette;
-                widgets::apply_palette(&palette, cx);
-            }
-        }
     }
 
     fn fit(&self) -> Option<&Fit> {
@@ -783,6 +804,7 @@ impl Efa {
 
     fn recompute(&mut self) {
         let Some(loaded) = self.loaded() else { return };
+        self.calc_generation += 1;
         self.follow_globals();
         let options = crate::engine::CalcOptions {
             factor_reload: self.saved.settings.factor_reload,
@@ -1594,11 +1616,7 @@ impl Render for Efa {
             }
         }))
         .child(self.menu_bar(window, cx))
-        .children(
-            (self.role == Role::Main)
-                .then(|| updates::notice(&self.hub.read(cx).updates, cx))
-                .flatten(),
-        )
+        .children(self.update_notice.clone())
         .child(
             h_flex()
                 .flex_1()

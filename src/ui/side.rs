@@ -72,6 +72,73 @@ enum MarketContext {
     Search,
 }
 
+/// Height of a ship group line in the fittings browser, and of a ship or fit line.
+const GROUP_ROW_H: f32 = 26.;
+const FIT_ROW_H: f32 = 44.;
+
+/// A line of the fittings browser.
+#[derive(Debug, Clone, Copy)]
+enum BrowserRow {
+    /// A band over the ships or the structures.
+    Header(&'static str),
+    /// A ship group and how many fits its ships have.
+    Group(i32, usize),
+    /// A ship and how many fits it has.
+    Ship(TypeId, usize),
+    /// A saved fit, by index.
+    Fit(usize),
+}
+
+/// The fittings browser's lines, and the races its race filter offers.
+pub(super) struct BrowserRows {
+    rows: Vec<BrowserRow>,
+    races: Vec<Race>,
+}
+
+/// What the fittings browser's lines were listed from.
+pub(super) struct BrowserKey {
+    /// The fits, kept so a changed one is told apart by address.
+    fits: Vec<Rc<crate::fit::Fit>>,
+    stage: Stage,
+    hide_empty: bool,
+    races: Vec<Race>,
+}
+
+impl BrowserKey {
+    fn same(&self, other: &Self) -> bool {
+        self.stage == other.stage
+            && self.hide_empty == other.hide_empty
+            && self.races == other.races
+            && self.fits.len() == other.fits.len()
+            && self
+                .fits
+                .iter()
+                .zip(&other.fits)
+                .all(|(a, b)| Rc::ptr_eq(a, b))
+    }
+}
+
+/// What the results pane's filters ran over and with, to know when to run them again.
+pub(super) struct FilterKey {
+    /// The listed sections, kept so the next ones are told apart by address.
+    sections: Option<Rc<Vec<Section>>>,
+    text: String,
+    meta: crate::market::MetaFilter,
+    /// The calculation the ship filter used, when it is on.
+    ship: Option<u64>,
+}
+
+impl FilterKey {
+    fn same(&self, other: &Self) -> bool {
+        let sections = match (&self.sections, &other.sections) {
+            (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        sections && self.text == other.text && self.meta == other.meta && self.ship == other.ship
+    }
+}
+
 /// What the results pane's list was built from, to know when to build it again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ResultsKey {
@@ -100,7 +167,7 @@ impl Efa {
     /// here instead of a column of its own.
     pub(super) fn browser(
         &mut self,
-        loaded: &Loaded,
+        loaded: &Rc<Loaded>,
         narrow: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -449,25 +516,43 @@ impl Efa {
         let room = self.ship_room(catalog);
         let can_filter_ship = room.is_some();
         let room = room.filter(|_| self.fits_ship_only);
-        let text = TextFilter::new(&self.results_filter_text, Jargon::global());
-        let meta = self.meta_filter;
-        let filtered = results.as_ref().map_or_default(|(_, sections)| {
-            filter_results(catalog, sections, text.as_ref(), room.as_ref(), meta)
-        });
+        let filter_key = FilterKey {
+            sections: results.as_ref().map(|(_, sections)| Rc::clone(sections)),
+            text: self.results_filter_text.clone(),
+            meta: self.meta_filter,
+            ship: room.is_some().then_some(self.calc_generation),
+        };
+        let filtered = match &self.filtered_cache {
+            Some((last, filtered)) if last.same(&filter_key) => Rc::clone(filtered),
+            _ => {
+                let text = TextFilter::new(&self.results_filter_text, Jargon::global());
+                let filtered = Rc::new(results.as_ref().map_or_default(|(_, sections)| {
+                    filter_results(
+                        catalog,
+                        sections,
+                        text.as_ref(),
+                        room.as_ref(),
+                        self.meta_filter,
+                    )
+                }));
+                self.market_order = Rc::new(
+                    filtered
+                        .rows
+                        .iter()
+                        .filter_map(|row| match row {
+                            ResultRow::Item(id) => Some(*id),
+                            ResultRow::Heading(_) => None,
+                        })
+                        .collect(),
+                );
+                // Only what is listed stays selected, so nothing hidden is dragged along.
+                let listed: HashSet<TypeId> = self.market_order.iter().copied().collect();
+                self.market_selection.retain(|id| listed.contains(id));
+                self.filtered_cache = Some((filter_key, Rc::clone(&filtered)));
+                filtered
+            }
+        };
         let key = results.map(|(key, _)| key);
-        self.market_order = Rc::new(
-            filtered
-                .rows
-                .iter()
-                .filter_map(|row| match row {
-                    ResultRow::Item(id) => Some(*id),
-                    ResultRow::Heading(_) => None,
-                })
-                .collect(),
-        );
-        // Only what is listed stays selected, so nothing hidden is dragged along.
-        let listed: HashSet<TypeId> = self.market_order.iter().copied().collect();
-        self.market_selection.retain(|id| listed.contains(id));
         if jump
             && let Some(target) = self.market_highlight
             && let Some(index) = filtered
@@ -484,19 +569,19 @@ impl Efa {
         let body = if filtered.rows.is_empty() {
             self.results_empty(key.as_ref(), &filtered, cx)
         } else {
-            let rows = Rc::new(filtered.rows);
+            let rows = Rc::clone(&filtered);
             let group = match key {
                 Some(ResultsKey::Listing(Listing::Group(group))) => Some(group),
                 _ => None,
             };
             uniform_list(
                 "market-results",
-                rows.len(),
+                rows.rows.len(),
                 cx.processor(move |this, range: Range<usize>, _, cx| {
                     let Some(loaded) = this.loaded() else {
                         return Vec::new();
                     };
-                    rows[range]
+                    rows.rows[range]
                         .iter()
                         .map(|row| match row {
                             ResultRow::Heading(title) => heading_row(title, cx),
@@ -653,7 +738,7 @@ impl Efa {
 
     fn item_row(
         &self,
-        loaded: &Loaded,
+        loaded: &Rc<Loaded>,
         id: TypeId,
         context: MarketContext,
         cx: &mut Context<Self>,
@@ -751,11 +836,30 @@ impl Efa {
         self.add_fit(fit, cx);
     }
 
-    fn fittings(&self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The fittings browser's rows for where it is, worked out again only when the fits, the
+    /// place or its filters changed.
+    fn browser_rows(&mut self, loaded: &Loaded) -> Rc<BrowserRows> {
+        let key = BrowserKey {
+            fits: self.saved.fits.clone(),
+            stage: self.ship_browser.stage.clone(),
+            hide_empty: self.ship_browser.hide_empty,
+            races: self.ship_browser.races.iter().copied().collect(),
+        };
+        if let Some((last, rows)) = &self.browser_cache
+            && last.same(&key)
+        {
+            return Rc::clone(rows);
+        }
+        let rows = Rc::new(self.list_browser_rows(loaded));
+        self.browser_cache = Some((key, Rc::clone(&rows)));
+        rows
+    }
+
+    fn list_browser_rows(&self, loaded: &Loaded) -> BrowserRows {
         let counts = ship_browser::fit_counts(&self.saved.fits);
-        let stage = self.ship_browser.stage.clone();
+        let count_of = |ship: TypeId| counts.get(&ship).copied().unwrap_or(0);
         let mut races = Vec::new();
-        let rows: Vec<AnyElement> = match &stage {
+        let rows: Vec<BrowserRow> = match &self.ship_browser.stage {
             Stage::Groups => {
                 // Ships first, then structures in a section of their own.
                 let shown = |structures: bool| {
@@ -782,11 +886,11 @@ impl Efa {
                     if groups.is_empty() {
                         continue;
                     }
-                    rows.push(section_header(title, cx));
+                    rows.push(BrowserRow::Header(title));
                     rows.extend(
                         groups
                             .into_iter()
-                            .map(|(group, count)| Self::ship_group_row(loaded, group, count, cx)),
+                            .map(|(group, count)| BrowserRow::Group(group, count)),
                     );
                 }
                 rows
@@ -801,37 +905,38 @@ impl Efa {
                 races.sort();
                 ships
                     .iter()
-                    .filter_map(|&ship| {
-                        let count = counts.get(&ship).copied().unwrap_or(0);
+                    .filter(|&&ship| {
                         let race = loaded.catalog.get(ship).and_then(|t| t.race);
-                        let shown = self.ship_browser.shows_race(race, &present)
-                            && (!self.ship_browser.hide_empty || count > 0);
-                        shown.then(|| self.ship_row(loaded, ship, count, cx))
+                        self.ship_browser.shows_race(race, &present)
+                            && (!self.ship_browser.hide_empty || count_of(ship) > 0)
                     })
+                    .map(|&ship| BrowserRow::Ship(ship, count_of(ship)))
                     .collect()
             }
             Stage::Fits(ship) => ship_browser::fits_of(&self.saved.fits, *ship)
                 .into_iter()
-                .map(|i| self.fit_row(loaded, i, cx))
+                .map(BrowserRow::Fit)
                 .collect(),
-            Stage::Search(query) => {
-                let ships = ship_browser::search_ships(&loaded.catalog, query);
-                let fits = ship_browser::search_fits(&self.saved.fits, query);
-                let mut rows: Vec<AnyElement> = ships
-                    .into_iter()
-                    .map(|ship| {
-                        let count = counts.get(&ship).copied().unwrap_or(0);
-                        self.ship_row(loaded, ship, count, cx)
-                    })
-                    .collect();
-                rows.extend(fits.into_iter().map(|i| self.fit_row(loaded, i, cx)));
-                rows
-            }
+            Stage::Search(query) => ship_browser::search_ships(&loaded.catalog, query)
+                .into_iter()
+                .map(|ship| BrowserRow::Ship(ship, count_of(ship)))
+                .chain(
+                    ship_browser::search_fits(&self.saved.fits, query)
+                        .into_iter()
+                        .map(BrowserRow::Fit),
+                )
+                .collect(),
             Stage::Recent => ship_browser::recent_fits(&self.saved.fits)
                 .into_iter()
-                .map(|i| self.fit_row(loaded, i, cx))
+                .map(BrowserRow::Fit)
                 .collect(),
         };
+        BrowserRows { rows, races }
+    }
+
+    fn fittings(&mut self, loaded: &Rc<Loaded>, cx: &mut Context<Self>) -> impl IntoElement {
+        let stage = self.ship_browser.stage.clone();
+        let listed = self.browser_rows(loaded);
         let empty = match &stage {
             Stage::Groups | Stage::Ships(_) if self.ship_browser.hide_empty => "No fits yet.",
             Stage::Groups | Stage::Ships(_) => "Nothing here.",
@@ -839,22 +944,55 @@ impl Efa {
             Stage::Search(_) => "No matching results.",
             Stage::Recent => "No fits yet.",
         };
+        // Groups are single lines; ships and fits show an icon over two.
+        let row_h = if stage == Stage::Groups {
+            GROUP_ROW_H
+        } else {
+            FIT_ROW_H
+        };
+        let list = if listed.rows.is_empty() {
+            div()
+                .flex_1()
+                .min_h_0()
+                .child(empty_line(empty, cx))
+                .into_any_element()
+        } else {
+            let rows = Rc::clone(&listed);
+            uniform_list(
+                "fittings-list",
+                rows.rows.len(),
+                cx.processor(move |this, range: Range<usize>, _, cx| {
+                    let Some(loaded) = this.loaded() else {
+                        return Vec::new();
+                    };
+                    rows.rows[range]
+                        .iter()
+                        .map(|row| match *row {
+                            BrowserRow::Header(title) => section_header(title, cx),
+                            BrowserRow::Group(group, count) => {
+                                Self::ship_group_row(&loaded, group, count, cx)
+                            }
+                            BrowserRow::Ship(ship, count) => {
+                                this.ship_row(&loaded, ship, count, cx)
+                            }
+                            BrowserRow::Fit(i) => this.fit_row(&loaded, i, cx),
+                        })
+                        .map(|row| div().h(px(row_h)).child(row).into_any_element())
+                        .collect()
+                }),
+            )
+            .flex_1()
+            .min_h_0()
+            .into_any_element()
+        };
         v_flex()
             .flex_1()
             .min_h_0()
             .child(self.fittings_toolbar(&stage, cx))
             .child(Self::fittings_title(loaded, &stage, cx))
-            .child(
-                v_flex()
-                    .id("fittings-list")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .when(rows.is_empty(), |list| list.child(empty_line(empty, cx)))
-                    .children(rows),
-            )
-            .when(!races.is_empty(), |pane| {
-                pane.child(self.race_filter(loaded, &races, cx))
+            .child(list)
+            .when(!listed.races.is_empty(), |pane| {
+                pane.child(self.race_filter(loaded, &listed.races, cx))
             })
     }
 
@@ -1065,7 +1203,7 @@ impl Efa {
         list_row(SharedString::from(format!("ship-group-{group}")), false, cx)
             .gap_2()
             .px_2()
-            .h(px(26.))
+            .h_full()
             .child(
                 div().w(px(16.)).flex_none().children(
                     crate::brackets::ship_bracket(group)
@@ -1103,7 +1241,7 @@ impl Efa {
             .general
             .ship_browser_tooltips;
         list_row(SharedString::from(format!("ship-{ship}")), false, cx)
-            .h_auto()
+            .h_full()
             .gap_2()
             .p_1()
             .child(icon_box(
@@ -1165,7 +1303,7 @@ impl Efa {
         };
         let open = self.saved.settings.current == Some(i);
         list_row(SharedString::from(format!("fitting-{i}")), open, cx)
-            .h_auto()
+            .h_full()
             .gap_2()
             .p_1()
             .map(|row| match (fit.ship, self.loaded().filter(|_| tooltips)) {
@@ -1633,7 +1771,7 @@ fn market_menu(
 /// A band over a run of rows in the fittings browser, like the fitting view's rack labels.
 fn section_header(title: &'static str, cx: &App) -> AnyElement {
     let theme = cx.theme();
-    band(div().mt_2().px_2().py_1(), cx)
+    band(div().h_full().flex().items_center().px_2(), cx)
         .text_xs()
         .font_weight(gpui_kit::FontWeight::SEMIBOLD)
         .text_color(theme.muted_foreground)

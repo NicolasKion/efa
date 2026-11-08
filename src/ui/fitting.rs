@@ -98,11 +98,8 @@ impl Efa {
                 .into_any_element();
         };
         let no_stats = Stats::default();
-        let layout = {
-            let stats = self.stats.as_ref().unwrap_or(&no_stats);
-            self.column_layout(loaded, &self.saved.fits[current], stats, window)
-        };
-        self.column_layout = layout;
+        self.refresh_fitting_cache(loaded, window);
+        let layout = self.column_layout;
         let fit = &self.saved.fits[current];
         let stats = self.stats.as_ref().unwrap_or(&no_stats);
         let rows = fitting_rows(fit, stats, self.rack_style());
@@ -307,8 +304,8 @@ impl Efa {
                             return div().into_any_element();
                         };
                         let info = stats.modules.get(&(slot, i)).copied().unwrap_or_default();
-                        let misc = self.misc_of(loaded, fit, stats, FitItem::Module(slot, i));
-                        self.module_cells(base, loaded, (slot, i), m, info, misc.as_ref(), cx)
+                        let misc = self.cached_misc(FitItem::Module(slot, i));
+                        self.module_cells(base, loaded, (slot, i), m, info, misc, cx)
                     }
                     RowRef::Rig(i) | RowRef::Subsystem(i) => {
                         let id = match item {
@@ -333,7 +330,7 @@ impl Efa {
                                 format!("misc-{item:?}"),
                                 match item {
                                     RowRef::Subsystem(i) => {
-                                        self.misc_of(loaded, fit, stats, FitItem::Subsystem(i))
+                                        self.cached_misc(FitItem::Subsystem(i)).cloned()
                                     }
                                     _ => None,
                                 },
@@ -593,44 +590,50 @@ pub enum DragSource {
     Listed,
 }
 
-/// An item being dragged: from the market onto a slot, or between slots.
-#[derive(Debug, Clone)]
+/// An item being dragged: from the market onto a slot, or between slots. Rows hand one out
+/// every time they are drawn, so it only names the item; the preview looks up its name and
+/// icon once a drag starts.
+#[derive(Clone)]
 pub struct Dragged {
     pub source: DragSource,
     pub type_id: TypeId,
     /// Further items dragged along, from a selection in the market results.
     pub more: Vec<TypeId>,
-    label: SharedString,
-    icon: Option<std::path::PathBuf>,
+    /// Shown instead of the item's name, such as the name of a set of items.
+    label: Option<SharedString>,
+    loaded: Rc<Loaded>,
 }
 
 impl Dragged {
-    pub fn of(loaded: &Loaded, source: DragSource, type_id: Option<TypeId>) -> Option<Self> {
-        let type_id = type_id?;
+    pub fn of(loaded: &Rc<Loaded>, source: DragSource, type_id: Option<TypeId>) -> Option<Self> {
         Some(Self {
             source,
-            type_id,
+            type_id: type_id?,
             more: Vec::new(),
-            label: loaded.catalog.name(type_id).into(),
-            icon: loaded.icons.path(&loaded.catalog, Icon::Type(type_id)),
+            label: None,
+            loaded: Rc::clone(loaded),
         })
     }
-}
 
-impl Dragged {
     /// Drag `more` along with the item.
     pub fn with_more(mut self, more: Vec<TypeId>) -> Self {
-        if !more.is_empty() {
-            self.label = format!("{} items", more.len() + 1).into();
-        }
         self.more = more;
         self
     }
 
     /// Show `label` while dragging, such as the name of a set of items.
     pub fn labelled(mut self, label: impl Into<SharedString>) -> Self {
-        self.label = label.into();
+        self.label = Some(label.into());
         self
+    }
+
+    /// What the preview says: the label, the count when several go, or the item's name.
+    fn caption(&self) -> SharedString {
+        match &self.label {
+            Some(label) => label.clone(),
+            None if !self.more.is_empty() => format!("{} items", self.more.len() + 1).into(),
+            None => self.loaded.catalog.name(self.type_id).into(),
+        }
     }
 
     /// Every item dragged, the grabbed one first.
@@ -645,6 +648,7 @@ pub struct DragPreview(pub Dragged);
 impl Render for DragPreview {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
+        let loaded = &self.0.loaded;
         h_flex()
             .gap_2()
             .px_2()
@@ -656,10 +660,13 @@ impl Render for DragPreview {
             .border_color(theme.ring)
             .shadow_md()
             .opacity(0.9)
-            .when_some(self.0.icon.clone(), |row, path| {
-                row.child(img(path).size(px(22.)))
-            })
-            .child(self.0.label.clone())
+            .when_some(
+                loaded
+                    .icons
+                    .path(&loaded.catalog, Icon::Type(self.0.type_id)),
+                |row, path| row.child(img(path).size(px(22.))),
+            )
+            .child(self.0.caption())
     }
 }
 
@@ -1488,12 +1495,15 @@ pub(super) fn structure_charges(
                 .into_iter()
                 .filter(|c| !c.name.to_lowercase().contains("civilian"))
                 .collect();
-            sorted.sort_by(|a, b| {
-                range(b)
-                    .total_cmp(&range(a))
-                    .then_with(|| name_base(a).cmp(&name_base(b)))
-                    .then_with(|| damage(a).total_cmp(&damage(b)))
-                    .then_with(|| a.name.cmp(&b.name))
+            // Longest range first, then by name family and damage; the keys are worked out once
+            // per charge rather than on every comparison.
+            sorted.sort_by_cached_key(|c| {
+                (
+                    std::cmp::Reverse(Total(range(c))),
+                    name_base(c),
+                    Total(damage(c)),
+                    c.name.clone(),
+                )
             });
             let mut families: Vec<Vec<TypeId>> = Vec::new();
             let mut previous: Option<(String, Option<f64>)> = None;
@@ -1537,6 +1547,24 @@ pub(super) fn structure_charges(
         Hardpoint::Turret | Hardpoint::None => {
             ChargeMenu::Flat(charges.iter().map(|c| c.id).collect())
         }
+    }
+}
+
+/// An `f64` ordered by `total_cmp`, for sort keys.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Total(f64);
+
+impl Eq for Total {}
+
+impl PartialOrd for Total {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Total {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.total_cmp(&other.0)
     }
 }
 
@@ -1644,17 +1672,21 @@ fn rack_cells(fit: &Fit, slot: Slot) -> Vec<Cell> {
         .collect()
 }
 
-/// Published charges that fit a module type, by name.
+/// Published charges that fit a module type, by name. Only the module's charge groups are
+/// looked through.
 pub(super) fn compatible_charges(catalog: &Catalog, module: TypeId) -> Vec<TypeId> {
     let Some(m) = catalog.get(module).filter(|m| !m.charge_groups.is_empty()) else {
         return Vec::new();
     };
-    let mut charges: Vec<_> = catalog
-        .types
-        .values()
-        .filter(|c| c.published && c.market_group.is_some() && c.fits_in(m))
+    let mut charges: Vec<&ItemType> = m
+        .charge_groups
+        .iter()
+        .flat_map(|&group| catalog.charges_in_group(group))
+        .filter_map(|&c| catalog.get(c))
+        .filter(|c| c.fits_in(m))
         .collect();
-    charges.sort_by(|a, b| a.name.cmp(&b.name));
+    charges.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
+    charges.dedup_by_key(|c| c.id);
     charges.into_iter().map(|c| c.id).collect()
 }
 

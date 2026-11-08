@@ -11,6 +11,8 @@ use gpui_kit::{
     div, prelude::FluentBuilder, px,
 };
 
+use std::{collections::HashMap, rc::Rc};
+
 use super::{
     Efa, Loaded, stats,
     widgets::{self, icon, icon_box, km, short},
@@ -262,6 +264,28 @@ pub(super) fn text_width(window: &Window, text: &str) -> f32 {
     f32::from(line.width)
 }
 
+/// What the fitting view's widths and Miscellanea texts were worked out from.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FittingKey {
+    calc: u64,
+    current: usize,
+    /// The prices, by address: they are replaced, never changed.
+    prices: usize,
+    expanded: bool,
+    raw_hp: bool,
+    rem: gpui_kit::Pixels,
+}
+
+/// The fitting view's column widths and Miscellanea texts, kept while what they come from
+/// stays the same, since measuring text is the slow part of drawing the view.
+pub struct FittingCache {
+    key: FittingKey,
+    /// The widths the user set, which the layout starts from.
+    columns: std::collections::BTreeMap<String, f32>,
+    layout: Layout,
+    misc: HashMap<FitItem, (String, String)>,
+}
+
 impl Efa {
     /// The Miscellanea text and tooltip of a module or subsystem.
     pub(super) fn misc_of(
@@ -291,12 +315,67 @@ impl Efa {
         misc::module_misc(&loaded.catalog, type_id, charge, misc, ehp)
     }
 
+    /// Work out the fitting view's column widths and Miscellanea texts again when something
+    /// they come from changed: the fit or its stats, the prices, the column widths set, the
+    /// preferences they show and the text size.
+    pub(super) fn refresh_fitting_cache(&mut self, loaded: &Loaded, window: &Window) {
+        let Some(current) = self.saved.settings.current else {
+            return;
+        };
+        let key = FittingKey {
+            calc: self.calc_generation,
+            current,
+            prices: Rc::as_ptr(&self.prices) as usize,
+            expanded: self
+                .saved
+                .settings
+                .preferences
+                .general
+                .expanded_mutant_names,
+            raw_hp: self.stats_view.raw_hp,
+            rem: window.rem_size(),
+        };
+        if let Some(cache) = &self.fitting_cache
+            && cache.key == key
+            && cache.columns == self.saved.settings.columns
+        {
+            self.column_layout = cache.layout;
+            return;
+        }
+        let no_stats = Stats::default();
+        let fit = &self.saved.fits[current];
+        let stats = self.stats.as_ref().unwrap_or(&no_stats);
+        let modules = [Slot::High, Slot::Mid, Slot::Low, Slot::Service]
+            .into_iter()
+            .flat_map(|slot| (0..fit.rack(slot).len()).map(move |i| FitItem::Module(slot, i)));
+        let subsystems = (0..fit.subsystems.len()).map(FitItem::Subsystem);
+        let misc: HashMap<FitItem, (String, String)> = modules
+            .chain(subsystems)
+            .filter_map(|item| Some((item, self.misc_of(loaded, fit, stats, item)?)))
+            .collect();
+        let layout = self.column_layout(loaded, fit, stats, &misc, window);
+        self.column_layout = layout;
+        self.fitting_cache = Some(FittingCache {
+            key,
+            columns: self.saved.settings.columns.clone(),
+            layout,
+            misc,
+        });
+    }
+
+    /// A module's or subsystem's Miscellanea text and tooltip, as the fitting view last worked
+    /// them out.
+    pub(super) fn cached_misc(&self, item: FitItem) -> Option<&(String, String)> {
+        self.fitting_cache.as_ref()?.misc.get(&item)
+    }
+
     /// Widths for this frame: what the user set, or the widest header or cell plus padding.
-    pub(super) fn column_layout(
+    fn column_layout(
         &self,
         loaded: &Loaded,
         fit: &Fit,
         stats: &Stats,
+        misc: &HashMap<FitItem, (String, String)>,
         window: &Window,
     ) -> Layout {
         let expanded = self
@@ -306,23 +385,21 @@ impl Efa {
             .general
             .expanded_mutant_names;
         let mut layout = Layout::default();
-        let modules: Vec<(&Module, ModuleInfo, Option<String>)> =
+        let text_of = |item: FitItem| misc.get(&item).map(|(text, _)| text.as_str());
+        let modules: Vec<(&Module, ModuleInfo, Option<&str>)> =
             [Slot::High, Slot::Mid, Slot::Low, Slot::Service]
                 .into_iter()
                 .flat_map(|slot| {
                     fit.rack(slot).iter().enumerate().filter_map(move |(i, m)| {
                         let info = stats.modules.get(&(slot, i)).copied().unwrap_or_default();
-                        let misc = self
-                            .misc_of(loaded, fit, stats, FitItem::Module(slot, i))
-                            .map(|(text, _)| text);
+                        let misc = text_of(FitItem::Module(slot, i));
                         m.as_ref().map(|m| (m, info, misc))
                     })
                 })
                 .collect();
         // Subsystems show their slot changes in the misc column.
-        let subsystem_misc: Vec<String> = (0..fit.subsystems.len())
-            .filter_map(|i| self.misc_of(loaded, fit, stats, FitItem::Subsystem(i)))
-            .map(|(text, _)| text)
+        let subsystem_misc: Vec<&str> = (0..fit.subsystems.len())
+            .filter_map(|i| text_of(FitItem::Subsystem(i)))
             .collect();
         for col in Col::ALL {
             if let Some(&width) = self.saved.settings.columns.get(col.key()) {
@@ -339,14 +416,7 @@ impl Efa {
             let mut widest = modules
                 .iter()
                 .filter_map(|(m, info, misc)| {
-                    col.text(
-                        &loaded.catalog,
-                        &self.prices,
-                        m,
-                        info,
-                        expanded,
-                        misc.as_deref(),
-                    )
+                    col.text(&loaded.catalog, &self.prices, m, info, expanded, *misc)
                 })
                 .map(|text| text_width(window, &text))
                 .fold(header, f32::max);
