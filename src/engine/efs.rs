@@ -1,32 +1,31 @@
 //! pyfa's Eve Fleet Simulator export (service/port/efs.py): the fit's numbers, weapons, repairs
 //! and projections as JSON, in the layout EFS reads.
 
-use std::collections::BTreeMap;
+mod multipliers;
+mod repairs;
+mod weapons;
 
 use rc::{
-    AddMode, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack, SolOwned,
+    ItemCommon, ItemId, SolOwned,
     stats::{ItemStatsCommon, StatCritOptions, StatDmg, StatItemChargeOptions},
 };
 use serde_json::{Map, Value, json};
 
 use super::{BuildOptions, CalcOptions, Damage, Engine, Pilot, Stats, pane, read};
 use crate::{
-    data::{Catalog, Hardpoint, Kind, Slot, TypeId},
+    data::{Catalog, Slot, TypeId},
     dogma::attr,
     fit::{Fit, ModuleState},
 };
 
+use repairs::repairs;
+use weapons::weapons;
+
 /// The EFS format version pyfa writes.
 const VERSION: f64 = 0.06;
-/// The capsule, the hull without bonuses the weapon multipliers are measured against.
-const CAPSULE: TypeId = 670;
-/// pyfa's Tech II meta group, which the weapon test set is taken from.
-const TECH_II: i32 = 2;
 /// What pyfa assumes a Tech II siege module does for a dreadnought's turrets and launchers.
 const SIEGE_TURRET_MULTIPLIER: f64 = 9.4;
 const SIEGE_LAUNCHER_MULTIPLIER: f64 = 15.0;
-/// Fighter shield HP to EHP, pyfa's rough average fighter resist.
-const FIGHTER_EHP: f64 = 0.8875;
 
 /// pyfa's module attributes per projection kind, by attribute name and ID.
 const PROJECTION_ATTRS: &[(&str, &[(&str, i32)])] = &[
@@ -398,7 +397,7 @@ impl Engine {
         );
         put(
             "weapons",
-            Value::Array(self.weapons(fit, &mut built, catalog, &stats)),
+            Value::Array(weapons(fit, &mut built, catalog, &stats)),
         );
         put("scanRes", round6(built.ship(attr::SCAN_RESOLUTION)));
         put("capUsed", round6(stats.cap_detail.used));
@@ -457,314 +456,6 @@ impl Engine {
         put("efsExportVersion", json!(VERSION));
         Some(Value::Object(data))
     }
-
-    /// Weapons grouped by type and charge, then drones and fighters, pyfa's
-    /// `getWeaponSystemData`.
-    fn weapons(
-        &self,
-        fit: &Fit,
-        built: &mut Built,
-        catalog: &Catalog,
-        stats: &Stats,
-    ) -> Vec<Value> {
-        let _ = self;
-        let mut groups: BTreeMap<WeaponKey, (Slot, usize, ItemId, u32)> = BTreeMap::new();
-        let mut order = Vec::new();
-        for &(slot, i, id) in &built.modules.clone() {
-            let Some(Some(module)) = fit.rack(slot).get(i) else {
-                continue;
-            };
-            let dps = built.dmg(id).map_or(0.0, |d| Damage::from(&d.dps).total());
-            if dps <= 0.0 {
-                continue;
-            }
-            let key = (module.type_id, module.charge);
-            groups
-                .entry(key)
-                .and_modify(|g| g.3 += 1)
-                .or_insert_with(|| {
-                    order.push(key);
-                    (slot, i, id, 1)
-                });
-        }
-        let mut weapons = Vec::new();
-        for key in order {
-            let (slot, i, id, n) = groups[&key];
-            let n_f = f64::from(n);
-            let (module, charge) = key;
-            let Some(t) = catalog.get(module) else {
-                continue;
-            };
-            let group = catalog
-                .group_names
-                .get(&t.group_id)
-                .map_or("", String::as_str);
-            let name = match charge {
-                Some(c) => format!("{}, {}", t.name, catalog.name(c)),
-                None => t.name.clone(),
-            };
-            let info = stats.modules.get(&(slot, i));
-            let optimal = info.and_then(|m| m.optimal);
-            let mut kind = "None";
-            let (mut tracking, mut optimal_sig) = (0.0, 0.0);
-            let (mut velocity, mut delay, mut reduction, mut radius, mut aoe_velocity) =
-                (0.0, 0.0, 0.0, 0.0, 0.0);
-            let mut field_range = 0.0;
-            if t.hardpoint == Hardpoint::Turret {
-                tracking = built.attr0(id, attr::TRACKING_SPEED);
-                optimal_sig = built.attr0(id, attr::OPTIMAL_SIG_RADIUS);
-                kind = "Turret";
-            } else if t.hardpoint == Hardpoint::Launcher || t.name.contains("Bomb Launcher") {
-                if let Some(c) = built.charge(id) {
-                    velocity = built.attr0(c, attr::MAX_VELOCITY);
-                    delay = built.attr0(c, attr::EXPLOSION_DELAY);
-                    reduction = built.attr0(c, attr::AOE_DAMAGE_REDUCTION_FACTOR);
-                    radius = built.attr0(c, attr::AOE_CLOUD_SIZE);
-                    aoe_velocity = built.attr0(c, attr::AOE_VELOCITY);
-                }
-                kind = "Missile";
-            } else if group == "Super Weapon" && optimal.is_some() {
-                radius = built.attr0(id, attr::SIGNATURE_RADIUS);
-                kind = "Missile";
-            } else if t.hardpoint == Hardpoint::None {
-                field_range = built.attr0(id, attr::EMP_FIELD_RANGE);
-                kind = "SmartBomb";
-            }
-            let max_range = if group == "Super Weapon" && optimal.is_none() {
-                Some(300_000.0)
-            } else {
-                optimal
-            };
-            let dmg = built.dmg(id);
-            let dps = dmg.as_ref().map_or(0.0, |d| Damage::from(&d.dps).total());
-            let volley = dmg
-                .as_ref()
-                .map_or(0.0, |d| Damage::from(&d.volley).total());
-            let spread = dmg.as_ref().map_or_else(
-                || json!({"em": 0, "therm": 0, "kin": 0, "exp": 0, "pure": 0}),
-                |d| {
-                    let v = |x: rc::PValue| round6(x.into_f64() * n_f);
-                    json!({
-                        "em": v(d.dps.em), "therm": v(d.dps.thermal), "kin": v(d.dps.kinetic),
-                        "exp": v(d.dps.explosive), "pure": 0,
-                    })
-                },
-            );
-            let (charges, shots) = built
-                .sol
-                .get_module(&id)
-                .ok()
-                .map_or((None, None), |mut m| {
-                    (
-                        m.get_charge_count().map(rc::Count::into_u32),
-                        m.get_charged_cycle_count().map(rc::Count::into_u32),
-                    )
-                });
-            let cycle = built
-                .attr(id, attr::RATE_OF_FIRE)
-                .filter(|&v| v > 0.0)
-                .or_else(|| built.attr(id, attr::DURATION));
-            weapons.push(json!({
-                "dps": round6(dps * n_f),
-                "capUse": round6(info.and_then(|m| m.cap_per_sec).unwrap_or(0.0) * n_f),
-                "falloff": num(built.attr(id, attr::FALLOFF)),
-                "type": kind,
-                "name": name,
-                "optimal": num(max_range),
-                "numCharges": charges.unwrap_or(0),
-                "numShots": shots.unwrap_or(0),
-                "reloadTime": round6(built.attr0(id, attr::RELOAD_TIME)),
-                "cycleTime": num(cycle),
-                "volley": round6(volley * n_f),
-                "tracking": round6(tracking),
-                "maxVelocity": round6(velocity),
-                "explosionDelay": round6(delay),
-                "damageReductionFactor": round6(reduction),
-                "explosionRadius": round6(radius),
-                "explosionVelocity": round6(aoe_velocity),
-                "aoeFieldRange": round6(field_range),
-                "damageMultiplierBonusMax": num(built.attr(id, attr::DAMAGE_MULTIPLIER_BONUS_MAX)),
-                "damageMultiplierBonusPerCycle": num(built.attr(id, attr::DAMAGE_MULTIPLIER_BONUS_PER_CYCLE)),
-                "dps_spread": spread,
-                "optimalSigRadius": round6(optimal_sig),
-            }));
-        }
-        for (stack, id) in fit.drones.iter().zip(built.drones.clone()) {
-            let Some(id) = id.filter(|_| stack.active > 0) else {
-                continue;
-            };
-            let active = f64::from(stack.active);
-            let dmg = built.dmg(id);
-            let dps = dmg.as_ref().map_or(0.0, |d| Damage::from(&d.dps).total()) * active;
-            if dps <= 0.0 {
-                continue;
-            }
-            let volley = dmg
-                .as_ref()
-                .map_or(0.0, |d| Damage::from(&d.volley).total())
-                * active;
-            let sig = built.attr0(id, attr::OPTIMAL_SIG_RADIUS);
-            // Drones use the old tracking formula; pyfa scales it to match turrets.
-            let tracking = if sig > 0.0 {
-                built.attr0(id, attr::TRACKING_SPEED) / (sig / 40_000.0)
-            } else {
-                0.0
-            };
-            weapons.push(json!({
-                "dps": round6(dps),
-                "cycleTime": num(built.attr(id, attr::RATE_OF_FIRE)),
-                "type": "Drone",
-                "optimal": num(built.attr(id, attr::MAX_RANGE)),
-                "name": catalog.name(stack.type_id),
-                "falloff": num(built.attr(id, attr::FALLOFF)),
-                "maxSpeed": round6(built.attr0(id, attr::MAX_VELOCITY)),
-                "tracking": round6(tracking),
-                "volley": round6(volley),
-            }));
-        }
-        for ((fighter, id), info) in fit
-            .fighters
-            .iter()
-            .zip(built.fighters.clone())
-            .zip(&stats.fighters)
-        {
-            let amount = info.count.map_or(0, |(now, _)| now);
-            if amount == 0 {
-                continue;
-            }
-            let dmg = built.dmg(id);
-            let dps = dmg.as_ref().map_or(0.0, |d| Damage::from(&d.dps).total());
-            if dps <= 0.0 {
-                continue;
-            }
-            let abilities: Vec<Value> = [FIGHTER_ATTACK, FIGHTER_MISSILES]
-                .iter()
-                .filter_map(|ability| fighter_ability(built, id, ability, amount))
-                .collect();
-            weapons.push(json!({
-                "dps": round6(dps),
-                "type": "Fighter",
-                "name": catalog.name(fighter.type_id),
-                "maxSpeed": round6(built.attr0(id, attr::MAX_VELOCITY)),
-                "abilities": abilities,
-                "ehp": round6(built.attr0(id, attr::SHIELD_CAPACITY) / FIGHTER_EHP * f64::from(amount)),
-                "volley": round6(dmg.as_ref().map_or(0.0, |d| Damage::from(&d.volley).total())),
-                "signatureRadius": round6(built.attr0(id, attr::SIGNATURE_RADIUS)),
-            }));
-        }
-        weapons
-    }
-
-    /// How much more damage the hull's bonuses give turrets, launchers and drones, pyfa's
-    /// `getWeaponBonusMultipliers`: Tech II weapons on this hull against the same on a capsule,
-    /// the biggest gain of each kind.
-    fn weapon_multipliers(&self, fit: &Fit, pilot: &Pilot, catalog: &Catalog) -> [f64; 3] {
-        let test = test_set(catalog);
-        let bare = Fit {
-            ship: Some(CAPSULE),
-            ..Fit::default()
-        };
-        let pre = self.measure(&bare, pilot, &test);
-        let post = self.measure(fit, pilot, &test);
-        let mut best = [0.0_f64; 3];
-        for ((kind, before), (_, after)) in pre.iter().zip(&post) {
-            if *before > 0.0 && after.is_finite() {
-                best[*kind] = best[*kind].max(after / before);
-            }
-        }
-        best.map(|ratio| {
-            if ratio > 0.0 {
-                (ratio * 1e6).round() / 1e6
-            } else {
-                1.0
-            }
-        })
-    }
-
-    /// Damage per second factor of each test weapon on the fit's hull, mode and subsystems:
-    /// (kind, factor) with kinds 0 turret, 1 launcher, 2 drone.
-    fn measure(&self, fit: &Fit, pilot: &Pilot, test: &[TestWeapon]) -> Vec<(usize, f64)> {
-        let mut sol = self.sol();
-        let mut f = sol.add_fit();
-        pilot.board(&mut f);
-        if let Some(ship) = fit.ship {
-            f.set_ship(ItemTypeId::from_i32(ship), None, None);
-        }
-        if let Some(mode) = fit.mode {
-            f.set_stance(ItemTypeId::from_i32(mode));
-        }
-        for &sub in &fit.subsystems {
-            f.add_subsystem(ItemTypeId::from_i32(sub));
-        }
-        let mut ids = Vec::with_capacity(test.len());
-        for weapon in test {
-            let id = match *weapon {
-                TestWeapon::Turret(t) | TestWeapon::Launcher(t, _) => {
-                    let Ok(mut m) = f.add_module(
-                        ModRack::High,
-                        AddMode::Append,
-                        ItemTypeId::from_i32(t),
-                        rc::ModuleState::Active,
-                    ) else {
-                        ids.push(None);
-                        continue;
-                    };
-                    if let TestWeapon::Launcher(_, charge) = *weapon {
-                        m.set_charge_type_id(ItemTypeId::from_i32(charge));
-                    }
-                    m.get_item_id()
-                }
-                TestWeapon::Drone(t) => f
-                    .add_drone(ItemTypeId::from_i32(t), MinionState::Engaging, None, None)
-                    .get_item_id(),
-            };
-            ids.push(Some(id));
-        }
-        let mut charges = Vec::new();
-        for (weapon, id) in test.iter().zip(&ids) {
-            if let (TestWeapon::Launcher(..), Some(id)) = (weapon, id) {
-                charges.push(
-                    sol.get_module(id)
-                        .ok()
-                        .and_then(|mut m| m.get_charge().map(|c| c.get_item_id())),
-                );
-            } else {
-                charges.push(None);
-            }
-        }
-        let mut read = |id: ItemId, attr: i32| read::attr_or_zero(&mut sol, id, attr);
-        test.iter()
-            .zip(ids)
-            .zip(charges)
-            .map(|((weapon, id), charge)| {
-                let Some(id) = id else {
-                    return (weapon.kind(), 0.0);
-                };
-                let sum = |read: &mut dyn FnMut(ItemId, i32) -> f64, id: ItemId| {
-                    attr::DAMAGE.iter().map(|&a| read(id, a)).sum::<f64>()
-                };
-                let factor = match weapon {
-                    TestWeapon::Turret(_) => {
-                        let rof = read(id, attr::RATE_OF_FIRE);
-                        if rof > 0.0 {
-                            read(id, attr::DAMAGE_MULTIPLIER) / rof
-                        } else {
-                            0.0
-                        }
-                    }
-                    TestWeapon::Launcher(..) => {
-                        let rof = read(id, attr::RATE_OF_FIRE);
-                        match charge {
-                            Some(c) if rof > 0.0 => sum(&mut read, c) / rof,
-                            _ => 0.0,
-                        }
-                    }
-                    TestWeapon::Drone(_) => sum(&mut read, id) * read(id, attr::DAMAGE_MULTIPLIER),
-                };
-                (weapon.kind(), factor)
-            })
-            .collect()
-    }
 }
 
 /// Speed and signature with the microwarpdrive off, pyfa's `getPropData`.
@@ -807,156 +498,10 @@ fn prop_data(fit: &Fit, built: &mut Built, catalog: &Catalog, stats: &Stats) -> 
     }
 }
 
-/// What an ancillary shield booster needs once its cap boosters run out.
-fn unloaded_cap_need(built: &mut Built, id: ItemId) -> Option<f64> {
-    let mut tx = built.sol.begin_tx();
-    if let Some(charge) = tx.get_module(&id).ok()?.get_charge() {
-        charge.remove();
-    }
-    read::attr(&mut tx, id, attr::CAPACITOR_NEED)
-}
-
-/// Local repairers and capacitor boosters, pyfa's `getRepairData`.
-fn repairs(fit: &Fit, built: &mut Built, catalog: &Catalog) -> Vec<Value> {
-    const GROUPS: [&str; 6] = [
-        "Shield Booster",
-        "Armor Repair Unit",
-        "Ancillary Shield Booster",
-        "Ancillary Armor Repairer",
-        "Hull Repair Unit",
-        "Capacitor Booster",
-    ];
-    let mut repairs = Vec::new();
-    for (slot, i, id, group) in modules_in_groups(fit, built, catalog, &GROUPS) {
-        let mut stats = Map::new();
-        let mut put = |key: &str, value: Value| {
-            stats.insert(key.to_owned(), value);
-        };
-        put("duration", num(built.attr(id, attr::DURATION)));
-        put("capacitorNeed", num(built.attr(id, attr::CAPACITOR_NEED)));
-        let shots = built
-            .sol
-            .get_module(&id)
-            .ok()
-            .and_then(|mut m| m.get_charged_cycle_count())
-            .map(rc::Count::into_u32);
-        match group.as_str() {
-            "Armor Repair Unit" | "Ancillary Armor Repairer" => {
-                put("type", json!("Armor Repairer"));
-                put(
-                    "armorDamageAmount",
-                    num(built.attr(id, attr::ARMOR_DAMAGE_AMOUNT)),
-                );
-                if group == "Ancillary Armor Repairer" {
-                    put("numShots", json!(shots.unwrap_or(0)));
-                    put("reloadTime", num(built.attr(id, attr::RELOAD_TIME)));
-                    put(
-                        "chargedArmorDamageMultiplier",
-                        num(built.attr(id, attr::CHARGED_ARMOR_DAMAGE_MULTIPLIER)),
-                    );
-                }
-            }
-            "Shield Booster" | "Ancillary Shield Booster" => {
-                put("type", json!("Shield Booster"));
-                put("shieldBonus", num(built.attr(id, attr::SHIELD_BONUS)));
-                if group == "Ancillary Shield Booster" {
-                    put("numShots", json!(shots.unwrap_or(0)));
-                    put("reloadTime", num(built.attr(id, attr::RELOAD_TIME)));
-                    // What it needs once its cap boosters run out.
-                    if fit
-                        .rack(slot)
-                        .get(i)
-                        .and_then(|m| m.as_ref()?.charge)
-                        .is_some()
-                    {
-                        put("unloadedCapacitorNeed", num(unloaded_cap_need(built, id)));
-                    }
-                }
-            }
-            "Capacitor Booster" => {
-                put("type", json!("Capacitor Booster"));
-                put("numShots", json!(shots.unwrap_or(0)));
-                put("reloadTime", num(built.attr(id, attr::RELOAD_TIME)));
-            }
-            _ => {}
-        }
-        repairs.push(Value::Object(stats));
-    }
-    repairs
-}
-
-/// A weapon and the charge it has loaded, which pyfa groups identical weapons by.
-type WeaponKey = (TypeId, Option<TypeId>);
-
 struct PropData {
     using_mwd: bool,
     unproped_speed: Option<f64>,
     unproped_sig: Option<f64>,
-}
-
-/// A weapon of pyfa's test set.
-#[derive(Debug, Clone, Copy)]
-enum TestWeapon {
-    Turret(TypeId),
-    /// A launcher with one of the charges it takes.
-    Launcher(TypeId, TypeId),
-    Drone(TypeId),
-}
-
-impl TestWeapon {
-    fn kind(self) -> usize {
-        match self {
-            Self::Turret(_) => 0,
-            Self::Launcher(..) => 1,
-            Self::Drone(_) => 2,
-        }
-    }
-}
-
-/// pyfa's `getTestSet`: Tech II turrets, one per charge group and size; Tech II launchers with
-/// one charge of each family they take, for the damage-type bonuses; Tech II drones.
-fn test_set(catalog: &Catalog) -> Vec<TestWeapon> {
-    let mut t2: Vec<&crate::data::ItemType> = catalog
-        .types
-        .values()
-        .filter(|t| t.published && t.meta_group == Some(TECH_II))
-        .collect();
-    t2.sort_by_key(|t| t.id);
-    let mut set = Vec::new();
-    let mut turret_kinds = Vec::new();
-    for t in &t2 {
-        match (t.kind, t.hardpoint) {
-            (Kind::Module(_), Hardpoint::Turret) if !t.mining && !t.charge_groups.is_empty() => {
-                let kind = (t.charge_groups[0], t.charge_size.map(f64::to_bits));
-                if !turret_kinds.contains(&kind) {
-                    turret_kinds.push(kind);
-                    set.push(TestWeapon::Turret(t.id));
-                }
-            }
-            (Kind::Module(_), Hardpoint::Launcher) => {
-                let Some(&group) = t.charge_groups.first() else {
-                    continue;
-                };
-                let mut charges: Vec<&crate::data::ItemType> = catalog
-                    .types
-                    .values()
-                    .filter(|c| c.group_id == group && c.published && c.kind == Kind::Charge)
-                    .collect();
-                charges.sort_by_key(|c| c.id);
-                let mut families = Vec::new();
-                for c in charges {
-                    let family = c.variation_parent.unwrap_or(c.id);
-                    if !families.contains(&family) {
-                        families.push(family);
-                        set.push(TestWeapon::Launcher(t.id, c.id));
-                    }
-                }
-            }
-            (Kind::Drone, _) => set.push(TestWeapon::Drone(t.id)),
-            _ => {}
-        }
-    }
-    set
 }
 
 /// The modules of the given groups, pyfa's `getModsInGroups`: by group, then type.
@@ -1033,69 +578,6 @@ fn projections(fit: &Fit, built: &mut Built, catalog: &Catalog, stats: &Stats) -
         out.push(Value::Object(stats_map));
     }
     out
-}
-
-/// One of a fighter's damaging abilities: attribute IDs from its base name.
-struct FighterAbility {
-    name: &'static str,
-    damage: [i32; 4],
-    multiplier: i32,
-    reduction_factor: i32,
-    reduction_sensitivity: i32,
-    explosion_radius: i32,
-    explosion_velocity: i32,
-    range: i32,
-    duration: i32,
-}
-
-/// pyfa calls the attack missile `RegularAttack` and the missiles `MissileAttack`.
-const FIGHTER_ATTACK: FighterAbility = FighterAbility {
-    name: "RegularAttack",
-    damage: [2227, 2228, 2230, 2229],
-    multiplier: 2226,
-    reduction_factor: 2231,
-    reduction_sensitivity: 2232,
-    explosion_radius: 2234,
-    explosion_velocity: 2235,
-    range: 2236,
-    duration: 2233,
-};
-
-const FIGHTER_MISSILES: FighterAbility = FighterAbility {
-    name: "MissileAttack",
-    damage: [2131, 2132, 2134, 2133],
-    multiplier: 2130,
-    reduction_factor: 2127,
-    reduction_sensitivity: 2128,
-    explosion_radius: 2125,
-    explosion_velocity: 2126,
-    range: 2149,
-    duration: 2182,
-};
-
-fn fighter_ability(
-    built: &mut Built,
-    id: ItemId,
-    ability: &FighterAbility,
-    amount: u32,
-) -> Option<Value> {
-    // pyfa checks the type has the ability's EM damage at all.
-    built.attr(id, ability.damage[0])?;
-    let reduction = read::reduction_exponent(
-        built.attr0(id, ability.reduction_factor),
-        built.attr0(id, ability.reduction_sensitivity),
-    );
-    let base: f64 = ability.damage.iter().map(|&a| built.attr0(id, a)).sum();
-    let damage = base * built.attr0(id, ability.multiplier);
-    Some(json!({
-        "name": ability.name,
-        "volley": round6(damage * f64::from(amount)),
-        "explosionRadius": round6(built.attr0(id, ability.explosion_radius)),
-        "explosionVelocity": round6(built.attr0(id, ability.explosion_velocity)),
-        "optimal": round6(built.attr0(id, ability.range)),
-        "damageReductionFactor": round6(reduction),
-        "rof": round6(built.attr0(id, ability.duration)),
-    }))
 }
 
 /// The fit as a list of names with headers, and the type IDs in it, pyfa's `getModuleInfo`.
