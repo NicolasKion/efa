@@ -1,7 +1,7 @@
 //! What damage patterns and target profiles share: pyfa's raw names with `[Category]` prefixes,
 //! its natural sort, and the category tree its menus are built from.
 
-use std::cmp::Ordering;
+use std::{cmp::Ordering, rc::Rc};
 
 /// Categories and short name of a raw name, like pyfa's `__parseRawName`.
 ///
@@ -103,7 +103,8 @@ fn cmp_digits(a: &str, b: &str) -> Ordering {
 /// One menu level: named sublevels and the entries directly in it, both in insertion order.
 #[derive(Debug, Clone)]
 pub struct Tree<T> {
-    pub children: Vec<(String, Tree<T>)>,
+    /// Shared, so menus built from a level can keep it without copying it.
+    pub children: Vec<(String, Rc<Tree<T>>)>,
     pub entries: Vec<(String, T)>,
 }
 
@@ -116,7 +117,7 @@ impl<T> Default for Tree<T> {
     }
 }
 
-impl<T> Tree<T> {
+impl<T: Clone> Tree<T> {
     /// File `item` under its raw name's categories. A later entry with the same short name in
     /// the same level replaces the earlier one, as pyfa's dictionaries do.
     pub fn insert(&mut self, raw: &str, item: T) {
@@ -126,10 +127,10 @@ impl<T> Tree<T> {
             let i = if let Some(i) = level.children.iter().position(|(n, _)| n == category) {
                 i
             } else {
-                level.children.push((category.to_owned(), Tree::default()));
+                level.children.push((category.to_owned(), Rc::default()));
                 level.children.len() - 1
             };
-            level = &mut level.children[i].1;
+            level = Rc::make_mut(&mut level.children[i].1);
         }
         match level.entries.iter_mut().find(|(n, _)| n == short) {
             Some(entry) => entry.1 = item,

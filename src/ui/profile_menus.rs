@@ -58,13 +58,25 @@ pub fn damage_pattern_menu(
         }
     }
     let current = pattern_name(current);
+    let pick = Rc::clone(pick);
+    let entries: LevelEntries<DamagePattern> = Rc::new(move |menu, level| {
+        level.entries.iter().fold(menu, |menu, (short, pattern)| {
+            let checked = current.as_deref() == Some(pattern.name.as_str());
+            let (pick, profile) = (Rc::clone(&pick), pattern.to_profile());
+            menu.item(
+                PopupMenuItem::new(short.clone())
+                    .checked(checked)
+                    .on_click(move |_, window, cx| pick(profile.clone(), window, cx)),
+            )
+        })
+    });
     tree.children.iter().fold(menu, |menu, (name, level)| {
-        pattern_submenu(
+        tree_submenu(
             menu,
             name,
-            Rc::new(level.clone()),
-            current.as_deref(),
-            pick,
+            Rc::clone(level),
+            false,
+            Rc::clone(&entries),
             window,
             cx,
         )
@@ -78,37 +90,43 @@ fn pattern_name(profile: &DamageProfile) -> Option<String> {
     }
 }
 
-fn pattern_submenu(
+/// What adds a tree level's own entries to a menu.
+type LevelEntries<T> = Rc<dyn Fn(PopupMenu, &Tree<T>) -> PopupMenu>;
+
+/// One category of a pattern or profile tree as a submenu: its subcategories, as submenus of
+/// their own, and its entries, which `entries` adds. `entries_first` puts the entries above
+/// the subcategories, as pyfa's target profile menus have them.
+fn tree_submenu<T: 'static>(
     menu: PopupMenu,
     name: &str,
-    level: Rc<Tree<DamagePattern>>,
-    current: Option<&str>,
-    pick: &PickPattern,
+    level: Rc<Tree<T>>,
+    entries_first: bool,
+    entries: LevelEntries<T>,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
-    let (current, pick) = (current.map(str::to_owned), Rc::clone(pick));
     menu.submenu(name.to_owned(), window, cx, move |menu, window, cx| {
+        let menu = if entries_first {
+            entries(menu, &level)
+        } else {
+            menu
+        };
         let menu = level.children.iter().fold(menu, |menu, (name, child)| {
-            pattern_submenu(
+            tree_submenu(
                 menu,
                 name,
-                Rc::new(child.clone()),
-                current.as_deref(),
-                &pick,
+                Rc::clone(child),
+                entries_first,
+                Rc::clone(&entries),
                 window,
                 cx,
             )
         });
-        level.entries.iter().fold(menu, |menu, (short, pattern)| {
-            let checked = current.as_deref() == Some(pattern.name.as_str());
-            let (pick, profile) = (Rc::clone(&pick), pattern.to_profile());
-            menu.item(
-                PopupMenuItem::new(short.clone())
-                    .checked(checked)
-                    .on_click(move |_, window, cx| pick(profile.clone(), window, cx)),
-            )
-        })
+        if entries_first {
+            menu
+        } else {
+            entries(menu, &level)
+        }
     })
 }
 
@@ -157,13 +175,16 @@ pub fn target_profile_menu(
         }
     };
     menu = profile_entries(menu, &tree, current, pick);
+    let (current, pick) = (current.map(str::to_owned), Rc::clone(pick));
+    let entries: LevelEntries<TargetProfile> =
+        Rc::new(move |menu, level| profile_entries(menu, level, current.as_deref(), &pick));
     tree.children.iter().fold(menu, |menu, (name, level)| {
-        profile_submenu(
+        tree_submenu(
             menu,
             name,
-            Rc::new(level.clone()),
-            current,
-            pick,
+            Rc::clone(level),
+            true,
+            Rc::clone(&entries),
             window,
             cx,
         )
@@ -183,31 +204,5 @@ fn profile_entries(
                 .checked(current == Some(profile.name.as_str()))
                 .on_click(move |_, window, cx| pick(Some(profile.clone()), window, cx)),
         )
-    })
-}
-
-fn profile_submenu(
-    menu: PopupMenu,
-    name: &str,
-    level: Rc<Tree<TargetProfile>>,
-    current: Option<&str>,
-    pick: &PickProfile,
-    window: &mut Window,
-    cx: &mut Context<PopupMenu>,
-) -> PopupMenu {
-    let (current, pick) = (current.map(str::to_owned), Rc::clone(pick));
-    menu.submenu(name.to_owned(), window, cx, move |menu, window, cx| {
-        let menu = profile_entries(menu, &level, current.as_deref(), &pick);
-        level.children.iter().fold(menu, |menu, (name, child)| {
-            profile_submenu(
-                menu,
-                name,
-                Rc::new(child.clone()),
-                current.as_deref(),
-                &pick,
-                window,
-                cx,
-            )
-        })
     })
 }

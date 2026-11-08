@@ -621,7 +621,7 @@ impl Efa {
             .id(SharedString::from(format!("drone-misc-{i}")))
             .truncate()
             .children(misc_text)
-            .when_some(tooltip, |cell, tip| cell.tip(tip));
+            .when_some(tooltip, super::super::widgets::TipExt::tip);
         let mut row: Stateful<Div> = h_flex()
             .id(SharedString::from(format!("drone-{i}")))
             .h(px(ROW_HEIGHT))

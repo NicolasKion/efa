@@ -294,44 +294,6 @@ impl Efa {
         })
     }
 
-    pub(super) fn can_undo(&self) -> bool {
-        self.saved.current.is_some_and(|i| self.history.can_undo(i))
-    }
-
-    pub(super) fn can_redo(&self) -> bool {
-        self.saved.current.is_some_and(|i| self.history.can_redo(i))
-    }
-
-    pub(super) fn undo(&mut self, cx: &mut Context<Self>) {
-        let Some(i) = self.saved.current else { return };
-        let current = self.saved.fits[i].clone();
-        if let Some(previous) = self.history.undo(i, current) {
-            self.restore(i, previous, cx);
-        } else {
-            self.set_status("Nothing to undo");
-            cx.notify();
-        }
-    }
-
-    pub(super) fn redo(&mut self, cx: &mut Context<Self>) {
-        let Some(i) = self.saved.current else { return };
-        let current = self.saved.fits[i].clone();
-        if let Some(next) = self.history.redo(i, current) {
-            self.restore(i, next, cx);
-        } else {
-            self.set_status("Nothing to redo");
-            cx.notify();
-        }
-    }
-
-    fn restore(&mut self, i: usize, fit: Fit, cx: &mut Context<Self>) {
-        self.saved.fits[i] = fit;
-        self.clear_selection();
-        self.inputs_show = None;
-        self.status = None;
-        self.changed(cx);
-    }
-
     /// Search the market once typing pauses for the delay set in the preferences.
     pub(super) fn search_after_delay(&mut self, text: String, cx: &mut Context<Self>) {
         let delay = self.saved.preferences.market.search_delay_ms;

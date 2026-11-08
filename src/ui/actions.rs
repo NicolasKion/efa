@@ -330,7 +330,6 @@ impl Outcome {
 }
 
 /// Make `action` on `fit`, pure of any window state.
-#[expect(clippy::too_many_lines, reason = "one arm per action, each short")]
 fn apply_action(fit: &mut Fit, action: Action, env: &EditEnv) -> Outcome {
     let EditEnv {
         loaded,
@@ -582,11 +581,11 @@ fn apply_action(fit: &mut Fit, action: Action, env: &EditEnv) -> Outcome {
                 }
             };
             // Like pyfa, copies go on until the rack is full or the next one is refused.
-            let mut base = loaded.engine.validate(fit, &pilot);
+            let mut base = loaded.engine.validate(fit, pilot);
             for _ in 0..free(slot, used) {
                 let mut next = fit.clone();
                 next.add(&loaded.catalog, type_id);
-                let after = loaded.engine.validate(&next, &pilot);
+                let after = loaded.engine.validate(&next, pilot);
                 if let Some(problem) = base.refusal(&after, next.ignore_restrictions) {
                     out.error = Some(problem.describe(|t| loaded.catalog.name(t)));
                     break;
@@ -599,9 +598,9 @@ fn apply_action(fit: &mut Fit, action: Action, env: &EditEnv) -> Outcome {
             let catalog = &loaded.catalog;
             let price = |t: TypeId| prices.get(t);
             let was = optimize::value(fit, catalog, price);
-            let mut base = loaded.engine.validate(fit, &pilot);
+            let mut base = loaded.engine.validate(fit, pilot);
             let made = optimize::optimize(fit, catalog, price, |_, next| {
-                let after = loaded.engine.validate(next, &pilot);
+                let after = loaded.engine.validate(next, pilot);
                 let refused = base.refusal(&after, next.ignore_restrictions).is_some();
                 if !refused {
                     base = after;

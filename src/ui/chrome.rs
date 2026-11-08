@@ -134,7 +134,7 @@ pub fn open_single<V: Render + 'static>(
     })
 }
 
-/// A window's view under efa's header.
+/// A window's view under efa's header, on the theme's background in its text color and size.
 struct Framed {
     view: AnyView,
 }
@@ -164,8 +164,14 @@ impl Render for Framed {
                 )
                 .child(controls(window, cx))
         });
+        // Every window's body starts from the theme's background, text color and size, so views
+        // only set what differs.
+        let theme = cx.theme();
         v_flex()
             .size_full()
+            .bg(theme.background)
+            .text_color(theme.foreground)
+            .text_sm()
             .children(header)
             .child(div().flex_1().min_h_0().child(self.view.clone()))
     }

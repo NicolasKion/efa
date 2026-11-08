@@ -1423,7 +1423,7 @@ fn ship_menu(menu: PopupMenu, this: &WeakEntity<Efa>, ship: TypeId) -> PopupMenu
     ))
     .item(
         entry(IconName::Plus, "New Fit").on_click(on_efa(this, move |g, _, _, cx| {
-            g.new_fit_for_ship(ship, cx)
+            g.new_fit_for_ship(ship, cx);
         })),
     )
 }
@@ -1514,10 +1514,12 @@ fn market_menu(
         .is_some_and(|g| loaded.catalog.market_groups.contains_key(&g));
     if context == MarketContext::Search && listed && !several {
         menu = menu.item(
-            entry(IconName::Search, format!("{category} Market Group"))
-                .on_click(on_efa(this, move |g, _, window, cx| {
-                    g.jump_to_market(id, window, cx)
-                })),
+            entry(IconName::Search, format!("{category} Market Group")).on_click(on_efa(
+                this,
+                move |g, _, window, cx| {
+                    g.jump_to_market(id, window, cx);
+                },
+            )),
         );
     }
     if !has_fit {
