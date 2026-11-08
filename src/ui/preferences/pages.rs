@@ -1,322 +1,28 @@
-//! pyfa's preferences dialog (gui/preferenceDialog.py, gui/builtinPreferenceViews/) as a window
-//! of its own. Every change goes straight to the hub, which saves it and hands it to every fit
-//! window, the way pyfa applies a preference as soon as it is clicked.
-//!
-//! Left out on purpose: language and theme (efa follows the system and Omarchy's theme), gauge
-//! animation, market shortcuts and market view modes, reactivation timers, pyfa's own SSO server
-//! mode (efa always logs in through a local callback), and logging.
+//! The preference pages, General through ESI, each a list of sections.
 
-use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon as UiIcon, Sizable,
+    ActiveTheme, Disableable, Sizable,
     button::Button,
     h_flex,
-    input::{Input, InputEvent, InputState},
+    input::{Input, InputState},
     switch::Switch,
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
-    div, prelude::FluentBuilder, px,
+    AnyElement, Context, Entity, FontWeight, IntoElement, ParentElement, SharedString, Styled, div,
+    px,
 };
 
-use super::{
-    Efa, Hub,
-    dialogs::{Confirm, confirm},
-    port::html_path,
-    widgets::{ROW_H, Segment, TipExt, band, parse_decimal, section_title, segmented},
-};
+use super::PreferencesWindow;
+use super::controls::{Toggle, row, section};
 use crate::{
     preferences::{AdditionsLabels, Preferences, ProxyMode},
     prices::{PriceSource, PriceSystem},
-    store::{PriceTotals, Saved},
+    store::PriceTotals,
 };
 
-/// Below this width the page list shows only its icons and the page sits closer to the edges.
-const NARROW_W: f32 = 720.;
-/// A setting's text keeps this much beside its control before the control drops under it.
-const TEXT_MIN_W: f32 = 200.;
-/// The widest a choice's buttons grow, so a few short options do not span a wide window.
-const CHOICE_MAX_W: f32 = 420.;
-/// Below this height the page's title scrolls with its settings.
-const SHORT_H: f32 = 520.;
-/// The page list's width, and with icons only.
-const PAGES_W: f32 = 200.;
-const PAGES_NARROW_W: f32 = 48.;
-
-/// A switch: id, title, description, whether it is on, and how to set it.
-type Toggle = (
-    &'static str,
-    &'static str,
-    &'static str,
-    bool,
-    fn(&mut Saved, bool),
-);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Page {
-    General,
-    Engine,
-    Stats,
-    ContextMenus,
-    Market,
-    Network,
-    Html,
-    Esi,
-    Database,
-}
-
-impl Page {
-    const ALL: [Self; 9] = [
-        Self::General,
-        Self::Engine,
-        Self::Stats,
-        Self::ContextMenus,
-        Self::Market,
-        Self::Network,
-        Self::Html,
-        Self::Esi,
-        Self::Database,
-    ];
-
-    fn title(self) -> &'static str {
-        match self {
-            Self::General => "General",
-            Self::Engine => "Fitting Engine",
-            Self::Stats => "Statistics Panel",
-            Self::ContextMenus => "Context Menus",
-            Self::Market => "Market & Prices",
-            Self::Network => "Network",
-            Self::Html => "HTML Export",
-            Self::Esi => "ESI",
-            Self::Database => "Database",
-        }
-    }
-
-    fn icon(self) -> AssetIcon {
-        match self {
-            Self::General => AssetIcon::Settings,
-            Self::Engine => AssetIcon::Cpu,
-            Self::Stats => AssetIcon::ChartColumn,
-            Self::ContextMenus => AssetIcon::MousePointerClick,
-            Self::Market => AssetIcon::Coins,
-            Self::Network => AssetIcon::Globe,
-            Self::Html => AssetIcon::FileCode,
-            Self::Esi => AssetIcon::KeyRound,
-            Self::Database => AssetIcon::Database,
-        }
-    }
-
-    fn summary(self) -> &'static str {
-        match self {
-            Self::General => "How the fitting view, tabs and browsers look and behave.",
-            Self::Engine => "How the fitting engine works out the numbers.",
-            Self::Stats => "Which sections the stats pane shows.",
-            Self::ContextMenus => "Hide menu entries you do not use.",
-            Self::Market => "Market search and where prices come from.",
-            Self::Network => "Internet access and proxy settings.",
-            Self::Html => "Exporting every fit to one HTML page.",
-            Self::Esi => "Logging in with EVE for skills and in-game fittings.",
-            Self::Database => "Where efa keeps its files, and starting over.",
-        }
-    }
-}
-
-/// Text fields, kept so typing is not interrupted by redraws.
-struct Fields {
-    spool: Entity<InputState>,
-    search_delay: Entity<InputState>,
-    proxy_address: Entity<InputState>,
-    proxy_user: Entity<InputState>,
-    proxy_password: Entity<InputState>,
-    html_path: Entity<InputState>,
-    esi_client_id: Entity<InputState>,
-    esi_port: Entity<InputState>,
-}
-
-pub struct PreferencesWindow {
-    hub: Entity<Hub>,
-    page: Page,
-    fields: Fields,
-    _subscriptions: Vec<Subscription>,
-}
-
-impl Efa {
-    /// pyfa's Global > Preferences.
-    pub(super) fn open_preferences(&mut self, cx: &mut Context<Self>) {
-        let hub = self.hub.clone();
-        let opening = crate::ui::chrome::open_single(
-            "Preferences",
-            (880., 640.),
-            cx,
-            |_: &mut PreferencesWindow, _, _| {},
-            move |window, cx| PreferencesWindow::new(hub, window, cx),
-        );
-        Self::report_open(opening, cx);
-    }
-}
-
 impl PreferencesWindow {
-    fn new(hub: Entity<Hub>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let prefs = hub.read(cx).saved.settings.preferences.clone();
-        let mut field = |value: String, placeholder: &str, masked: bool| {
-            let placeholder = placeholder.to_owned();
-            cx.new(|cx| {
-                InputState::new(window, cx)
-                    .placeholder(placeholder)
-                    .masked(masked)
-                    .default_value(value)
-            })
-        };
-        let proxy = &prefs.network.proxy;
-        let fields = Fields {
-            spool: field(
-                format!("{}", (prefs.engine.default_spool * 100.0).round()),
-                "100",
-                false,
-            ),
-            search_delay: field(prefs.market.search_delay_ms.to_string(), "250", false),
-            proxy_address: field(proxy.address.clone(), "host:port", false),
-            proxy_user: field(proxy.username.clone(), "Username", false),
-            proxy_password: field(proxy.password.clone(), "Password", true),
-            html_path: field(
-                prefs.html.path.clone(),
-                &html_path("").display().to_string(),
-                false,
-            ),
-            esi_client_id: field(prefs.esi.client_id.clone(), crate::esi::CLIENT_ID, false),
-            esi_port: field(
-                prefs.esi.port.to_string(),
-                &crate::esi::DEFAULT_PORT.to_string(),
-                false,
-            ),
-        };
-        let on_change =
-            |input: &Entity<InputState>, cx: &mut Context<Self>, apply: fn(&mut Saved, &str)| {
-                cx.subscribe(input, move |this, input, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        let value = input.read(cx).value().to_string();
-                        this.set(cx, |s| apply(s, &value));
-                    }
-                })
-            };
-        let updates = hub.read(cx).updates.clone();
-        let subscriptions = vec![
-            cx.observe(&hub, |_, _, cx| cx.notify()),
-            cx.observe(&updates, |_, _, cx| cx.notify()),
-            on_change(&fields.spool, cx, |s, v| {
-                if let Some(percent) = parse_decimal::<f64>(v.trim().trim_end_matches('%')) {
-                    s.settings.preferences.engine.default_spool = (percent / 100.0).clamp(0.0, 1.0);
-                }
-            }),
-            on_change(&fields.search_delay, cx, |s, v| {
-                if let Some(ms) = parse_decimal::<u64>(v) {
-                    s.settings.preferences.market.search_delay_ms = ms.min(10_000);
-                }
-            }),
-            on_change(&fields.proxy_address, cx, |s, v| {
-                v.trim()
-                    .clone_into(&mut s.settings.preferences.network.proxy.address);
-            }),
-            on_change(&fields.proxy_user, cx, |s, v| {
-                v.clone_into(&mut s.settings.preferences.network.proxy.username);
-            }),
-            on_change(&fields.proxy_password, cx, |s, v| {
-                v.clone_into(&mut s.settings.preferences.network.proxy.password);
-            }),
-            on_change(&fields.html_path, cx, |s, v| {
-                v.trim().clone_into(&mut s.settings.preferences.html.path);
-            }),
-            on_change(&fields.esi_client_id, cx, |s, v| {
-                v.trim()
-                    .clone_into(&mut s.settings.preferences.esi.client_id);
-            }),
-            on_change(&fields.esi_port, cx, |s, v| {
-                if let Some(port) = parse_decimal::<u16>(v)
-                    && port > 0
-                {
-                    s.settings.preferences.esi.port = port;
-                }
-            }),
-        ];
-        Self {
-            hub,
-            page: Page::General,
-            fields,
-            _subscriptions: subscriptions,
-        }
-    }
-
-    fn set(&self, cx: &mut Context<Self>, edit: impl FnOnce(&mut Saved)) {
-        self.hub.update(cx, |hub, cx| hub.update_saved(edit, cx));
-    }
-
-    /// A switch bound to one setting.
-    fn toggle(
-        id: &'static str,
-        title: &'static str,
-        description: &'static str,
-        checked: bool,
-        apply: fn(&mut Saved, bool),
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        Self::toggle_under(id, title, description, checked, None, apply, cx)
-    }
-
-    /// A switch that depends on another setting: indented under it, and off limits while
-    /// `enabled` is false. None for a switch that stands on its own.
-    fn toggle_under(
-        id: &'static str,
-        title: &'static str,
-        description: &'static str,
-        checked: bool,
-        enabled: Option<bool>,
-        apply: fn(&mut Saved, bool),
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let disabled = enabled == Some(false);
-        let control = Switch::new(id)
-            .checked(checked)
-            .disabled(disabled)
-            .on_click(cx.listener(move |this, value: &bool, _, cx| {
-                let value = *value;
-                this.set(cx, |s| apply(s, value));
-            }))
-            .into_any_element();
-        row(title, description, control, enabled.is_some(), disabled, cx)
-    }
-
-    /// One of a few values, as a segmented control under the setting's text.
-    fn choice<T: Copy + PartialEq + 'static>(
-        id: &'static str,
-        title: &'static str,
-        description: &'static str,
-        options: &[(T, &'static str)],
-        current: T,
-        apply: fn(&mut Saved, T),
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let values: Vec<T> = options.iter().map(|&(value, _)| value).collect();
-        let segments = options
-            .iter()
-            .map(|&(value, label)| Segment::new(label, current == value))
-            .collect();
-        let control = segmented(id, segments, cx, move |this, n, _, cx| {
-            if let Some(&value) = values.get(n) {
-                this.set(cx, |s| apply(s, value));
-            }
-        });
-        v_flex()
-            .gap_2()
-            .px_4()
-            .py_2()
-            .child(text(title, description, false, cx))
-            .child(div().w_full().max_w(px(CHOICE_MAX_W)).child(control))
-            .into_any_element()
-    }
-
-    fn general(p: &Preferences, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn general(p: &Preferences, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let g = &p.general;
         let labels: Vec<(AdditionsLabels, &str)> = AdditionsLabels::ALL
             .iter()
@@ -504,7 +210,7 @@ impl PreferencesWindow {
         .collect()
     }
 
-    fn engine(
+    pub(super) fn engine(
         &self,
         prefs: &Preferences,
         factor_reload: bool,
@@ -554,7 +260,7 @@ impl PreferencesWindow {
         ]
     }
 
-    fn stats(p: &Preferences, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn stats(p: &Preferences, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let rows = p
             .stats
             .entries()
@@ -592,7 +298,7 @@ impl PreferencesWindow {
         vec![section("Sections", rows, cx)]
     }
 
-    fn context_menus(p: &Preferences, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn context_menus(p: &Preferences, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let c = &p.context_menus;
         let entries: [Toggle; 8] = [
             (
@@ -661,7 +367,7 @@ impl PreferencesWindow {
         vec![section("Menu entries", rows, cx)]
     }
 
-    fn market(
+    pub(super) fn market(
         &self,
         p: &Preferences,
         totals: PriceTotals,
@@ -744,7 +450,7 @@ impl PreferencesWindow {
         ]
     }
 
-    fn network(&self, p: &Preferences, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn network(&self, p: &Preferences, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let n = &p.network;
         let modes: Vec<(ProxyMode, &str)> =
             ProxyMode::ALL.iter().map(|&m| (m, m.label())).collect();
@@ -870,7 +576,7 @@ impl PreferencesWindow {
         ]
     }
 
-    fn html(&self, p: &Preferences, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn html(&self, p: &Preferences, cx: &mut Context<Self>) -> Vec<AnyElement> {
         vec![section(
             "Export",
             vec![
@@ -901,7 +607,7 @@ impl PreferencesWindow {
 }
 
 impl PreferencesWindow {
-    fn esi(&self, p: &Preferences, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn esi(&self, p: &Preferences, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let url = crate::esi::callback_url(p.esi.port);
         let logged_in = self.hub.read(cx).esi.accounts.accounts.len();
         let theme = cx.theme();
@@ -941,7 +647,7 @@ impl PreferencesWindow {
             .small()
             .label("Manage…")
             .on_click(move |_, _, cx| {
-                super::esi::open_characters_window(hub.clone(), cx).detach();
+                crate::ui::esi::open_characters_window(hub.clone(), cx).detach();
             })
             .into_any_element();
         vec![
@@ -994,361 +700,5 @@ impl PreferencesWindow {
                 cx,
             ),
         ]
-    }
-}
-
-/// What the Database page can delete.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Wipe {
-    DamagePatterns,
-    TargetProfiles,
-    Prices,
-}
-
-impl Wipe {
-    fn button(self) -> &'static str {
-        match self {
-            Self::DamagePatterns => "Delete All Damage Pattern Profiles",
-            Self::TargetProfiles => "Delete All Target Profiles",
-            Self::Prices => "Delete All Prices",
-        }
-    }
-
-    /// pyfa's question before going ahead.
-    fn question(self) -> &'static str {
-        match self {
-            Self::DamagePatterns => {
-                "This is a destructive action that will delete all damage pattern profiles. \
-                 Are you sure you want to do this?"
-            }
-            Self::TargetProfiles => {
-                "This is a destructive action that will delete all target profiles. Are you \
-                 sure you want to do this?"
-            }
-            Self::Prices => {
-                "This is a destructive action that will delete all cached prices. Are you sure \
-                 you want to do this?"
-            }
-        }
-    }
-}
-
-impl PreferencesWindow {
-    /// pyfa's Database page: where things are kept, and the three deletes.
-    fn database(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let cache_dir = match &self.hub.read(cx).loading {
-            super::hub::HubLoading::Ready(loaded) => Some(loaded.cache_dir.clone()),
-            _ => None,
-        };
-        let shown = |path: Option<std::path::PathBuf>| {
-            path.map_or_else(|| "unknown".to_owned(), |p| p.display().to_string())
-        };
-        let path_row = |title: &'static str, path: String, cx: &App| {
-            row(
-                title,
-                "",
-                div()
-                    .text_xs()
-                    .max_w(px(360.))
-                    .text_color(cx.theme().muted_foreground)
-                    .child(path)
-                    .into_any_element(),
-                false,
-                false,
-                cx,
-            )
-        };
-        let wipes = [Wipe::DamagePatterns, Wipe::TargetProfiles, Wipe::Prices]
-            .into_iter()
-            .map(|wipe| {
-                let description = match wipe {
-                    Wipe::DamagePatterns => "Your own damage patterns. The built-in ones stay.",
-                    Wipe::TargetProfiles => "Your own target profiles. The built-in ones stay.",
-                    Wipe::Prices => "Every price fetched so far. They are fetched again.",
-                };
-                let control = gpui_kit::component::button::Button::new(wipe.button())
-                    .small()
-                    .label(wipe.button())
-                    .on_click(cx.listener(move |_, _, window, cx| {
-                        Self::confirm_wipe(wipe, window, cx);
-                    }))
-                    .into_any_element();
-                row(wipe.button(), description, control, false, false, cx)
-            })
-            .collect();
-        vec![
-            section(
-                "Locations",
-                vec![
-                    path_row(
-                        "Fits, characters and settings",
-                        shown(crate::db::path()),
-                        cx,
-                    ),
-                    path_row("Cache", shown(cache_dir), cx),
-                ],
-                cx,
-            ),
-            section("Start over", wipes, cx),
-        ]
-    }
-
-    fn confirm_wipe(wipe: Wipe, window: &mut Window, cx: &mut Context<Self>) {
-        let this = cx.weak_entity();
-        let question = Confirm {
-            danger: true,
-            ..Confirm::new("Confirm", wipe.question())
-        };
-        confirm(window, cx, question, move |_, cx| {
-            let _ = this.update(cx, |this, cx| this.wipe(wipe, cx));
-        });
-    }
-
-    fn wipe(&self, wipe: Wipe, cx: &mut Context<Self>) {
-        match wipe {
-            Wipe::DamagePatterns => self.set(cx, |s| s.damage_patterns.clear()),
-            Wipe::TargetProfiles => self.set(cx, |s| s.target_profiles.clear()),
-            Wipe::Prices => {
-                let cache_dir = match &self.hub.read(cx).loading {
-                    super::hub::HubLoading::Ready(loaded) => Some(loaded.cache_dir.clone()),
-                    _ => None,
-                };
-                if let Some(dir) = cache_dir
-                    && let Err(e) = crate::prices::Prices::delete_cached(&dir)
-                {
-                    crate::errors::report("Deleting the prices failed", e);
-                }
-                self.hub.update(cx, |hub, cx| {
-                    hub.set_prices(std::rc::Rc::new(crate::prices::Prices::default()), cx);
-                });
-            }
-        }
-    }
-}
-
-/// A setting's title with its description under it.
-fn text(
-    title: impl Into<SharedString>,
-    description: &'static str,
-    disabled: bool,
-    cx: &App,
-) -> AnyElement {
-    let theme = cx.theme();
-    v_flex()
-        .flex_1()
-        .min_w_0()
-        .gap_0p5()
-        .when(disabled, |d| d.opacity(0.5))
-        .child(div().font_weight(FontWeight::MEDIUM).child(title.into()))
-        .when(!description.is_empty(), |d| {
-            d.child(
-                div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(description),
-            )
-        })
-        .into_any_element()
-}
-
-/// A setting: its text on the left, its control on the right, or under the text when the row
-/// is too narrow for both. `nested` indents it under the setting before it.
-fn row(
-    title: impl Into<SharedString>,
-    description: &'static str,
-    control: AnyElement,
-    nested: bool,
-    disabled: bool,
-    cx: &App,
-) -> AnyElement {
-    h_flex()
-        .flex_wrap()
-        .gap_x_6()
-        .gap_y_2()
-        .px_4()
-        .py_2()
-        .when(nested, Styled::pl_10)
-        .child(
-            div()
-                .flex_1()
-                .min_w(px(TEXT_MIN_W))
-                .child(text(title, description, disabled, cx)),
-        )
-        .child(div().flex_none().max_w_full().child(control))
-        .into_any_element()
-}
-
-/// A band titling a run of settings, like the fitting view's rack labels, with hairlines
-/// between the settings.
-pub(super) fn section(title: &'static str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
-    let theme = cx.theme();
-    let count = rows.len();
-    v_flex()
-        .child(band(
-            h_flex().h(px(ROW_H)).px_4().child(section_title(title)),
-            cx,
-        ))
-        .children(rows.into_iter().enumerate().map(|(n, row)| {
-            div()
-                .when(n + 1 < count, |d| d.border_b_1().border_color(theme.border))
-                .child(row)
-        }))
-        .into_any_element()
-}
-
-impl Render for PreferencesWindow {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let viewport = window.viewport_size();
-        let narrow = viewport.width < px(NARROW_W);
-        // A short window scrolls the page's title away with its settings.
-        let short = viewport.height < px(SHORT_H);
-        let (prefs, factor_reload, totals) = {
-            let saved = &self.hub.read(cx).saved;
-            (
-                saved.settings.preferences.clone(),
-                saved.settings.factor_reload,
-                saved.settings.price_totals,
-            )
-        };
-        let body = match self.page {
-            Page::General => Self::general(&prefs, cx),
-            Page::Engine => self.engine(&prefs, factor_reload, cx),
-            Page::Stats => Self::stats(&prefs, cx),
-            Page::ContextMenus => Self::context_menus(&prefs, cx),
-            Page::Market => self.market(&prefs, totals, cx),
-            Page::Network => self.network(&prefs, cx),
-            Page::Html => self.html(&prefs, cx),
-            Page::Esi => self.esi(&prefs, cx),
-            Page::Database => self.database(cx),
-        };
-        let theme = cx.theme();
-        let pages = Page::ALL.into_iter().map(|page| {
-            let selected = page == self.page;
-            h_flex()
-                .id(page.title())
-                .flex_none()
-                .gap_2p5()
-                .px_2p5()
-                .py_1p5()
-                .rounded(px(6.))
-                .when(narrow, gpui_kit::Styled::justify_center)
-                .when(selected, |d| {
-                    d.bg(theme.secondary)
-                        .text_color(theme.foreground)
-                        .font_weight(FontWeight::MEDIUM)
-                })
-                .when(!selected, |d| {
-                    d.text_color(theme.muted_foreground).hover(|s| {
-                        s.bg(theme.secondary.opacity(0.5))
-                            .text_color(theme.foreground)
-                    })
-                })
-                .child(
-                    UiIcon::new(page.icon())
-                        .size(px(16.))
-                        .text_color(if selected {
-                            theme.primary
-                        } else {
-                            theme.muted_foreground
-                        }),
-                )
-                .when(!narrow, |d| d.child(page.title()))
-                .when(narrow, |d| d.tip(page.title()))
-                .on_mouse_down(
-                    gpui_kit::MouseButton::Left,
-                    cx.listener(move |this, _: &gpui_kit::MouseDownEvent, _, cx| {
-                        this.page = page;
-                        cx.notify();
-                    }),
-                )
-        });
-        let header = h_flex()
-            .flex_none()
-            .gap_3()
-            .when(narrow, |d| d.px_4().pt_4().pb_3())
-            .when(!narrow, |d| d.px_8().pt_6().pb_4())
-            .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .items_center()
-                    .justify_center()
-                    .size(px(36.))
-                    .rounded(px(8.))
-                    .bg(theme.primary.opacity(0.15))
-                    .child(
-                        UiIcon::new(self.page.icon())
-                            .size(px(18.))
-                            .text_color(theme.primary),
-                    ),
-            )
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .text_lg()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(self.page.title()),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(self.page.summary()),
-                    ),
-            );
-        let (scrolled_header, fixed_header) = if short {
-            (Some(header), None)
-        } else {
-            (None, Some(header))
-        };
-        h_flex()
-            .size_full()
-            .items_start()
-            .child(
-                v_flex()
-                    .id("preferences-pages")
-                    .flex_none()
-                    .w(px(if narrow { PAGES_NARROW_W } else { PAGES_W }))
-                    .h_full()
-                    .overflow_y_scroll()
-                    .px_2()
-                    .when(narrow, gpui_kit::Styled::py_2)
-                    .when(!narrow, gpui_kit::Styled::py_4)
-                    .gap_0p5()
-                    .border_r_1()
-                    .border_color(theme.border)
-                    .bg(theme.sidebar)
-                    .when(!narrow, |d| {
-                        d.child(
-                            div()
-                                .px_2p5()
-                                .pb_3()
-                                .text_xs()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme.muted_foreground)
-                                .child("PREFERENCES"),
-                        )
-                    })
-                    .children(pages),
-            )
-            .child(
-                v_flex()
-                    .flex_1()
-                    .h_full()
-                    .min_w_0()
-                    .children(fixed_header)
-                    .child(
-                        v_flex()
-                            .id("preferences-page")
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_y_scroll()
-                            .children(scrolled_header)
-                            .child(v_flex().flex_none().pb_4().gap_3().children(body)),
-                    ),
-            )
     }
 }
