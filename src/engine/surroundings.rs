@@ -3,20 +3,24 @@
 //! effects.
 //!
 //! Loose projected modules, drones and fighters have no fit of their own in pyfa. refine needs one
-//! to hold them, so each gets a hidden fit flying a capsule, which carries no bonuses that could
-//! change them. A fit projected more than once is added once per copy, since refine has no
-//! multiplier for projections.
+//! to hold them, so they go into hidden fits flying a capsule, which carries no bonuses that could
+//! change them, one per distance from the target. A fit projected more than once is added once
+//! per copy, since refine has no multiplier for projections.
 
 use rc::{
     AbilityId, AttrId, CountNz, EveAttrId, ItemCommon, ItemId, ItemTypeId, Lender, MinionState,
     ModRack, SolOwned, stats::StatSlot,
 };
 
-use super::{DroneInfo, Engine, Slots, build::add_fit, drone_info, module_state};
+use super::{
+    DroneInfo, Engine, Pilot, Slots,
+    build::{add_fit, add_fit_module},
+    drone_info,
+};
 use crate::{
     data::Slot,
     fit::{
-        Fit, ModuleState,
+        Fit, Module, ModuleState,
         fighters::Fighter,
         projected::{EnvEffect, ProjectedModule},
     },
@@ -178,17 +182,36 @@ pub fn surrounding_fits<'a>(fit: &'a Fit, fits: &'a [Fit]) -> impl Iterator<Item
     .filter_map(|uid| fits.iter().find(|f| f.uid == uid))
 }
 
-impl Engine {
-    /// A hidden fit to hold loose projected items: a capsule with the character's skills.
-    fn add_holder(&self, sol: &mut SolOwned) -> (rc::FitId, ItemId) {
+/// The hidden fits holding loose projected items, one per distance from the target: a capsule
+/// with All 5's skills, which carries no bonuses that could change what it holds.
+struct Holders<'a> {
+    pilot: &'a Pilot,
+    target_radius: f64,
+    /// By the range their items project from, as bits so they compare exactly.
+    fits: Vec<(Option<u64>, rc::FitId)>,
+}
+
+impl Holders<'_> {
+    /// The holder for items `range` metres from the target, added the first time it is asked
+    /// for.
+    fn at(&mut self, sol: &mut SolOwned, range: Option<f64>) -> rc::FitId {
+        let key = range.map(f64::to_bits);
+        if let Some(&(_, fit_id)) = self.fits.iter().find(|(k, _)| *k == key) {
+            return fit_id;
+        }
         let mut f = sol.add_fit();
-        self.all5.board(&mut f);
+        self.pilot.board(&mut f);
         let ship = f
             .set_ship(ItemTypeId::from_i32(CAPSULE), None, None)
             .get_item_id();
-        (f.get_fit_id(), ship)
+        let fit_id = f.get_fit_id();
+        place_ship(sol, ship, range, self.target_radius);
+        self.fits.push((key, fit_id));
+        fit_id
     }
+}
 
+impl Engine {
     /// Add what surrounds `fit` to the solar system its own items are in. `others` are the saved
     /// fits that projected and command fits refer to.
     pub(super) fn add_surroundings(
@@ -261,16 +284,23 @@ impl Engine {
             }
         }
 
+        let mut holders = Holders {
+            pilot: &self.all5,
+            target_radius,
+            fits: Vec::new(),
+        };
         let modules = fit
             .projected
             .modules
             .iter()
-            .map(|module| self.project_module(sol, module, ship_id, target_radius))
+            .map(|module| {
+                let holder = holders.at(sol, module.range);
+                project_module(sol, holder, module, ship_id)
+            })
             .collect();
 
         for stack in &fit.projected.drones {
-            let (holder, holder_ship) = self.add_holder(sol);
-            place_ship(sol, holder_ship, stack.range, target_radius);
+            let holder = holders.at(sol, stack.range);
             let state = if stack.active {
                 MinionState::Engaging
             } else {
@@ -294,8 +324,7 @@ impl Engine {
 
         let mut fighter_ids = Vec::with_capacity(fit.projected.fighters.len());
         for projected in &fit.projected.fighters {
-            let (holder, holder_ship) = self.add_holder(sol);
-            place_ship(sol, holder_ship, projected.range, target_radius);
+            let holder = holders.at(sol, projected.range);
             let Ok(mut f) = sol.get_fit(&holder) else {
                 continue;
             };
@@ -317,38 +346,31 @@ impl Engine {
             modules,
         }
     }
+}
 
-    fn project_module(
-        &self,
-        sol: &mut SolOwned,
-        module: &ProjectedModule,
-        target: ItemId,
-        target_radius: f64,
-    ) -> Option<ItemId> {
-        let (holder, holder_ship) = self.add_holder(sol);
-        place_ship(sol, holder_ship, module.range, target_radius);
-        let mut f = sol.get_fit(&holder).ok()?;
-        // A capsule has no racks to speak of; the module just needs somewhere to sit.
-        let Ok(mut item) = f.add_module(
-            ModRack::High,
-            rc::AddMode::Append,
-            ItemTypeId::from_i32(module.type_id),
-            module_state(module.state),
-        ) else {
-            return None;
-        };
-        if let Some(cycles) = module.spool {
-            item.set_spool_override(Some(rc::Spool::Cycles(rc::Count::from_u32(cycles))));
-        }
-        if let Some(charge) = module.charge {
-            item.set_charge_type_id(ItemTypeId::from_i32(charge));
-        }
-        let id = item.get_item_id();
-        if module.state != ModuleState::Offline {
-            let _ = item.add_proj(&target);
-        }
-        Some(id)
+/// Put a loose projected module into its holder, projecting onto `target` unless it is offline.
+fn project_module(
+    sol: &mut SolOwned,
+    holder: rc::FitId,
+    module: &ProjectedModule,
+    target: ItemId,
+) -> Option<ItemId> {
+    let mut f = sol.get_fit(&holder).ok()?;
+    let fitted = Module {
+        type_id: module.type_id,
+        state: module.state,
+        charge: module.charge,
+        spool: module.spool,
+        mutation: None,
+        rah: None,
+    };
+    // A capsule has no racks to speak of; the module just needs somewhere to sit.
+    let mut item = add_fit_module(&mut f, ModRack::High, rc::AddMode::Append, &fitted).ok()?;
+    let id = item.get_item_id();
+    if module.state != ModuleState::Offline {
+        let _ = item.add_proj(&target);
     }
+    Some(id)
 }
 
 /// Environmental effects act on the whole fit, except abyssal weather and clouds, which refine

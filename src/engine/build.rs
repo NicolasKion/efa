@@ -347,7 +347,7 @@ fn roll(applied: rc::Mutation<'_>, mutation: &Mutation) {
     }
 }
 
-pub(super) fn module_state(state: ModuleState) -> rc::ModuleState {
+fn module_state(state: ModuleState) -> rc::ModuleState {
     match state {
         ModuleState::Offline => rc::ModuleState::Offline,
         ModuleState::Online => rc::ModuleState::Online,

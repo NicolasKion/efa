@@ -25,7 +25,7 @@ use crate::{
     fit::{Fit, ModuleState},
 };
 
-use build::{BuildOptions, Built, Placed, module_state};
+use build::{BuildOptions, Built, Placed};
 use items::{booster_info, drone_info};
 use stats::{damage, fit_stats, resource, slots};
 
