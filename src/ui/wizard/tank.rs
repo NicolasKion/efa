@@ -42,8 +42,8 @@ use crate::{
 /// Tanks the search lists.
 const RESULTS: usize = 6;
 /// The controls column, and the picked tank's, in a wide window.
-const CONTROLS_W: f32 = 300.;
-const DETAIL_W: f32 = 360.;
+const CONTROLS_W: f32 = 250.;
+const DETAIL_W: f32 = 320.;
 const ICON: f32 = 18.;
 /// Icons in a result row.
 const STRIP_ICON: f32 = 20.;
@@ -551,9 +551,10 @@ impl TankSection {
 
     fn controls(&self, across: bool, cx: &mut Context<Self>) -> Div {
         let c = self.choices;
+        let _ = across;
         let mut out = v_flex()
-            .gap_4()
-            .child(group("Goal", self.goals(across, cx), cx))
+            .gap_2p5()
+            .child(group("Goal", self.goals(cx), cx))
             .child(group("Layer", self.layers(cx), cx));
         if c.goal == Goal::Repair {
             out = out.child(group("Repairers", self.repairers(cx), cx));
@@ -582,7 +583,7 @@ impl TankSection {
         .child(group(
             "Budget",
             v_flex()
-                .gap_2()
+                .gap_1p5()
                 .child(self.budget(false, cx))
                 .child(self.budget(true, cx))
                 .into_any_element(),
@@ -590,78 +591,30 @@ impl TankSection {
         ))
     }
 
-    /// The goals as a short list: icon, name and what it aims for, the picked one lit in the
-    /// accent.
-    fn goals(&self, across: bool, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
-        let tiles: Vec<AnyElement> = Goal::ALL
+    /// The goals as a segmented control; what each aims for is in its tooltip.
+    fn goals(&self, cx: &mut Context<Self>) -> AnyElement {
+        let segments = Goal::ALL
             .into_iter()
             .map(|goal| {
-                let on = goal == self.choices.goal;
-                let (icon, sub) = match goal {
-                    Goal::Ehp => (AssetIcon::Shield, "Most buffer over all layers"),
-                    Goal::Resists => (AssetIcon::ShieldCheck, "Highest resist multiplier"),
-                    Goal::Repair => (AssetIcon::HeartPulse, "Most EHP repaired a second"),
+                let icon = match goal {
+                    Goal::Ehp => AssetIcon::Shield,
+                    Goal::Resists => AssetIcon::ShieldCheck,
+                    Goal::Repair => AssetIcon::HeartPulse,
                 };
-                h_flex()
-                    .id(SharedString::from(format!("wizard-goal-{goal:?}")))
-                    .gap_2p5()
-                    .px_2()
-                    .py_1p5()
-                    .rounded(px(6.))
-                    .cursor_pointer()
-                    .when(on, |d| d.bg(theme.primary.opacity(0.12)))
-                    .when(!on, |d| d.hover(|h| h.bg(theme.secondary.opacity(0.6))))
-                    .child(UiIcon::new(icon).small().flex_none().text_color(if on {
-                        theme.primary
-                    } else {
-                        theme.muted_foreground
-                    }))
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .when(on, |d| d.text_color(theme.primary))
-                                    .child(goal.label()),
-                            )
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child(sub),
-                            ),
-                    )
-                    .when(on, |d| {
-                        d.child(
-                            UiIcon::new(IconName::Check)
-                                .small()
-                                .text_color(theme.primary),
-                        )
-                    })
-                    .tooltip(move |window, cx| Tooltip::new(goal_text(goal)).build(window, cx))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _: &gpui_kit::MouseDownEvent, window, cx| {
-                            this.change(cx, |c| c.goal = goal);
-                            this.refocus(window, cx);
-                        }),
-                    )
-                    .into_any_element()
+                Segment::new(goal.short_label(), goal == self.choices.goal)
+                    .icon(UiIcon::new(icon).xsmall())
+                    .tip(goal_text(goal))
             })
             .collect();
-        if across {
-            h_flex()
-                .gap_1()
-                .children(tiles.into_iter().map(|t| div().flex_1().min_w_0().child(t)))
-                .into_any_element()
-        } else {
-            v_flex().gap_0p5().children(tiles).into_any_element()
-        }
+        segmented(
+            "wizard-goal",
+            segments,
+            cx,
+            |this: &mut Self, i, window, cx| {
+                this.change(cx, |c| c.goal = Goal::ALL[i]);
+                this.refocus(window, cx);
+            },
+        )
     }
 
     fn layers(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -725,40 +678,34 @@ impl TankSection {
                     this.refocus(window, cx);
                 }))
         };
+        let tip = if self.choices.refit {
+            "How many the tank ends up with; Auto lets the search decide"
+        } else {
+            "Repairers already fitted count"
+        };
         h_flex()
-            .gap_3()
+            .id("wizard-repairers")
+            .flex_none()
+            .w_full()
+            .gap_px()
+            .rounded(px(4.))
+            .border_1()
+            .border_color(theme.border)
+            .child(step("wizard-rep-less", IconName::Minus, true, n.is_none()))
             .child(
-                h_flex()
-                    .flex_none()
-                    .p_0p5()
-                    .gap_0p5()
-                    .rounded(px(7.))
-                    .border_1()
-                    .border_color(theme.border)
-                    .child(step("wizard-rep-less", IconName::Minus, true, n.is_none()))
-                    .child(
-                        div()
-                            .w(px(44.))
-                            .text_center()
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(n.map_or_else(|| "Auto".to_owned(), |n| n.to_string())),
-                    )
-                    .child(step(
-                        "wizard-rep-more",
-                        IconName::Plus,
-                        false,
-                        n == Some(MAX_REPAIRERS),
-                    )),
+                div()
+                    .flex_1()
+                    .text_center()
+                    .text_xs()
+                    .child(n.map_or_else(|| "Auto".to_owned(), |n| n.to_string())),
             )
-            .child(muted(
-                if self.choices.refit {
-                    "How many the tank ends up with; Auto lets the search decide."
-                } else {
-                    "Repairers already fitted count."
-                },
-                cx,
+            .child(step(
+                "wizard-rep-more",
+                IconName::Plus,
+                false,
+                n == Some(MAX_REPAIRERS),
             ))
+            .tooltip(move |window, cx| Tooltip::new(tip).build(window, cx))
             .into_any_element()
     }
 
@@ -786,7 +733,7 @@ impl TankSection {
             .collect();
         h_flex()
             .flex_wrap()
-            .gap_1p5()
+            .gap_1()
             .children(chips)
             .into_any_element()
     }
@@ -845,7 +792,7 @@ impl TankSection {
                     .gap_2()
                     .child(
                         div()
-                            .w(px(72.))
+                            .w(px(64.))
                             .flex_none()
                             .text_xs()
                             .text_color(theme.muted_foreground)
@@ -855,7 +802,7 @@ impl TankSection {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .child(Input::new(field).small().suffix(muted("ISK", cx).pr_1())),
+                            .child(Input::new(field).xsmall().suffix(muted("ISK", cx).pr_1())),
                     ),
             )
             .child(h_flex().flex_wrap().gap_1().children(chips))
@@ -866,7 +813,7 @@ impl TankSection {
         let palette = self.shared.palette;
         let cancel = Self::cancel_button(cx);
         let theme = cx.theme();
-        let mut block = v_flex().gap_2();
+        let mut block = v_flex().gap_1p5();
         if let Some(search) = &self.search {
             let fraction = search.progress.fraction();
             block = block.child(
@@ -898,7 +845,7 @@ impl TankSection {
             block = block
                 .child(
                     Button::new("wizard-find")
-                        .primary()
+                        .small()
                         .w_full()
                         .tab_stop(false)
                         .loading(fetching)
@@ -1112,23 +1059,17 @@ impl TankSection {
             )
         };
         v_flex()
-            .items_center()
-            .gap_1p5()
-            .py_16()
-            .px_4()
+            .gap_0p5()
+            .py_2()
             .child(
-                UiIcon::new(icon)
-                    .size(px(22.))
-                    .text_color(theme.muted_foreground.opacity(0.7)),
-            )
-            .child(
-                div()
-                    .pt_1()
+                h_flex()
+                    .gap_1p5()
                     .text_sm()
-                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.muted_foreground)
+                    .child(UiIcon::new(icon).xsmall())
                     .child(title),
             )
-            .child(muted(text, cx).text_center())
+            .child(muted(text, cx))
     }
 
     /// One found tank as a row: its goal number with the change against now, the other two
@@ -1698,37 +1639,8 @@ impl TankSection {
             .into_any_element()
     }
 
-    fn footer(&self, narrow: bool, cx: &mut Context<Self>) -> Div {
+    fn footer(&self, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme();
-        let keys: [(&str, &str); 5] = [
-            ("F", "find"),
-            ("Up Down", "pick"),
-            ("1-6", "pick"),
-            ("Esc", "cancel search"),
-            ("Enter", "fit"),
-        ];
-        let hints = h_flex()
-            .flex_1()
-            .min_w_0()
-            .overflow_hidden()
-            .gap_3()
-            .text_xs()
-            .text_color(theme.muted_foreground)
-            .children(keys.into_iter().map(|(key, what)| {
-                h_flex()
-                    .flex_none()
-                    .gap_1()
-                    .child(
-                        div()
-                            .px_1()
-                            .rounded(px(3.))
-                            .border_1()
-                            .border_color(theme.border)
-                            .bg(theme.secondary.opacity(0.5))
-                            .child(key),
-                    )
-                    .child(what)
-            }));
         let rank = self
             .selected
             .and_then(|s| self.order().iter().position(|&o| o == s));
@@ -1739,14 +1651,15 @@ impl TankSection {
         h_flex()
             .flex_none()
             .justify_end()
-            .gap_3()
-            .px_4()
-            .py_2()
+            .gap_2()
+            .px_2()
+            .py_1()
             .border_t_1()
             .border_color(theme.border)
-            .when(!narrow, |d| d.child(hints))
+            .bg(theme.title_bar)
             .child(
                 Button::new("wizard-apply")
+                    .small()
                     .primary()
                     .tab_stop(false)
                     .icon(IconName::Check)
@@ -1784,14 +1697,14 @@ impl Render for TankSection {
                     scroll("wizard-results")
                         .flex_1()
                         .min_w_0()
-                        .py_3()
+                        .py_1()
                         .child(results),
                 )
                 .child(
                     scroll("wizard-detail")
                         .w(px(DETAIL_W))
                         .flex_none()
-                        .p_4()
+                        .p_2()
                         .bg(side)
                         .border_l_1()
                         .border_color(theme.border)
@@ -1812,8 +1725,8 @@ impl Render for TankSection {
                     scroll("wizard-results")
                         .flex_1()
                         .min_w_0()
-                        .py_3()
-                        .gap_4()
+                        .py_1()
+                        .gap_2()
                         .child(results)
                         .child(divider(cx))
                         .child(div().px_3().child(detail)),
@@ -1821,8 +1734,8 @@ impl Render for TankSection {
                 .into_any_element(),
             Layout::Narrow => scroll("wizard-all")
                 .size_full()
-                .py_3()
-                .gap_4()
+                .py_1()
+                .gap_2()
                 .child(div().px_3().child(controls.child(search)))
                 .child(divider(cx))
                 .child(results)
@@ -1838,7 +1751,7 @@ impl Render for TankSection {
             }))
             .size_full()
             .child(div().flex_1().min_h_0().child(body))
-            .child(self.footer(layout == Layout::Narrow, cx))
+            .child(self.footer(cx))
     }
 }
 
@@ -1858,14 +1771,13 @@ fn controls_column(controls: Div, search: Div, width: f32, side: Hsla, cx: &App)
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
-                .p_4()
+                .p_2()
                 .child(controls),
         )
         .child(
             div()
                 .flex_none()
-                .px_4()
-                .py_3()
+                .p_2()
                 .border_t_1()
                 .border_color(theme.border)
                 .child(search),
@@ -1874,12 +1786,12 @@ fn controls_column(controls: Div, search: Div, width: f32, side: Hsla, cx: &App)
 
 /// A titled group of controls.
 fn group(title: &str, body: AnyElement, cx: &App) -> Div {
-    v_flex().gap_1p5().child(label(title, cx)).child(body)
+    v_flex().gap_1().child(label(title, cx)).child(body)
 }
 
 /// A titled block of the picked tank's detail.
 fn panel(title: &str, body: impl IntoElement, cx: &App) -> Div {
-    v_flex().gap_2().child(label(title, cx)).child(body)
+    v_flex().gap_1().child(label(title, cx)).child(body)
 }
 
 /// A number now and after, the after green when better and red when worse, with the change.

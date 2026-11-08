@@ -11,14 +11,14 @@ use std::{rc::Rc, time::Duration};
 
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
-    ActiveTheme, Icon as UiIcon, IconName, Sizable,
+    ActiveTheme, Icon as UiIcon, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
     tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, AnyView, App, AppContext, Context, Div, Entity, FocusHandle, FontWeight, Hsla,
+    AnyElement, AnyView, App, AppContext, Context, Div, Entity, FocusHandle, Hsla,
     InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement, Render,
     SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window,
     WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, relative, size,
@@ -458,26 +458,20 @@ impl WizardDialog {
         let tip = SharedString::from(format!("Ctrl+{n}: {summary}"));
         h_flex()
             .id(SharedString::from(format!("wizard-section-{section:?}")))
-            .h_full()
+            .h(px(24.))
             .gap_1p5()
             .px_2()
-            .border_b_2()
+            .rounded(px(4.))
             .cursor_pointer()
             .text_sm()
-            .font_weight(FontWeight::MEDIUM)
             .when(current, |d| {
-                d.border_color(theme.primary).text_color(theme.foreground)
+                d.bg(theme.secondary).text_color(theme.foreground)
             })
             .when(!current, |d| {
-                d.border_color(theme.primary.opacity(0.))
-                    .text_color(theme.muted_foreground)
+                d.text_color(theme.muted_foreground)
                     .hover(|h| h.text_color(theme.foreground))
             })
-            .child(
-                UiIcon::new(panel.icon())
-                    .small()
-                    .when(current, |d| d.text_color(theme.primary)),
-            )
+            .child(UiIcon::new(panel.icon()).xsmall())
             .child(section.label())
             .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
             .on_mouse_down(
@@ -497,66 +491,47 @@ impl WizardDialog {
         let catalog = &self.shared.loaded.catalog;
         let stats = stats.into_iter().enumerate().map(|(i, s)| {
             let tip = s.tip.clone();
-            v_flex()
+            h_flex()
                 .id(SharedString::from(format!("wizard-stat-{i}")))
-                .pl_3()
-                .border_l_1()
-                .border_color(theme.border)
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(s.label),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(s.value),
-                )
+                .gap_1p5()
+                .child(div().text_color(theme.muted_foreground).child(s.label))
+                .child(s.value)
                 .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
         });
         h_flex()
             .flex_none()
             .flex_wrap()
             .items_center()
-            .gap_x_5()
-            .gap_y_2()
-            .px_4()
-            .min_h(px(52.))
+            .gap_x_4()
+            .gap_y_1()
+            .px_2()
+            .py_1()
+            .min_h(px(32.))
             .border_b_1()
             .border_color(theme.border)
+            .bg(theme.title_bar)
+            .text_sm()
             .child(
                 h_flex()
-                    .gap_2p5()
-                    .py_2()
+                    .min_w_0()
+                    .gap_1p5()
                     .child(widgets::icon_box(
                         catalog,
                         &self.shared.loaded.icons,
                         Icon::Type(self.shared.facts.ship),
-                        30.,
+                        20.,
                     ))
+                    .child(div().truncate().child(self.shared.fit.name.clone()))
                     .child(
-                        v_flex()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_sm()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(self.shared.fit.name.clone()),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child(catalog.name(self.shared.facts.ship)),
-                            ),
+                        div()
+                            .flex_none()
+                            .text_color(theme.muted_foreground)
+                            .child(catalog.name(self.shared.facts.ship)),
                     ),
             )
-            .child(h_flex().self_stretch().gap_1().children(tabs))
+            .child(h_flex().gap_1().children(tabs))
             .child(div().flex_1())
-            .child(h_flex().py_2().gap_3().children(stats))
+            .child(h_flex().gap_4().children(stats))
     }
 
     /// A strip under the header when the fit is no longer what the wizard works on.
@@ -585,8 +560,8 @@ impl WizardDialog {
             h_flex()
                 .flex_none()
                 .gap_2()
-                .px_4()
-                .py_1p5()
+                .px_2()
+                .py_1()
                 .bg(fill.opacity(0.1))
                 .border_b_1()
                 .border_color(fill.opacity(0.3))
@@ -687,11 +662,10 @@ fn segmented<T: 'static>(
                 .min_w_0()
                 .justify_center()
                 .gap_1p5()
-                .h(px(24.))
-                .px_2()
-                .rounded(px(5.))
+                .h(px(22.))
+                .px_1p5()
+                .rounded(px(3.))
                 .text_xs()
-                .font_weight(FontWeight::MEDIUM)
                 .cursor_pointer()
                 .when(s.selected, |d| {
                     d.bg(theme.background)
@@ -718,10 +692,12 @@ fn segmented<T: 'static>(
         .collect();
     h_flex()
         .w_full()
-        .gap_0p5()
-        .p(px(2.))
-        .rounded(px(7.))
-        .bg(theme.secondary.opacity(0.8))
+        .gap_px()
+        .p(px(1.))
+        .rounded(px(4.))
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.secondary.opacity(0.5))
         .children(items)
         .into_any_element()
 }
@@ -737,22 +713,22 @@ fn chip(
     let theme = cx.theme();
     h_flex()
         .id(id)
-        .gap_1()
-        .h(px(22.))
-        .px_2()
-        .rounded(px(5.))
+        .h(px(20.))
+        .px_1p5()
+        .rounded(px(3.))
+        .border_1()
         .text_xs()
-        .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
         .when(on, |d| {
-            d.bg(theme.primary.opacity(0.16)).text_color(theme.primary)
+            d.bg(theme.primary.opacity(0.14))
+                .border_color(theme.primary.opacity(0.5))
+                .text_color(theme.foreground)
         })
         .when(!on, |d| {
-            d.bg(theme.secondary.opacity(0.6))
+            d.border_color(theme.border)
                 .text_color(theme.muted_foreground)
-                .hover(|h| h.bg(theme.secondary).text_color(theme.foreground))
+                .hover(|h| h.text_color(theme.foreground))
         })
-        .when(on, |d| d.child(UiIcon::new(IconName::Check).xsmall()))
         .child(label.into())
         .when_some(tip, |d, tip| {
             d.tooltip(move |window, cx| Tooltip::new(tip).build(window, cx))
@@ -763,9 +739,8 @@ fn chip(
 fn label(text: &str, cx: &App) -> Div {
     div()
         .text_xs()
-        .font_weight(FontWeight::SEMIBOLD)
         .text_color(cx.theme().muted_foreground)
-        .child(text.to_uppercase())
+        .child(text.to_owned())
 }
 
 /// Small muted text that wraps.

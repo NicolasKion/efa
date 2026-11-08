@@ -74,6 +74,15 @@ impl Goal {
             Self::Repair => "Max repair",
         }
     }
+
+    /// The goal in a word, for the goal switch.
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::Ehp => "EHP",
+            Self::Resists => "Resists",
+            Self::Repair => "Repair",
+        }
+    }
 }
 
 /// What the user picks on the tank section. All but the layer is remembered for the next fit;
