@@ -393,11 +393,12 @@ fn config_entry(line: &str) -> ConfigEntry<'_> {
     }
 }
 
-/// "Hobgoblin II,5" -> ("Hobgoblin II", 5); a missing or odd amount counts as one.
+/// "Hobgoblin II,5" -> ("Hobgoblin II", 5); a missing or odd amount counts as one, a huge one as
+/// [`crate::fit::MAX_STACK`].
 fn split_amount(data: &str) -> (&str, u32) {
     match data.rsplit_once(',') {
-        Some((name, n)) => match n.trim().parse() {
-            Ok(n) => (name.trim(), n),
+        Some((name, n)) => match n.trim().parse::<u32>() {
+            Ok(n) => (name.trim(), n.min(crate::fit::MAX_STACK)),
             Err(_) => (data.trim(), 1),
         },
         None => (data.trim(), 1),

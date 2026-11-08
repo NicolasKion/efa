@@ -180,15 +180,11 @@ pub fn swap_amounts(
     amounts: &[(TypeId, u32)],
     swap: &BTreeMap<TypeId, TypeId>,
 ) -> Vec<(TypeId, u32)> {
-    let mut out: Vec<(TypeId, u32)> = Vec::with_capacity(amounts.len());
-    for &(t, n) in amounts {
-        let t = swap.get(&t).copied().unwrap_or(t);
-        match out.iter_mut().find(|(o, _)| *o == t) {
-            Some((_, m)) => *m += n,
-            None => out.push((t, n)),
-        }
-    }
-    out
+    amounts
+        .iter()
+        .map(|&(t, n)| (swap.get(&t).copied().unwrap_or(t), n))
+        .collect::<crate::port::Tally<TypeId>>()
+        .into_vec()
 }
 
 /// Every type of `amounts` mapped to its cheaper replacement, where it has one.

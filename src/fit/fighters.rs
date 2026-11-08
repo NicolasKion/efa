@@ -60,6 +60,7 @@ impl Fighter {
     /// squadron size, the way pyfa's importers set a fighter's amount.
     pub fn with_size(catalog: &Catalog, type_id: TypeId, size: u32) -> Self {
         let mut fighter = Self::new(type_id);
+        let size = size.min(crate::fit::MAX_DRONES);
         fighter.set_amount(size, catalog.projection.squadron_size(type_id));
         fighter
     }

@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     data::{Catalog, Kind, Slot, TypeId},
-    fit::{Booster, Fit, Module, fighters::Fighter, split_count},
+    fit::{Booster, Fit, MAX_STACK, Module, fighters::Fighter, split_count},
 };
 
 /// Fits read from text, and names in it that matched no item.
@@ -191,25 +191,45 @@ pub(crate) enum Bay {
     Cargo,
 }
 
+/// The most positions a rack has on any hull, so an import never makes a longer one.
+pub(crate) fn max_positions(slot: Slot) -> usize {
+    match slot {
+        Slot::High | Slot::Mid | Slot::Low | Slot::Service => 8,
+        Slot::Subsystem => 4,
+        Slot::Rig => 3,
+    }
+}
+
 /// Put `count` of an item where it belongs on a fit built from a flat list, the way pyfa's
 /// importers do: modules into racks in order, drones and fighters into their bays, charges and
-/// anything unfittable into cargo.
+/// anything unfittable into cargo. Modules beyond what a rack can hold are dropped, as pyfa
+/// drops modules that do not fit, and amounts are capped, so a hostile count cannot run away.
 pub(crate) fn place(fit: &mut Fit, catalog: &Catalog, type_id: TypeId, count: u32, bay: Bay) {
     let Some(t) = catalog.get(type_id) else {
         return;
     };
+    let count = count.min(MAX_STACK);
     if bay == Bay::Cargo {
         fit.add_cargo(type_id, count);
         return;
     }
+    let free =
+        |used: usize, slot: Slot| max_positions(slot).saturating_sub(used).min(count as usize);
     match t.kind {
         Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low | Slot::Service)) => {
-            for _ in 0..count {
-                fit.rack_mut(slot).push(Some(Module::new(catalog, type_id)));
+            let rack = fit.rack_mut(slot);
+            for _ in 0..free(rack.len(), slot) {
+                rack.push(Some(Module::new(catalog, type_id)));
             }
         }
-        Kind::Module(Slot::Rig) => fit.rigs.extend((0..count).map(|_| Some(type_id))),
-        Kind::Module(Slot::Subsystem) => fit.subsystems.extend((0..count).map(|_| type_id)),
+        Kind::Module(Slot::Rig) => {
+            let n = free(fit.rigs.len(), Slot::Rig);
+            fit.rigs.extend(std::iter::repeat_n(Some(type_id), n));
+        }
+        Kind::Module(Slot::Subsystem) => {
+            let n = free(fit.subsystems.len(), Slot::Subsystem);
+            fit.subsystems.extend(std::iter::repeat_n(type_id, n));
+        }
         Kind::Drone => fit.add_drones(type_id, count),
         // Formats without a fighter section write one squadron per entry, its size as the count.
         Kind::Fighter => fit
@@ -224,6 +244,59 @@ pub(crate) fn place(fit: &mut Fit, catalog: &Catalog, type_id: TypeId, count: u3
         Kind::Mode => fit.mode = Some(type_id),
         Kind::Ship | Kind::Skill => {}
         Kind::Charge | Kind::Cargo | Kind::Other => fit.add_cargo(type_id, count),
+    }
+}
+
+/// Amounts by key in the order keys first came, the way the exports list items. Adding never
+/// overflows: amounts stop at `u32::MAX`.
+#[derive(Debug, Clone)]
+pub struct Tally<K>(Vec<(K, u32)>);
+
+impl<K> Default for Tally<K> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
+impl<K: PartialEq> Tally<K> {
+    pub fn add(&mut self, key: K, count: u32) {
+        match self.0.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, n)) => *n = n.saturating_add(count),
+            None => self.0.push((key, count)),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn into_vec(self) -> Vec<(K, u32)> {
+        self.0
+    }
+}
+
+impl<K: PartialEq> FromIterator<(K, u32)> for Tally<K> {
+    fn from_iter<I: IntoIterator<Item = (K, u32)>>(items: I) -> Self {
+        let mut tally = Self::default();
+        tally.extend(items);
+        tally
+    }
+}
+
+impl<K: PartialEq> Extend<(K, u32)> for Tally<K> {
+    fn extend<I: IntoIterator<Item = (K, u32)>>(&mut self, items: I) {
+        for (key, count) in items {
+            self.add(key, count);
+        }
+    }
+}
+
+impl<K> IntoIterator for Tally<K> {
+    type Item = (K, u32);
+    type IntoIter = std::vec::IntoIter<(K, u32)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
@@ -267,4 +340,16 @@ pub fn fit_types(fit: &Fit) -> impl Iterator<Item = TypeId> + '_ {
         .chain(fit.implants.iter().copied())
         .chain(fit.boosters.iter().map(|b| b.type_id))
         .chain(fit.cargo.iter().map(|&(t, _)| t))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tallies_keep_first_seen_order_and_never_overflow() {
+        let mut tally: Tally<i32> = [(2, 1), (1, 5), (2, 3)].into_iter().collect();
+        tally.add(1, u32::MAX);
+        assert_eq!(tally.into_vec(), vec![(2, 4), (1, u32::MAX)]);
+    }
 }

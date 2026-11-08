@@ -51,14 +51,10 @@ impl Fit {
 
     /// Fold stacks of the same item into the first one, as pyfa keeps one stack per item.
     pub fn merge_cargo(&mut self) {
-        let mut merged: Vec<(TypeId, u32)> = Vec::with_capacity(self.cargo.len());
-        for (type_id, count) in std::mem::take(&mut self.cargo) {
-            match merged.iter_mut().find(|(t, _)| *t == type_id) {
-                Some((_, n)) => *n = n.saturating_add(count),
-                None => merged.push((type_id, count)),
-            }
-        }
-        self.cargo = merged;
+        self.cargo = std::mem::take(&mut self.cargo)
+            .into_iter()
+            .collect::<crate::port::Tally<TypeId>>()
+            .into_vec();
     }
 
     /// The item at a position and its loaded charge, if anything is there. A mutated module is

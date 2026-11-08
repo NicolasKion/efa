@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{Bay, Imported, charge_count, new_fit, place, sorted_subsystems};
+use super::{Bay, Imported, Tally, charge_count, new_fit, place, sorted_subsystems};
 use crate::{
     data::{Catalog, Kind, TypeId},
     fit::Fit,
@@ -34,21 +34,21 @@ pub fn export(fit: &Fit, catalog: &Catalog, options: &Options) -> String {
     for subsystem in sorted_subsystems(catalog, fit) {
         parts.push(format!("{subsystem};1"));
     }
-    let mut modules: Vec<(TypeId, u32)> = Vec::new();
-    let mut charges: Vec<(TypeId, u32)> = Vec::new();
+    let mut modules: Tally<TypeId> = Tally::default();
+    let mut charges: Tally<TypeId> = Tally::default();
     let fitted = fit
         .modules()
         .map(|m| (m.type_id, m.charge))
         .chain(fit.rigs.iter().flatten().map(|&r| (r, None)));
     for (type_id, charge) in fitted {
-        bump(&mut modules, type_id, 1);
+        modules.add(type_id, 1);
         if let Some(charge) = charge {
-            bump(&mut charges, charge, charge_count(catalog, type_id, charge));
+            charges.add(charge, charge_count(catalog, type_id, charge));
         }
     }
     for &(type_id, count) in &fit.cargo {
         if catalog.get(type_id).is_some_and(|t| t.kind == Kind::Charge) {
-            bump(&mut charges, type_id, count);
+            charges.add(type_id, count);
         }
     }
     let drones = fit.drones.iter().map(|d| (d.type_id, d.count));
@@ -66,14 +66,6 @@ pub fn export(fit: &Fit, catalog: &Catalog, options: &Options) -> String {
         format!("<url=fitting:{dna}>{}</url>", fit.name)
     } else {
         dna
-    }
-}
-
-/// Add to an amount kept in first-seen order, which the export keeps.
-fn bump(list: &mut Vec<(TypeId, u32)>, type_id: TypeId, count: u32) {
-    match list.iter_mut().find(|(t, _)| *t == type_id) {
-        Some((_, n)) => *n += count,
-        None => list.push((type_id, count)),
     }
 }
 

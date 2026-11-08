@@ -511,3 +511,59 @@ fn fighters_survive_every_format() {
     assert!(list.lines().any(|l| l == line), "{list}");
     assert!(list.lines().any(|l| l == "Ametat I x3"), "{list}");
 }
+
+#[test]
+fn huge_counts_do_not_run_away() {
+    let Some(catalog) = catalog() else { return };
+    let id = |name: &str| catalog.find(name).expect("the item exists").id;
+    let (rifter, dc, hob, ammo) = (
+        id("Rifter"),
+        id("Damage Control II"),
+        id("Hobgoblin II"),
+        id("EMP S"),
+    );
+
+    // A rack fills up to what any hull has, and the rest is dropped.
+    let dna = format!("{rifter}:{dc};4000000000:{hob};4000000000:{ammo};4000000000::");
+    let fit = one(port::import(&catalog, &dna, None).expect("the DNA imports"));
+    assert!(fit.low.len() <= 8, "{} low slots", fit.low.len());
+    assert!(fit.drones[0].count <= efa::fit::MAX_DRONES);
+    assert!(fit.cargo[0].1 <= efa::fit::MAX_STACK);
+
+    // Stacks of one item add up without overflowing.
+    let many = format!("{rifter}:{ammo};4000000000:{ammo};4000000000:{ammo};4000000000::");
+    let fit = one(port::import(&catalog, &many, None).expect("the DNA imports"));
+    assert_eq!(fit.cargo, vec![(ammo, efa::fit::MAX_STACK)]);
+    let exported = dna::export(&fit, &catalog, &dna::Options { formatting: false });
+    assert!(exported.contains(&format!("{ammo};{}", efa::fit::MAX_STACK)));
+
+    let xml = r#"<?xml version="1.0" ?><fittings count="1"><fitting name="x"><shipType value="Rifter"/>
+        <hardware qty="4000000000" slot="low slot 0" type="Damage Control II"/>
+        <hardware qty="4000000000" slot="drone bay" type="Hobgoblin II"/>
+        <hardware qty="4000000000" slot="cargo" type="EMP S"/>
+        </fitting></fittings>"#;
+    let fit = one(port::import(&catalog, xml, None).expect("the XML imports"));
+    assert!(fit.low.len() <= 8);
+    assert!(fit.drones[0].count <= efa::fit::MAX_DRONES);
+    assert!(fit.cargo[0].1 <= efa::fit::MAX_STACK);
+
+    let json = format!(
+        r#"{{"name": "x", "description": "", "ship_type_id": {rifter}, "items": [
+            {{"flag": 11, "quantity": 4000000000, "type_id": {dc}}},
+            {{"flag": 87, "quantity": 4000000000, "type_id": {hob}}},
+            {{"flag": 5, "quantity": 4000000000, "type_id": {ammo}}},
+            {{"flag": 5, "quantity": 4000000000, "type_id": {ammo}}}
+        ]}}"#
+    );
+    let fit = one(port::import(&catalog, &json, None).expect("the JSON imports"));
+    assert!(fit.low.len() <= 8);
+    assert!(fit.drones[0].count <= efa::fit::MAX_DRONES);
+    assert_eq!(fit.cargo, vec![(ammo, efa::fit::MAX_STACK)]);
+
+    let eft = "[Rifter, x]\n\nHobgoblin II x4000000000\n\nEMP S x4000000000\n";
+    let fit = one(port::import(&catalog, eft, None).expect("the EFT imports"));
+    assert!(fit.drones[0].count <= efa::fit::MAX_DRONES);
+    assert!(fit.cargo[0].1 <= efa::fit::MAX_STACK);
+    let list = multibuy::export(&fit, &catalog, &multibuy::Options::default());
+    assert!(list.contains("EMP S x"), "{list}");
+}

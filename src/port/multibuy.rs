@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{charge_count, sort_cargo};
+use super::{Tally, charge_count, sort_cargo};
 use crate::{
     data::{Catalog, TypeId},
     fit::Fit,
@@ -40,12 +40,8 @@ impl Default for Options {
 
 /// The items the list holds and how many of each, the ship left out, in fit order.
 pub fn amounts(fit: &Fit, catalog: &Catalog, options: &Options) -> Vec<(TypeId, u32)> {
-    let mut amounts: Vec<(TypeId, u32)> = Vec::new();
-    let mut add =
-        |type_id: TypeId, count: u32| match amounts.iter_mut().find(|(t, _)| *t == type_id) {
-            Some((_, n)) => *n += count,
-            None => amounts.push((type_id, count)),
-        };
+    let mut amounts: Tally<TypeId> = Tally::default();
+    let mut add = |type_id: TypeId, count: u32| amounts.add(type_id, count);
     for m in fit.modules() {
         add(m.type_id, 1);
         if let Some(charge) = m.charge.filter(|_| options.loaded_charges) {
@@ -79,7 +75,7 @@ pub fn amounts(fit: &Fit, catalog: &Catalog, options: &Options) -> Vec<(TypeId, 
             add(b.type_id, 1);
         }
     }
-    amounts
+    amounts.into_vec()
 }
 
 /// The list as it is, whatever `options` says about optimizing prices.

@@ -105,12 +105,21 @@ pub struct DroneStack {
     pub mutation: Option<Mutation>,
 }
 
+/// The most of one item a cargo stack holds, and the most any amount read from text counts
+/// for: far beyond what any hold carries, and small enough that sums of stacks stay sane.
+pub const MAX_STACK: u32 = 1_000_000;
+/// The most drones one stack holds, and fighters one squadron. The engine adds every drone as
+/// an item of its own, so a pasted "x4000000000" must not reach it.
+pub const MAX_DRONES: u32 = 1_000;
+
 impl DroneStack {
+    /// A stack of `count` drones, at most [`MAX_DRONES`], `active` of them launched.
     pub fn new(type_id: TypeId, count: u32, active: u32) -> Self {
+        let count = count.min(MAX_DRONES);
         Self {
             type_id,
             count,
-            active,
+            active: active.min(count),
             mutation: None,
         }
     }
@@ -494,8 +503,9 @@ impl Fit {
 
     /// Put `count` of an item into the cargo hold, on top of any stack already there.
     pub fn add_cargo(&mut self, type_id: TypeId, count: u32) {
+        let count = count.min(MAX_STACK);
         match self.cargo.iter_mut().find(|(t, _)| *t == type_id) {
-            Some((_, n)) => *n += count,
+            Some((_, n)) => *n = n.saturating_add(count).min(MAX_STACK),
             None => self.cargo.push((type_id, count)),
         }
     }
@@ -533,8 +543,8 @@ impl Fit {
         let launch = MAX_LAUNCHED.saturating_sub(self.launched()).min(count);
         match self.drones.iter_mut().find(|d| d.type_id == type_id) {
             Some(stack) => {
-                stack.count += count;
-                stack.active += launch;
+                stack.count = stack.count.saturating_add(count).min(MAX_DRONES);
+                stack.active = stack.active.saturating_add(launch).min(stack.count);
             }
             None => self.drones.push(DroneStack::new(type_id, count, launch)),
         }
@@ -736,7 +746,8 @@ impl Fit {
             return false;
         }
         let moved = src.count;
-        self.drones[to].count += moved;
+        let stack = &mut self.drones[to];
+        stack.count = stack.count.saturating_add(moved).min(MAX_DRONES);
         self.drones.remove(from);
         true
     }
@@ -1024,12 +1035,12 @@ pub fn trim_rack<T>(rack: &mut Vec<Option<T>>) {
     }
 }
 
-/// "Hobgoblin II x5" -> ("Hobgoblin II", Some(5))
+/// "Hobgoblin II x5" -> ("Hobgoblin II", Some(5)). Amounts above [`MAX_STACK`] count as that.
 pub fn split_count(line: &str) -> (&str, Option<u32>) {
     if let Some((name, count)) = line.rsplit_once(" x")
-        && let Ok(count) = count.trim().parse()
+        && let Ok(count) = count.trim().parse::<u32>()
     {
-        return (name.trim(), Some(count));
+        return (name.trim(), Some(count.min(MAX_STACK)));
     }
     (line, None)
 }

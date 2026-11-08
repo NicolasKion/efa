@@ -209,12 +209,8 @@ pub fn export(fit: &Fit, catalog: &Catalog) -> Result<String, String> {
 pub fn upload(fit: &Fit, catalog: &Catalog, options: UploadOptions) -> Result<String, String> {
     let ship = fit.ship.ok_or("the fit has no ship")?;
     let mut items = items(fit, catalog);
-    let mut extra: Vec<(TypeId, u32)> = Vec::new();
-    let mut add = |type_id: TypeId, count: u32| match extra.iter_mut().find(|(t, _)| *t == type_id)
-    {
-        Some((_, n)) => *n += count,
-        None => extra.push((type_id, count)),
-    };
+    let mut extra: super::Tally<TypeId> = super::Tally::default();
+    let mut add = |type_id: TypeId, count: u32| extra.add(type_id, count);
     if options.charges {
         for m in fit.modules() {
             if let Some(charge) = m.charge {

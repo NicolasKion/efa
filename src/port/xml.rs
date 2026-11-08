@@ -3,7 +3,7 @@
 
 use std::fmt::Write;
 
-use super::{Bay, Imported, charge_count, escape_xml, new_fit, place, subsystem_flag};
+use super::{Bay, Imported, Tally, charge_count, escape_xml, new_fit, place, subsystem_flag};
 use crate::{
     data::{Catalog, Kind, Slot},
     fit::{DroneStack, Fit, Mutation},
@@ -26,12 +26,8 @@ pub fn export(fits: &[&Fit], catalog: &Catalog) -> String {
             "\t\t<shipType value=\"{}\"/>",
             escape_xml(&catalog.name(ship))
         );
-        let mut charges: Vec<(String, u32)> = Vec::new();
-        let mut add_charge =
-            |name: String, count: u32| match charges.iter_mut().find(|(n, _)| *n == name) {
-                Some((_, n)) => *n += count,
-                None => charges.push((name, count)),
-            };
+        let mut charges: Tally<String> = Tally::default();
+        let mut add_charge = |name: String, count: u32| charges.add(name, count);
         let mut hardware = |type_id: i32, slot: String, mutation: Option<&Mutation>| {
             let _ = writeln!(
                 out,
@@ -178,8 +174,9 @@ fn hardware(fit: &mut Fit, catalog: &Catalog, tag: &Tag, unknown: &mut Vec<Strin
     };
     let count = tag
         .attr("qty")
-        .and_then(|q| q.trim().parse().ok())
-        .unwrap_or(1);
+        .and_then(|q| q.trim().parse::<u32>().ok())
+        .unwrap_or(1)
+        .min(crate::fit::MAX_STACK);
     let slot = tag.attr("slot").unwrap_or_default().to_lowercase();
     let bay = if slot == "cargo" {
         Bay::Cargo
