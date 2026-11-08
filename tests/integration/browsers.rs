@@ -21,8 +21,7 @@ fn catalog() -> Option<Catalog> {
 }
 
 fn names(catalog: &Catalog, query: &str) -> Vec<String> {
-    catalog
-        .search(query, 300)
+    efa::market::search(catalog, query, 300)
         .into_iter()
         .map(|t| catalog.name(t))
         .collect()
@@ -136,9 +135,7 @@ fn off_market_boosters_get_a_group_of_their_own() {
     let group = &catalog.market_groups[&efa::data::MARKET_SPECIAL_BOOSTERS];
     assert!(group.types.contains(&booster.id));
     assert!(
-        catalog
-            .search("air repairer booster", 50)
-            .contains(&booster.id),
+        efa::market::search(&catalog, "air repairer booster", 50).contains(&booster.id),
         "found by search"
     );
     // Accelerators stay out of it.
@@ -151,4 +148,54 @@ fn off_market_boosters_get_a_group_of_their_own() {
         .find("Limited Synth Blue Pill Booster")
         .expect("in the catalog");
     assert!(!group.types.contains(&hidden.id));
+}
+
+#[test]
+fn search_stops_at_the_limit_in_market_order() {
+    let Some(catalog) = catalog() else { return };
+    let all = efa::market::search(&catalog, "launcher", 1000);
+    assert!(all.len() > 20, "{}", all.len());
+    assert_eq!(efa::market::search(&catalog, "launcher", 20), all[..20]);
+    let mut sorted = all.clone();
+    efa::market::sort_items(&catalog.types, &mut sorted);
+    assert_eq!(sorted, all, "results come in market order");
+}
+
+#[test]
+fn the_charge_index_finds_what_a_scan_finds() {
+    let Some(catalog) = catalog() else { return };
+    for name in [
+        "Heavy Missile Launcher II",
+        "Heavy Neutron Blaster II",
+        "Warp Disruptor II",
+    ] {
+        let module = catalog.find(name).expect("in the catalog");
+        let fit = Fit {
+            high: vec![Some(Module::new(&catalog, module.id))],
+            ..Fit::new("test")
+        };
+        let mut scanned: Vec<i32> = catalog
+            .types
+            .values()
+            .filter(|c| c.published && c.market_group.is_some() && c.fits_in(module))
+            .map(|c| c.id)
+            .collect();
+        efa::market::sort_items(&catalog.types, &mut scanned);
+        assert_eq!(charges_for_fit(&catalog, &fit), scanned, "{name}");
+    }
+}
+
+#[test]
+fn tactical_destroyers_have_their_modes() {
+    let Some(catalog) = catalog() else { return };
+    let svipul = catalog.find("Svipul").expect("in the catalog").id;
+    let modes: Vec<String> = catalog
+        .modes_for(svipul)
+        .iter()
+        .map(|&m| catalog.name(m))
+        .collect();
+    assert_eq!(modes.len(), 3, "{modes:?}");
+    assert!(modes.iter().all(|m| m.starts_with("Svipul ")), "{modes:?}");
+    let rifter = catalog.find("Rifter").expect("in the catalog").id;
+    assert_eq!(catalog.modes_for(rifter), [] as [i32; 0]);
 }

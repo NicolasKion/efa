@@ -395,7 +395,10 @@ impl OverridesWindow {
         let query = self.search.read(cx).value().trim().to_owned();
         let searching = query.chars().filter(|c| !matches!(c, '*' | '?')).count() >= 3;
         let (heading, types): (&str, Vec<TypeId>) = if searching {
-            ("RESULTS", self.loaded.catalog.search(&query, SEARCH_LIMIT))
+            (
+                "RESULTS",
+                crate::market::search(&self.loaded.catalog, &query, SEARCH_LIMIT),
+            )
         } else {
             let mut types: Vec<TypeId> = overrides.values.keys().copied().collect();
             types.sort_by_key(|&t| self.loaded.catalog.name(t));

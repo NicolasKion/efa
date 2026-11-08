@@ -322,8 +322,7 @@ impl ItemTree {
                 self.group_rows(loaded, root, 0, cx, tree, add, &mut rows);
             }
         } else {
-            let hits = catalog
-                .search(&query, SEARCH_LIMIT)
+            let hits = crate::market::search(catalog, &query, SEARCH_LIMIT)
                 .into_iter()
                 .filter(|&t| catalog.get(t).is_some_and(self.accepts));
             for t in hits {

@@ -8,13 +8,11 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    market::jargon::{Jargon, Query},
-    ship_browser::Race,
-};
+use crate::ship_browser::Race;
 
 pub(crate) mod cache;
 pub mod muta;
+pub mod order;
 pub mod projection;
 mod publish;
 pub mod renames;
@@ -159,6 +157,10 @@ pub enum Kind {
 pub struct ItemType {
     pub id: TypeId,
     pub name: String,
+    /// The name in lower case, for filters that match a piece of it.
+    pub lower_name: String,
+    /// Where the item comes in market order; see [`order::rank`].
+    pub market_rank: u32,
     pub group_id: i32,
     pub category_id: i32,
     pub market_group: Option<i32>,
@@ -268,8 +270,9 @@ pub struct MarketGroup {
 pub struct Catalog {
     #[serde(serialize_with = "crate::sorted::map")]
     pub types: HashMap<TypeId, ItemType>,
+    /// Lowercase names to types; see [`Catalog::find`].
     #[serde(serialize_with = "crate::sorted::map")]
-    pub by_name: HashMap<String, TypeId>,
+    by_name: HashMap<String, TypeId>,
     pub market_groups: BTreeMap<i32, MarketGroup>,
     /// Top-level market groups that contain something fittable, in name order.
     pub market_roots: Vec<i32>,
@@ -284,9 +287,15 @@ pub struct Catalog {
     pub meta_group_names: HashMap<i32, String>,
     #[serde(serialize_with = "crate::sorted::map")]
     pub group_names: HashMap<i32, String>,
-    /// Cargo-only types the market search finds, the way pyfa limits its search.
-    #[serde(serialize_with = "crate::sorted::set")]
-    pub cargo_searchable: HashSet<TypeId>,
+    /// What the market search looks through, in market order: published types on the market
+    /// that can be fitted or used, and the cargo pyfa's search finds.
+    searchable: Vec<TypeId>,
+    /// Published charges on the market by group, in market order.
+    #[serde(serialize_with = "crate::sorted::map")]
+    charges_by_group: HashMap<i32, Vec<TypeId>>,
+    /// A tactical destroyer's modes, by ship.
+    #[serde(serialize_with = "crate::sorted::map")]
+    modes: HashMap<TypeId, Vec<TypeId>>,
     /// Skills each type needs and at what level, in the order the type lists them. Skills have
     /// their prerequisites here too.
     #[serde(serialize_with = "crate::sorted::map")]
@@ -304,7 +313,7 @@ pub struct Catalog {
     /// Published types that are the same item under another name, pyfa's item replacements
     /// (`db_update.py` `processReplacements`): same group, skills, effects and attributes.
     #[serde(serialize_with = "crate::sorted::map")]
-    pub replacements: HashMap<TypeId, Vec<TypeId>>,
+    pub(crate) replacements: HashMap<TypeId, Vec<TypeId>>,
     /// The Alpha clone grades, by name.
     pub alpha_clones: Vec<AlphaClone>,
 }
@@ -320,7 +329,7 @@ pub struct AlphaClone {
 
 /// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
 /// instead of loaded.
-const CACHE_FORMAT: u32 = 12;
+const CACHE_FORMAT: u32 = 13;
 const CACHE_FILE: &str = "catalog.bin";
 
 impl Catalog {
@@ -548,6 +557,8 @@ impl Catalog {
                 id,
                 ItemType {
                     id,
+                    lower_name: t.name.en.to_lowercase(),
+                    market_rank: 0,
                     name: t.name.en,
                     group_id: t.group_id,
                     category_id,
@@ -721,6 +732,7 @@ impl Catalog {
             })
             .map(|t| t.id)
             .collect();
+        order::rank(&mut types);
         let cargo_searchable: HashSet<TypeId> = types
             .values()
             .filter(|t| t.published && t.group_id == GROUP_ICE_PRODUCT)
@@ -739,7 +751,7 @@ impl Catalog {
             }
         }
         for group in market_groups.values_mut() {
-            crate::market::sort_items(&types, &mut group.types);
+            group.types.sort_by_key(|id| types[id].market_rank);
         }
         prune_and_link(&mut market_groups);
         let mut market_roots: Vec<i32> = market_groups
@@ -774,6 +786,27 @@ impl Catalog {
         let group_names: HashMap<i32, String> =
             groups.into_iter().map(|(id, g)| (id, g.name.en)).collect();
         let ship_groups = ship_groups(&types, &group_names);
+        let mut searchable: Vec<TypeId> = types
+            .values()
+            .filter(|t| {
+                t.published
+                    && t.market_group.is_some()
+                    && !matches!(t.kind, Kind::Skill | Kind::Mode | Kind::Other)
+                    && (t.kind != Kind::Cargo || cargo_searchable.contains(&t.id))
+            })
+            .map(|t| t.id)
+            .collect();
+        searchable.sort_by_key(|id| types[id].market_rank);
+        let mut charges_by_group: HashMap<i32, Vec<TypeId>> = HashMap::new();
+        for t in types.values() {
+            if t.kind == Kind::Charge && t.published && t.market_group.is_some() {
+                charges_by_group.entry(t.group_id).or_default().push(t.id);
+            }
+        }
+        for charges in charges_by_group.values_mut() {
+            charges.sort_by_key(|id| types[id].market_rank);
+        }
+        let modes = modes(&types);
 
         Ok(Self {
             types,
@@ -785,7 +818,9 @@ impl Catalog {
             variations,
             meta_group_names,
             group_names,
-            cargo_searchable,
+            searchable,
+            charges_by_group,
+            modes,
             required_skills,
             required_for,
             projection,
@@ -812,24 +847,19 @@ impl Catalog {
         self.replacements.get(&id).map_or(&[], Vec::as_slice)
     }
 
-    /// A tactical destroyer's modes, found the way pyfa finds them: mode items named after the
-    /// ship. Empty for every other ship.
-    pub fn modes_for(&self, ship: TypeId) -> Vec<TypeId> {
-        let Some(ship) = self.get(ship) else {
-            return Vec::new();
-        };
-        if ship.group_id != GROUP_TACTICAL_DESTROYER && ship.name != "Anhinga" {
-            return Vec::new();
-        }
-        let prefix = format!("{} ", ship.name.to_lowercase());
-        let mut modes: Vec<TypeId> = self
-            .types
-            .values()
-            .filter(|t| t.kind == Kind::Mode && t.name.to_lowercase().starts_with(&prefix))
-            .map(|t| t.id)
-            .collect();
-        modes.sort_unstable();
-        modes
+    /// A tactical destroyer's modes, by type ID. Empty for every other ship.
+    pub fn modes_for(&self, ship: TypeId) -> &[TypeId] {
+        self.modes.get(&ship).map_or(&[], Vec::as_slice)
+    }
+
+    /// Published charges of a group that are on the market, in market order.
+    pub fn charges_in_group(&self, group: i32) -> &[TypeId] {
+        self.charges_by_group.get(&group).map_or(&[], Vec::as_slice)
+    }
+
+    /// What the market search looks through, in market order.
+    pub fn searchable(&self) -> &[TypeId] {
+        &self.searchable
     }
 
     /// The market group chain from the root down to the type's own group.
@@ -869,30 +899,6 @@ impl Catalog {
         self.alpha_clones.iter().find(|c| c.id == id)
     }
 
-    /// Published, fittable types matching a market search the way pyfa runs it: every word
-    /// found in the name, with pyfa's jargon and wildcards, in pyfa's order. Nothing for a query
-    /// too short to search for.
-    pub fn search(&self, query: &str, limit: usize) -> Vec<TypeId> {
-        let Some(query) = Query::parse(query, Jargon::global()) else {
-            return Vec::new();
-        };
-        let mut hits: Vec<TypeId> = self
-            .types
-            .values()
-            .filter(|t| {
-                t.published
-                    && t.market_group.is_some()
-                    && !matches!(t.kind, Kind::Skill | Kind::Mode | Kind::Other)
-                    && (t.kind != Kind::Cargo || self.cargo_searchable.contains(&t.id))
-            })
-            .filter(|t| query.matches(&t.name))
-            .map(|t| t.id)
-            .collect();
-        crate::market::sort_items(&self.types, &mut hits);
-        hits.truncate(limit);
-        hits
-    }
-
     /// A ship group's published ships, by race and name.
     pub fn ships_in(&self, group: i32) -> &[TypeId] {
         self.ship_groups
@@ -900,6 +906,26 @@ impl Catalog {
             .find(|(g, _)| *g == group)
             .map_or(&[], |(_, ships)| ships.as_slice())
     }
+}
+
+/// Each tactical destroyer's modes, found the way pyfa finds them: mode items named after the
+/// ship.
+fn modes(types: &HashMap<TypeId, ItemType>) -> HashMap<TypeId, Vec<TypeId>> {
+    let modes: Vec<&ItemType> = types.values().filter(|t| t.kind == Kind::Mode).collect();
+    types
+        .values()
+        .filter(|s| s.group_id == GROUP_TACTICAL_DESTROYER || s.name == "Anhinga")
+        .filter_map(|ship| {
+            let prefix = format!("{} ", ship.lower_name);
+            let mut of_ship: Vec<TypeId> = modes
+                .iter()
+                .filter(|m| m.lower_name.starts_with(&prefix))
+                .map(|m| m.id)
+                .collect();
+            of_ship.sort_unstable();
+            (!of_ship.is_empty()).then_some((ship.id, of_ship))
+        })
+        .collect()
 }
 
 /// Published ships by group, as the fittings browser lists them.

@@ -1055,7 +1055,7 @@ pub(super) fn ship_entries(
     let structure = loaded.catalog.get(ship).is_some_and(ItemType::is_structure);
     let mut menu = menu;
 
-    let modes = loaded.catalog.modes_for(ship);
+    let modes = loaded.catalog.modes_for(ship).to_vec();
     if !modes.is_empty() {
         let (this, loaded, prefix) = (this.clone(), Rc::clone(&loaded), format!("{ship_name} "));
         menu = menu.submenu_with_element(

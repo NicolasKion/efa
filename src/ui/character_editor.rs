@@ -820,8 +820,7 @@ impl CharacterEditor {
         }
         let catalog = &self.loaded.catalog;
         let query = self.implant_search.read(cx).value().to_string();
-        let hits: Vec<TypeId> = catalog
-            .search(&query, SEARCH_LIMIT)
+        let hits: Vec<TypeId> = crate::market::search(catalog, &query, SEARCH_LIMIT)
             .into_iter()
             .filter(|&t| catalog.get(t).is_some_and(|t| t.kind == Kind::Implant))
             .collect();

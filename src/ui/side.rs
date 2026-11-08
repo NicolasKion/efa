@@ -201,7 +201,11 @@ impl Efa {
         let catalog = &loaded.catalog;
         let sections = Rc::new(match &key {
             ResultsKey::Search(text) => {
-                vec![Section::untitled(catalog.search(text, SEARCH_LIMIT))]
+                vec![Section::untitled(crate::market::search(
+                    catalog,
+                    text,
+                    SEARCH_LIMIT,
+                ))]
             }
             ResultsKey::Listing(Listing::Group(group)) => {
                 vec![Section::untitled(group_items(catalog, *group))]

@@ -72,8 +72,7 @@ fn cargo_only_items_are_listed_like_pyfa() {
     assert!(!roots.contains(&"Trade Goods"), "{roots:?}");
 
     let found = |query: &str| {
-        catalog
-            .search(query, 50)
+        efa::market::search(&catalog, query, 50)
             .into_iter()
             .map(|t| catalog.name(t))
             .collect::<Vec<_>>()

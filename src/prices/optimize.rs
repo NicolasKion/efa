@@ -168,16 +168,15 @@ mod tests {
 
     fn catalog() -> Catalog {
         // 1, 2 and 3 are the same item; so are 10 and 11.
-        Catalog {
-            replacements: HashMap::from([
-                (1, vec![2, 3]),
-                (2, vec![1, 3]),
-                (3, vec![1, 2]),
-                (10, vec![11]),
-                (11, vec![10]),
-            ]),
-            ..Catalog::default()
-        }
+        let mut catalog = Catalog::default();
+        catalog.replacements = HashMap::from([
+            (1, vec![2, 3]),
+            (2, vec![1, 3]),
+            (3, vec![1, 2]),
+            (10, vec![11]),
+            (11, vec![10]),
+        ]);
+        catalog
     }
 
     /// 11 has no price.

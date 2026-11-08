@@ -9,6 +9,7 @@ use std::{
     hash::BuildHasher,
 };
 
+pub use crate::data::order::MetaCategory;
 use crate::{
     data::{Catalog, Hardpoint, ItemType, Kind, Slot, TypeId, category},
     fit::Fit,
@@ -17,64 +18,6 @@ use jargon::{Jargon, Query};
 
 /// Items pyfa remembers as recently used.
 pub const RECENT_LIMIT: usize = 20;
-
-/// The meta group buttons over the market results. Each covers one or more of the game's meta
-/// groups; pyfa lumps Tech I, II and III into one "Normal" button, efa splits them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MetaCategory {
-    /// Tech I, including meta and compact variants, and anything without a button of its own.
-    Tech1,
-    /// Tech II, including structure Tech II.
-    Tech2,
-    Tech3,
-    /// Faction, storyline and structure faction: meta groups 4, 3 and 52.
-    Faction,
-    /// Deadspace and abyssal.
-    Deadspace,
-    Officer,
-}
-
-impl MetaCategory {
-    pub const ALL: [Self; 6] = [
-        Self::Tech1,
-        Self::Tech2,
-        Self::Tech3,
-        Self::Faction,
-        Self::Deadspace,
-        Self::Officer,
-    ];
-
-    /// Which button a meta group falls under.
-    pub fn of(meta_group: Option<i32>) -> Self {
-        match meta_group {
-            Some(2 | 53) => Self::Tech2,
-            Some(14) => Self::Tech3,
-            Some(3 | 4 | 52) => Self::Faction,
-            Some(6 | 15) => Self::Deadspace,
-            Some(5) => Self::Officer,
-            _ => Self::Tech1,
-        }
-    }
-
-    pub fn of_item(t: &ItemType) -> Self {
-        Self::of(t.meta_group)
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Tech1 => "T1",
-            Self::Tech2 => "T2",
-            Self::Tech3 => "T3",
-            Self::Faction => "Faction",
-            Self::Deadspace => "Deadspace",
-            Self::Officer => "Officer",
-        }
-    }
-
-    fn index(self) -> usize {
-        self as usize
-    }
-}
 
 /// Which meta buttons are pressed. None pressed shows everything, which is where it starts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -143,14 +86,19 @@ pub fn charges_for_fit(catalog: &Catalog, fit: &Fit) -> Vec<TypeId> {
     if holders.is_empty() {
         return Vec::new();
     }
-    let mut charges: Vec<TypeId> = catalog
-        .types
-        .values()
-        .filter(|c| c.kind == Kind::Charge && c.published && c.market_group.is_some())
-        .filter(|c| holders.iter().any(|m| c.fits_in(m)))
-        .map(|c| c.id)
+    let mut charges: Vec<TypeId> = holders
+        .iter()
+        .flat_map(|m| &m.charge_groups)
+        .flat_map(|&group| catalog.charges_in_group(group))
+        .copied()
+        .filter(|&c| {
+            catalog
+                .get(c)
+                .is_some_and(|c| holders.iter().any(|m| c.fits_in(m)))
+        })
         .collect();
     sort_items(&catalog.types, &mut charges);
+    charges.dedup();
     charges
 }
 
@@ -223,9 +171,9 @@ impl TextFilter {
         })
     }
 
-    pub fn matches(&self, name: &str) -> bool {
-        name.to_lowercase().contains(&self.lower)
-            || self.query.as_ref().is_some_and(|q| q.matches(name))
+    pub fn matches(&self, t: &ItemType) -> bool {
+        t.lower_name.contains(&self.lower)
+            || self.query.as_ref().is_some_and(|q| q.matches(&t.name))
     }
 }
 
@@ -328,7 +276,7 @@ pub fn filter_results(
                 .items
                 .iter()
                 .filter_map(|&id| catalog.get(id))
-                .filter(|t| text.is_none_or(|f| f.matches(&t.name)))
+                .filter(|t| text.is_none_or(|f| f.matches(t)))
                 .filter(|t| room.is_none_or(|r| r.can_use(t)))
                 .collect();
             (s.title.as_ref(), items)
@@ -360,45 +308,26 @@ pub fn filter_results(
     filtered
 }
 
-/// The category name pyfa sorts by, the game's own: boosters are implants, for one.
-fn category_name(t: &ItemType) -> &'static str {
-    match t.category_id {
-        category::SHIP => "Ship",
-        category::MODULE => "Module",
-        category::CHARGE => "Charge",
-        category::DRONE => "Drone",
-        category::FIGHTER => "Fighter",
-        category::IMPLANT => "Implant",
-        category::SUBSYSTEM => "Subsystem",
-        category::COMMODITY => "Commodity",
-        category::MATERIAL => "Material",
-        category::DEPLOYABLE => "Deployable",
-        category::CELESTIAL => "Celestial",
-        _ => "",
-    }
+/// Sort items the way pyfa lists them (`Market.itemSort`), by the place the catalog gave each
+/// (see [`crate::data::order::rank`]). Unknown types come first.
+pub fn sort_items<S: BuildHasher>(types: &HashMap<TypeId, ItemType, S>, items: &mut [TypeId]) {
+    items.sort_by_key(|id| types.get(id).map(|t| t.market_rank));
 }
 
-/// Sort items the way pyfa lists them (`Market.itemSort`): by category, market group, the item
-/// they are a variation of, meta button, meta level and name. Variations end up next to
-/// their T1 item.
-pub fn sort_items<S: BuildHasher>(types: &HashMap<TypeId, ItemType, S>, items: &mut [TypeId]) {
-    items.sort_by_cached_key(|id| {
-        let Some(t) = types.get(id) else {
-            return (String::new(), -1, String::new(), 0, 0, String::new());
-        };
-        let parent = t
-            .variation_parent
-            .and_then(|p| types.get(&p))
-            .map_or_else(|| t.name.clone(), |p| p.name.clone());
-        (
-            category_name(t).to_owned(),
-            t.market_group.unwrap_or(-1),
-            parent,
-            MetaCategory::of_item(t).index(),
-            t.meta_level,
-            t.name.clone(),
-        )
-    });
+/// Published, fittable types matching a market search the way pyfa runs it: every word found
+/// in the name, with pyfa's jargon and wildcards, in pyfa's order, at most `limit` of them.
+/// Nothing for a query too short to search for.
+pub fn search(catalog: &Catalog, query: &str, limit: usize) -> Vec<TypeId> {
+    let Some(query) = Query::parse(query, Jargon::global()) else {
+        return Vec::new();
+    };
+    catalog
+        .searchable()
+        .iter()
+        .copied()
+        .filter(|&id| catalog.get(id).is_some_and(|t| query.matches(&t.name)))
+        .take(limit)
+        .collect()
 }
 
 #[cfg(test)]
@@ -452,6 +381,8 @@ mod tests {
         ItemType {
             id,
             name: name.to_owned(),
+            lower_name: name.to_lowercase(),
+            market_rank: 0,
             group_id: 0,
             category_id: match kind {
                 Kind::Module(_) => category::MODULE,
@@ -499,6 +430,7 @@ mod tests {
         for t in items {
             catalog.types.insert(t.id, t);
         }
+        crate::data::order::rank(&mut catalog.types);
         catalog
     }
 
@@ -536,14 +468,15 @@ mod tests {
     fn text_filter_takes_substrings_and_jargon() {
         let jargon = Jargon::from_yaml("hml: [Heavy Missile Launcher]").unwrap();
         assert!(TextFilter::new("   ", &jargon).is_none());
+        let named = |name: &str| item(1, name, Kind::Other);
         let short = TextFilter::new("ii", &jargon).unwrap();
-        assert!(short.matches("Heavy Missile Launcher II"));
-        assert!(!short.matches("Heavy Missile Launcher I"));
+        assert!(short.matches(&named("Heavy Missile Launcher II")));
+        assert!(!short.matches(&named("Heavy Missile Launcher I")));
         let abbreviated = TextFilter::new("hml", &jargon).unwrap();
-        assert!(abbreviated.matches("Heavy Missile Launcher II"));
-        assert!(!abbreviated.matches("Rapid Light Missile Launcher II"));
+        assert!(abbreviated.matches(&named("Heavy Missile Launcher II")));
+        assert!(!abbreviated.matches(&named("Rapid Light Missile Launcher II")));
         let words = TextFilter::new("launcher heavy", &jargon).unwrap();
-        assert!(words.matches("Heavy Missile Launcher II"));
+        assert!(words.matches(&named("Heavy Missile Launcher II")));
     }
 
     fn room(ship: &ItemType) -> ShipRoom<'_> {
