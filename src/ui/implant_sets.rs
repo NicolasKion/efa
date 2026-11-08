@@ -27,8 +27,9 @@ use super::{
         Sidebar, icon_button, name_problem, next_after_delete,
     },
     fitting::{DragPreview, DragSource, Dragged},
-    item_data, item_stats, side,
+    item_data, item_stats,
     stats::format,
+    tooltips,
     widgets::{DropHighlight, caption, count, empty_state, icon_box, redraw_on_change, tree_row},
 };
 use crate::{
@@ -948,7 +949,7 @@ impl ImplantSetEditor {
                         e.remove_implants(&[id], cx);
                     })),
             )
-            .tooltip(move |window, cx| side::item_tooltip(&tip, id, price, window, cx))
+            .tooltip(move |window, cx| tooltips::item_tooltip(&tip, id, price, window, cx))
             .on_click(cx.listener(move |e, _, window, cx| {
                 e.slot = Some(slot);
                 window.focus(&e.focus, cx);
@@ -1238,7 +1239,7 @@ impl ImplantSetEditor {
                     .text_color(primary),
             )
         })
-        .tooltip(move |window, cx| side::item_tooltip(&tip, id, price, window, cx))
+        .tooltip(move |window, cx| tooltips::item_tooltip(&tip, id, price, window, cx))
         .on_click(cx.listener(move |e, event: &ClickEvent, _, cx| {
             if event.click_count() >= 2 {
                 e.add_implants(&[id], cx);
@@ -1291,7 +1292,7 @@ impl ImplantSetEditor {
                 .text_color(muted)
                 .child(count(implants.len(), "piece", "pieces")),
         )
-        .tooltip(move |window, cx| side::text_tooltip(lines.clone(), window, cx))
+        .tooltip(move |window, cx| tooltips::text_tooltip(lines.clone(), window, cx))
         .on_click(cx.listener(move |e, event: &ClickEvent, _, cx| {
             if event.click_count() >= 2 {
                 e.add_implants(&add, cx);

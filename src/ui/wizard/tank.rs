@@ -33,8 +33,9 @@ use crate::{
     prices::Prices,
     theme::Palette,
     ui::{
-        columns, side,
+        columns,
         stats::{self, SectionKind},
+        tooltips,
         widgets::{self, Segment, TipExt, count, empty_state, segmented},
     },
     wizard::{
@@ -1200,7 +1201,7 @@ impl TankSection {
                                 .child(format!("{n}")),
                         )
                     })
-                    .tooltip(move |window, cx| side::item_tooltip(&tip, id, price, window, cx))
+                    .tooltip(move |window, cx| tooltips::item_tooltip(&tip, id, price, window, cx))
             }))
     }
 
@@ -1472,7 +1473,7 @@ impl TankSection {
                     _ => tag.to_owned(),
                 }),
         )
-        .tooltip(move |window, cx| side::item_tooltip(&item_tip, id, price, window, cx))
+        .tooltip(move |window, cx| tooltips::item_tooltip(&item_tip, id, price, window, cx))
         .into_any_element()
     }
 

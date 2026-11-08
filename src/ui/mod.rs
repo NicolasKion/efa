@@ -32,6 +32,7 @@ mod side;
 mod splash;
 mod stats;
 mod status_bar;
+mod tooltips;
 mod updates;
 mod validation;
 mod widgets;
