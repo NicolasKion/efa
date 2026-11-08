@@ -125,8 +125,9 @@ fn ships_by_group_with_races_and_omega() {
 #[test]
 fn off_market_boosters_get_a_group_of_their_own() {
     let Some(catalog) = catalog() else { return };
+    // AIR boosters are unpublished in the SDE and sold nowhere; pyfa publishes them.
     let booster = catalog
-        .find("Limited Synth Blue Pill Booster")
+        .find("AIR Repairer Booster III")
         .expect("in the catalog");
     assert_eq!(
         booster.market_group,
@@ -135,7 +136,7 @@ fn off_market_boosters_get_a_group_of_their_own() {
     let group = &catalog.market_groups[&efa::data::MARKET_SPECIAL_BOOSTERS];
     assert!(group.types.contains(&booster.id));
     assert!(
-        catalog.search("synth blue pill", 50).contains(&booster.id),
+        catalog.search("air repairer booster", 50).contains(&booster.id),
         "found by search"
     );
     // Accelerators stay out of it.
@@ -143,4 +144,9 @@ fn off_market_boosters_get_a_group_of_their_own() {
         .find("Standard Cerebral Accelerator")
         .expect("in the catalog");
     assert!(!group.types.contains(&accelerator.id));
+    // Boosters pyfa hides, or that expired, stay out too.
+    let hidden = catalog
+        .find("Limited Synth Blue Pill Booster")
+        .expect("in the catalog");
+    assert!(!group.types.contains(&hidden.id));
 }

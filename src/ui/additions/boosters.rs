@@ -127,24 +127,6 @@ fn side_effects(
     }
 }
 
-/// Whether pyfa's database has this booster: its data update hides a few published ones and
-/// publishes the AIR boosters (`db_update.py`).
-fn listed_by_pyfa(t: &ItemType) -> bool {
-    let name = t.name.as_str();
-    let after = |prefix: &str, rest: &str| {
-        name.strip_prefix(prefix)
-            .is_some_and(|tail| tail.contains(rest))
-    };
-    if after("AIR ", "Booster") {
-        return true;
-    }
-    let hidden = name.starts_with("Limited Synth ")
-        || name.starts_with("Expired ")
-        || after("Grand Prix ", "Booster")
-        || after("Mining Blitz ", " Booster Dose ");
-    t.published && !hidden
-}
-
 /// A booster's variations the way pyfa finds them. The data has no variation parents for
 /// boosters, so pyfa takes every booster of the same slot sold in the same market group (or in
 /// none), and ranks them by the chance of their first side effect, or by name when there are
@@ -164,7 +146,7 @@ fn booster_variations(catalog: &Catalog, type_id: TypeId) -> Vec<TypeId> {
                 || (t.kind == Kind::Booster
                     && t.booster_slot == Some(slot)
                     && (t.market_group.is_none() || t.market_group == base.market_group)
-                    && listed_by_pyfa(t))
+                    && t.published)
         })
         .collect();
     items.sort_by(|a, b| a.name.cmp(&b.name));
@@ -535,9 +517,11 @@ mod tests {
     #[test]
     fn pyfa_hides_some_boosters() {
         let Some(catalog) = catalog() else { return };
-        let listed = |name: &str| listed_by_pyfa(catalog.find(name).expect("booster exists"));
+        let listed = |name: &str| catalog.find(name).expect("booster exists").published;
         assert!(listed("Strong Blue Pill Booster"));
         assert!(!listed("Limited Synth Blue Pill Booster"));
+        // A Serenity season booster that expired years ago.
+        assert!(!listed("Serenity YC122.9 Season Booster - Max Velocity"));
     }
 
     #[test]

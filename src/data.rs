@@ -17,6 +17,7 @@ use crate::{
 
 pub mod muta;
 pub mod projection;
+mod publish;
 
 pub type TypeId = i32;
 
@@ -324,7 +325,7 @@ pub struct AlphaClone {
 
 /// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
 /// instead of loaded.
-const CACHE_FORMAT: u32 = 9;
+const CACHE_FORMAT: u32 = 10;
 const CACHE_FILE: &str = "catalog.bin";
 
 /// The cache on disk: the key it was built for, then the catalog.
@@ -420,11 +421,26 @@ impl Catalog {
         let mut types = HashMap::with_capacity(sde_types.len());
         let mut skills = Vec::new();
         let mut required_skills = HashMap::new();
-        for (id, t) in sde_types {
+        let today = publish::today();
+        for (id, mut t) in sde_types {
             let Ok(id) = id.parse::<TypeId>() else {
                 continue;
             };
             let category_id = group_category.get(&t.group_id).copied().unwrap_or(0);
+            let last_injection = dogma.get(&id.to_string()).and_then(|d| {
+                d.attributes
+                    .iter()
+                    .find(|a| a.attribute_id == publish::LAST_INJECTION)
+                    .map(|a| a.value)
+            });
+            t.published = publish::published(
+                id,
+                &t.name.en,
+                t.group_id,
+                t.published,
+                last_injection,
+                today,
+            );
             projection.consider(id, &t, category_id, dogma.get(&id.to_string()));
             // Cargo can hold anything, but these are what pyfa's market offers or EFT cargo lines
             // usually name (fuel blocks, ice products); loading every category would mostly add
