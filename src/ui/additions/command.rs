@@ -19,6 +19,7 @@ use super::{
     MENU_MAX_H, ROW_HEIGHT,
     linked::{Link, add_fit_entries},
 };
+use crate::ui::widgets::DropHighlight;
 use crate::{
     data::Catalog,
     fit::Fit,
@@ -139,7 +140,7 @@ impl Efa {
             .track_focus(&self.additions_focus)
             .on_key_down(cx.listener(|g, event: &KeyDownEvent, _, cx| g.command_key(event, cx)))
             .children(content)
-            .drag_over::<super::FitDrag>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+            .drop_highlight::<super::FitDrag>()
             .on_drop(cx.listener(|g, drag: &super::FitDrag, _, cx| {
                 g.link(Link::Command, &[drag.index], cx);
             }))

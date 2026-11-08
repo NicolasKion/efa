@@ -16,6 +16,7 @@ use gpui_kit::{
 };
 
 use super::{PRICE_W, ROW_HEIGHT, addition_menu, misc_entries, price_text};
+use crate::ui::widgets::{DropHighlight, empty_line};
 use crate::{
     data::{CONTAINER_GROUPS, Catalog, Kind, Slot, TypeId},
     fit::cargo::Transfer,
@@ -197,11 +198,8 @@ impl Efa {
         let mut rows: Vec<AnyElement> = Vec::with_capacity(order.len().max(1));
         if order.is_empty() {
             rows.push(
-                div()
+                empty_line("Drag items here, or right-click them in the market.", cx)
                     .id("cargo-empty")
-                    .p_2()
-                    .text_color(theme.muted_foreground)
-                    .child("Drag items here, or right-click them in the market.")
                     .context_menu(space_menu(cx.weak_entity(), Rc::clone(loaded)))
                     .into_any_element(),
             );
@@ -219,13 +217,7 @@ impl Efa {
             .on_key_down(cx.listener(|g, event: &KeyDownEvent, _, cx| {
                 g.cargo_key(event, cx);
             }))
-            .drag_over::<Dragged>(|style, dragged, _, cx| {
-                if matches!(dragged.source, DragSource::Cargo) {
-                    style
-                } else {
-                    style.bg(cx.theme().drop_target)
-                }
-            })
+            .drop_highlight_if::<Dragged>(|d| !matches!(d.source, DragSource::Cargo))
             .on_drop(cx.listener(|g, dragged: &Dragged, window, cx| {
                 g.drop_on_cargo(dragged, None, window.modifiers(), cx);
             }))
@@ -273,13 +265,7 @@ impl Efa {
             .when(n % 2 == 1, |r| r.bg(theme.table_even))
             .when(selected, |r| r.bg(theme.table_active))
             .hover(|s| s.bg(theme.table_hover))
-            .drag_over::<Dragged>(|style, dragged, _, cx| {
-                if matches!(dragged.source, DragSource::Row(_)) {
-                    style.bg(cx.theme().drop_target)
-                } else {
-                    style
-                }
-            })
+            .drop_highlight_if::<Dragged>(|d| matches!(d.source, DragSource::Row(_)))
             .on_drop(cx.listener(move |g, dragged: &Dragged, window, cx| {
                 cx.stop_propagation();
                 g.drop_on_cargo(dragged, Some(type_id), window.modifiers(), cx);

@@ -16,7 +16,6 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     h_flex,
     menu::{ContextMenuExt, DropdownMenu, PopupMenu},
-    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
@@ -25,6 +24,7 @@ use gpui_kit::{
     div, prelude::FluentBuilder, px,
 };
 
+use super::widgets::TipExt;
 use super::{
     AdditionsTab, Efa, Loaded,
     widgets::{icon_box, section_title},
@@ -223,9 +223,10 @@ fn tip(
     text: impl Into<SharedString>,
 ) -> Stateful<Div> {
     let text: SharedString = text.into();
-    div().id(id).child(child).when(!text.is_empty(), |d| {
-        d.tooltip(move |window, cx| Tooltip::new(text.clone()).build(window, cx))
-    })
+    div()
+        .id(id)
+        .child(child)
+        .when(!text.is_empty(), |d| d.tip(text))
 }
 
 fn muted(text: impl Into<SharedString>, cx: &App) -> Div {

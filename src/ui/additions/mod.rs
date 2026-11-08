@@ -16,22 +16,17 @@ pub(super) use linked::{FitDrag, Link};
 
 use std::rc::Rc;
 
-use gpui_kit::component::{
-    ActiveTheme, IconName, WindowExt,
-    button::{Button, ButtonVariants},
-    h_flex,
-    input::{Input, InputState},
-    menu::PopupMenu,
-    v_flex,
-};
+use gpui_kit::component::{ActiveTheme, IconName, h_flex, menu::PopupMenu, v_flex};
 use gpui_kit::{
-    App, AppContext, ClickEvent, ClipboardItem, Context, InteractiveElement, IntoElement,
-    KeyDownEvent, Modifiers, ParentElement, StatefulInteractiveElement, Styled, WeakEntity, Window,
-    div, prelude::FluentBuilder, px,
+    App, ClickEvent, ClipboardItem, Context, InteractiveElement, IntoElement, KeyDownEvent,
+    Modifiers, ParentElement, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
+    prelude::FluentBuilder, px,
 };
 
+use super::widgets::TipExt;
 use super::{
     Action, AddKind, AdditionsTab, Efa, Loaded,
+    dialogs::{Prompt, prompt_value},
     item_stats::{StatsOf, stats_entry},
     selection::{ListKey, list_key},
     stats::format,
@@ -262,10 +257,7 @@ impl Efa {
                             .size(px(13.))
                             .text_color(theme.danger),
                         )
-                        .tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new("The cargo hold is overfull")
-                                .build(window, cx)
-                        })
+                        .tip("The cargo hold is overfull")
                     })
                     .when(on, |t| {
                         // Tabs switch on press, as desktop tab bars do.
@@ -389,40 +381,10 @@ impl Efa {
         cx: &mut Context<Self>,
         action: impl Fn(T) -> Action + 'static,
     ) {
-        let input = cx.new(|cx| InputState::new(window, cx).default_value(initial));
         let this = cx.weak_entity();
-        let action = Rc::new(action);
-        window.open_dialog(cx, move |dialog, _, _| {
-            let (input, this, action) = (input.clone(), this.clone(), Rc::clone(&action));
-            // The OK button and Enter both submit; it closes the dialog itself when done.
-            let submit: crate::ui::widgets::Submit = {
-                let (input, this, action) = (input.clone(), this.clone(), action.clone());
-                Rc::new(move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                    let Ok(amount) = input.read(cx).value().trim().parse::<T>() else {
-                        return;
-                    };
-                    Self::app_update(&this, cx, |g, cx| g.apply(action(amount), cx));
-                    window.close_dialog(cx);
-                })
-            };
-            dialog
-                .on_ok({
-                    let submit = Rc::clone(&submit);
-                    move |e, w, cx| {
-                        submit(e, w, cx);
-                        false
-                    }
-                })
-                .title(title)
-                .w(px(320.))
-                .child(v_flex().gap_3().child(Input::new(&input)).child(
-                    h_flex().justify_end().child(
-                        Button::new("amount-ok").primary().label("OK").on_click({
-                            let submit = Rc::clone(&submit);
-                            move |e: &ClickEvent, w: &mut Window, cx: &mut App| submit(e, w, cx)
-                        }),
-                    ),
-                ))
+        let prompt = Prompt::new(title).default(initial).width(320.);
+        prompt_value(window, cx, prompt, move |value, _, cx| {
+            Self::app_update(&this, cx, |g, cx| g.apply(action(value), cx));
         });
     }
 }

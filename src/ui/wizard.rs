@@ -12,7 +12,7 @@ use std::{rc::Rc, time::Duration};
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
     ActiveTheme, Icon as UiIcon, Sizable,
-    button::{Button, ButtonCustomVariant, ButtonGroup, ButtonVariants},
+    button::{Button, ButtonVariants},
     h_flex,
     tooltip::Tooltip,
     v_flex,
@@ -594,68 +594,6 @@ impl Render for WizardDialog {
 }
 
 // Pieces the sections share.
-
-/// One option of a segmented control.
-struct Segment {
-    label: SharedString,
-    selected: bool,
-    tip: Option<SharedString>,
-}
-
-impl Segment {
-    fn new(label: impl Into<SharedString>, selected: bool) -> Self {
-        Self {
-            label: label.into(),
-            selected,
-            tip: None,
-        }
-    }
-
-    fn tip(mut self, tip: impl Into<SharedString>) -> Self {
-        self.tip = Some(tip.into());
-        self
-    }
-}
-
-/// Options side by side as the kit's button group, sharing the width evenly.
-fn segmented<T: 'static>(
-    id: &str,
-    segments: Vec<Segment>,
-    cx: &Context<T>,
-    pick: impl Fn(&mut T, usize, &mut Window, &mut Context<T>) + 'static,
-) -> AnyElement {
-    let this = cx.weak_entity();
-    // The kit marks a selected button with its pressed shade, which barely shows; the picked
-    // option takes the accent tint the lists use for what is picked. The outline goes on the
-    // others only, since an outlined button drops its fill.
-    let theme = cx.theme();
-    let picked = ButtonCustomVariant::new(cx)
-        .color(theme.primary.opacity(0.18))
-        .foreground(theme.foreground)
-        .hover(theme.primary.opacity(0.24))
-        .active(theme.primary.opacity(0.3));
-    let buttons = segments.into_iter().enumerate().map(|(i, s)| {
-        Button::new(SharedString::from(format!("{id}-{i}")))
-            .label(s.label)
-            .when(s.selected, |b| b.custom(picked))
-            .when(!s.selected, |b| {
-                b.outline().text_color(theme.muted_foreground)
-            })
-            .tab_stop(false)
-            .flex_1()
-            .when_some(s.tip, Button::tooltip)
-    });
-    ButtonGroup::new(SharedString::from(id.to_owned()))
-        .xsmall()
-        .w_full()
-        .children(buttons)
-        .on_click(move |clicked, window, cx| {
-            if let Some(&i) = clicked.first() {
-                let _ = this.update(cx, |this, cx| pick(this, i, window, cx));
-            }
-        })
-        .into_any_element()
-}
 
 /// Width of the label column in the controls.
 const FIELD_LABEL_W: f32 = 72.;

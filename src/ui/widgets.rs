@@ -1,10 +1,18 @@
 //! Small building blocks shared by the views: icons, bars, the theme mapping, number formatting.
 
-use gpui_kit::component::{ActiveTheme, Theme, ThemeMode, h_flex};
+use gpui_kit::assets::IconName as AssetIcon;
+use gpui_kit::component::{
+    ActiveTheme, Sizable, Theme, ThemeMode,
+    button::{Button, ButtonCustomVariant, ButtonGroup, ButtonVariants},
+    h_flex,
+    input::{InputEvent, InputState},
+    tooltip::Tooltip,
+    v_flex,
+};
 use gpui_kit::{
-    App, ClickEvent, Context, Div, ElementId, FontWeight, Hsla, InteractiveElement, IntoElement,
-    ParentElement, SharedString, Stateful, Styled, WeakEntity, Window, div, img,
-    prelude::FluentBuilder, px, relative, rgb,
+    App, ClickEvent, Context, Div, ElementId, Entity, FontWeight, Hsla, InteractiveElement,
+    IntoElement, ParentElement, SharedString, Stateful, StatefulInteractiveElement, Styled,
+    Subscription, WeakEntity, Window, div, img, prelude::FluentBuilder, px, relative, rgb,
 };
 
 use std::rc::Rc;
@@ -422,6 +430,230 @@ pub fn on_each<T: Copy + 'static>(
             f(g, item, window, cx);
         }
     })
+}
+
+/// Hover text on an element, the one-line way.
+pub trait TipExt: StatefulInteractiveElement + Sized {
+    /// Show `text` on hover.
+    #[must_use]
+    fn tip(self, text: impl Into<SharedString>) -> Self {
+        let text = text.into();
+        self.tooltip(move |window, cx| Tooltip::new(text.clone()).build(window, cx))
+    }
+}
+
+impl<E: StatefulInteractiveElement> TipExt for E {}
+
+/// A row of dialog or form buttons, flush right.
+pub fn button_row() -> Div {
+    h_flex().justify_end().gap_2()
+}
+
+/// A number typed by a person: trimmed, and with a decimal comma read as a point, so "0,5" is
+/// a half.
+pub fn parse_decimal<T: std::str::FromStr>(text: &str) -> Option<T> {
+    text.trim().replace(',', ".").parse().ok()
+}
+
+/// "1 fit", "3 fits": `n` with the word that goes with it.
+pub fn count(n: usize, one: &str, many: &str) -> String {
+    if n == 1 {
+        format!("1 {one}")
+    } else {
+        format!("{n} {many}")
+    }
+}
+
+/// The drop target look: an element lights up while something it takes is dragged over it.
+pub trait DropHighlight: InteractiveElement + Sized {
+    /// Light up while something of type `T` is dragged over.
+    #[must_use]
+    fn drop_highlight<T: 'static>(self) -> Self {
+        self.drag_over::<T>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+    }
+
+    /// Light up while something of type `T` that `accepts` takes is dragged over.
+    #[must_use]
+    fn drop_highlight_if<T: 'static>(self, accepts: impl Fn(&T) -> bool + 'static) -> Self {
+        self.drag_over::<T>(move |style, dragged, _, cx| {
+            if accepts(dragged) {
+                style.bg(cx.theme().drop_target)
+            } else {
+                style
+            }
+        })
+    }
+}
+
+impl<E: InteractiveElement> DropHighlight for E {}
+
+/// Redraw the view whenever the text in `input` changes, for views that read it while drawing,
+/// such as a filter box.
+pub fn redraw_on_change<V: 'static>(
+    cx: &mut Context<V>,
+    input: &Entity<InputState>,
+) -> Subscription {
+    cx.subscribe(input, |_, _, event: &InputEvent, cx| {
+        if matches!(event, InputEvent::Change) {
+            cx.notify();
+        }
+    })
+}
+
+/// A small uppercase caption over a column or section.
+pub fn caption(text: &str, cx: &App) -> Div {
+    div()
+        .text_xs()
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(cx.theme().muted_foreground)
+        .child(text.to_uppercase())
+}
+
+/// What an empty list shows: an icon, a line on what is missing and one on what to do.
+pub fn empty_state(icon: AssetIcon, title: &str, hint: &str, cx: &App) -> Div {
+    let theme = cx.theme();
+    v_flex()
+        .items_center()
+        .gap_2()
+        .px_4()
+        .py_8()
+        .child(
+            gpui_kit::component::Icon::new(icon)
+                .size(px(28.))
+                .text_color(theme.muted_foreground),
+        )
+        .child(
+            div()
+                .font_weight(FontWeight::MEDIUM)
+                .text_center()
+                .child(title.to_owned()),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_center()
+                .text_color(theme.muted_foreground)
+                .child(hint.to_owned()),
+        )
+}
+
+/// What an empty list in a dense pane shows: one muted line where the rows would be.
+pub fn empty_line(text: impl Into<SharedString>, cx: &App) -> Div {
+    div()
+        .p_2()
+        .text_color(cx.theme().muted_foreground)
+        .child(text.into())
+}
+
+/// How far each level of a tree is indented.
+pub const INDENT: f32 = 14.;
+/// Height of a line of a tree.
+pub const TREE_ROW_H: f32 = 22.;
+
+/// A line of a tree, such as the market's groups: indented `depth` levels, with an open or
+/// closed chevron when it has children (`expanded` is None for a leaf), then the icon and the
+/// label. Clicks and the like are the caller's.
+pub fn tree_row(
+    id: impl Into<ElementId>,
+    depth: usize,
+    expanded: Option<bool>,
+    icon: Option<gpui_kit::AnyElement>,
+    label: impl Into<SharedString>,
+    selected: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let theme = cx.theme();
+    h_flex()
+        .id(id)
+        .gap_1()
+        .h(px(TREE_ROW_H))
+        .flex_none()
+        .pl(px(4. + INDENT * depth as f32))
+        .pr_1()
+        .when(selected, |row| row.bg(theme.list_active))
+        .hover(|s| s.bg(theme.list_hover))
+        .child(
+            div()
+                .w(px(14.))
+                .flex_none()
+                .flex()
+                .items_center()
+                .children(expanded.map(|open| {
+                    gpui_kit::component::Icon::new(if open {
+                        AssetIcon::ChevronDown
+                    } else {
+                        AssetIcon::ChevronRight
+                    })
+                    .size(px(14.))
+                    .text_color(theme.muted_foreground)
+                })),
+        )
+        .children(icon)
+        .child(div().flex_1().min_w_0().truncate().child(label.into()))
+}
+
+/// One option of a [`segmented`] control.
+pub struct Segment {
+    label: SharedString,
+    selected: bool,
+    tip: Option<SharedString>,
+}
+
+impl Segment {
+    pub fn new(label: impl Into<SharedString>, selected: bool) -> Self {
+        Self {
+            label: label.into(),
+            selected,
+            tip: None,
+        }
+    }
+
+    #[must_use]
+    pub fn tip(mut self, tip: impl Into<SharedString>) -> Self {
+        self.tip = Some(tip.into());
+        self
+    }
+}
+
+/// Options side by side as the kit's button group, sharing the width evenly. `pick` gets the
+/// clicked option's index.
+pub fn segmented<T: 'static>(
+    id: &str,
+    segments: Vec<Segment>,
+    cx: &Context<T>,
+    pick: impl Fn(&mut T, usize, &mut Window, &mut Context<T>) + 'static,
+) -> gpui_kit::AnyElement {
+    let this = cx.weak_entity();
+    // The kit marks a selected button with its pressed shade, which barely shows; the picked
+    // option takes the accent tint the lists use for what is picked. The outline goes on the
+    // others only, since an outlined button drops its fill.
+    let theme = cx.theme();
+    let picked = ButtonCustomVariant::new(cx)
+        .color(theme.primary.opacity(0.18))
+        .foreground(theme.foreground)
+        .hover(theme.primary.opacity(0.24))
+        .active(theme.primary.opacity(0.3));
+    let buttons = segments.into_iter().enumerate().map(|(i, s)| {
+        Button::new(SharedString::from(format!("{id}-{i}")))
+            .label(s.label)
+            .when(s.selected, |b| b.custom(picked))
+            .when(!s.selected, |b| {
+                b.outline().text_color(theme.muted_foreground)
+            })
+            .tab_stop(false)
+            .flex_1()
+            .when_some(s.tip, Button::tooltip)
+    });
+    ButtonGroup::new(SharedString::from(id.to_owned()))
+        .xsmall()
+        .w_full()
+        .children(buttons)
+        .on_click(move |clicked, window, cx| {
+            if let Some(&i) = clicked.first() {
+                let _ = this.update(cx, |this, cx| pick(this, i, window, cx));
+            }
+        })
+        .into_any_element()
 }
 
 /// Short numbers the way pyfa writes them: 1.38k, 16.6k, 2.25M.

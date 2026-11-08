@@ -26,8 +26,7 @@ use gpui_kit::{
 };
 
 use super::{
-    Efa, Layout, Segment, Shared, Stat, Target, divider, field, fieldset, join_and, muted, notice,
-    plural, segmented,
+    Efa, Layout, Shared, Stat, Target, divider, field, fieldset, join_and, muted, notice, plural,
 };
 use crate::{
     data::{Slot, TypeId},
@@ -41,7 +40,7 @@ use crate::{
         editor_kit::empty_state,
         side,
         stats::{self, SectionKind},
-        widgets,
+        widgets::{self, Segment, segmented},
     },
     wizard::{
         self, Budget, Change, Layer, SearchGroup,

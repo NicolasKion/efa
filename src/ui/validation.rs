@@ -1,21 +1,13 @@
 //! Fit validation in the window: red rows with a tooltip saying why, refusing modules the ship
 //! cannot take, and pyfa's fitting restrictions toggle (fitCommands/gui/fitRestrictionToggle.py).
 
-use gpui_kit::component::{
-    WindowExt,
-    button::{Button, ButtonVariants},
-    h_flex,
-    tooltip::Tooltip,
-    v_flex,
-};
-use gpui_kit::{
-    Context, Div, Hsla, ParentElement, SharedString, Stateful, StatefulInteractiveElement, Styled,
-    Window, px,
-};
+use gpui_kit::{Context, Div, Hsla, SharedString, Stateful, Styled, Window};
 
+use super::widgets::TipExt;
 use super::{
     Efa, Loaded,
     actions::{Outcome, RowRef},
+    dialogs::{Confirm, confirm},
 };
 use crate::{
     data::Slot,
@@ -35,8 +27,7 @@ impl From<RowRef> for ItemRef {
 
 /// Red text and a tooltip with the reasons, for a row of an item that breaks a rule.
 pub(super) fn flag(el: Stateful<Div>, why: SharedString, danger: Hsla) -> Stateful<Div> {
-    el.text_color(danger)
-        .tooltip(move |window, cx| Tooltip::new(why.clone()).build(window, cx))
+    el.text_color(danger).tip(why)
 }
 
 impl Efa {
@@ -66,30 +57,14 @@ impl Efa {
              could lead to wildly inaccurate results and possible errors."
         };
         let this = cx.weak_entity();
-        window.open_dialog(cx, move |dialog, _, _| {
-            let yes = this.clone();
-            dialog.title("Confirm").w(px(420.)).child(
-                v_flex().gap_3().child(message).child(
-                    h_flex()
-                        .justify_end()
-                        .gap_2()
-                        .child(
-                            Button::new("restrictions-no")
-                                .label("No")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(
-                            Button::new("restrictions-yes")
-                                .primary()
-                                .label("Yes")
-                                .on_click(move |_, window, cx| {
-                                    window.close_dialog(cx);
-                                    let _ = yes.update(cx, Efa::toggle_restrictions);
-                                }),
-                        ),
-                ),
-            )
-        });
+        confirm(
+            window,
+            cx,
+            Confirm::new("Confirm", message),
+            move |_, cx| {
+                let _ = this.update(cx, Efa::toggle_restrictions);
+            },
+        );
     }
 
     /// Switch the current fit's restrictions. Turning them back on takes off whatever the ship

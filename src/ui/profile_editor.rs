@@ -584,13 +584,14 @@ impl<K: Kind> Editor<K> {
         cx.notify();
     }
 
-    /// Why `name` cannot name an entry, in pyfa's words.
-    fn name_problem(&self, name: &str, cx: &App) -> Option<String> {
+    /// Why `name` cannot name an entry, in pyfa's words. `keep` is the entry being renamed,
+    /// which may keep its name.
+    fn name_problem(&self, name: &str, keep: Option<&str>, cx: &App) -> Option<String> {
         if name.is_empty() {
             Some(format!("You must supply a name for your {}!", K::ENTITY))
         } else if K::user(&self.hub.read(cx).saved)
             .iter()
-            .any(|item| K::name(item) == name)
+            .any(|item| K::name(item) == name && Some(name) != keep)
         {
             Some(format!(
                 "{} name already in use, please choose another.",
@@ -690,11 +691,13 @@ impl<K: Kind> Editor<K> {
                 format!("{current} Copy"),
             ),
         };
+        let keep = (naming == Naming::Rename).then(|| default.clone());
         let input = cx.new(|cx| InputState::new(window, cx).default_value(default));
         let error = cx.new(|_| None::<SharedString>);
         let editor = cx.weak_entity();
         window.open_dialog(cx, move |dialog, _, cx| {
-            let (input, error, editor) = (input.clone(), error.clone(), editor.clone());
+            let (input, error, editor, keep) =
+                (input.clone(), error.clone(), editor.clone(), keep.clone());
             let problem = error.read(cx).clone();
             // The OK button and Enter both submit; it closes the dialog itself when done.
             let submit: crate::ui::widgets::Submit = {
@@ -703,7 +706,7 @@ impl<K: Kind> Editor<K> {
                     let name = input.read(cx).value().trim().to_owned();
                     let problem = editor
                         .upgrade()
-                        .and_then(|e| e.read(cx).name_problem(&name, cx));
+                        .and_then(|e| e.read(cx).name_problem(&name, keep.as_deref(), cx));
                     if let Some(problem) = problem {
                         error.update(cx, |e, cx| {
                             *e = Some(problem.into());

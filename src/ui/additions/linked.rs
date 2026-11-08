@@ -7,7 +7,7 @@ use gpui_kit::component::{
     ActiveTheme, IconName, Sizable, WindowExt,
     button::{Button, ButtonVariants},
     h_flex,
-    input::{Input, InputEvent, InputState},
+    input::{Input, InputState},
     menu::{PopupMenu, PopupMenuItem},
     v_flex,
 };
@@ -23,7 +23,8 @@ use crate::{
     icons::Icon,
     ui::{
         Efa, Loaded,
-        widgets::{entry, icon_box, icon_label},
+        dialogs::{Prompt, prompt_value},
+        widgets::{entry, icon_box, icon_label, redraw_on_change},
     },
 };
 
@@ -91,48 +92,13 @@ impl Efa {
         cx: &mut Context<Self>,
         apply: impl Fn(&mut Efa, T, &mut Context<Efa>) + 'static,
     ) {
-        let input = cx.new(|cx| InputState::new(window, cx).default_value(initial));
         let this = cx.weak_entity();
-        let apply = Rc::new(apply);
-        window.open_dialog(cx, move |dialog, _, _| {
-            let (input, this, apply) = (input.clone(), this.clone(), Rc::clone(&apply));
-            // The OK button and Enter both submit; it closes the dialog itself when done.
-            let submit: crate::ui::widgets::Submit = {
-                let (input, this, apply) = (input.clone(), this.clone(), apply.clone());
-                Rc::new(
-                    move |_: &ClickEvent, window: &mut Window, cx: &mut gpui_kit::App| {
-                        let Ok(value) = input.read(cx).value().trim().parse::<T>() else {
-                            return;
-                        };
-                        window.close_dialog(cx);
-                        Efa::app_update(&this, cx, |g, cx| apply(g, value, cx));
-                    },
-                )
-            };
-            dialog
-                .on_ok({
-                    let submit = Rc::clone(&submit);
-                    move |e, w, cx| {
-                        submit(e, w, cx);
-                        false
-                    }
-                })
-                .title(title)
-                .w(px(340.))
-                .child(
-                    v_flex()
-                        .gap_3()
-                        .child(prompt)
-                        .child(Input::new(&input))
-                        .child(h_flex().justify_end().child(
-                            Button::new("input-ok").primary().label("OK").on_click({
-                                let submit = Rc::clone(&submit);
-                                move |e: &ClickEvent, w: &mut Window, cx: &mut gpui_kit::App| {
-                                    submit(e, w, cx);
-                                }
-                            }),
-                        )),
-                )
+        let prompt = Prompt::new(title)
+            .message(prompt)
+            .default(initial)
+            .width(340.);
+        prompt_value(window, cx, prompt, move |value, _, cx| {
+            Efa::app_update(&this, cx, |g, cx| apply(g, value, cx));
         });
     }
 
@@ -198,11 +164,7 @@ impl FitPicker {
         cx: &mut Context<Self>,
     ) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search fits"));
-        let subscriptions = vec![cx.subscribe(&search, |_, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                cx.notify();
-            }
-        })];
+        let subscriptions = vec![redraw_on_change(cx, &search)];
         Self {
             efa,
             loaded,

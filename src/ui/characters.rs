@@ -5,23 +5,21 @@
 use std::rc::Rc;
 
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName, Sizable, WindowExt,
-    button::{Button, ButtonVariants},
+    ActiveTheme, Disableable, IconName, Sizable,
+    button::Button,
     h_flex,
-    input::{Input, InputState},
     menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
-    tooltip::Tooltip,
-    v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext, ClipboardItem, Context, Entity, InteractiveElement, IntoElement,
-    ParentElement, PathPromptOptions, SharedString, StatefulInteractiveElement, Styled, WeakEntity,
-    Window, div, prelude::FluentBuilder, px,
+    AnyElement, App, ClipboardItem, Context, Entity, InteractiveElement, IntoElement,
+    ParentElement, PathPromptOptions, SharedString, Styled, WeakEntity, Window, div, px,
 };
 
+use super::widgets::TipExt;
 use super::{
     Efa, Hub, Loaded,
     character_editor::CharacterEditor,
+    dialogs::{Prompt, prompt_text},
     widgets::{entry, icon_label, on_efa},
 };
 use crate::{
@@ -323,7 +321,7 @@ impl Efa {
                     .size(px(16.))
                     .text_color(color),
             )
-            .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx));
+            .tip(tip);
         let icon = if needs_skills {
             icon.context_menu(move |menu, _, _| missing_skills_menu(menu, &this))
                 .into_any_element()
@@ -554,68 +552,19 @@ pub(super) fn name_dialog(
     cx: &mut App,
     on_ok: impl Fn(String, &mut App) + 'static,
 ) {
-    let input = cx.new(|cx| InputState::new(window, cx).default_value(initial));
-    let error = cx.new(|_| None::<SharedString>);
     let hub = hub.downgrade();
-    let on_ok = Rc::new(on_ok);
-    window.open_dialog(cx, move |dialog, _, cx| {
-        let (input, error, hub, on_ok) =
-            (input.clone(), error.clone(), hub.clone(), Rc::clone(&on_ok));
-        let message = error.read(cx).clone();
-        // The OK button and Enter both submit; it closes the dialog itself when done.
-        let submit: crate::ui::widgets::Submit = {
-            let (input, error, hub, on_ok) =
-                (input.clone(), error.clone(), hub.clone(), on_ok.clone());
-            Rc::new(
-                move |_: &gpui_kit::ClickEvent, window: &mut Window, cx: &mut App| {
-                    let name = input.read(cx).value().trim().to_owned();
-                    let problem = hub
-                        .upgrade()
-                        .and_then(|h| h.read(cx).characters.name_problem(&name));
-                    if let Some(problem) = problem {
-                        error.update(cx, |e, cx| {
-                            *e = Some(problem.into());
-                            cx.notify();
-                        });
-                        window.refresh();
-                        return;
-                    }
-                    window.close_dialog(cx);
-                    on_ok(name, cx);
-                },
-            )
-        };
-        dialog
-            .on_ok({
-                let submit = Rc::clone(&submit);
-                move |e, w, cx| {
-                    submit(e, w, cx);
-                    false
-                }
-            })
-            .title(title)
-            .w(px(360.))
-            .child(
-                v_flex()
-                    .gap_3()
-                    .child(prompt)
-                    .child(Input::new(&input))
-                    .when_some(message, |col, message| {
-                        col.child(div().text_sm().text_color(cx.theme().danger).child(message))
-                    })
-                    .child(
-                        h_flex().justify_end().child(
-                            Button::new("character-name-ok")
-                                .primary()
-                                .label("OK")
-                                .on_click({
-                                    let submit = Rc::clone(&submit);
-                                    move |e: &gpui_kit::ClickEvent, w: &mut Window, cx: &mut App| {
-                                        submit(e, w, cx);
-                                    }
-                                }),
-                        ),
-                    ),
-            )
-    });
+    prompt_text(
+        window,
+        cx,
+        Prompt::new(title)
+            .message(prompt)
+            .default(initial)
+            .width(360.),
+        move |name, cx| {
+            hub.upgrade()
+                .and_then(|h| h.read(cx).characters.name_problem(name))
+                .map(SharedString::from)
+        },
+        move |name, _, cx| on_ok(name, cx),
+    );
 }

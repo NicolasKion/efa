@@ -7,7 +7,6 @@ use std::rc::Rc;
 use gpui_kit::component::{
     ActiveTheme, IconName, h_flex,
     menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
-    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
@@ -17,6 +16,7 @@ use gpui_kit::{
 };
 
 use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, drones::format_amount, price_text};
+use crate::ui::widgets::{DropHighlight, TipExt};
 use crate::{
     data::{Catalog, Kind, TypeId, projection::FighterClass},
     dogma::attr as drone_attr,
@@ -328,7 +328,7 @@ impl Efa {
                     .on_key_down(cx.listener(|g, event: &KeyDownEvent, _, cx| {
                         g.fighter_key(event, cx);
                     }))
-                    .drag_over::<Dragged>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+                    .drop_highlight::<Dragged>()
                     .on_drop(cx.listener(|g, dragged: &Dragged, _, cx| {
                         g.drop_on_fighters(dragged, cx);
                     })),
@@ -344,7 +344,7 @@ impl Efa {
                 .id(SharedString::from(format!("fighter-header-{id}")))
                 .w(px(NUMBER_W))
                 .flex_none()
-                .tooltip(move |window, cx| Tooltip::new(tip).build(window, cx))
+                .tip(tip)
                 .child(icon_box(
                     &loaded.catalog,
                     &loaded.icons,

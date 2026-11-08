@@ -19,6 +19,7 @@ use gpui_kit::{
     prelude::FluentBuilder, px, uniform_list,
 };
 
+use super::widgets::TipExt;
 use super::{
     Action, AdditionsTab, BrowserTab, Efa, Loaded,
     additions::{FitDrag, Link, goes_to_cargo},
@@ -27,7 +28,7 @@ use super::{
     },
     item_stats,
     stats::format,
-    widgets::{band, entry, icon_box, on_each, on_efa},
+    widgets::{band, count, empty_line, entry, icon_box, list_row, on_each, on_efa, tree_row},
 };
 use crate::{
     data::{Catalog, Kind, Slot, TypeId},
@@ -41,7 +42,6 @@ use crate::{
 
 /// Search results shown at most, to keep the list quick to build.
 const SEARCH_LIMIT: usize = 500;
-const INDENT: f32 = 14.;
 /// Height of every results row, items and headings alike, as the list needs.
 const RESULT_ROW_H: f32 = 26.;
 /// Height of the market results pane until the user drags the divider.
@@ -386,48 +386,39 @@ impl Efa {
         } = entry;
         let expanded = self.expanded_groups.contains(&id);
         let selected = self.listing == Some(listing);
-        h_flex()
-            .id(SharedString::from(format!("group-{id}")))
-            .gap_1()
-            .h(px(22.))
-            .flex_none()
-            .pl(px(4. + INDENT * depth as f32))
-            .when(selected, |row| row.bg(cx.theme().list_active))
-            .hover(|s| s.bg(cx.theme().list_hover))
-            .child(
+        let icon = match icon {
+            GroupIcon::Game(Some(icon_id)) => Some(
+                icon_box(&loaded.catalog, &loaded.icons, Icon::Id(icon_id), 18.).into_any_element(),
+            ),
+            GroupIcon::Game(None) => None,
+            GroupIcon::Lucide(name) => Some(
                 div()
-                    .w(px(10.))
+                    .size(px(18.))
+                    .flex()
                     .flex_none()
-                    .text_xs()
-                    .when(branch, |d| d.child(if expanded { "▾" } else { "▸" })),
-            )
-            .map(|row| match icon {
-                GroupIcon::Game(Some(icon_id)) => row.child(icon_box(
-                    &loaded.catalog,
-                    &loaded.icons,
-                    Icon::Id(icon_id),
-                    18.,
-                )),
-                GroupIcon::Game(None) => row,
-                GroupIcon::Lucide(name) => row.child(
-                    div()
-                        .size(px(18.))
-                        .flex()
-                        .flex_none()
-                        .items_center()
-                        .justify_center()
-                        .child(LucideIcon::new(name).size(px(14.))),
-                ),
-            })
-            .child(div().flex_1().min_w_0().truncate().child(name))
-            // A click lists the entry's items and opens it; a second click closes it again.
-            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                if branch && (!selected || !this.expanded_groups.remove(&id)) {
-                    this.expanded_groups.insert(id);
-                }
-                this.select_listing(listing, window, cx);
-            }))
-            .into_any_element()
+                    .items_center()
+                    .justify_center()
+                    .child(LucideIcon::new(name).size(px(14.)))
+                    .into_any_element(),
+            ),
+        };
+        tree_row(
+            SharedString::from(format!("group-{id}")),
+            depth,
+            branch.then_some(expanded),
+            icon,
+            name,
+            selected,
+            cx,
+        )
+        // A click lists the entry's items and opens it; a second click closes it again.
+        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+            if branch && (!selected || !this.expanded_groups.remove(&id)) {
+                this.expanded_groups.insert(id);
+            }
+            this.select_listing(listing, window, cx);
+        }))
+        .into_any_element()
     }
 
     /// List something in the results pane, leaving the search so it shows.
@@ -574,9 +565,10 @@ impl Efa {
     ) -> AnyElement {
         let message = match key {
             _ if filtered.total > 0 => {
-                let n = filtered.total;
-                let items = if n == 1 { "item" } else { "items" };
-                format!("The filters hide all {n} {items}.")
+                format!(
+                    "The filters hide all {}.",
+                    count(filtered.total, "item", "items")
+                )
             }
             None => "Pick a market group, or search the market.".to_owned(),
             Some(ResultsKey::Search(_)) => "No matching items.".to_owned(),
@@ -677,14 +669,10 @@ impl Efa {
         };
         let price = self.prices.get(id).filter(|&p| p > 0.0);
         let weak = cx.weak_entity();
-        h_flex()
-            .id(SharedString::from(format!("item-{id}")))
+        list_row(SharedString::from(format!("item-{id}")), highlighted, cx)
             .w_full()
             .gap_2()
             .h(px(RESULT_ROW_H))
-            .px_1()
-            .when(highlighted, |row| row.bg(cx.theme().list_active))
-            .hover(|s| s.bg(cx.theme().list_hover))
             .children(self.omega_marker(loaded, id, 16.))
             .child(icon_box(
                 &loaded.catalog,
@@ -857,14 +845,7 @@ impl Efa {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .when(rows.is_empty(), |list| {
-                        list.child(
-                            div()
-                                .p_2()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(empty),
-                        )
-                    })
+                    .when(rows.is_empty(), |list| list.child(empty_line(empty, cx)))
                     .children(rows),
             )
             .when(!races.is_empty(), |pane| {
@@ -1036,7 +1017,7 @@ impl Efa {
                             .opacity(0.6)
                             .hover(|s| s.opacity(1.).bg(theme.secondary))
                     })
-                    .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
+                    .tip(label)
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.ship_browser.toggle_race(race);
                         cx.notify();
@@ -1076,12 +1057,10 @@ impl Efa {
             .get(&group)
             .cloned()
             .unwrap_or_default();
-        h_flex()
-            .id(SharedString::from(format!("ship-group-{group}")))
+        list_row(SharedString::from(format!("ship-group-{group}")), false, cx)
             .gap_2()
             .px_2()
             .h(px(26.))
-            .hover(|s| s.bg(cx.theme().list_hover))
             .child(
                 div().w(px(16.)).flex_none().children(
                     crate::brackets::ship_bracket(group)
@@ -1113,11 +1092,10 @@ impl Efa {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let tooltips = self.saved.preferences.general.ship_browser_tooltips;
-        h_flex()
-            .id(SharedString::from(format!("ship-{ship}")))
+        list_row(SharedString::from(format!("ship-{ship}")), false, cx)
+            .h_auto()
             .gap_2()
             .p_1()
-            .hover(|s| s.bg(cx.theme().list_hover))
             .child(icon_box(
                 &loaded.catalog,
                 &loaded.icons,
@@ -1171,12 +1149,10 @@ impl Efa {
             None => ship_name.clone(),
         };
         let open = self.saved.current == Some(i);
-        h_flex()
-            .id(SharedString::from(format!("fitting-{i}")))
+        list_row(SharedString::from(format!("fitting-{i}")), open, cx)
+            .h_auto()
             .gap_2()
             .p_1()
-            .when(open, |row| row.bg(cx.theme().list_active))
-            .hover(|s| s.bg(cx.theme().list_hover))
             .map(|row| match (fit.ship, self.loaded().filter(|_| tooltips)) {
                 (Some(ship), Some(loaded)) => row.tooltip(move |window, cx| {
                     ship_tooltip(&loaded, ship, TipHead::Fit(notes.clone()), window, cx)
@@ -1184,7 +1160,7 @@ impl Efa {
                 _ => match notes {
                     Some(notes) => {
                         let tip: SharedString = notes.into();
-                        row.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                        row.tip(tip)
                     }
                     None => row,
                 },
@@ -1287,8 +1263,7 @@ fn results_title(catalog: &Catalog, key: Option<&ResultsKey>) -> String {
 fn count_label(filtered: &Filtered) -> Option<String> {
     match (filtered.count, filtered.total) {
         (_, 0) => None,
-        (1, 1) => Some("1 item".to_owned()),
-        (shown, total) if shown == total => Some(format!("{total} items")),
+        (shown, total) if shown == total => Some(count(total, "item", "items")),
         (shown, total) => Some(format!("{shown} of {total}")),
     }
 }
@@ -1349,11 +1324,11 @@ fn module_charge_sections(catalog: &Catalog, module: TypeId) -> Vec<Section> {
 }
 
 /// "No fits", "1 fit", "3 fits", as pyfa's ship rows count them.
-fn fits_label(count: usize) -> String {
-    match count {
-        0 => "No fits".to_owned(),
-        1 => "1 fit".to_owned(),
-        n => format!("{n} fits"),
+fn fits_label(n: usize) -> String {
+    if n == 0 {
+        "No fits".to_owned()
+    } else {
+        count(n, "fit", "fits")
     }
 }
 

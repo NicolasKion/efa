@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use gpui_kit::component::{ActiveTheme, h_flex, menu::ContextMenuExt, tooltip::Tooltip, v_flex};
+use gpui_kit::component::{ActiveTheme, h_flex, menu::ContextMenuExt, v_flex};
 use gpui_kit::{
     AnyElement, AppContext, ClickEvent, Context, CursorStyle, Div, DragMoveEvent,
     InteractiveElement, IntoElement, KeyDownEvent, Modifiers, MouseButton, MouseDownEvent,
@@ -12,6 +12,7 @@ use gpui_kit::{
 };
 
 use super::{ROW_HEIGHT, addition_menu, misc_entries, price_text};
+use crate::ui::widgets::{DropHighlight, TipExt, empty_line};
 use crate::{
     data::{Catalog, Kind},
     dogma::{attr as drone_attr, effect},
@@ -534,11 +535,8 @@ impl Efa {
         let mut rows: Vec<AnyElement> = Vec::with_capacity(order.len() + 1);
         if order.is_empty() {
             rows.push(
-                div()
+                empty_line("Double-click drones in the market to add them.", cx)
                     .id("drones-empty")
-                    .p_2()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Double-click drones in the market to add them.")
                     .context_menu({
                         let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
                         move |menu, window, cx| {
@@ -565,7 +563,7 @@ impl Efa {
             .on_key_down(cx.listener(move |g, event: &KeyDownEvent, _, cx| {
                 g.drone_key(event, cx);
             }))
-            .drag_over::<Dragged>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+            .drop_highlight::<Dragged>()
             .on_drop(cx.listener(|g, dragged: &Dragged, window, cx| {
                 g.drop_on_drones(None, dragged, window.modifiers(), cx);
             }));
@@ -623,9 +621,7 @@ impl Efa {
             .id(SharedString::from(format!("drone-misc-{i}")))
             .truncate()
             .children(misc_text)
-            .when_some(tooltip, |cell, tip| {
-                cell.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
-            });
+            .when_some(tooltip, |cell, tip| cell.tip(tip));
         let mut row: Stateful<Div> = h_flex()
             .id(SharedString::from(format!("drone-{i}")))
             .h(px(ROW_HEIGHT))
@@ -656,7 +652,7 @@ impl Efa {
                 cx.new(|_| DragPreview(dragged.clone()))
             });
         }
-        row.drag_over::<Dragged>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+        row.drop_highlight::<Dragged>()
             .on_drop(cx.listener(move |g, dragged: &Dragged, window, cx| {
                 cx.stop_propagation();
                 g.drop_on_drones(Some(i), dragged, window.modifiers(), cx);
@@ -738,9 +734,7 @@ impl Efa {
                     .h_full()
                     .flex()
                     .items_center()
-                    .when_some(col.header_icon(), |cell, (_, tip)| {
-                        cell.tooltip(move |window, cx| Tooltip::new(tip).build(window, cx))
-                    })
+                    .when_some(col.header_icon(), |cell, (_, tip)| cell.tip(tip))
                     .child(content)
                     .child(handle)
                     .on_drag_move(cx.listener(

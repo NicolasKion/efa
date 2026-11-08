@@ -11,6 +11,7 @@ use gpui_kit::{
     div, prelude::FluentBuilder, px,
 };
 
+use super::widgets::TipExt;
 use super::{
     Efa, Loaded, stats,
     widgets::{self, icon, icon_box, km, short},
@@ -417,11 +418,7 @@ impl Efa {
                     .h_full()
                     .flex()
                     .items_center()
-                    .when_some(col.header_tooltip(), |cell, tip| {
-                        cell.tooltip(move |window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(tip).build(window, cx)
-                        })
-                    })
+                    .when_some(col.header_tooltip(), |cell, tip| cell.tip(tip))
                     .child(content)
                     .child(handle)
                     .on_drag_move(cx.listener(

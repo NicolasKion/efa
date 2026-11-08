@@ -15,6 +15,7 @@ use gpui_kit::{
 };
 
 use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, misc_entries, price_text};
+use crate::ui::widgets::DropHighlight;
 use crate::{
     data::{Catalog, ItemType, Kind, TypeId},
     engine::{ItemRef, Stats},
@@ -203,7 +204,7 @@ impl Efa {
                 g.additions_key(event, AddKind::Boosters, len, true, cx);
             }))
             .children(content)
-            .drag_over::<Dragged>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+            .drop_highlight::<Dragged>()
             // pyfa treats a market item dropped here like one double-clicked in the market.
             .on_drop(cx.listener(|g, dragged: &Dragged, _, cx| {
                 if matches!(dragged.source, DragSource::Market) {

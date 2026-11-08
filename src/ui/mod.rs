@@ -8,6 +8,7 @@ mod character_editor;
 mod characters;
 pub mod chrome;
 mod columns;
+mod dialogs;
 mod editor_kit;
 mod error_dialog;
 mod esi;
@@ -49,7 +50,6 @@ use gpui_kit::component::{
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
     menu::ContextMenuExt,
     resizable::{h_resizable, resizable_panel, v_resizable},
-    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
@@ -60,6 +60,7 @@ use gpui_kit::{
 };
 
 pub use actions::{Action, AddKind, RowRef, Scope};
+use dialogs::Confirm;
 pub use hub::Hub;
 pub use menu::init as init_menus;
 use selection::ListSelection;
@@ -101,6 +102,7 @@ impl Render for TabPreview {
     }
 }
 
+use crate::ui::widgets::{DropHighlight, TipExt};
 use crate::{
     character::{CharacterId, Characters},
     data::{Catalog, Kind, TypeId},
@@ -936,22 +938,13 @@ impl Efa {
             return;
         };
         let this = cx.weak_entity();
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            let this = this.clone();
-            alert
-                .confirm()
-                .title("Confirm Delete")
-                .description("Do you really want to delete this fit?")
-                .ok_text("Yes")
-                .cancel_text("No")
-                .on_ok(move |_, _, cx| {
-                    let _ = this.update(cx, |g, cx| {
-                        if let Some(index) = g.saved.fit_index(uid) {
-                            g.delete_fit(index, cx);
-                        }
-                    });
-                    true
-                })
+        let question = Confirm::new("Confirm Delete", "Do you really want to delete this fit?");
+        dialogs::confirm(window, cx, question, move |_, cx| {
+            let _ = this.update(cx, |g, cx| {
+                if let Some(index) = g.saved.fit_index(uid) {
+                    g.delete_fit(index, cx);
+                }
+            });
         });
     }
 
@@ -1186,7 +1179,7 @@ impl Efa {
             .group(group.clone())
             .when(self.saved.preferences.general.tab_tooltips, |tab| {
                 let tip: SharedString = label.clone().into();
-                tab.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                tab.tip(tip)
             })
             .flex_none()
             .max_w(px(TAB_MAX_W))
@@ -1274,7 +1267,7 @@ impl Efa {
                     }
                 },
             )
-            .drag_over::<TabDrag>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+            .drop_highlight::<TabDrag>()
             .on_drop(cx.listener(move |g, drag: &TabDrag, _, cx| {
                 g.tab_dragging = false;
                 g.move_tab(drag.index, i, cx);
@@ -1351,7 +1344,7 @@ impl Efa {
             .text_color(theme.foreground)
             .child(gpui_kit::component::Icon::new(IconName::ExternalLink).size(px(18.)))
             .child("Drop here to open this fit in a new window")
-            .drag_over::<TabDrag>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+            .drop_highlight::<TabDrag>()
             .on_drop(cx.listener(|g, drag: &TabDrag, _, cx| {
                 g.tab_dragging = false;
                 g.open_in_new_window(drag.index, cx);

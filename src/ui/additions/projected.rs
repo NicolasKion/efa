@@ -20,6 +20,7 @@ use super::{
     drones::format_amount,
     linked::{Link, add_fit_entries},
 };
+use crate::ui::widgets::DropHighlight;
 use crate::{
     data::{Catalog, Kind, TypeId, projection::EnvMenu},
     engine::{FighterInfo, FitItem, Stats},
@@ -507,11 +508,11 @@ impl Efa {
                         g.projected_key(event, cx);
                     }))
                     .children(content)
-                    .drag_over::<Dragged>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+                    .drop_highlight::<Dragged>()
                     .on_drop(cx.listener(|g, dragged: &Dragged, _, cx| {
                         g.drop_on_projected(dragged, cx);
                     }))
-                    .drag_over::<FitDrag>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+                    .drop_highlight::<FitDrag>()
                     .on_drop(cx.listener(|g, drag: &FitDrag, _, cx| {
                         g.link(Link::Projected, &[drag.index], cx);
                     }))

@@ -15,6 +15,7 @@ use gpui_kit::{
     prelude::FluentBuilder, px,
 };
 
+use super::widgets::{DropHighlight, TipExt};
 use super::{
     Action, Efa, Loaded, RowRef, Scope,
     actions::MutaTarget,
@@ -393,9 +394,7 @@ impl Efa {
                         theme.muted_foreground
                     }),
             )
-            .tooltip(move |window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(tip).build(window, cx)
-            })
+            .tip(tip)
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 cx.stop_propagation();
                 this.apply(Action::ToggleGrouped(slot), cx);
@@ -441,12 +440,7 @@ impl Efa {
                         .size(px(15.))
                         .text_color(color(mark_color)),
                 )
-                .tooltip({
-                    let label = m.state.label();
-                    move |window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(label).build(window, cx)
-                    }
-                })
+                .tip(m.state.label())
                 .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                     cx.stop_propagation();
                     // Like pyfa: a click on a selected module takes the selection along, Alt
@@ -495,9 +489,7 @@ impl Efa {
                 .children(text(Col::Price))
                 .when_some(prices.source_label(m.type_id), |cell, source| {
                     let source = SharedString::from(format!("Price from {source}"));
-                    cell.tooltip(move |window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(source.clone()).build(window, cx)
-                    })
+                    cell.tip(source)
                 }),
         )
         .child(layout.cell(Col::Charge).child(h_flex().gap_1().when_some(
@@ -522,9 +514,7 @@ impl Efa {
                     } else {
                         "Estimated time til burnout"
                     };
-                    cell.tooltip(move |window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(tip).build(window, cx)
-                    })
+                    cell.tip(tip)
                 }),
         )
     }
@@ -540,9 +530,7 @@ fn misc_cell(
     match misc {
         Some((text, tooltip)) => cell.child(text).when(!tooltip.is_empty(), |cell| {
             let tooltip = SharedString::from(tooltip);
-            cell.tooltip(move |window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx)
-            })
+            cell.tip(tooltip)
         }),
         None => cell,
     }
@@ -700,7 +688,7 @@ impl DropOn {
 
 /// Highlight a row while something is dragged over it, and handle the drop.
 fn drop_target(row: Stateful<Div>, on: DropOn, cx: &mut Context<Efa>) -> Stateful<Div> {
-    row.drag_over::<Dragged>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+    row.drop_highlight::<Dragged>()
         .on_drop(cx.listener(move |g, dragged: &Dragged, window, cx| {
             cx.stop_propagation();
             g.drop_on(on, dragged, window.modifiers(), cx);

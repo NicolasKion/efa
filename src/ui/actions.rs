@@ -613,9 +613,8 @@ fn apply_action(fit: &mut Fit, action: Action, env: &EditEnv) -> Outcome {
                 "No cheaper replacements found".to_owned()
             } else {
                 format!(
-                    "Swapped {} item type{} for cheaper ones, saving {} ISK",
-                    made.len(),
-                    if made.len() == 1 { "" } else { "s" },
+                    "Swapped {} for cheaper ones, saving {} ISK",
+                    super::widgets::count(made.len(), "item type", "item types"),
                     super::stats::format::currency(saving)
                 )
             });

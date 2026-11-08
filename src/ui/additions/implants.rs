@@ -14,6 +14,7 @@ use gpui_kit::{
 };
 
 use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, export_lines, parse_lines, price_text};
+use crate::ui::widgets::DropHighlight;
 use crate::{
     data::{Kind, TypeId},
     engine::ItemRef,
@@ -106,7 +107,7 @@ impl Efa {
                 g.additions_key(event, AddKind::Implants, len, own, cx);
             }))
             .children(content)
-            .drag_over::<Dragged>(|style, _, _, cx| style.bg(cx.theme().drop_target))
+            .drop_highlight::<Dragged>()
             .on_drop(cx.listener(|g, dragged: &Dragged, _, cx| {
                 g.drop_implant(dragged, cx);
             }));

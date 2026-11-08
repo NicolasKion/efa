@@ -4,12 +4,13 @@
 use std::time::Instant;
 
 use gpui_kit::assets::IconName as AssetIcon;
-use gpui_kit::component::{ActiveTheme, Icon, Sizable, h_flex, spinner::Spinner, tooltip::Tooltip};
+use gpui_kit::component::{ActiveTheme, Icon, Sizable, h_flex, spinner::Spinner};
 use gpui_kit::{
     AnyElement, App, Context, Hsla, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, div, px,
+    Styled, div, px,
 };
 
+use super::widgets::TipExt;
 use super::{Efa, Loading};
 
 const HEIGHT: f32 = 24.;
@@ -165,7 +166,7 @@ impl Efa {
                     .text_color(cx.theme().foreground)
                     .child(health.label()),
             )
-            .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+            .tip(tip)
             .into_any_element()
     }
 
@@ -264,7 +265,7 @@ impl Efa {
                     .flex_none(),
                 )
                 .child(div().min_w_0().truncate().child(status.clone()))
-                .tooltip(move |window, cx| Tooltip::new(status.clone()).build(window, cx))
+                .tip(status)
                 .into_any_element(),
         )
     }
@@ -287,7 +288,7 @@ fn item(
         .border_color(cx.theme().border)
         .children(icon.map(|icon| Icon::new(icon).xsmall()))
         .child(content)
-        .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+        .tip(tip)
         .into_any_element()
 }
 
