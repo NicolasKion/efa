@@ -5,7 +5,8 @@
 use crate::common::setup;
 use efa::{
     data::{Catalog, Kind, Slot},
-    engine::{FitItem, Stats, misc_attr},
+    dogma::attr as misc_attr,
+    engine::{FitItem, Stats},
     fit::{DamageProfile, Fit, ModuleState, RahPattern},
 };
 

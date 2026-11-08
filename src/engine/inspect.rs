@@ -1,16 +1,14 @@
 //! One fitted item looked at closely, for the item stats window: every attribute before and after
 //! bonuses, every modification with where it comes from, and which effects run.
 //!
-//! The fit is built the way [`Engine::compute_with`] builds it, but every item's ID is kept, so a
+//! The fit is built the way [`Engine::compute_among`] builds it, and every item's ID is kept, so a
 //! modification can be traced back to the module, drone or skill it came from.
 
 use std::collections::HashMap;
 
-use rc::{
-    AddMode, AttrId, Item, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack, Op, SolOwned,
-};
+use rc::{AttrId, Item, ItemCommon, ItemId, Op, SolOwned};
 
-use super::{Engine, Pilot, add_fit_drone, add_fit_module, pane};
+use super::{BuildOptions, Built, Engine, Pilot};
 use crate::{
     data::{Slot, TypeId},
     fit::Fit,
@@ -29,9 +27,10 @@ pub enum FitItem {
     Subsystem(usize),
     /// A drone stack; all its drones are the same, so the first stands for them.
     Drone(usize),
-    /// Implants and boosters take one per slot, so the type names them.
+    /// Implants take one per slot, so the type names them.
     Implant(TypeId),
-    Booster(TypeId),
+    /// A booster, by its place in the fit's list.
+    Booster(usize),
     /// A fighter squadron, by its place in the fit's list.
     Fighter(usize),
 }
@@ -52,7 +51,7 @@ impl FitItem {
                 .applied_implants(character_implants)
                 .any(|(i, _)| i == t)
                 .then_some(t),
-            Self::Booster(t) => fit.boosters.iter().any(|b| b.type_id == t).then_some(t),
+            Self::Booster(i) => fit.boosters.get(i).map(|b| b.type_id),
             Self::Fighter(i) => fit.fighters.get(i).map(|f| f.type_id),
         }
     }
@@ -140,11 +139,28 @@ impl Inspection {
 }
 
 impl Engine {
-    /// The item at `item` in `fit`, after all bonuses. None when nothing is there.
+    /// The item at `item` in `fit`, after all bonuses, alone in space but for its projected
+    /// items and environment. None when nothing is there.
     pub fn inspect(&self, fit: &Fit, pilot: &Pilot, item: FitItem) -> Option<Inspection> {
+        self.inspect_among(fit, &[], pilot, item)
+    }
+
+    /// The item at `item` in `fit`, after all bonuses, with what surrounds the fit: `fits` are
+    /// the saved fits its projected and command fits are looked up in. None when nothing is
+    /// there.
+    pub fn inspect_among(
+        &self,
+        fit: &Fit,
+        fits: &[Fit],
+        pilot: &Pilot,
+        item: FitItem,
+    ) -> Option<Inspection> {
         let type_id = item.type_in(fit, &pilot.implants)?;
-        let mut sol = self.sol();
-        let (fit_id, places) = Self::build(&mut sol, fit, pilot)?;
+        let Built {
+            mut sol, fit: own, ..
+        } = self.build(fit, pilot, BuildOptions::among(fits))?;
+        let fit_id = own.fit_id;
+        let places = own.items;
         let target = places
             .iter()
             .find(|&(_, &place)| place == item)
@@ -217,105 +233,6 @@ impl Engine {
             modifiers,
             effects,
         })
-    }
-
-    /// Put `fit` into `sol` the way [`Engine::compute_for`] does, keeping where each item went.
-    fn build(
-        sol: &mut SolOwned,
-        fit: &Fit,
-        pilot: &Pilot,
-    ) -> Option<(rc::FitId, HashMap<ItemId, FitItem>)> {
-        let mut places = HashMap::new();
-        sol.set_sec_zone(super::sec_zone(fit.system_security));
-        let mut f = sol.add_fit();
-        pilot.board(&mut f);
-        let ship = fit.ship?;
-        let ship_id = f
-            .set_ship(ItemTypeId::from_i32(ship), None, None)
-            .get_item_id();
-        places.insert(ship_id, FitItem::Ship);
-        for (slot, rack, modules) in [
-            (Slot::High, ModRack::High, &fit.high),
-            (Slot::Mid, ModRack::Mid, &fit.mid),
-            (Slot::Low, ModRack::Low, &fit.low),
-        ] {
-            for (i, m) in modules.iter().enumerate() {
-                let Some(m) = m else { continue };
-                let Ok(mut module) = add_fit_module(
-                    &mut f,
-                    rack,
-                    AddMode::Replace(rc::RackPos::from_usize_clamped(i)),
-                    m,
-                ) else {
-                    continue;
-                };
-                places.insert(module.get_item_id(), FitItem::Module(slot, i));
-                if let Some(charge) = module.get_charge() {
-                    places.insert(charge.get_item_id(), FitItem::Charge(slot, i));
-                }
-            }
-        }
-        if let Some(mode) = fit.mode {
-            let id = f.set_stance(ItemTypeId::from_i32(mode)).get_item_id();
-            places.insert(id, FitItem::Mode);
-        }
-        f.set_sec_status(rc::FitSecStatus::from_f64_clamped(
-            fit.sec_status.unwrap_or(pilot.sec_status),
-        ));
-        for (i, rig) in fit.rigs.iter().enumerate() {
-            if let Some(rig) = rig {
-                let id = f.add_rig(ItemTypeId::from_i32(*rig)).get_item_id();
-                places.insert(id, FitItem::Rig(i));
-            }
-        }
-        for (i, id) in super::add_services(&mut f, fit) {
-            places.insert(id, FitItem::Module(Slot::Service, i));
-        }
-        for (i, &subsystem) in fit.subsystems.iter().enumerate() {
-            let id = f
-                .add_subsystem(ItemTypeId::from_i32(subsystem))
-                .get_item_id();
-            places.insert(id, FitItem::Subsystem(i));
-        }
-        for (n, stack) in fit.drones.iter().enumerate() {
-            for i in 0..stack.count {
-                let state = if i < stack.active {
-                    MinionState::Engaging
-                } else {
-                    MinionState::InBay
-                };
-                let id = add_fit_drone(&mut f, stack, state).get_item_id();
-                places.insert(id, FitItem::Drone(n));
-            }
-        }
-        for (implant, active) in fit.applied_implants(&pilot.implants) {
-            let mut item = f.add_implant(ItemTypeId::from_i32(implant));
-            if !active {
-                item.set_state(false);
-            }
-            places.insert(item.get_item_id(), FitItem::Implant(implant));
-        }
-        for booster in &fit.boosters {
-            let mut item = f.add_booster(ItemTypeId::from_i32(booster.type_id));
-            item.set_state(booster.active);
-            for &effect in &booster.side_effects {
-                let id = rc::EffectId::Dogma(rc::DogmaEffectId::from_i32(effect));
-                if let Ok(mut side_effect) = item.get_side_effect(&id) {
-                    side_effect.set_state(true);
-                }
-            }
-            places.insert(item.get_item_id(), FitItem::Booster(booster.type_id));
-        }
-        for (i, id) in super::surroundings::add_fighters(&mut f, &fit.fighters)
-            .into_iter()
-            .enumerate()
-        {
-            places.insert(id, FitItem::Fighter(i));
-        }
-        let incoming = pane::dps_profile(pane::incoming_mix(&mut f, &fit.damage_profile));
-        let rah = super::rah_incoming(&mut f, fit, incoming);
-        f.set_rah_incoming_dps(Some(rah));
-        Some((f.get_fit_id(), places))
     }
 }
 

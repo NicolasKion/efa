@@ -40,7 +40,13 @@ impl Pilot {
     /// The level a skill is flown at: the trained level, capped for an Alpha clone the way
     /// pyfa's `Skill.level` caps it.
     pub fn flown_level(&self, skill: TypeId, level: u8) -> u8 {
-        self.alpha_caps.as_ref().map_or(level, |caps| {
+        Self::capped(self.alpha_caps.as_ref(), skill, level)
+    }
+
+    /// A skill's level under an Alpha clone's `caps`, where skills it lacks fly at 0; None caps
+    /// nothing, as for Omega.
+    pub fn capped(caps: Option<&HashMap<TypeId, u8>>, skill: TypeId, level: u8) -> u8 {
+        caps.map_or(level, |caps| {
             level.min(caps.get(&skill).copied().unwrap_or(0))
         })
     }

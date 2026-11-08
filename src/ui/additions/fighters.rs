@@ -19,7 +19,8 @@ use gpui_kit::{
 use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, drones::format_amount, price_text};
 use crate::{
     data::{Catalog, Kind, TypeId, projection::FighterClass},
-    engine::{FighterInfo, ItemRef, Slots, Stats, drone_attr},
+    dogma::attr as drone_attr,
+    engine::{FighterInfo, ItemRef, Slots, Stats},
     fit::{
         Fit,
         fighters::{self, Fighter},

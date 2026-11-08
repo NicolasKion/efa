@@ -2,17 +2,17 @@
 //! the targeting and misc column, gathered after the core recalculation.
 
 use rc::{
-    AttrId, CtlAffectors, DpsProfile, EveAttrId, FitId, ItemCommon, ItemId, OptionExt,
-    OptionalReload, PValue, SolOwned, Spool, UnitInterval,
+    CtlAffectors, DpsProfile, FitId, ItemId, OptionExt, OptionalReload, PValue, Sol, SolOwned,
+    Spool, UnitInterval,
     stats::{
-        StatCapBlcSrcKinds, StatCritOptions, StatDmgItemKinds, StatMining, StatMiningItemKinds,
+        StatCapBlcSrcKinds, StatCritOptions, StatDmgItemKinds, StatMiningItemKinds,
         StatMiningResourceKind, StatNeutItemKinds, StatOutRepItemKinds, StatSensorsKind,
         StatTimeOptions, StatTimeOptionsBurst, StatTimeOptionsSim,
     },
 };
 
-use super::{Cap, Damage, Stats};
-use crate::fit::DamageProfile;
+use super::{Cap, Damage, Stats, read};
+use crate::{damage_pattern::UNIFORM, dogma::attr, fit::DamageProfile};
 
 /// Settings that change how numbers are calculated rather than what is fitted.
 #[derive(Debug, Clone, Copy, Default)]
@@ -126,11 +126,6 @@ pub struct Misc {
     pub holds: Vec<(&'static str, f64)>,
 }
 
-mod attr {
-    pub const RECHARGE_RATE: i32 = 55;
-    pub const WARP_SCRAMBLE_STATUS: i32 = 104;
-}
-
 /// Special holds in the order pyfa lists them in the cargo tooltip.
 const HOLDS: [(i32, &str); 21] = [
     (912, "Fleet hangar"),
@@ -157,10 +152,7 @@ const HOLDS: [(i32, &str); 21] = [
 ];
 
 /// Shield regeneration peaks at this fill level.
-const PEAK_SHIELD: f64 = 0.25;
-
-/// Uniform damage, pyfa's default pattern.
-const UNIFORM: [f64; 4] = [25.0; 4];
+pub(super) const PEAK_SHIELD: f64 = 0.25;
 
 /// The EM, thermal, kinetic, explosive mix a damage profile stands for on this fit.
 pub(super) fn incoming_mix(f: &mut rc::Fit<'_>, profile: &DamageProfile) -> [f64; 4] {
@@ -225,7 +217,7 @@ pub(super) fn burst_at(spool: f64) -> StatTimeOptions {
 
 pub(super) fn firepower_detail(f: &mut rc::Fit<'_>, time: StatTimeOptions) -> FirepowerDetail {
     let mut s = f.stats();
-    let drone_dps = super::damage(
+    let drone_dps = Damage::from(
         &s.get_stat_dmg(minions(), time, StatCritOptions::default())
             .dps,
     );
@@ -236,7 +228,11 @@ pub(super) fn firepower_detail(f: &mut rc::Fit<'_>, time: StatTimeOptions) -> Fi
             burst_at(spool),
             StatCritOptions::default(),
         );
-        (total(&weapon.dps), total(&all.volley), total(&all.dps))
+        (
+            Damage::from(&weapon.dps).total(),
+            Damage::from(&all.volley).total(),
+            Damage::from(&all.dps).total(),
+        )
     };
     let (pre, full) = (at(0.0), at(1.0));
     FirepowerDetail {
@@ -256,10 +252,6 @@ pub(super) fn firepower_detail(f: &mut rc::Fit<'_>, time: StatTimeOptions) -> Fi
     }
 }
 
-fn total(d: &rc::stats::StatDmgEntry) -> f64 {
-    (d.em + d.thermal + d.kinetic + d.explosive).into_f64()
-}
-
 /// Shield, armor and hull repair the fit does on itself, HP/s.
 fn local_reps(f: &mut rc::Fit<'_>, time: StatTimeOptions) -> [f64; 3] {
     f.stats()
@@ -269,28 +261,37 @@ fn local_reps(f: &mut rc::Fit<'_>, time: StatTimeOptions) -> [f64; 3] {
         })
 }
 
-pub(super) fn tank(f: &mut rc::Fit<'_>, time: StatTimeOptions) -> Tank {
+/// Repair rates, local and incoming, with armor spool-up left at zero.
+pub(super) fn repairs(f: &mut rc::Fit<'_>, time: StatTimeOptions) -> Tank {
     let Ok(r) = f
         .stats()
         .get_stat_rps(time, UnitInterval::from_f64_clamped(PEAK_SHIELD))
     else {
         return Tank::default();
     };
-    let armor = (r.armor.local + r.armor.remote).into_f64();
-    let armor_at = |f: &mut rc::Fit<'_>, spool| {
-        f.stats()
-            .get_stat_rps(burst_at(spool), UnitInterval::from_f64_clamped(PEAK_SHIELD))
-            .map_or(armor, |r| (r.armor.local + r.armor.remote).into_f64())
-    };
     Tank {
         passive_shield: r.shield.regen.into_f64(),
         shield: (r.shield.local + r.shield.remote).into_f64(),
-        armor,
+        armor: (r.armor.local + r.armor.remote).into_f64(),
         hull: (r.hull.local + r.hull.remote).into_f64(),
+        armor_spool: SpoolRange::default(),
+    }
+}
+
+/// Repair rates, with how armor repairs spool up.
+pub(super) fn tank(f: &mut rc::Fit<'_>, time: StatTimeOptions) -> Tank {
+    let tank = repairs(f, time);
+    let armor_at = |f: &mut rc::Fit<'_>, spool| {
+        f.stats()
+            .get_stat_rps(burst_at(spool), UnitInterval::from_f64_clamped(PEAK_SHIELD))
+            .map_or(tank.armor, |r| (r.armor.local + r.armor.remote).into_f64())
+    };
+    Tank {
         armor_spool: SpoolRange {
             pre: armor_at(f, 0.0),
             full: armor_at(f, 1.0),
         },
+        ..tank
     }
 }
 
@@ -335,11 +336,7 @@ pub(super) fn pane_stats(
         };
 
         let mining = |s: &mut rc::stats::FitStats<'_>, kinds| {
-            let m: StatMining = s.get_stat_mps(kinds, time, StatMiningResourceKind::Regular);
-            MiningRate {
-                yield_: (m.ore.yield_ + m.ice.yield_ + m.gas.yield_).into_f64(),
-                drain: (m.ore.drain + m.ice.drain + m.gas.drain).into_f64(),
-            }
+            read::mining_rate(&s.get_stat_mps(kinds, time, StatMiningResourceKind::Regular))
         };
         stats.mining = Mining {
             miner: mining(&mut s, StatMiningItemKinds::new(false).with_module(true)),
@@ -386,14 +383,7 @@ pub(super) fn pane_stats(
         sustained(sol, fit_id, base, cap_users, time, stats.cap_detail)
     };
 
-    let Ok(mut ship) = sol.get_item(&ship_id) else {
-        return;
-    };
-    let mut get = |attr: i32| {
-        ship.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr)))
-            .ok()
-            .map(|v| v.modified.into_f64())
-    };
+    let mut get = |attr: i32| read::attr(sol, ship_id, attr);
     stats.cap_detail.recharge_time = get(attr::RECHARGE_RATE).map(|ms| ms / 1000.0);
     // Stabilizers lower the status; strength is its negation, and 0 should not print as -0.
     stats.misc.warp_core_strength = 0.0 - get(attr::WARP_SCRAMBLE_STATUS).unwrap_or(0.0);
@@ -427,35 +417,54 @@ pub(super) fn cap_flow(s: &mut rc::stats::FitStats<'_>) -> (f64, f64) {
 /// pyfa's sustainable tank: capacitor-using repairers only count for the share of their cycles
 /// the capacitor can pay for at peak recharge, most efficient repairer first.
 pub(super) fn sustained(
-    sol: &mut SolOwned,
+    sol: &mut Sol,
     fit_id: FitId,
     base: Tank,
     cap_users: &[(ItemId, f64)],
     time: StatTimeOptions,
     cap: CapDetail,
 ) -> Tank {
+    let shares = repair_shares(sol, fit_id, cap_users, time);
+    let repairers = shares
+        .into_iter()
+        .zip(cap_users)
+        .filter_map(|(share, &(_, cap_per_sec))| Some((share?, cap_per_sec)))
+        .collect();
+    sustain(base, repairers, cap)
+}
+
+/// What each capacitor user adds to the fit's own repairs, found by switching it off: None for
+/// those that repair nothing.
+pub(super) fn repair_shares(
+    sol: &mut Sol,
+    fit_id: FitId,
+    cap_users: &[(ItemId, f64)],
+    time: StatTimeOptions,
+) -> Vec<Option<[f64; 3]>> {
     let Ok(mut f) = sol.get_fit(&fit_id) else {
-        return base;
+        return vec![None; cap_users.len()];
     };
     let before = local_reps(&mut f, time);
-    let mut repairers: Vec<([f64; 3], f64)> = Vec::new();
-    for &(id, cap_per_sec) in cap_users {
-        let Ok(mut module) = sol.get_module(&id) else {
-            continue;
-        };
-        let state = module.get_state();
-        module.set_state(rc::ModuleState::Online);
-        let after = sol
-            .get_fit(&fit_id)
-            .map_or(before, |mut f| local_reps(&mut f, time));
-        if let Ok(mut module) = sol.get_module(&id) {
-            module.set_state(state);
-        }
-        let share = [0, 1, 2].map(|i| before[i] - after[i]);
-        if share.iter().any(|&v| v > 1e-9) {
-            repairers.push((share, cap_per_sec));
-        }
-    }
+    cap_users
+        .iter()
+        .map(|&(id, _)| {
+            let mut module = sol.get_module(&id).ok()?;
+            let state = module.get_state();
+            module.set_state(rc::ModuleState::Online);
+            let after = sol
+                .get_fit(&fit_id)
+                .map_or(before, |mut f| local_reps(&mut f, time));
+            if let Ok(mut module) = sol.get_module(&id) {
+                module.set_state(state);
+            }
+            let share = [0, 1, 2].map(|i| before[i] - after[i]);
+            share.iter().any(|&v| v > 1e-9).then_some(share)
+        })
+        .collect()
+}
+
+/// The sustainable tank from the repairers' shares of `base` and their capacitor use, GJ/s.
+pub(super) fn sustain(base: Tank, mut repairers: Vec<([f64; 3], f64)>, cap: CapDetail) -> Tank {
     let mut reps = [base.shield, base.armor, base.hull];
     let mut used = cap.used;
     for (share, cap_per_sec) in &repairers {

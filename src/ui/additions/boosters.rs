@@ -408,7 +408,7 @@ fn booster_menu(
     menu = menu.item(super::super::item_stats::stats_entry(
         this,
         "Booster",
-        super::super::item_stats::StatsOf::Fitted(crate::engine::FitItem::Booster(type_id)),
+        super::super::item_stats::StatsOf::Fitted(crate::engine::FitItem::Booster(i)),
     ));
     if t.market_group.is_some() {
         let this = this.clone();

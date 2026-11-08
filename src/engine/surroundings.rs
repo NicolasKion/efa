@@ -3,25 +3,32 @@
 //! effects.
 //!
 //! Loose projected modules, drones and fighters have no fit of their own in pyfa. refine needs one
-//! to hold them, so each gets a hidden fit flying a capsule, which carries no bonuses that could
-//! change them. A fit projected more than once is added once per copy, since refine has no
-//! multiplier for projections.
+//! to hold them, so they go into hidden fits flying a capsule, which carries no bonuses that could
+//! change them, one per distance from the target. A fit projected more than once is added once
+//! per copy, since refine has no multiplier for projections.
 
 use rc::{
-    AbilityId, AttrId, CountNz, EveAttrId, ItemCommon, ItemId, ItemTypeId, Lender, MinionState,
-    ModRack, SolOwned, stats::StatSlot,
+    AbilityId, CountNz, ItemCommon, ItemId, ItemTypeId, Lender, MinionState, ModRack, SolOwned,
+    stats::StatSlot,
 };
 
-use super::{DroneInfo, Engine, Slots, add_fit_drone, add_fit_module, drone_info, module_state};
-use crate::fit::{
-    Fit, ModuleState,
-    fighters::Fighter,
-    projected::{EnvEffect, ProjectedModule},
+use super::{
+    DroneInfo, Engine, Pilot, Slots,
+    build::{add_fit, add_fit_module},
+    drone_info, read,
+};
+use crate::{
+    data::Slot,
+    dogma::attr,
+    fit::{
+        Fit, Module, ModuleState,
+        fighters::Fighter,
+        projected::{EnvEffect, ProjectedModule},
+    },
 };
 
 /// The capsule: a ship item with nothing on it that bonuses modules or drones.
 const CAPSULE: i32 = 670;
-const RADIUS: i32 = 162;
 
 /// Fighter abilities pyfa leaves off when a squadron has no attack to start with.
 const PROPULSION_ABILITIES: [i32; 2] = [4, 13];
@@ -56,15 +63,8 @@ pub struct FighterClasses {
     pub support: Slots,
 }
 
-/// Items of a fit added to the solar system that the stats read back.
-pub(super) struct Built {
-    pub ship: Option<ItemId>,
-    pub modules: Vec<ItemId>,
-    pub drones: Vec<ItemId>,
-    pub fighters: Vec<ItemId>,
-}
-
 /// Projected items the stats read back, in the fit's order.
+#[derive(Debug, Clone, Default)]
 pub(super) struct Projections {
     pub fighters: Vec<ItemId>,
     pub modules: Vec<Option<ItemId>>,
@@ -166,107 +166,52 @@ pub(super) fn fighter_classes(sol: &mut SolOwned, fit_id: rc::FitId) -> FighterC
     }
 }
 
-impl Engine {
-    /// Put a whole fit into the solar system as a fit of its own, the way the main fit is built.
-    pub(super) fn add_other_fit(&self, sol: &mut SolOwned, fit: &Fit) -> (rc::FitId, Built) {
-        let mut f = sol.add_fit();
-        self.add_skills(&mut f);
-        let ship = fit.ship.map(|ship| {
-            f.set_ship(ItemTypeId::from_i32(ship), None, None)
-                .get_item_id()
-        });
-        let mut modules = Vec::new();
-        for (rack, list) in [
-            (ModRack::High, &fit.high),
-            (ModRack::Mid, &fit.mid),
-            (ModRack::Low, &fit.low),
-        ] {
-            for (i, m) in list.iter().enumerate() {
-                let Some(m) = m else { continue };
-                if let Ok(module) = add_fit_module(
-                    &mut f,
-                    rack,
-                    rc::AddMode::Replace(rc::RackPos::from_usize_clamped(i)),
-                    m,
-                ) {
-                    modules.push(module.get_item_id());
-                }
-            }
-        }
-        if let Some(mode) = fit.mode {
-            f.set_stance(ItemTypeId::from_i32(mode));
-        }
-        if let Some(sec) = fit.sec_status {
-            f.set_sec_status(rc::FitSecStatus::from_f64_clamped(sec));
-        }
-        for &rig in fit.rigs.iter().flatten() {
-            f.add_rig(ItemTypeId::from_i32(rig));
-        }
-        for &subsystem in &fit.subsystems {
-            f.add_subsystem(ItemTypeId::from_i32(subsystem));
-        }
-        super::add_services(&mut f, fit);
-        let mut drones = Vec::new();
-        for stack in &fit.drones {
-            for i in 0..stack.count {
-                let state = if i < stack.active {
-                    MinionState::Engaging
-                } else {
-                    MinionState::InBay
-                };
-                let drone = add_fit_drone(&mut f, stack, state);
-                if i < stack.active {
-                    drones.push(drone.get_item_id());
-                }
-            }
-        }
-        let fighters = fit
-            .fighters
-            .iter()
-            .map(|fighter| (fighter.active, add_fighter(&mut f, fighter)))
-            .filter_map(|(active, id)| active.then_some(id))
-            .collect();
-        for (implant, active) in fit.applied_implants(&self.all5.implants) {
-            f.add_implant(ItemTypeId::from_i32(implant))
-                .set_state(active);
-        }
-        for booster in &fit.boosters {
-            let mut item = f.add_booster(ItemTypeId::from_i32(booster.type_id));
-            item.set_state(booster.active);
-            for &effect in &booster.side_effects {
-                let id = rc::EffectId::Dogma(rc::DogmaEffectId::from_i32(effect));
-                if let Ok(mut side_effect) = item.get_side_effect(&id) {
-                    side_effect.set_state(true);
-                }
-            }
-        }
-        let fit_id = f.get_fit_id();
-        (
-            fit_id,
-            Built {
-                ship,
-                modules,
-                drones,
-                fighters,
-            },
-        )
-    }
+/// The saved fits `fit` is boosted or projected by, which its numbers depend on.
+pub fn surrounding_fits<'a>(fit: &'a Fit, fits: &'a [Fit]) -> impl Iterator<Item = &'a Fit> + 'a {
+    let uids = fit
+        .command
+        .iter()
+        .map(|c| c.fit)
+        .chain(fit.projected.fits.iter().map(|p| p.fit));
+    let mut seen = Vec::new();
+    uids.filter(move |&uid| {
+        let new = uid != 0 && !seen.contains(&uid);
+        seen.push(uid);
+        new
+    })
+    .filter_map(|uid| fits.iter().find(|f| f.uid == uid))
+}
 
-    /// Other fits fly All 5 for now; pyfa gives each its own character.
-    fn add_skills(&self, f: &mut rc::Fit<'_>) {
-        self.all5.board(f);
-    }
+/// The hidden fits holding loose projected items, one per distance from the target: a capsule
+/// with All 5's skills, which carries no bonuses that could change what it holds.
+struct Holders<'a> {
+    pilot: &'a Pilot,
+    target_radius: f64,
+    /// By the range their items project from, as bits so they compare exactly.
+    fits: Vec<(Option<u64>, rc::FitId)>,
+}
 
-    /// A hidden fit to hold loose projected items: a capsule with the character's skills.
-    fn add_holder(&self, sol: &mut SolOwned) -> (rc::FitId, ItemId) {
+impl Holders<'_> {
+    /// The holder for items `range` metres from the target, added the first time it is asked
+    /// for.
+    fn at(&mut self, sol: &mut SolOwned, range: Option<f64>) -> rc::FitId {
+        let key = range.map(f64::to_bits);
+        if let Some(&(_, fit_id)) = self.fits.iter().find(|(k, _)| *k == key) {
+            return fit_id;
+        }
         let mut f = sol.add_fit();
-        self.add_skills(&mut f);
+        self.pilot.board(&mut f);
         let ship = f
             .set_ship(ItemTypeId::from_i32(CAPSULE), None, None)
             .get_item_id();
-        (f.get_fit_id(), ship)
+        let fit_id = f.get_fit_id();
+        place_ship(sol, ship, range, self.target_radius);
+        self.fits.push((key, fit_id));
+        fit_id
     }
+}
 
+impl Engine {
     /// Add what surrounds `fit` to the solar system its own items are in. `others` are the saved
     /// fits that projected and command fits refer to.
     pub(super) fn add_surroundings(
@@ -278,7 +223,7 @@ impl Engine {
         others: &[Fit],
     ) -> Projections {
         let find = |uid: u64| others.iter().find(|f| uid != 0 && f.uid == uid);
-        let target_radius = radius(sol, ship_id);
+        let target_radius = read::attr_or_zero(sol, ship_id, attr::RADIUS);
 
         let boosters: Vec<&Fit> = fit
             .command
@@ -292,8 +237,11 @@ impl Engine {
                 let _ = f.set_fleet(Some(&fleet));
             }
             for booster in boosters {
-                let (id, _) = self.add_other_fit(sol, booster);
-                if let Ok(mut f) = sol.get_fit(&id) {
+                // Other fits fly All 5 for now; pyfa gives each its own character.
+                let Some(placed) = add_fit(sol, booster, &self.all5) else {
+                    continue;
+                };
+                if let Ok(mut f) = sol.get_fit(&placed.fit_id) {
                     let _ = f.set_fleet(Some(&fleet));
                 }
             }
@@ -304,40 +252,55 @@ impl Engine {
                 continue;
             };
             for _ in 0..projected.amount {
-                let (_, built) = self.add_other_fit(sol, source);
-                if let Some(ship) = built.ship {
-                    place_ship(sol, ship, projected.range, target_radius);
-                }
-                for id in &built.modules {
-                    if let Ok(mut module) = sol.get_module(id) {
+                let Some(placed) = add_fit(sol, source, &self.all5) else {
+                    continue;
+                };
+                place_ship(sol, placed.ship, projected.range, target_radius);
+                for &(slot, _, id) in &placed.modules {
+                    if slot == Slot::Service {
+                        continue;
+                    }
+                    if let Ok(mut module) = sol.get_module(&id) {
                         let _ = module.add_proj(&ship_id);
                     }
                 }
-                for id in &built.drones {
-                    place_minion(sol, *id, projected.range, target_radius);
-                    if let Ok(mut drone) = sol.get_drone(id) {
+                let engaged = placed
+                    .drones
+                    .iter()
+                    .zip(&source.drones)
+                    .flat_map(|(ids, stack)| ids.iter().take(stack.active as usize));
+                for &id in engaged {
+                    place_minion(sol, id, projected.range, target_radius);
+                    if let Ok(mut drone) = sol.get_drone(&id) {
                         let _ = drone.add_proj(&ship_id);
                     }
                 }
-                for id in &built.fighters {
-                    place_minion(sol, *id, projected.range, target_radius);
-                    if let Ok(mut fighter) = sol.get_fighter(id) {
+                for id in placed.launched_fighters(source) {
+                    place_minion(sol, id, projected.range, target_radius);
+                    if let Ok(mut fighter) = sol.get_fighter(&id) {
                         let _ = fighter.add_proj(&ship_id);
                     }
                 }
             }
         }
 
+        let mut holders = Holders {
+            pilot: &self.all5,
+            target_radius,
+            fits: Vec::new(),
+        };
         let modules = fit
             .projected
             .modules
             .iter()
-            .map(|module| self.project_module(sol, module, ship_id, target_radius))
+            .map(|module| {
+                let holder = holders.at(sol, module.range);
+                project_module(sol, holder, module, ship_id)
+            })
             .collect();
 
         for stack in &fit.projected.drones {
-            let (holder, holder_ship) = self.add_holder(sol);
-            place_ship(sol, holder_ship, stack.range, target_radius);
+            let holder = holders.at(sol, stack.range);
             let state = if stack.active {
                 MinionState::Engaging
             } else {
@@ -361,8 +324,7 @@ impl Engine {
 
         let mut fighter_ids = Vec::with_capacity(fit.projected.fighters.len());
         for projected in &fit.projected.fighters {
-            let (holder, holder_ship) = self.add_holder(sol);
-            place_ship(sol, holder_ship, projected.range, target_radius);
+            let holder = holders.at(sol, projected.range);
             let Ok(mut f) = sol.get_fit(&holder) else {
                 continue;
             };
@@ -384,38 +346,31 @@ impl Engine {
             modules,
         }
     }
+}
 
-    fn project_module(
-        &self,
-        sol: &mut SolOwned,
-        module: &ProjectedModule,
-        target: ItemId,
-        target_radius: f64,
-    ) -> Option<ItemId> {
-        let (holder, holder_ship) = self.add_holder(sol);
-        place_ship(sol, holder_ship, module.range, target_radius);
-        let mut f = sol.get_fit(&holder).ok()?;
-        // A capsule has no racks to speak of; the module just needs somewhere to sit.
-        let Ok(mut item) = f.add_module(
-            ModRack::High,
-            rc::AddMode::Append,
-            ItemTypeId::from_i32(module.type_id),
-            module_state(module.state),
-        ) else {
-            return None;
-        };
-        if let Some(cycles) = module.spool {
-            item.set_spool_override(Some(rc::Spool::Cycles(rc::Count::from_u32(cycles))));
-        }
-        if let Some(charge) = module.charge {
-            item.set_charge_type_id(ItemTypeId::from_i32(charge));
-        }
-        let id = item.get_item_id();
-        if module.state != ModuleState::Offline {
-            let _ = item.add_proj(&target);
-        }
-        Some(id)
+/// Put a loose projected module into its holder, projecting onto `target` unless it is offline.
+fn project_module(
+    sol: &mut SolOwned,
+    holder: rc::FitId,
+    module: &ProjectedModule,
+    target: ItemId,
+) -> Option<ItemId> {
+    let mut f = sol.get_fit(&holder).ok()?;
+    let fitted = Module {
+        type_id: module.type_id,
+        state: module.state,
+        charge: module.charge,
+        spool: module.spool,
+        mutation: None,
+        rah: None,
+    };
+    // A capsule has no racks to speak of; the module just needs somewhere to sit.
+    let mut item = add_fit_module(&mut f, ModRack::High, rc::AddMode::Append, &fitted).ok()?;
+    let id = item.get_item_id();
+    if module.state != ModuleState::Offline {
+        let _ = item.add_proj(&target);
     }
+    Some(id)
 }
 
 /// Environmental effects act on the whole fit, except abyssal weather and clouds, which refine
@@ -444,17 +399,6 @@ fn add_env(sol: &mut SolOwned, fit_id: rc::FitId, ship_id: ItemId, env: &EnvEffe
     let _ = effect.add_proj(&ship_id);
 }
 
-fn radius(sol: &mut SolOwned, id: ItemId) -> f64 {
-    sol.get_item(&id)
-        .ok()
-        .and_then(|mut item| {
-            item.get_attr(&AttrId::Eve(EveAttrId::from_i32(RADIUS)))
-                .ok()
-                .map(|v| v.modified.into_f64())
-        })
-        .unwrap_or(0.0)
-}
-
 /// Where a projector `range` metres from the target's surface has its centre: refine measures
 /// range surface to surface, and the target sits at the origin.
 fn centre_distance(range: f64, own_radius: f64, target_radius: f64) -> rc::Coordinates {
@@ -469,7 +413,7 @@ fn centre_distance(range: f64, own_radius: f64, target_radius: f64) -> rc::Coord
 /// Without a range everything overlaps at the origin, which refine treats as point blank.
 fn place_ship(sol: &mut SolOwned, ship: ItemId, range: Option<f64>, target_radius: f64) {
     let Some(range) = range else { return };
-    let own = radius(sol, ship);
+    let own = read::attr_or_zero(sol, ship, attr::RADIUS);
     if let Ok(mut ship) = sol.get_ship(&ship) {
         ship.set_coordinates(centre_distance(range, own, target_radius));
     }
@@ -477,7 +421,7 @@ fn place_ship(sol: &mut SolOwned, ship: ItemId, range: Option<f64>, target_radiu
 
 fn place_minion(sol: &mut SolOwned, id: ItemId, range: Option<f64>, target_radius: f64) {
     let Some(range) = range else { return };
-    let own = radius(sol, id);
+    let own = read::attr_or_zero(sol, id, attr::RADIUS);
     let at = centre_distance(range, own, target_radius);
     if let Ok(mut drone) = sol.get_drone(&id) {
         drone.set_coordinates(at);

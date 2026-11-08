@@ -42,6 +42,7 @@ use crate::{
     fit::Fit,
     icons::Icon,
     item_data::{ItemData, TypeInfo},
+    text::roman,
 };
 use tree::{Node, Openness};
 
@@ -302,6 +303,8 @@ pub struct ItemStats {
     type_id: TypeId,
     /// The fit the item is part of, as last seen.
     fit: Option<Fit>,
+    /// The saved fits boosting or projecting onto it, as last seen.
+    surroundings: Vec<Fit>,
     /// The characters the pilot was built from; a new list means the pilot is out of date.
     characters: Option<Rc<crate::character::Characters>>,
     /// Who flies the fit, for skill-dependent values.
@@ -338,6 +341,11 @@ impl ItemStats {
         cx: &mut Context<Self>,
     ) -> Self {
         let synced = hub.read(cx).generation;
+        let surroundings = request.fit.as_ref().map_or_default(|f| {
+            crate::engine::surrounding_fits(f, &hub.read(cx).saved.fits)
+                .cloned()
+                .collect()
+        });
         let subscriptions = vec![
             cx.observe(&hub, |this, _, cx| this.pull(cx)),
             cx.observe_global::<ItemDataGlobal>(|_, cx| cx.notify()),
@@ -369,6 +377,7 @@ impl ItemStats {
             hub,
             target: request.target,
             type_id,
+            surroundings,
             fit: request.fit,
             synced,
             characters: None,
@@ -431,6 +440,9 @@ impl ItemStats {
                 self.target = Target::Type(self.type_id);
             } else if let Some(f) = hub.saved.fits.get(*fit) {
                 self.pilot = Rc::new(hub.characters.pilot(f.character, &self.loaded.catalog));
+                self.surroundings = crate::engine::surrounding_fits(f, &hub.saved.fits)
+                    .cloned()
+                    .collect();
                 self.fit = Some(f.clone());
             }
         }
@@ -448,7 +460,11 @@ impl ItemStats {
         if item.type_in(fit, &self.pilot.implants) != Some(self.type_id) {
             return;
         }
-        if let Some(inspection) = self.loaded.engine.inspect(fit, &self.pilot, item) {
+        if let Some(inspection) =
+            self.loaded
+                .engine
+                .inspect_among(fit, &self.surroundings, &self.pilot, item)
+        {
             self.inspection = Some(inspection);
         }
     }
@@ -1083,13 +1099,6 @@ fn export_csv(file_name: &str, csv: String, cx: &mut App) {
         }
     })
     .detach();
-}
-
-/// Roman numerals for skill levels, as pyfa writes them.
-const ROMAN: [&str; 6] = ["0", "I", "II", "III", "IV", "V"];
-
-fn roman(level: u8) -> &'static str {
-    ROMAN.get(usize::from(level)).copied().unwrap_or("?")
 }
 
 /// pyfa's requirements tree: each skill with what it needs in turn. A skill's own needs are

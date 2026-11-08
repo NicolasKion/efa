@@ -16,16 +16,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     data::{Catalog, ItemType, Slot, TypeId},
+    dogma::{attr, group},
     engine::{CalcOptions, Engine, Pilot},
     fit::{Fit, Module},
     item_data::{ItemData, Traits},
 };
-
-/// Dogma attributes the wizard reads from the data.
-mod attr {
-    pub const UPGRADE_COST: i32 = 1153;
-    pub const RIG_SIZE: i32 = 1547;
-}
 
 /// Meta groups, as the market's buttons name them.
 mod meta {
@@ -36,9 +31,6 @@ mod meta {
     pub const OFFICER: i32 = 5;
     pub const DEADSPACE: i32 = 6;
 }
-
-/// Battlecruiser groups: medium hulls that carry large shield extenders and boosters.
-const BATTLECRUISER_GROUPS: [i32; 3] = [419, 540, 1201];
 
 /// How big a hull is, read from its rig size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -355,7 +347,7 @@ impl Facts {
             size,
             battlecruiser: catalog
                 .get(ship)
-                .is_some_and(|s| BATTLECRUISER_GROUPS.contains(&s.group_id)),
+                .is_some_and(|s| group::BATTLECRUISERS.contains(&s.group_id)),
             totals,
             calibration: stats.calibration.output.unwrap_or(0.0),
             bonuses: info
@@ -409,29 +401,8 @@ fn bonus_lines(traits: &Traits) -> Vec<String> {
         .flat_map(|(_, b)| b)
         .chain(&traits.role)
         .chain(&traits.misc)
-        .map(|b| strip_markup(&b.text).to_lowercase())
+        .map(|b| crate::text::strip_tags(&b.text).to_lowercase())
         .collect()
-}
-
-fn strip_markup(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut in_tag = false;
-    for c in text.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            c if !in_tag => out.push(c),
-            _ => {}
-        }
-    }
-    out
-}
-
-/// Item groups the wizard tells apart.
-mod group {
-    pub const CAP_BOOSTER: i32 = 76;
-    pub const ANCILLARY_SHIELD_BOOSTER: i32 = 1156;
-    pub const ANCILLARY_ARMOR_REPAIRER: i32 = 1199;
 }
 
 /// How many of the strongest variations of each faction, deadspace or officer group a search
@@ -539,7 +510,7 @@ impl<'a> Setup<'a> {
     fn charge_for(&self, id: TypeId) -> Option<TypeId> {
         let module = self.catalog.get(id)?;
         match module.group_id {
-            group::CAP_BOOSTER | group::ANCILLARY_SHIELD_BOOSTER => self.cap_charge(id),
+            group::CAPACITOR_BOOSTER | group::ANCILLARY_SHIELD_BOOSTER => self.cap_charge(id),
             group::ANCILLARY_ARMOR_REPAIRER => self
                 .catalog
                 .types

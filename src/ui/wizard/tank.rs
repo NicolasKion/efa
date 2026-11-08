@@ -486,15 +486,9 @@ impl TankSection {
         };
         let shared = &self.shared;
         let change = outcome.change(&searched.problem, &shared.loaded.catalog);
-        let numbers = Numbers::after(
-            &shared.loaded.engine,
-            &shared.pilot,
-            &shared.fit,
-            &change,
-            searched.choices.layer,
-        );
         let (fit, stats) =
             wizard::tank::stats_after(&shared.loaded.engine, &shared.pilot, &shared.fit, &change);
+        let numbers = Numbers::of_stats(&stats, searched.choices.layer);
         self.selected = Some(i);
         self.after = Some(Picked {
             change,

@@ -4,9 +4,12 @@
 use crate::common::setup;
 use efa::{
     data::Catalog,
-    engine::{CalcOptions, Stats},
+    engine::{CalcOptions, FitItem, SourceKind, Stats},
     fit::{Fit, ModuleState},
 };
+
+/// shieldCapacity.
+const SHIELD_CAPACITY: i32 = 263;
 
 fn id(catalog: &Catalog, name: &str) -> i32 {
     catalog
@@ -217,4 +220,82 @@ fn projected_fighters_report_their_abilities() {
     let info = &stats.projected_fighters[0];
     assert!(info.abilities.iter().any(|a| a.active));
     assert!(speed(&stats) < base, "the squadron webs the target");
+}
+
+/// A gunboat boosted by a fleet and sitting in a system effect, with the booster among the saved
+/// fits, and those saved fits.
+fn boosted_gunboat(catalog: &Catalog, effect: &str) -> (Fit, Vec<Fit>) {
+    let mut target = eft(
+        catalog,
+        "[Rifter, Guns]\nGyrostabilizer II\n\n1MN Afterburner II\nMedium Shield Extender II\n\n\
+         200mm AutoCannon II, EMP S\n200mm AutoCannon II, EMP S\n",
+        1,
+    );
+    for m in target.modules_mut() {
+        m.state = ModuleState::Active;
+    }
+    let booster = eft(
+        catalog,
+        "[Vulture, Booster]\n\n\nShield Command Burst II, Shield Extension Charge\n",
+        2,
+    );
+    assert!(target.add_command_fit(2));
+    target.projected.add_env(env(catalog, effect));
+    let fits = vec![target.clone(), booster];
+    (target, fits)
+}
+
+#[test]
+fn graphs_see_boosts_and_system_effects_like_the_stats_pane() {
+    let Some((catalog, engine)) = setup() else {
+        return;
+    };
+    let (target, fits) = boosted_gunboat(catalog, "Class 6 Magnetar Effects");
+    let stats = engine.compute_among(&target, &fits, engine.all5(), CalcOptions::default());
+    let mut calm = target.clone();
+    calm.projected.env.clear();
+    calm.command.clear();
+    let plain = engine.compute(&calm);
+    assert!(stats.shield.hp > plain.shield.hp * 1.05, "the burst boosts");
+    assert!(
+        stats.dps.total() > plain.dps.total() * 1.05,
+        "the magnetar boosts"
+    );
+
+    let snap = engine.graph_snapshot(&target, &fits, engine.all5(), catalog);
+    assert!((snap.ship.hp[0] - stats.shield.hp).abs() < 1e-6);
+    assert!((snap.ship.max_velocity - speed(&stats)).abs() < 1e-6);
+    assert!((snap.ship.dps - stats.dps.total()).abs() < 1e-6);
+    let weapons: f64 = snap.weapons.iter().map(|w| w.dps.iter().sum::<f64>()).sum();
+    assert!(
+        (weapons - stats.dps.total()).abs() < 1e-6,
+        "per weapon {weapons}, ship {}",
+        stats.dps.total()
+    );
+}
+
+#[test]
+fn item_stats_see_boosts_and_system_effects_like_the_stats_pane() {
+    let Some((catalog, engine)) = setup() else {
+        return;
+    };
+    let (target, fits) = boosted_gunboat(catalog, "Class 6 Pulsar Effects");
+    let stats = engine.compute_among(&target, &fits, engine.all5(), CalcOptions::default());
+    let ship = engine
+        .inspect_among(&target, &fits, engine.all5(), FitItem::Ship)
+        .expect("the ship");
+    let shield = ship.attr(SHIELD_CAPACITY).expect("a shield").modified;
+    assert!(
+        (shield - stats.shield.hp).abs() < 1e-6,
+        "item stats {shield}, stats pane {}",
+        stats.shield.hp
+    );
+    let from = |projected: bool| {
+        ship.modifiers
+            .iter()
+            .filter(|(attr, _)| *attr == SHIELD_CAPACITY)
+            .flat_map(|(_, mods)| mods)
+            .any(|m| m.source.projected == projected && m.source.kind != SourceKind::Skill)
+    };
+    assert!(from(true), "the burst shows as a projected source");
 }

@@ -234,6 +234,8 @@ const DISTANCE_ICON: i32 = 1391;
 const TIME_ICON: i32 = 1392;
 const SPEED_ICON: i32 = 1389;
 const SIG_ICON: i32 = 1390;
+/// The resistance icon, kinetic's shield.
+const RESIST_ICON: i32 = 1393;
 
 const ALWAYS: &[Condition] = &[];
 const DISTANCE_TIP: &str =
@@ -595,7 +597,7 @@ impl Graph {
                     Param::Resist,
                     Unit::Percent,
                     "Target resistance",
-                    1393,
+                    RESIST_ICON,
                     Some(0.0),
                     (0.0, 100.0),
                 ),

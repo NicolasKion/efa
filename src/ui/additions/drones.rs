@@ -14,7 +14,8 @@ use gpui_kit::{
 use super::{ROW_HEIGHT, addition_menu, misc_entries, price_text};
 use crate::{
     data::{Catalog, Kind},
-    engine::{DroneInfo, ItemRef, Stats, drone_attr, drone_effect},
+    dogma::{attr as drone_attr, effect},
+    engine::{DroneInfo, ItemRef, Stats},
     fit::{DroneStack, mutation::display_name},
     icons::Icon,
     prices::Prices,
@@ -363,7 +364,7 @@ fn misc(catalog: &Catalog, stack: &DroneStack, info: &DroneInfo) -> Option<(Stri
     use drone_attr::{
         ACCESS_DIFFICULTY_BONUS, FALLOFF_BONUS, MAX_RANGE_BONUS, MAX_TARGET_RANGE_BONUS,
         NEUT_AMOUNT, NEUT_DURATION, OPTIMAL_SIG_RADIUS, SCAN_GRAVIMETRIC_BONUS, SCAN_LADAR_BONUS,
-        SCAN_MAGNETOMETRIC_BONUS, SCAN_RADAR_BONUS, SCAN_RESOLUTION_BONUS, SIG_RADIUS_BONUS,
+        SCAN_MAGNETOMETRIC_BONUS, SCAN_RADAR_BONUS, SCAN_RESOLUTION_BONUS, SIGNATURE_RADIUS_BONUS,
         SPEED_FACTOR, TRACKING_SPEED, TRACKING_SPEED_BONUS,
     };
     let group = catalog.get(stack.type_id)?.group_id;
@@ -384,12 +385,12 @@ fn misc(catalog: &Catalog, stack: &DroneStack, info: &DroneInfo) -> Option<(Stri
                 let normalized = tracking * 40_000.0 / sig;
                 parts.push((format_amount(normalized, 3, false), "Tracking speed".into()));
             }
-            if info.has_effect(drone_effect::NEUTRALIZER)
+            if info.has_effect(effect::ENTITY_NEUTRALIZER)
                 && let Some(text) = neut()
             {
                 parts.push((text, "Energy neutralization per second".into()));
             }
-            if info.has_effect(drone_effect::WEAPON_DISRUPTOR)
+            if info.has_effect(effect::ENTITY_WEAPON_DISRUPTOR)
                 && let Some((display, names)) = strongest(&[
                     (a(MAX_RANGE_BONUS), "optimal range"),
                     (a(FALLOFF_BONUS), "falloff range"),
@@ -401,7 +402,7 @@ fn misc(catalog: &Catalog, stack: &DroneStack, info: &DroneInfo) -> Option<(Stri
                     capitalize(&format!("{} disruption", format_list(&names))),
                 ));
             }
-            if info.has_effect(drone_effect::ECM)
+            if info.has_effect(effect::ENTITY_ECM)
                 && let Some((display, names)) = strongest(&[
                     (a(SCAN_GRAVIMETRIC_BONUS), "gravimetric"),
                     (a(SCAN_LADAR_BONUS), "ladar"),
@@ -415,7 +416,7 @@ fn misc(catalog: &Catalog, stack: &DroneStack, info: &DroneInfo) -> Option<(Stri
                     capitalize(&format!("{} strength{plural}", format_list(&names))),
                 ));
             }
-            if info.has_effect(drone_effect::SENSOR_DAMPENER)
+            if info.has_effect(effect::ENTITY_SENSOR_DAMPENER)
                 && let Some((display, names)) = strongest(&[
                     (a(MAX_TARGET_RANGE_BONUS), "lock range"),
                     (a(SCAN_RESOLUTION_BONUS), "scan resolution"),
@@ -426,7 +427,7 @@ fn misc(catalog: &Catalog, stack: &DroneStack, info: &DroneInfo) -> Option<(Stri
                     capitalize(&format!("{} dampening", format_list(&names))),
                 ));
             }
-            if info.has_effect(drone_effect::WEBIFIER)
+            if info.has_effect(effect::ENTITY_WEBIFIER)
                 && let Some(speed) = a(SPEED_FACTOR)
             {
                 parts.push((
@@ -434,8 +435,8 @@ fn misc(catalog: &Catalog, stack: &DroneStack, info: &DroneInfo) -> Option<(Stri
                     "Speed reduction".into(),
                 ));
             }
-            if info.has_effect(drone_effect::TARGET_PAINTER)
-                && let Some(bonus) = a(SIG_RADIUS_BONUS)
+            if info.has_effect(effect::ENTITY_TARGET_PAINTER)
+                && let Some(bonus) = a(SIGNATURE_RADIUS_BONUS)
             {
                 parts.push((
                     format!("{}%", format_amount(bonus, 3, true)),
