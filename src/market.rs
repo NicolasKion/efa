@@ -2,6 +2,7 @@
 //! the meta group buttons, recently used items, charges for the active fit and the order items
 //! are listed in.
 
+pub(crate) mod charges;
 pub mod jargon;
 
 use std::{

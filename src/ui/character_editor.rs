@@ -26,8 +26,8 @@ use super::{
     Hub, Loaded,
     characters::name_dialog,
     dialogs::{Confirm, Prompt, confirm, prompt_value},
+    drag::{DragSource, Dragged},
     editor_kit::ItemTree,
-    fitting::{DragSource, Dragged},
     widgets::{
         DropHighlight, count, empty_line, entry, icon_box, icon_label, redraw_on_change, tree_row,
     },

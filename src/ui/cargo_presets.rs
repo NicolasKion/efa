@@ -24,11 +24,11 @@ use super::{
     Action, AdditionsTab, Efa, Loaded,
     additions::amount,
     dialogs::{Confirm, Prompt, confirm, prompt_text},
+    drag::{DragPreview, DragSource, Dragged},
     editor_kit::{
         self, CONTEXT, Delete, Duplicate, FOLD_W, FocusSearch, ItemTree, ListEntry, MIDDLE_MIN_W,
         Rename, Sidebar, icon_button, name_problem, next_after_delete,
     },
-    fitting::{DragPreview, DragSource, Dragged},
     widgets::{DropHighlight, TipExt, caption, count, empty_state, icon_box, redraw_on_change},
 };
 use crate::{

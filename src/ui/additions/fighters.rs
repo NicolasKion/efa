@@ -30,7 +30,7 @@ use crate::{
     ui::{
         Efa, Loaded,
         columns::{ICON_W, STATE_W},
-        fitting::{DragSource, Dragged},
+        drag::{DragSource, Dragged},
         validation::flag,
         widgets::{color, entry, icon, icon_box, icon_label, item_entry, on_efa},
     },

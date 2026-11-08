@@ -23,7 +23,7 @@ use crate::{
     icons::Icon,
     ui::{
         Action, AddKind, AdditionsTab, Efa, Loaded, RowRef,
-        fitting::{DragPreview, DragSource, Dragged},
+        drag::{DragPreview, DragSource, Dragged},
         widgets::{icon_box, short},
     },
 };

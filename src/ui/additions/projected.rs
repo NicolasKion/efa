@@ -20,6 +20,7 @@ use super::{
     drones::format_amount,
     linked::{Link, add_fit_entries},
 };
+use crate::market::charges::{ChargeMenu, compatible_charges, structure_charges};
 use crate::ui::widgets::{DropHighlight, empty_line};
 use crate::{
     data::{Catalog, Kind, TypeId, projection::EnvMenu},
@@ -33,7 +34,7 @@ use crate::{
     ui::{
         Efa, Loaded, RowRef,
         columns::{ICON_W, STATE_W},
-        fitting::{ChargeMenu, DragSource, Dragged, compatible_charges, structure_charges},
+        drag::{DragSource, Dragged},
         item_stats::{StatsOf, stats_entry},
         widgets::{color, entry, icon, icon_box, icon_label, item_entry, on_efa},
     },

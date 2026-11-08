@@ -24,7 +24,7 @@ use crate::{
     ui::{
         Action, AddKind, Efa, Loaded,
         columns::STATE_W,
-        fitting::{DragSource, Dragged},
+        drag::{DragSource, Dragged},
         stats::format::round_to_prec,
         validation::flag,
         widgets::{color, entry, icon_box, icon_label, item_entry, on_efa, short},

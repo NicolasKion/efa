@@ -9,6 +9,7 @@ mod characters;
 pub mod chrome;
 mod columns;
 mod dialogs;
+mod drag;
 mod editor_kit;
 mod error_dialog;
 mod esi;

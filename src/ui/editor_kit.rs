@@ -18,7 +18,7 @@ use gpui_kit::{
 
 use super::{
     Loaded,
-    fitting::{DragPreview, DragSource, Dragged},
+    drag::{DragPreview, DragSource, Dragged},
     widgets::{DropHighlight, caption, empty_state, icon_box, list_row, tree_row},
 };
 use crate::{

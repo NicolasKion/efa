@@ -22,11 +22,11 @@ use gpui_kit::{
 use super::{
     Action, Efa, Loaded,
     dialogs::{Confirm, Prompt, confirm, prompt_text},
+    drag::{DragPreview, DragSource, Dragged},
     editor_kit::{
         self, CONTEXT, Delete, Duplicate, FOLD_W, FocusSearch, ListEntry, MIDDLE_MIN_W, Rename,
         Sidebar, icon_button, name_problem, next_after_delete,
     },
-    fitting::{DragPreview, DragSource, Dragged},
     item_data, item_stats,
     stats::format,
     tooltips,

@@ -23,7 +23,7 @@ use crate::{
     implant_set::{self, PrecalcSet},
     ui::{
         Action, AddKind, Efa, Loaded,
-        fitting::{DragSource, Dragged},
+        drag::{DragSource, Dragged},
         validation::flag,
         widgets::{entry, icon_box, icon_label, item_entry, item_label, on_efa},
     },

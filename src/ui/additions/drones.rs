@@ -23,7 +23,7 @@ use crate::{
     ui::{
         Action, AddKind, Efa, Loaded,
         columns::{ICON_W, STATE_W, text_width},
-        fitting::{DragPreview, DragSource, Dragged},
+        drag::{DragPreview, DragSource, Dragged},
         stats::format::{self, capitalize, format_list},
         validation::flag,
         widgets::{color, icon, icon_box},

@@ -18,12 +18,11 @@ use gpui_kit::{
 };
 
 use super::menus::market_menu;
+use crate::market::charges::{ChargeMenu, compatible_charges, structure_charges};
 use crate::ui::tooltips::item_tooltip;
 use crate::ui::{
     Efa, Loaded,
-    fitting::{
-        ChargeMenu, DragPreview, DragSource, Dragged, compatible_charges, structure_charges,
-    },
+    drag::{DragPreview, DragSource, Dragged},
     widgets::{count, icon_box, list_row, tree_row},
 };
 use crate::{
