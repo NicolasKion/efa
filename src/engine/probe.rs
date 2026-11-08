@@ -26,8 +26,7 @@ pub struct TankProbe {
     pub hull: Layer,
     /// The damage mix the layers are judged against: EM, thermal, kinetic, explosive.
     pub incoming: [f64; 4],
-    /// Repair rates the capacitor can keep up, reloads counted; armor spool-up is left out.
-    /// Local repairs per second while the repairers run.
+    /// Local repairs per second while the repairers run, reloads counted.
     pub repairs: Tank,
     pub cap_stable: bool,
 }
