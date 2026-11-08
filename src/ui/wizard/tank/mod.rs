@@ -47,7 +47,7 @@ const DETAIL_W: f32 = stats::PANE_WIDTH + 16.;
 
 /// How the results are ordered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Sort {
+enum Sort {
     Goal,
     Price,
     Ehp,
@@ -84,7 +84,7 @@ struct RoomCounts {
 
 /// A picked tank: its change, the numbers the fit gets with it, and the fit with it made and its
 /// stats, which the preview shows in the main window's sections.
-pub(super) struct Picked {
+struct Picked {
     change: Change,
     numbers: Numbers,
     fit: Fit,
