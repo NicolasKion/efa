@@ -201,7 +201,7 @@ pub fn table_head(cx: &App) -> Div {
 }
 
 /// A rack's label in the fitting view and its icon, pyfa's "High Slots".
-pub fn rack_label(slot: Slot) -> (&'static str, Option<i32>) {
+fn rack_label(slot: Slot) -> (&'static str, Option<i32>) {
     match slot {
         Slot::High => ("High Slots", Some(icon::HIGH)),
         Slot::Mid => ("Med Slots", Some(icon::MID)),
@@ -546,9 +546,9 @@ pub fn empty_line(text: impl Into<SharedString>, cx: &App) -> Div {
 }
 
 /// How far each level of a tree is indented.
-pub const INDENT: f32 = 14.;
+const INDENT: f32 = 14.;
 /// Height of a line of a tree.
-pub const TREE_ROW_H: f32 = 22.;
+const TREE_ROW_H: f32 = 22.;
 
 /// A line of a tree, such as the market's groups: indented `depth` levels, with an open or
 /// closed chevron when it has children (`expanded` is None for a leaf), then the icon and the
