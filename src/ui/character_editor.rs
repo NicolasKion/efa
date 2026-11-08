@@ -8,10 +8,10 @@
 use std::{collections::HashSet, rc::Rc};
 
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName, Sizable, WindowExt,
+    ActiveTheme, Disableable, IconName, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
-    input::{Input, InputEvent, InputState},
+    input::{Input, InputState},
     menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
     v_flex,
 };
@@ -25,17 +25,20 @@ use gpui_kit::{
 use super::{
     Hub, Loaded,
     characters::name_dialog,
-    widgets::{entry, icon_box, icon_label},
+    dialogs::{Confirm, Prompt, confirm, prompt_value},
+    editor_kit::ItemTree,
+    fitting::{DragSource, Dragged},
+    widgets::{
+        DropHighlight, count, empty_line, entry, icon_box, icon_label, redraw_on_change, tree_row,
+    },
 };
 use crate::{
     character::{CharacterId, Characters, Keep, MAX_LEVEL},
-    data::{Kind, TypeId},
+    data::{ItemType, Kind, TypeId},
     icons::Icon,
 };
 
 const ROW_HEIGHT: f32 = 24.;
-/// Most implant search hits listed, so a one-letter query stays cheap to draw.
-const SEARCH_LIMIT: usize = 200;
 const MENU_MAX_H: f32 = 480.;
 /// What pyfa says before importing skills.
 const IMPORT_NOTICE: &str = "Imported skills are pending: click Save to keep them.";
@@ -69,7 +72,8 @@ pub struct CharacterEditor {
     /// The skill the level keys apply to.
     skill: Option<TypeId>,
     search: Entity<InputState>,
-    implant_search: Entity<InputState>,
+    /// The implants to plug in, as the market's tree.
+    implant_tree: ItemTree,
     tree_focus: FocusHandle,
     notice: Option<SharedString>,
     /// A Get Skills request on its way.
@@ -89,8 +93,8 @@ impl CharacterEditor {
     ) -> Self {
         window.set_window_title("efa: Character Editor");
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search skills"));
-        let implant_search =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Search implants"));
+        let implant_tree =
+            ItemTree::new(&loaded.catalog, is_implant, "Search implants", window, cx);
         let subscriptions = vec![
             cx.observe(&hub, |this: &mut Self, hub, cx| {
                 let characters = &hub.read(cx).characters;
@@ -105,16 +109,8 @@ impl CharacterEditor {
                     cx.notify();
                 }
             }),
-            cx.subscribe(&search, |_, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change) {
-                    cx.notify();
-                }
-            }),
-            cx.subscribe(&implant_search, |_, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change) {
-                    cx.notify();
-                }
-            }),
+            redraw_on_change(cx, &search),
+            redraw_on_change(cx, &implant_tree.search),
         ];
         let characters = Rc::clone(&hub.read(cx).characters);
         let groups = skill_groups(&loaded);
@@ -128,7 +124,7 @@ impl CharacterEditor {
             expanded: HashSet::new(),
             skill: None,
             search,
-            implant_search,
+            implant_tree,
             tree_focus: cx.focus_handle(),
             notice: None,
             esi_fetch: None,
@@ -261,30 +257,12 @@ impl CharacterEditor {
             self.characters.name(id)
         );
         let this = cx.weak_entity();
-        window.open_dialog(cx, move |dialog, _, _| {
-            let (yes, no) = (this.clone(), question.clone());
-            dialog.title("Confirm Delete").w(px(360.)).child(
-                v_flex().gap_3().child(no).child(
-                    h_flex()
-                        .justify_end()
-                        .gap_2()
-                        .child(
-                            Button::new("delete-no")
-                                .label("No")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(Button::new("delete-yes").danger().label("Yes").on_click(
-                            move |_, window, cx| {
-                                window.close_dialog(cx);
-                                let _ = yes.update(cx, |e, cx| {
-                                    e.edit(cx, |c, _| c.delete(id));
-                                    e.selected = CharacterId::All5;
-                                    e.skill = None;
-                                });
-                            },
-                        )),
-                ),
-            )
+        confirm(window, cx, Confirm::delete(question), move |_, cx| {
+            let _ = this.update(cx, |e, cx| {
+                e.edit(cx, |c, _| c.delete(id));
+                e.selected = CharacterId::All5;
+                e.skill = None;
+            });
         });
     }
 
@@ -326,7 +304,11 @@ impl CharacterEditor {
         let result = self.edit(cx, |c, loaded| c.import_skills(id, &text, &loaded.catalog));
         self.notice = Some(match result {
             Ok(0) => IMPORT_NOTICE.into(),
-            Ok(errors) => format!("{IMPORT_NOTICE} {errors} line(s) could not be read.").into(),
+            Ok(errors) => format!(
+                "{IMPORT_NOTICE} {} could not be read.",
+                count(errors, "line", "lines")
+            )
+            .into(),
             Err(e) => e.into(),
         });
         cx.notify();
@@ -344,52 +326,15 @@ impl CharacterEditor {
     fn sec_status_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let id = self.selected;
         let current = self.characters.sec_status(id);
-        let input = cx.new(|cx| InputState::new(window, cx).default_value(format!("{current:.2}")));
         let this = cx.weak_entity();
-        window.open_dialog(cx, move |dialog, _, _| {
-            let (input, this) = (input.clone(), this.clone());
-            // The OK button and Enter both submit; it closes the dialog itself when done.
-            let submit: crate::ui::widgets::Submit = {
-                let (input, this) = (input.clone(), this.clone());
-                Rc::new(move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                    let Ok(value) = input.read(cx).value().trim().parse::<f64>() else {
-                        return;
-                    };
-                    window.close_dialog(cx);
-                    let _ = this.update(cx, |e, cx| {
-                        e.edit(cx, |c, _| c.set_sec_status(id, value));
-                    });
-                })
-            };
-            dialog
-                .on_ok({
-                    let submit = Rc::clone(&submit);
-                    move |e, w, cx| {
-                        submit(e, w, cx);
-                        false
-                    }
-                })
-                .title("Set Security Status")
-                .w(px(320.))
-                .child(
-                    v_flex()
-                        .gap_3()
-                        .child("Security Status is used in some CONCORD hull calculations")
-                        .child(Input::new(&input))
-                        .child(
-                            h_flex().justify_end().child(
-                                Button::new("sec-status-ok")
-                                    .primary()
-                                    .label("OK")
-                                    .on_click({
-                                        let submit = Rc::clone(&submit);
-                                        move |e: &ClickEvent, w: &mut Window, cx: &mut App| {
-                                            submit(e, w, cx);
-                                        }
-                                    }),
-                            ),
-                        ),
-                )
+        let prompt = Prompt::new("Set Security Status")
+            .message("Security Status is used in some CONCORD hull calculations")
+            .default(format!("{current:.2}"))
+            .width(320.);
+        prompt_value(window, cx, prompt, move |value: f64, _, cx| {
+            let _ = this.update(cx, |e, cx| {
+                e.edit(cx, |c, _| c.set_sec_status(id, value));
+            });
         });
     }
 
@@ -579,28 +524,21 @@ impl CharacterEditor {
         indent: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = cx.theme();
         let dirty = self.characters.is_skill_dirty(self.selected, skill);
         let selected = self.skill == Some(skill);
         let builtin = self.selected.is_builtin();
-        let row = h_flex()
-            .id(SharedString::from(format!("skill-{skill}")))
-            .h(px(ROW_HEIGHT))
-            .px_2()
-            .gap_2()
-            .when(indent, Styled::pl_6)
-            .when(selected, |r| r.bg(theme.table_active))
-            .hover(|s| s.bg(theme.table_hover))
-            .child(
-                gpui_kit::component::Icon::new(IconName::BookOpen)
-                    .size(px(14.))
-                    .text_color(if dirty {
-                        theme.danger
-                    } else {
-                        theme.muted_foreground
-                    }),
-            )
-            .child(div().flex_1().min_w_0().truncate().child(name.to_owned()))
+        let icon = skill_icon(dirty, cx);
+        let row = tree_row(
+            SharedString::from(format!("skill-{skill}")),
+            usize::from(indent),
+            None,
+            Some(icon),
+            name.to_owned(),
+            selected,
+            cx,
+        );
+        let theme = cx.theme();
+        let row = row
             .child({
                 let (text, capped) = self.level_text(skill);
                 div()
@@ -678,30 +616,22 @@ impl CharacterEditor {
                     .any(|&(s, _)| self.characters.is_skill_dirty(self.selected, s));
                 let id = group.id;
                 rows.push(
-                    h_flex()
-                        .id(SharedString::from(format!("skill-group-{id}")))
-                        .h(px(ROW_HEIGHT))
-                        .px_2()
-                        .gap_2()
-                        .hover(|s| s.bg(theme.table_hover))
-                        .child(div().w(px(10.)).child(if open { "▾" } else { "▸" }))
-                        .child(
-                            gpui_kit::component::Icon::new(IconName::BookOpen)
-                                .size(px(14.))
-                                .text_color(if dirty {
-                                    theme.danger
-                                } else {
-                                    theme.muted_foreground
-                                }),
-                        )
-                        .child(group.name.clone())
-                        .on_click(cx.listener(move |e, _: &ClickEvent, _, cx| {
-                            if !e.expanded.remove(&id) {
-                                e.expanded.insert(id);
-                            }
-                            cx.notify();
-                        }))
-                        .into_any_element(),
+                    tree_row(
+                        SharedString::from(format!("skill-group-{id}")),
+                        0,
+                        Some(open),
+                        Some(skill_icon(dirty, cx)),
+                        group.name.clone(),
+                        false,
+                        cx,
+                    )
+                    .on_click(cx.listener(move |e, _: &ClickEvent, _, cx| {
+                        if !e.expanded.remove(&id) {
+                            e.expanded.insert(id);
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element(),
                 );
                 if open {
                     for (skill, name) in &group.skills {
@@ -811,29 +741,20 @@ impl CharacterEditor {
     }
 
     fn implants_tab(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
         if self.selected.is_builtin() {
-            return div()
-                .p_4()
-                .text_color(theme.muted_foreground)
-                .child("All 0 and All 5 have no implants. Pick or make another character.")
-                .into_any_element();
+            return empty_line(
+                "All 0 and All 5 have no implants. Pick or make another character.",
+                cx,
+            )
+            .into_any_element();
         }
-        let catalog = &self.loaded.catalog;
-        let query = self.implant_search.read(cx).value().to_string();
-        let hits: Vec<TypeId> = crate::market::search(catalog, &query, SEARCH_LIMIT)
-            .into_iter()
-            .filter(|&t| catalog.get(t).is_some_and(|t| t.kind == Kind::Implant))
-            .collect();
-        let available: Vec<AnyElement> = hits
-            .iter()
-            .enumerate()
-            .map(|(i, &t)| {
-                self.implant_row(SharedString::from(format!("available-{i}")), t, None, cx)
-                    .on_click(cx.listener(move |e, _: &ClickEvent, _, cx| e.add_implant(t, cx)))
-                    .into_any_element()
-            })
-            .collect();
+        let loaded = Rc::clone(&self.loaded);
+        let available = self.implant_tree.render(
+            &loaded,
+            cx,
+            |e: &mut Self| &mut e.implant_tree,
+            |e: &mut Self, t, _, cx| e.add_implant(t, cx),
+        );
         let plugged: Vec<AnyElement> = self
             .characters
             .implants(self.selected)
@@ -860,19 +781,9 @@ impl CharacterEditor {
                 .into_any_element()
             })
             .collect();
-        let hint = query
-            .trim()
-            .is_empty()
-            .then_some("Search for implants, then click one to plug it in.");
-        let sets: Vec<(String, Vec<TypeId>)> = self
-            .hub
-            .read(cx)
-            .saved
-            .implant_sets
-            .iter()
-            .map(|s| (s.name.clone(), s.implants.clone()))
-            .collect();
         let this = cx.weak_entity();
+        let hub = self.hub.downgrade();
+        let theme = cx.theme();
         h_flex()
             .flex_1()
             .min_h_0()
@@ -884,22 +795,11 @@ impl CharacterEditor {
                     .min_w_0()
                     .h_full()
                     .gap_1()
-                    .child(Input::new(&self.implant_search).small())
+                    .child(div().flex_1().min_h_0().child(available))
                     .child(
-                        v_flex()
-                            .id("editor-available")
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_y_scroll()
-                            .border_1()
-                            .border_color(theme.border)
-                            .rounded(px(4.))
-                            .when_some(hint, |pane, hint| {
-                                pane.child(
-                                    div().p_2().text_color(theme.muted_foreground).child(hint),
-                                )
-                            })
-                            .children(available),
+                        div().text_xs().text_color(theme.muted_foreground).child(
+                            "Double-click an implant or drag it to the right to plug it in.",
+                        ),
                     ),
             )
             .child(
@@ -911,19 +811,31 @@ impl CharacterEditor {
                     .overflow_y_scroll()
                     .border_1()
                     .border_color(theme.border)
-                    .rounded(px(4.))
                     .when(plugged.is_empty(), |pane| {
-                        pane.child(
-                            div()
-                                .p_2()
-                                .text_color(theme.muted_foreground)
-                                .child("No implants plugged in."),
-                        )
+                        pane.child(empty_line("No implants plugged in.", cx))
                     })
                     .children(plugged)
-                    // pyfa's implantEditor menu.
+                    .drop_highlight_if::<Dragged>(|d| matches!(d.source, DragSource::Market))
+                    .on_drop(cx.listener(|e, dragged: &Dragged, _, cx| {
+                        if matches!(dragged.source, DragSource::Market) {
+                            for t in dragged.types() {
+                                e.add_implant(t, cx);
+                            }
+                        }
+                    }))
+                    // pyfa's implantEditor menu, with the sets as they are when it opens.
                     .context_menu(move |menu, window, cx| {
-                        apply_set_menu(menu, &this, &sets, window, cx)
+                        let Some(hub) = hub.upgrade() else {
+                            return menu;
+                        };
+                        let sets: Vec<(String, Vec<TypeId>)> = hub
+                            .read(cx)
+                            .saved
+                            .implant_sets
+                            .iter()
+                            .map(|s| (s.name.clone(), s.implants.clone()))
+                            .collect();
+                        apply_set_menu(menu, &this, sets, window, cx)
                     }),
             )
             .into_any_element()
@@ -1194,14 +1106,14 @@ impl CharacterEditor {
 fn apply_set_menu(
     menu: PopupMenu,
     this: &gpui_kit::WeakEntity<CharacterEditor>,
-    sets: &[(String, Vec<TypeId>)],
+    sets: Vec<(String, Vec<TypeId>)>,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     if sets.is_empty() {
         return menu;
     }
-    let (this, sets) = (this.clone(), sets.to_vec());
+    let this = this.clone();
     menu.submenu_with_element(
         "Apply Implant Set",
         icon_label(IconName::Plus, "Apply Implant Set"),
@@ -1249,6 +1161,24 @@ fn skill_groups(loaded: &Loaded) -> Vec<Group> {
     groups
 }
 
+/// What the implants tab offers to plug in.
+fn is_implant(t: &ItemType) -> bool {
+    t.kind == Kind::Implant
+}
+
+/// A skill's or group's book, red while it has unsaved levels.
+fn skill_icon(dirty: bool, cx: &App) -> AnyElement {
+    let theme = cx.theme();
+    gpui_kit::component::Icon::new(IconName::BookOpen)
+        .size(px(14.))
+        .text_color(if dirty {
+            theme.danger
+        } else {
+            theme.muted_foreground
+        })
+        .into_any_element()
+}
+
 impl Render for CharacterEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Another window may have deleted the character shown here.
@@ -1266,9 +1196,6 @@ impl Render for CharacterEditor {
             .size_full()
             .p_3()
             .gap_2()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .text_sm()
             .child(self.header(cx))
             .child(self.tab_bar(cx))
             .child(v_flex().flex_1().min_h_0().child(body))
