@@ -282,20 +282,27 @@ impl Item for Fit {
                 Self::COLUMNS.join(", ")
             ),
             |r| {
-                let kind: String = r.get(11)?;
+                // After id and position, the columns in their listed order.
+                let at = |column: &str| {
+                    2 + Self::COLUMNS
+                        .iter()
+                        .position(|c| *c == column)
+                        .expect("a column of the fits table")
+                };
+                let kind: String = r.get(at("damage_profile"))?;
                 Ok(Fit {
-                    name: r.get(2)?,
-                    ship: r.get(3)?,
-                    uid: r.get::<_, Option<u64>>(4)?.unwrap_or(0),
-                    character: character(r, 5)?,
-                    implant_source: code(r, 7)?,
-                    mode: r.get(8)?,
-                    sec_status: r.get(9)?,
-                    system_security: code(r, 10)?,
-                    damage_profile: damage_profile(r, 11, &kind)?,
-                    ignore_restrictions: r.get(17)?,
-                    notes: r.get(18)?,
-                    modified: r.get::<_, Option<u64>>(19)?.unwrap_or(0),
+                    name: r.get(at("name"))?,
+                    ship: r.get(at("ship_type_id"))?,
+                    uid: r.get::<_, Option<u64>>(at("uid"))?.unwrap_or(0),
+                    character: character(r, at("character"))?,
+                    implant_source: code(r, at("implant_source"))?,
+                    mode: r.get(at("mode_type_id"))?,
+                    sec_status: r.get(at("sec_status"))?,
+                    system_security: code(r, at("system_security"))?,
+                    damage_profile: damage_profile(r, at("damage_profile"), &kind)?,
+                    ignore_restrictions: r.get(at("ignore_restrictions"))?,
+                    notes: r.get(at("notes"))?,
+                    modified: r.get::<_, Option<u64>>(at("modified"))?.unwrap_or(0),
                     ..Fit::default()
                 })
             },

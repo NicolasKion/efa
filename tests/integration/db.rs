@@ -34,9 +34,12 @@ fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
+/// The database in `dir`, with this start's backup written.
 fn open(dir: &Path) -> (Store, Contents) {
     let (store, contents) = Store::open(dir);
-    (store.expect("the database opens"), contents)
+    let mut store = store.expect("the database opens");
+    store.wait_for_backup();
+    (store, contents)
 }
 
 fn json(saved: &Saved) -> serde_json::Value {

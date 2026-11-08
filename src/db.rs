@@ -16,7 +16,7 @@
 //! changed fit has its row updated and its parts replaced, in one transaction.
 //!
 //! A database that cannot be read is set aside and the backup, made once per start with
-//! `VACUUM INTO`, loads instead. The JSON files of earlier versions are imported the first time.
+//! `VACUUM INTO` on a thread and connection of its own, loads instead. The JSON files of earlier versions are imported the first time.
 
 mod fits;
 mod lists;
@@ -113,6 +113,15 @@ pub struct Store {
     settings: HashMap<String, String>,
     /// The attribute overrides as last written.
     overrides: crate::overrides::Values,
+    /// This start's backup, while it is being written.
+    backup: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for Store {
+    /// A backup under way is finished, so quitting right after starting does not cut it short.
+    fn drop(&mut self) {
+        self.wait_for_backup();
+    }
 }
 
 /// Why a database could not be opened.
@@ -165,17 +174,27 @@ impl Store {
             return (None, Contents::default());
         }
         let path = dir.join(FILE);
-        let opened = if path.exists() {
+        let mut opened = if path.exists() {
             Self::open_existing(&path)
         } else {
             Self::create(dir, &path)
         };
-        if let (Some(store), _) = &opened
-            && let Err(e) = store.backup()
-        {
-            crate::errors::report("Backing up efa.db failed", e);
+        if let (Some(store), _) = &mut opened {
+            // Copying the whole database takes a moment; the window does not wait for it.
+            store.backup = Some(std::thread::spawn(move || {
+                if let Err(e) = backup(&path) {
+                    crate::errors::report("Backing up efa.db failed", e);
+                }
+            }));
         }
         opened
+    }
+
+    /// Wait until this start's backup is written.
+    pub fn wait_for_backup(&mut self) {
+        if let Some(backup) = self.backup.take() {
+            let _ = backup.join();
+        }
     }
 
     fn open_existing(path: &Path) -> (Option<Self>, Contents) {
@@ -276,7 +295,8 @@ impl Store {
             .map_err(|e| OpenError::Other(format!("{}: {e}", path.display())))?;
         let mut conn = Connection::open(path)?;
         conn.busy_timeout(Duration::from_secs(2))?;
-        let check: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+        // The quick check finds a damaged file without reading every index through.
+        let check: String = conn.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
         if check != "ok" {
             return Err(OpenError::Unreadable(check));
         }
@@ -290,6 +310,7 @@ impl Store {
             rows: HashMap::new(),
             settings: HashMap::new(),
             overrides: crate::overrides::Values::new(),
+            backup: None,
         };
         let contents = store.load().map_err(OpenError::Other)?;
         Ok((store, contents))
@@ -483,26 +504,29 @@ impl Store {
         }
         Ok(())
     }
+}
 
-    /// Copy the database to `efa.db.bak`, through a temporary file so a failed copy leaves the
-    /// last backup as it was.
-    fn backup(&self) -> Result<(), String> {
-        let backup = backup_path(&self.path);
-        let tmp = crate::persist::with_suffix(&backup, ".tmp");
+/// Copy the database at `path` to `efa.db.bak`, through a temporary file so a failed copy leaves
+/// the last backup as it was. It reads through a connection of its own, which sees the database
+/// as of one moment even while the app writes to it.
+fn backup(path: &Path) -> Result<(), String> {
+    let backup = backup_path(path);
+    let tmp = crate::persist::with_suffix(&backup, ".tmp");
+    let _ = std::fs::remove_file(&tmp);
+    // VACUUM INTO writes into an empty file, which keeps the mode it was made with.
+    crate::persist::create_private(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    let target = tmp.to_str().ok_or("the data folder's path is not UTF-8")?;
+    let vacuumed = Connection::open(path)
+        .and_then(|conn| {
+            conn.busy_timeout(Duration::from_secs(10))?;
+            conn.execute("VACUUM INTO ?1", [target])
+        })
+        .map_err(|e| e.to_string());
+    if let Err(e) = vacuumed {
         let _ = std::fs::remove_file(&tmp);
-        // VACUUM INTO writes into an empty file, which keeps the mode it was made with.
-        crate::persist::create_private(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
-        let target = tmp.to_str().ok_or("the data folder's path is not UTF-8")?;
-        let vacuumed = self
-            .conn
-            .execute("VACUUM INTO ?1", [target])
-            .map_err(|e| e.to_string());
-        if let Err(e) = vacuumed {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(e);
-        }
-        std::fs::rename(&tmp, &backup).map_err(|e| format!("{}: {e}", backup.display()))
+        return Err(e);
     }
+    std::fs::rename(&tmp, &backup).map_err(|e| format!("{}: {e}", backup.display()))
 }
 
 /// Bring an item's table in line with `items`, given the rows last written.
