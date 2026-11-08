@@ -308,6 +308,14 @@ impl Built {
             .map(|v| v.modified.into_f64())
     }
 
+    /// An attribute before anything modifies it.
+    fn base_attr(&mut self, id: ItemId, attr: i32) -> Option<f64> {
+        let mut item = self.sol.get_item(&id).ok()?;
+        item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr)))
+            .ok()
+            .map(|v| v.base.into_f64())
+    }
+
     fn attr0(&mut self, id: ItemId, attr: i32) -> f64 {
         self.attr(id, attr).unwrap_or(0.0)
     }
@@ -349,22 +357,6 @@ fn num(value: Option<f64>) -> Value {
 }
 
 impl Engine {
-    fn build_for_efs(&self, fit: &Fit, fits: &[Fit], pilot: &Pilot) -> Option<Built> {
-        let options = BuildOptions {
-            surroundings: Some(fits),
-            default_spool: Some(1.0),
-        };
-        let built = self.build(fit, pilot, options)?;
-        Some(Built {
-            ship: built.fit.ship,
-            fit_id: built.fit.fit_id,
-            drones: built.fit.first_drones().collect(),
-            modules: built.fit.modules,
-            fighters: built.fit.fighters,
-            sol: built.sol,
-        })
-    }
-
     /// The fit as pyfa's EFS export writes it. None without a ship.
     pub fn efs(&self, fit: &Fit, cx: &EfsContext<'_>) -> Option<Value> {
         let catalog = cx.catalog;
@@ -374,8 +366,20 @@ impl Engine {
             factor_reload: false,
             default_spool: Some(1.0),
         };
-        let stats = self.compute_among(fit, cx.fits, cx.pilot, options);
-        let mut built = self.build_for_efs(fit, cx.fits, cx.pilot)?;
+        let settings = BuildOptions {
+            surroundings: Some(cx.fits),
+            default_spool: options.default_spool,
+        };
+        let mut whole = self.build(fit, cx.pilot, settings)?;
+        let stats = super::stats_of(&mut whole, fit, options);
+        let mut built = Built {
+            ship: whole.fit.ship,
+            fit_id: whole.fit.fit_id,
+            drones: whole.fit.first_drones().collect(),
+            modules: whole.fit.modules,
+            fighters: whole.fit.fighters,
+            sol: whole.sol,
+        };
         let group_name = |t: TypeId| {
             catalog
                 .get(t)
@@ -397,7 +401,7 @@ impl Engine {
             )
         };
 
-        let prop = self.prop_data(fit, cx, catalog, &stats);
+        let prop = prop_data(fit, &mut built, catalog, &stats);
         let multipliers = self.weapon_multipliers(fit, cx.pilot, catalog);
         let turret_slots = built.ship(attr::TURRET_SLOTS);
         let launcher_slots = built.ship(attr::LAUNCHER_SLOTS);
@@ -507,10 +511,7 @@ impl Engine {
             "projections",
             Value::Array(projections(fit, &mut built, catalog, &stats)),
         );
-        put(
-            "repairs",
-            Value::Array(self.repairs(fit, cx, &mut built, catalog)),
-        );
+        put("repairs", Value::Array(repairs(fit, &mut built, catalog)));
         put("modTypeIDs", json!(type_ids));
         put("moduleNames", json!(names));
         put(
@@ -520,65 +521,6 @@ impl Engine {
         put("pyfaVersion", json!(cx.exporter));
         put("efsExportVersion", json!(VERSION));
         Some(Value::Object(data))
-    }
-
-    /// Speed and signature with the microwarpdrive off, pyfa's `getPropData`.
-    fn prop_data(
-        &self,
-        fit: &Fit,
-        cx: &EfsContext<'_>,
-        catalog: &Catalog,
-        stats: &Stats,
-    ) -> PropData {
-        let mwd = [Slot::High, Slot::Mid, Slot::Low]
-            .into_iter()
-            .find_map(|slot| {
-                fit.rack(slot).iter().enumerate().find_map(|(i, m)| {
-                    let m = m.as_ref()?;
-                    let t = catalog.get(m.type_id)?;
-                    let prop = catalog.group_names.get(&t.group_id).map(String::as_str)
-                        == Some("Propulsion Module");
-                    let blooms = self.base_attr(m.type_id, attr::SIGNATURE_RADIUS_BONUS);
-                    (prop && blooms.is_some_and(|v| v != 0.0) && m.state >= ModuleState::Active)
-                        .then_some((slot, i))
-                })
-            });
-        let Some((slot, i)) = mwd else {
-            return PropData {
-                using_mwd: false,
-                unproped_speed: stats.speed,
-                unproped_sig: stats.sig_radius,
-            };
-        };
-        let mut off = fit.clone();
-        if let Some(Some(m)) = off.rack_mut(slot).get_mut(i) {
-            m.state = ModuleState::Online;
-        }
-        let unproped = self.compute_among(&off, cx.fits, cx.pilot, CalcOptions::default());
-        PropData {
-            using_mwd: true,
-            unproped_speed: unproped.speed,
-            unproped_sig: unproped.sig_radius,
-        }
-    }
-
-    /// An attribute of a type before anything modifies it.
-    fn base_attr(&self, type_id: TypeId, attr: i32) -> Option<f64> {
-        let mut sol = self.sol();
-        let mut f = sol.add_fit();
-        let id = f
-            .add_module(
-                ModRack::High,
-                AddMode::Append,
-                ItemTypeId::from_i32(type_id),
-                rc::ModuleState::Offline,
-            )
-            .ok()?
-            .get_item_id();
-        let mut item = sol.get_item(&id).ok()?;
-        item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr)))
-            .ok()
-            .map(|v| v.base.into_f64())
     }
 
     /// Weapons grouped by type and charge, then drones and fighters, pyfa's
@@ -773,95 +715,6 @@ impl Engine {
         weapons
     }
 
-    /// Local repairers and capacitor boosters, pyfa's `getRepairData`.
-    fn repairs(
-        &self,
-        fit: &Fit,
-        cx: &EfsContext<'_>,
-        built: &mut Built,
-        catalog: &Catalog,
-    ) -> Vec<Value> {
-        const GROUPS: [&str; 6] = [
-            "Shield Booster",
-            "Armor Repair Unit",
-            "Ancillary Shield Booster",
-            "Ancillary Armor Repairer",
-            "Hull Repair Unit",
-            "Capacitor Booster",
-        ];
-        let mut repairs = Vec::new();
-        for (slot, i, id, group) in modules_in_groups(fit, built, catalog, &GROUPS) {
-            let mut stats = Map::new();
-            let mut put = |key: &str, value: Value| {
-                stats.insert(key.to_owned(), value);
-            };
-            put("duration", num(built.attr(id, attr::DURATION)));
-            put("capacitorNeed", num(built.attr(id, attr::CAPACITOR_NEED)));
-            let shots = built
-                .sol
-                .get_module(&id)
-                .ok()
-                .and_then(|mut m| m.get_charged_cycle_count())
-                .map(rc::Count::into_u32);
-            match group.as_str() {
-                "Armor Repair Unit" | "Ancillary Armor Repairer" => {
-                    put("type", json!("Armor Repairer"));
-                    put(
-                        "armorDamageAmount",
-                        num(built.attr(id, attr::ARMOR_DAMAGE_AMOUNT)),
-                    );
-                    if group == "Ancillary Armor Repairer" {
-                        put("numShots", json!(shots.unwrap_or(0)));
-                        put("reloadTime", num(built.attr(id, attr::RELOAD_TIME)));
-                        put(
-                            "chargedArmorDamageMultiplier",
-                            num(built.attr(id, attr::CHARGED_ARMOR_DAMAGE_MULTIPLIER)),
-                        );
-                    }
-                }
-                "Shield Booster" | "Ancillary Shield Booster" => {
-                    put("type", json!("Shield Booster"));
-                    put("shieldBonus", num(built.attr(id, attr::SHIELD_BONUS)));
-                    if group == "Ancillary Shield Booster" {
-                        put("numShots", json!(shots.unwrap_or(0)));
-                        put("reloadTime", num(built.attr(id, attr::RELOAD_TIME)));
-                        // What it needs once its cap boosters run out.
-                        if fit
-                            .rack(slot)
-                            .get(i)
-                            .and_then(|m| m.as_ref()?.charge)
-                            .is_some()
-                        {
-                            let mut empty = fit.clone();
-                            if let Some(Some(m)) = empty.rack_mut(slot).get_mut(i) {
-                                m.charge = None;
-                            }
-                            let need =
-                                self.build_for_efs(&empty, cx.fits, cx.pilot)
-                                    .and_then(|mut b| {
-                                        let id = b
-                                            .modules
-                                            .iter()
-                                            .find(|&&(s, j, _)| s == slot && j == i)?
-                                            .2;
-                                        b.attr(id, attr::CAPACITOR_NEED)
-                                    });
-                            put("unloadedCapacitorNeed", num(need));
-                        }
-                    }
-                }
-                "Capacitor Booster" => {
-                    put("type", json!("Capacitor Booster"));
-                    put("numShots", json!(shots.unwrap_or(0)));
-                    put("reloadTime", num(built.attr(id, attr::RELOAD_TIME)));
-                }
-                _ => {}
-            }
-            repairs.push(Value::Object(stats));
-        }
-        repairs
-    }
-
     /// How much more damage the hull's bonuses give turrets, launchers and drones, pyfa's
     /// `getWeaponBonusMultipliers`: Tech II weapons on this hull against the same on a capsule,
     /// the biggest gain of each kind.
@@ -977,6 +830,127 @@ impl Engine {
             })
             .collect()
     }
+}
+
+/// Speed and signature with the microwarpdrive off, pyfa's `getPropData`.
+fn prop_data(fit: &Fit, built: &mut Built, catalog: &Catalog, stats: &Stats) -> PropData {
+    let mwd = built.modules.clone().into_iter().find(|&(slot, i, id)| {
+        let Some(Some(m)) = fit.rack(slot).get(i) else {
+            return false;
+        };
+        let prop = catalog
+            .get(m.type_id)
+            .and_then(|t| catalog.group_names.get(&t.group_id))
+            .is_some_and(|group| group == "Propulsion Module");
+        prop && m.state >= ModuleState::Active
+            && built
+                .base_attr(id, attr::SIGNATURE_RADIUS_BONUS)
+                .is_some_and(|v| v != 0.0)
+    });
+    let Some((_, _, id)) = mwd else {
+        return PropData {
+            using_mwd: false,
+            unproped_speed: stats.speed,
+            unproped_sig: stats.sig_radius,
+        };
+    };
+    let mut tx = built.sol.begin_tx();
+    if let Ok(mut module) = tx.get_module(&id) {
+        module.set_state(rc::ModuleState::Online);
+    }
+    let (unproped_speed, unproped_sig) = tx.get_fit(&built.fit_id).ok().map_or_default(|mut f| {
+        let mut s = f.stats();
+        (
+            s.get_stat_speed().ok().map(rc::PValue::into_f64),
+            s.get_stat_sig_radius().ok().map(rc::PValue::into_f64),
+        )
+    });
+    PropData {
+        using_mwd: true,
+        unproped_speed,
+        unproped_sig,
+    }
+}
+
+/// What an ancillary shield booster needs once its cap boosters run out.
+fn unloaded_cap_need(built: &mut Built, id: ItemId) -> Option<f64> {
+    let mut tx = built.sol.begin_tx();
+    if let Some(charge) = tx.get_module(&id).ok()?.get_charge() {
+        charge.remove();
+    }
+    let mut item = tx.get_item(&id).ok()?;
+    item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr::CAPACITOR_NEED)))
+        .ok()
+        .map(|v| v.modified.into_f64())
+}
+
+/// Local repairers and capacitor boosters, pyfa's `getRepairData`.
+fn repairs(fit: &Fit, built: &mut Built, catalog: &Catalog) -> Vec<Value> {
+    const GROUPS: [&str; 6] = [
+        "Shield Booster",
+        "Armor Repair Unit",
+        "Ancillary Shield Booster",
+        "Ancillary Armor Repairer",
+        "Hull Repair Unit",
+        "Capacitor Booster",
+    ];
+    let mut repairs = Vec::new();
+    for (slot, i, id, group) in modules_in_groups(fit, built, catalog, &GROUPS) {
+        let mut stats = Map::new();
+        let mut put = |key: &str, value: Value| {
+            stats.insert(key.to_owned(), value);
+        };
+        put("duration", num(built.attr(id, attr::DURATION)));
+        put("capacitorNeed", num(built.attr(id, attr::CAPACITOR_NEED)));
+        let shots = built
+            .sol
+            .get_module(&id)
+            .ok()
+            .and_then(|mut m| m.get_charged_cycle_count())
+            .map(rc::Count::into_u32);
+        match group.as_str() {
+            "Armor Repair Unit" | "Ancillary Armor Repairer" => {
+                put("type", json!("Armor Repairer"));
+                put(
+                    "armorDamageAmount",
+                    num(built.attr(id, attr::ARMOR_DAMAGE_AMOUNT)),
+                );
+                if group == "Ancillary Armor Repairer" {
+                    put("numShots", json!(shots.unwrap_or(0)));
+                    put("reloadTime", num(built.attr(id, attr::RELOAD_TIME)));
+                    put(
+                        "chargedArmorDamageMultiplier",
+                        num(built.attr(id, attr::CHARGED_ARMOR_DAMAGE_MULTIPLIER)),
+                    );
+                }
+            }
+            "Shield Booster" | "Ancillary Shield Booster" => {
+                put("type", json!("Shield Booster"));
+                put("shieldBonus", num(built.attr(id, attr::SHIELD_BONUS)));
+                if group == "Ancillary Shield Booster" {
+                    put("numShots", json!(shots.unwrap_or(0)));
+                    put("reloadTime", num(built.attr(id, attr::RELOAD_TIME)));
+                    // What it needs once its cap boosters run out.
+                    if fit
+                        .rack(slot)
+                        .get(i)
+                        .and_then(|m| m.as_ref()?.charge)
+                        .is_some()
+                    {
+                        put("unloadedCapacitorNeed", num(unloaded_cap_need(built, id)));
+                    }
+                }
+            }
+            "Capacitor Booster" => {
+                put("type", json!("Capacitor Booster"));
+                put("numShots", json!(shots.unwrap_or(0)));
+                put("reloadTime", num(built.attr(id, attr::RELOAD_TIME)));
+            }
+            _ => {}
+        }
+        repairs.push(Value::Object(stats));
+    }
+    repairs
 }
 
 /// A weapon and the charge it has loaded, which pyfa groups identical weapons by.
