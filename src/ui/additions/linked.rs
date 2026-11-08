@@ -23,6 +23,7 @@ use crate::{
     icons::Icon,
     ui::{
         Efa, Loaded,
+        actions::Outcome,
         dialogs::{Prompt, prompt_value},
         widgets::{entry, icon_box, icon_label, redraw_on_change},
     },
@@ -45,21 +46,25 @@ pub(super) fn fit_label(catalog: &Catalog, fit: &Fit) -> String {
 }
 
 impl Efa {
-    /// Change the current fit and recalculate. `edit` says whether rows came or went, which
-    /// clears the selection since it holds row positions.
+    /// Change the current fit as one undo step and recalculate. `edit` says whether rows came
+    /// or went, which clears the selection since it holds row positions.
     pub(super) fn edit_current(
         &mut self,
         cx: &mut Context<Self>,
         edit: impl FnOnce(&mut Fit, &Catalog) -> bool,
     ) {
-        let Some(loaded) = self.loaded() else { return };
         let Some(i) = self.saved.settings.current else {
             return;
         };
-        if edit(self.saved.fit_mut(i), &loaded.catalog) {
-            self.clear_selection();
-        }
-        self.changed(cx);
+        self.edit_fit(
+            i,
+            false,
+            |fit, env| Outcome {
+                structural: edit(fit, &env.loaded.catalog),
+                ..Outcome::default()
+            },
+            cx,
+        );
     }
 
     /// Hand `link` the identity of saved fit `index`, giving it one first if it has none, to
