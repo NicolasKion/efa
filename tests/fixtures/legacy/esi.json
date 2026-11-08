@@ -1,0 +1,10 @@
+{
+  "accounts": [
+    {
+      "character_id": 90000001,
+      "name": "Main Pilot",
+      "refresh_token": "fixture-refresh-token",
+      "scopes": ["esi-skills.read_skills.v1"]
+    }
+  ]
+}

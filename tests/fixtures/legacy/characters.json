@@ -1,0 +1,14 @@
+{
+  "characters": [
+    {
+      "id": 1,
+      "name": "Main",
+      "skills": { "3300": 5, "3301": 4 },
+      "implants": [13219],
+      "sec_status": -2.5,
+      "esi_character": 90000001
+    },
+    { "id": 3, "name": "Alt", "alpha_clone": 1 }
+  ],
+  "last_id": 4
+}

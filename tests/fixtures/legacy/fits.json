@@ -1,0 +1,62 @@
+{
+  "fits": [
+    {
+      "name": "Rifter, Test",
+      "ship": 587,
+      "high": [
+        { "type_id": 2873, "state": "Active", "charge": 185, "spool": null },
+        { "type_id": 2873, "state": "Active", "charge": 185 },
+        null
+      ],
+      "mid": [{ "type_id": 5973, "state": "Overload", "charge": null }],
+      "low": [{ "type_id": 2048, "state": "Online", "charge": null }],
+      "rigs": [31790, null],
+      "subsystems": [],
+      "drones": [{ "type_id": 2454, "count": 1, "active": 1 }],
+      "implants": [13219],
+      "boosters": [5440],
+      "cargo": [[185, 1000]],
+      "notes": "kite at 9 km",
+      "uid": 3,
+      "modified": 1700000000
+    },
+    {
+      "name": "Kestrel",
+      "ship": 602,
+      "high": [],
+      "mid": [],
+      "low": [],
+      "rigs": [],
+      "subsystems": [],
+      "drones": [],
+      "implants": [],
+      "boosters": [],
+      "cargo": [],
+      "character": { "User": 1 },
+      "uid": 3
+    },
+    {
+      "name": "Copy of Kestrel",
+      "ship": 602,
+      "high": [],
+      "mid": [],
+      "low": [],
+      "rigs": [],
+      "subsystems": [],
+      "drones": [],
+      "implants": [],
+      "boosters": [],
+      "cargo": []
+    }
+  ],
+  "open": [0, 2, 7],
+  "current": 2,
+  "columns": { "name": 240.5 },
+  "factor_reload": true,
+  "implant_sets": [{ "name": "Snakes", "implants": [13219, 13220] }],
+  "price_totals": { "drones": false, "cargo": true, "character": true },
+  "damage_patterns": [{ "name": "[NPC]Guristas", "amounts": [0.0, 0.0, 1.5, 0.25] }],
+  "recent_items": [2873, 185],
+  "market_results": 312.0,
+  "cargo_presets": [{ "name": "Ammo", "items": [[185, 2000]] }]
+}
