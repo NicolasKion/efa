@@ -6,6 +6,7 @@ mod additions;
 mod cargo_presets;
 mod character_editor;
 mod characters;
+pub mod chrome;
 mod columns;
 mod editor_kit;
 mod error_dialog;
@@ -558,7 +559,7 @@ impl Efa {
             app_id: Some("efa".into()),
             ..Default::default()
         };
-        let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+        let opened = gpui_kit::open_window(chrome::options(options), cx, move |window, cx| {
             cx.new(|cx| Efa::new(hub, Role::Detached(index), window, cx))
         });
         match opened {
@@ -1515,7 +1516,7 @@ impl Render for Efa {
                 cx.notify();
             }
         }))
-        .child(self.menu_bar(cx))
+        .child(self.menu_bar(window, cx))
         .children(
             (self.role == Role::Main)
                 .then(|| updates::notice(&self.hub.read(cx).updates, cx))

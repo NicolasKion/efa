@@ -421,7 +421,7 @@ fn open<K: Kind>(hub: Entity<Hub>, select: Option<String>, cx: &mut App) {
         app_id: Some("efa".into()),
         ..Default::default()
     };
-    let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+    let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
         window.set_window_title(&format!("efa: {}", K::TITLE));
         cx.new(|cx| Editor::<K>::new(hub, select.as_deref(), window, cx))
     });

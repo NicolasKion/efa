@@ -69,7 +69,7 @@ impl Efa {
             ..Default::default()
         };
         cx.defer(move |cx| {
-            let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+            let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
                 window.set_window_title("efa: Attribute Overrides");
                 cx.new(|cx| OverridesWindow::new(hub, loaded, window, cx))
             });

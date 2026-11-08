@@ -71,7 +71,7 @@ pub fn open(hub: Entity<Hub>, fit: Option<usize>, hidden: bool, cx: &mut App) {
         app_id: Some("efa".into()),
         ..Default::default()
     };
-    let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+    let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
         window.set_window_title("efa: Graphs");
         cx.new(|cx| GraphsWindow::new(hub, fit, hidden, window, cx))
     });

@@ -58,6 +58,9 @@ pub struct General {
     pub compact_skills: bool,
     /// The fit's own implants and boosters travel in the cargo hold, so they count against it.
     pub implants_in_cargo: bool,
+    /// Draw minimize, maximize and close into efa's own header instead of relying on the
+    /// desktop's. Linux only; Windows always does, macOS keeps its traffic lights.
+    pub window_controls: bool,
 }
 
 impl Default for General {
@@ -79,6 +82,7 @@ impl Default for General {
             global_damage_pattern: false,
             compact_skills: true,
             implants_in_cargo: true,
+            window_controls: false,
         }
     }
 }

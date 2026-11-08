@@ -314,7 +314,7 @@ impl Efa {
         self.changed(cx);
     }
 
-    pub(super) fn menu_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn menu_bar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let this = cx.entity().downgrade();
         let has_fit = self.saved.current.is_some();
         let has_ship = self.fit().is_some_and(|f| f.ship.is_some());
@@ -673,10 +673,12 @@ impl Efa {
             }) as Box<dyn Fn(PopupMenu) -> PopupMenu>
         };
 
+        let builtin = super::chrome::builtin(cx);
         h_flex()
             .gap_1()
-            .px_2()
-            .py_1()
+            .pl_2()
+            .when(builtin, |bar| bar.h(px(super::chrome::HEIGHT)))
+            .when(!builtin, |bar| bar.px_2().py_1())
             .border_b_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().title_bar)
@@ -697,6 +699,16 @@ impl Efa {
                         .text_color(cx.theme().muted_foreground)
                         .child(status),
                 )
+            })
+            // With the window buttons in the bar, the room left over moves the window.
+            .when(builtin, |bar| {
+                bar.child(
+                    super::chrome::drag_area(div().id("menu-bar-drag"))
+                        .flex_1()
+                        .min_w(px(24.))
+                        .h_full(),
+                )
+                .child(super::chrome::controls(window, cx))
             })
     }
 

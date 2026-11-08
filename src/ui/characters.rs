@@ -183,7 +183,7 @@ impl Efa {
             app_id: Some("efa".into()),
             ..Default::default()
         };
-        let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+        let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
             cx.new(|cx| CharacterEditor::new(hub, loaded, select, window, cx))
         });
         match opened {

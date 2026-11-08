@@ -285,7 +285,7 @@ fn open_single<V: Render + 'static>(
             app_id: Some("efa".into()),
             ..Default::default()
         };
-        let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+        let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
             window.set_window_title(&format!("efa: {title}"));
             cx.new(|cx| build(window, cx))
         });
@@ -360,7 +360,7 @@ impl Efa {
                 app_id: Some("efa".into()),
                 ..Default::default()
             };
-            let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+            let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
                 window.set_window_title("efa: Export to EVE");
                 cx.new(|cx| upload::ExportToEveWindow::new(hub, loaded, fit, preferred, cx))
             });

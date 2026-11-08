@@ -144,7 +144,7 @@ impl Efa {
             app_id: Some("efa".into()),
             ..Default::default()
         };
-        let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+        let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
             window.set_window_title("efa: Preferences");
             cx.new(|cx| PreferencesWindow::new(hub, window, cx))
         });
@@ -512,6 +512,23 @@ impl PreferencesWindow {
                 cx,
             ),
         ]
+        .into_iter()
+        .chain(cfg!(target_os = "linux").then(|| {
+            section(
+                "Window",
+                vec![Self::toggle(
+                    "window-controls",
+                    "Window buttons in the header",
+                    "Draw minimize, maximize and close into efa's top bar, as on Windows. Meant \
+                     for desktops that draw no title bars of their own.",
+                    g.window_controls,
+                    |s, v| s.preferences.general.window_controls = v,
+                    cx,
+                )],
+                cx,
+            )
+        }))
+        .collect()
     }
 
     fn engine(

@@ -153,7 +153,7 @@ impl Efa {
                 }
             }
             let weak = efa.downgrade();
-            let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+            let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
                 window.set_window_title("efa: Cargo Presets");
                 cx.new(|cx| CargoPresetEditor::new(&efa, loaded, select, window, cx))
             });

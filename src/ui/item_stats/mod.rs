@@ -241,7 +241,7 @@ pub fn open(
         ..Default::default()
     };
     let (loaded, hub) = (Rc::clone(loaded), hub.clone());
-    let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+    let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
         cx.new(|cx| ItemStats::new(loaded, hub, request, type_id, window, cx))
     });
     match opened {

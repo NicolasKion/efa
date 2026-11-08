@@ -114,7 +114,7 @@ impl Efa {
         // this view, which gpui does not allow while it is being updated.
         cx.defer(move |cx| {
             let weak = efa.downgrade();
-            let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+            let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
                 window.set_window_title("efa: Implant Set Editor");
                 cx.new(|cx| ImplantSetEditor::new(&efa, loaded, select, window, cx))
             });

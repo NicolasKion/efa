@@ -40,7 +40,7 @@ pub fn open(reports: &[Report], cx: &mut App) {
         app_id: Some("efa".into()),
         ..Default::default()
     };
-    let opened = gpui_kit::open_window(options, cx, move |window, cx| {
+    let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
         window.set_window_title("efa: Error");
         cx.new(|cx| ErrorDialog::new(title, text, window, cx))
     });

@@ -40,7 +40,7 @@ fn main() {
             };
             // Loading and the fits live in the hub, which every window shares.
             let hub = cx.new(|cx| Hub::new(import, cx));
-            gpui_kit::open_window(options, cx, move |window, cx| {
+            gpui_kit::open_window(efa::ui::chrome::options(options), cx, move |window, cx| {
                 cx.new(|cx| Efa::new(hub, Role::Main, window, cx))
             })
             .expect("the main window opens");

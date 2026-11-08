@@ -68,7 +68,7 @@ impl Efa {
             app_id: Some("efa".into()),
             ..Default::default()
         };
-        let opened = gpui_kit::open_window(options, cx, move |window_handle, cx| {
+        let opened = crate::ui::chrome::open_window(options, cx, move |window_handle, cx| {
             window_handle.set_window_title("efa: Export");
             cx.new(|_| window)
         });
