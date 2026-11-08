@@ -4,12 +4,25 @@
 use std::path::{Path, PathBuf};
 
 use efa::{
-    character::{Character, Characters},
+    cargo_preset::{CargoPolicy, CargoPreset},
+    character::{Character, CharacterId, Characters},
+    damage_pattern::DamagePattern,
+    data::Slot,
     db::{Contents, Store},
     esi::accounts::{Access, Account, Accounts},
-    fit::Fit,
+    fit::{
+        Booster, DamageProfile, DroneStack, Fit, ImplantSource, Module, ModuleState, Mutation,
+        RahPattern, SystemSecurity,
+        fighters::Fighter,
+        projected::{
+            CommandFit, EnvEffect, ProjectedDrone, ProjectedFighter, ProjectedFit, ProjectedModule,
+        },
+    },
+    implant_set::ImplantSet,
     store::Saved,
+    target_profile::TargetProfile,
 };
+use rusqlite::Connection;
 
 const FIXTURES: &str = "tests/fixtures/legacy";
 
@@ -266,5 +279,445 @@ fn the_database_is_owner_only() {
         assert_eq!(mode & 0o777, 0o600, "{file}");
     }
     drop(store);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn module(type_id: i32, state: ModuleState) -> Module {
+    Module {
+        type_id,
+        state,
+        charge: None,
+        spool: None,
+        mutation: None,
+        rah: None,
+    }
+}
+
+fn mutation(base: i32, mutaplasmid: i32, attrs: &[(i32, f64)]) -> Mutation {
+    Mutation {
+        base,
+        mutaplasmid,
+        attrs: attrs.iter().copied().collect(),
+    }
+}
+
+fn fighter(type_id: i32) -> Fighter {
+    Fighter {
+        type_id,
+        amount: Some(6),
+        active: false,
+        abilities: vec![(2, false), (1, true)],
+    }
+}
+
+/// A fit with every field set to something other than its default.
+fn full_fit(name: &str) -> Fit {
+    let mut point = module(3242, ModuleState::Overload);
+    point.charge = Some(29_001);
+    point.spool = Some(7);
+    point.mutation = Some(mutation(447, 47_702, &[(20, 1.125), (54, 26_250.5)]));
+    let mut rah = module(4403, ModuleState::Active);
+    rah.rah = Some(RahPattern::Pattern(DamageProfile::Pattern {
+        name: "[NPC]Sansha".into(),
+        amounts: [0.5, 0.25, 0.0, 0.125],
+    }));
+    let mut flat = module(4403, ModuleState::Online);
+    flat.rah = Some(RahPattern::DoNotAdapt);
+    let mut ammo = module(4403, ModuleState::Offline);
+    ammo.rah = Some(RahPattern::Pattern(DamageProfile::SelectedAmmo));
+    let mut drone = DroneStack::new(2488, 5, 2);
+    drone.mutation = Some(mutation(2488, 60_478, &[(37, 2_000.25)]));
+    Fit {
+        name: name.into(),
+        ship: Some(17_740),
+        high: vec![
+            Some(point),
+            None,
+            Some(module(2873, ModuleState::Active)),
+            None,
+        ],
+        mid: vec![None, Some(module(5973, ModuleState::Online))],
+        low: vec![Some(rah), None, Some(flat), Some(ammo)],
+        rigs: vec![Some(31_790), None, Some(31_790)],
+        subsystems: vec![45_586, 45_590],
+        services: vec![Some(module(35_892, ModuleState::Online)), None],
+        drones: vec![drone, DroneStack::new(2454, 3, 0)],
+        implants: vec![13_219, 13_220, 13_221],
+        inactive_implants: vec![13_220],
+        implant_source: ImplantSource::Character,
+        boosters: vec![
+            Booster {
+                type_id: 5440,
+                active: false,
+                side_effects: vec![3, 1],
+            },
+            Booster::new(28_672),
+        ],
+        cargo: vec![(185, 1000), (27_441, 2)],
+        notes: "kite at 9 km\nsecond line".into(),
+        mode: Some(34_317),
+        sec_status: Some(-2.25),
+        system_security: SystemSecurity::WSpace,
+        damage_profile: DamageProfile::Pattern {
+            name: "Mostly kinetic".into(),
+            amounts: [0.0, 1.0, 3.5, 0.25],
+        },
+        target_profile: Some(TargetProfile {
+            name: "[Frigates]Rifter".into(),
+            resists: [0.1, 0.2, 0.3, 0.4],
+            max_velocity: Some(412.5),
+            signature_radius: Some(35.0),
+            radius: None,
+            hp: Some(3_000.0),
+        }),
+        character: CharacterId::User(4),
+        // Distinct per name, since fits sharing one are split on load.
+        uid: name.bytes().fold(0, |h, b| h * 31 + u64::from(b)),
+        fighters: vec![fighter(40_556), Fighter::new(40_557)],
+        projected: efa::fit::projected::Projected {
+            fits: vec![ProjectedFit {
+                fit: 3,
+                amount: 4,
+                active: false,
+                range: Some(24_000.0),
+            }],
+            modules: vec![ProjectedModule {
+                type_id: 526,
+                state: ModuleState::Overload,
+                charge: Some(12_608),
+                spool: Some(3),
+                range: Some(9_000.0),
+            }],
+            drones: vec![ProjectedDrone {
+                type_id: 2203,
+                count: 3,
+                active: true,
+                range: None,
+            }],
+            fighters: vec![ProjectedFighter {
+                fighter: fighter(40_558),
+                range: Some(50_000.0),
+            }],
+            env: vec![EnvEffect {
+                type_id: 30_844,
+                active: false,
+            }],
+        },
+        command: vec![
+            CommandFit {
+                fit: 7,
+                active: true,
+            },
+            CommandFit {
+                fit: 9,
+                active: false,
+            },
+        ],
+        ignore_restrictions: true,
+        grouped: [Slot::High, Slot::Low, Slot::Service].into_iter().collect(),
+        modified: 1_700_000_123,
+    }
+}
+
+fn fit_json(fit: &Fit) -> serde_json::Value {
+    serde_json::to_value(fit).expect("serializes")
+}
+
+/// Every table holding part of a fit, and the fits.
+const FIT_TABLES: [&str; 22] = [
+    "fit_modules",
+    "module_mutations",
+    "module_mutation_attrs",
+    "fit_rigs",
+    "fit_subsystems",
+    "fit_drones",
+    "drone_mutations",
+    "drone_mutation_attrs",
+    "fit_fighters",
+    "fighter_abilities",
+    "fit_implants",
+    "fit_boosters",
+    "booster_side_effects",
+    "fit_cargo",
+    "fit_target_profiles",
+    "fit_projected_fits",
+    "fit_projected_modules",
+    "fit_projected_drones",
+    "fit_projected_env",
+    "fit_command",
+    "fit_grouped_racks",
+    "fits",
+];
+
+fn sql(dir: &Path) -> Connection {
+    Connection::open(dir.join("efa.db")).expect("open the database")
+}
+
+fn count(conn: &Connection, table: &str) -> i64 {
+    conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+        .expect(table)
+}
+
+fn counts(conn: &Connection) -> Vec<i64> {
+    FIT_TABLES.iter().map(|t| count(conn, t)).collect()
+}
+
+#[test]
+fn a_full_fit_and_the_other_lists_load_back_the_same() {
+    let dir = temp_dir("full-fit");
+    let (mut store, _) = open(&dir);
+    let mut set = ImplantSet::new("Snakes");
+    set.implants = vec![13_219, 13_220];
+    let mut preset = CargoPreset::new("Ammo");
+    preset.items = vec![(185, 2000), (186, 50)];
+    preset.policy = CargoPolicy::Exact;
+    let mut overrides = efa::overrides::Overrides {
+        enabled: true,
+        ..Default::default()
+    };
+    overrides.set(587, 263, 1_250.5);
+    overrides.set(587, 37, 400.0);
+    overrides.set(2873, 54, 9_000.0);
+    let mut saved = Saved {
+        overrides,
+        fits: vec![full_fit("full"), Fit::new("empty"), full_fit("again")],
+        implant_sets: vec![set, ImplantSet::new("none")],
+        damage_patterns: vec![DamagePattern::new("[NPC]Guristas", [0.0, 0.0, 1.5, 0.25])],
+        target_profiles: vec![
+            TargetProfile::ideal(),
+            full_fit("x").target_profile.expect("set"),
+        ],
+        cargo_presets: vec![preset, CargoPreset::new("empty")],
+        ..Saved::default()
+    };
+    store.save_saved(&saved).expect("save");
+    drop(store);
+
+    let (mut store, loaded) = open(&dir);
+    assert_eq!(fit_json(&loaded.saved.fits[0]), fit_json(&full_fit("full")));
+    assert_eq!(json(&loaded.saved), json(&saved));
+    let before = store.total_changes();
+    store.save_saved(&loaded.saved).expect("save unchanged");
+    assert_eq!(
+        store.total_changes(),
+        before,
+        "nothing changed, nothing written"
+    );
+    saved.overrides.set(587, 263, 1_000.0);
+    saved.overrides.remove(2873, 54);
+    store.save_saved(&saved).expect("save overrides");
+    assert_eq!(store.total_changes(), before + 2, "one changed, one gone");
+    drop(store);
+    let (store, loaded) = open(&dir);
+    assert_eq!(json(&loaded.saved), json(&saved));
+    drop(store);
+
+    let conn = sql(&dir);
+    assert_eq!(count(&conn, "attribute_overrides"), 2);
+    let setting: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'overrides'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("the switch is a setting");
+    assert_eq!(setting, r#"{"enabled":true}"#);
+    let payloads: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_schema t JOIN pragma_table_info(t.name) c
+             WHERE t.type = 'table' AND c.name = 'payload'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("query");
+    assert_eq!(payloads, 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_changed_fit_rewrites_only_its_own_rows() {
+    let dir = temp_dir("one-fit");
+    let (mut store, _) = open(&dir);
+    let mut saved = Saved {
+        fits: ["a", "b", "c", "d"].into_iter().map(full_fit).collect(),
+        ..Saved::default()
+    };
+    store.save_saved(&saved).expect("save");
+    let others = |conn: &Connection| -> Vec<(i64, i64, Option<i32>)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT m.id, m.fit_id, m.type_id FROM fit_modules m JOIN fits f ON f.id = m.fit_id
+                 WHERE f.name <> 'c' ORDER BY m.id",
+            )
+            .expect("prepare");
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("rows")
+    };
+    let conn = sql(&dir);
+    let untouched = others(&conn);
+    let before_counts = counts(&conn);
+    let per_fit: i64 = before_counts.iter().sum::<i64>() / 4;
+
+    let before = store.total_changes();
+    saved.fits[2].notes = "changed".into();
+    store.save_saved(&saved).expect("save one change");
+    let written = store.total_changes() - before;
+    assert_eq!(others(&conn), untouched, "the other fits' rows stay");
+    assert_eq!(
+        counts(&conn),
+        before_counts,
+        "parts are replaced, not added"
+    );
+    // Its row updated and its parts deleted and inserted again, nothing of the other fits.
+    let parts = per_fit - 1;
+    assert_eq!(written, 1 + 2 * parts as u64);
+    drop(store);
+
+    let (_store, loaded) = open(&dir);
+    assert_eq!(json(&loaded.saved), json(&saved));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn deleting_a_fit_takes_all_its_parts() {
+    let dir = temp_dir("cascade");
+    let (mut store, _) = open(&dir);
+    let mut saved = Saved {
+        fits: vec![full_fit("gone"), full_fit("kept")],
+        ..Saved::default()
+    };
+    store.save_saved(&saved).expect("save");
+    let conn = sql(&dir);
+    let both = counts(&conn);
+    for (table, n) in FIT_TABLES.iter().zip(&both) {
+        assert!(
+            *n > 0 && n % 2 == 0,
+            "{table} has {n} rows for two full fits"
+        );
+    }
+
+    saved.fits.remove(0);
+    store.save_saved(&saved).expect("save the deletion");
+    let halves: Vec<i64> = both.iter().map(|n| n / 2).collect();
+    assert_eq!(counts(&conn), halves);
+
+    saved.fits.clear();
+    store.save_saved(&saved).expect("save no fits");
+    assert_eq!(counts(&conn), vec![0; FIT_TABLES.len()]);
+    drop(store);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn fits_using_a_type_are_a_query() {
+    let dir = temp_dir("query");
+    let (mut store, _) = open(&dir);
+    let mut other = Fit::new("other");
+    other.mid = vec![Some(module(3242, ModuleState::Active))];
+    let saved = Saved {
+        fits: vec![full_fit("full"), Fit::new("empty"), other],
+        ..Saved::default()
+    };
+    store.save_saved(&saved).expect("save");
+    let conn = sql(&dir);
+    let query = "SELECT DISTINCT f.name FROM fits f JOIN fit_modules m ON m.fit_id = f.id
+                 WHERE m.type_id = ?1 ORDER BY f.position";
+    let names = |type_id: i32| -> Vec<String> {
+        let mut stmt = conn.prepare(query).expect("prepare");
+        stmt.query_map([type_id], |r| r.get(0))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("rows")
+    };
+    assert_eq!(names(3242), ["full", "other"]);
+    assert_eq!(names(5973), ["full"]);
+    assert_eq!(names(1), Vec::<String>::new());
+    let plan: Vec<String> = conn
+        .prepare(&format!("EXPLAIN QUERY PLAN {query}"))
+        .expect("prepare")
+        .query_map([3242], |r| r.get(3))
+        .expect("plan")
+        .collect::<Result<_, _>>()
+        .expect("rows");
+    assert!(
+        plan.iter().any(|p| p.contains("fit_modules_type")),
+        "{plan:?}"
+    );
+    drop(store);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn characters_keep_their_skills_and_ids() {
+    let dir = temp_dir("characters");
+    let (mut store, _) = open(&dir);
+    let character = |id: u32, name: &str| Character {
+        id,
+        name: name.into(),
+        skills: [(3300, 5), (3301, 4), (3327, 1)].into_iter().collect(),
+        implants: vec![13_219, 13_221],
+        sec_status: -9.75,
+        esi_character: Some(2_119_000_001),
+        alpha_clone: Some(2),
+        ..Character::default()
+    };
+    let mut characters = Characters {
+        characters: vec![
+            character(3, "Main"),
+            character(5, "Alt"),
+            Character {
+                id: 6,
+                ..Character::default()
+            },
+        ],
+        last_id: 6,
+    };
+    store.save_characters(&characters).expect("save");
+    drop(store);
+    let (mut store, loaded) = open(&dir);
+    assert_eq!(loaded.characters, characters);
+
+    characters.characters.swap(0, 1);
+    characters.characters[0].skills.insert(3302, 3);
+    characters.characters.remove(2);
+    store.save_characters(&characters).expect("save changes");
+    drop(store);
+    let (_store, loaded) = open(&dir);
+    assert_eq!(loaded.characters, characters);
+    let conn = sql(&dir);
+    let ids: Vec<i64> = conn
+        .prepare("SELECT id FROM characters ORDER BY position")
+        .expect("prepare")
+        .query_map([], |r| r.get(0))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("rows");
+    assert_eq!(ids, [5, 3], "kept under their own ids");
+    assert_eq!(count(&conn, "character_skills"), 7);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_fit_that_does_not_read_is_left_alone() {
+    let dir = temp_dir("unreadable");
+    let (mut store, _) = open(&dir);
+    store.save_saved(&fits(&["broken", "fine"])).expect("save");
+    drop(store);
+    sql(&dir)
+        .execute(
+            "UPDATE fits SET character = 'user', character_id = -1 WHERE name = 'broken'",
+            [],
+        )
+        .expect("break a fit");
+
+    let (mut store, loaded) = open(&dir);
+    assert_eq!(names(&loaded.saved), ["fine"]);
+    let mut saved = loaded.saved;
+    saved.fits.push(Fit::new("new"));
+    store.save_saved(&saved).expect("save");
+    drop(store);
+    assert_eq!(count(&sql(&dir), "fits"), 3, "the broken fit is kept");
     let _ = std::fs::remove_dir_all(&dir);
 }
