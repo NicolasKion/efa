@@ -522,3 +522,62 @@ fn budgets_read_like_eve_amounts() {
     assert_eq!(Budget::label(Some(1_500_000_000)), "1.5B");
     assert_eq!(Budget::label(Some(75_000_000)), "75M");
 }
+
+/// A repair tank fits nothing for buffer alone: each of its rigs repairs more than leaving it
+/// off, and the same tank shows only once.
+#[test]
+fn a_repair_tank_takes_no_rig_that_does_not_repair() {
+    let Some(all) = setup() else {
+        return;
+    };
+    let catalog = all.0;
+    let (fit, _) = Fit::from_eft(
+        catalog,
+        "[Omen, Repair]\n\n\nFocused Medium Pulse Laser II, Scorch M\n\
+         Focused Medium Pulse Laser II, Scorch M\nFocused Medium Pulse Laser II, Scorch M\n",
+    )
+    .expect("the fit reads");
+    let (problem, outcomes) = best(all, &fit, |c| {
+        c.layer = Layer::Armor;
+        c.goal = Goal::Repair;
+    });
+    let found = outcomes.first().expect("a tank");
+    let modules: Vec<_> = found
+        .types
+        .iter()
+        .map(|&t| {
+            problem
+                .candidates
+                .iter()
+                .find(|c| c.module.type_id == t)
+                .expect("a candidate")
+        })
+        .collect();
+    let rigs: Vec<_> = found
+        .rig_types
+        .iter()
+        .map(|&t| *problem.rigs.iter().find(|r| r.type_id == t).expect("a rig"))
+        .collect();
+    for i in 0..rigs.len() {
+        let mut fewer = rigs.clone();
+        fewer.remove(i);
+        let without = tank::score(all.1, &problem, &modules, &fewer).expect("still fits");
+        assert!(
+            without.numbers.repair_ehp < found.numbers.repair_ehp,
+            "{} adds no repair",
+            catalog.name(rigs[i].type_id)
+        );
+    }
+    let mut tanks: Vec<_> = outcomes
+        .iter()
+        .map(|o| {
+            let (mut t, mut r) = (o.types.clone(), o.rig_types.clone());
+            t.sort_unstable();
+            r.sort_unstable();
+            (t, r)
+        })
+        .collect();
+    let count = tanks.len();
+    tanks.dedup();
+    assert_eq!(tanks.len(), count, "each tank once");
+}

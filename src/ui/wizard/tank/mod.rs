@@ -249,17 +249,26 @@ impl TankSection {
         if self.choices == before {
             return;
         }
-        // Another layer makes the found tanks moot.
-        if self.choices.layer != before.layer {
+        // Another layer or goal makes the found tanks moot: tanks found for max EHP are not
+        // the ones to show under max repair. A goal change searches again right away when
+        // there were results, ranked by the new goal.
+        let layer = self.choices.layer != before.layer;
+        let goal = self.choices.goal != before.goal;
+        let had_results = self.searched.is_some();
+        if layer || goal {
             self.searched = None;
             self.selected = None;
             self.after = None;
             self.note = None;
             self.search = None;
             self.stop_fetching();
+            self.sort = Sort::Goal;
         }
-        if self.choices.layer != before.layer || self.choices.refit != before.refit {
+        if layer || self.choices.refit != before.refit {
             self.measure();
+        }
+        if goal && !layer && had_results {
+            self.find_best(cx);
         }
         cx.notify();
     }

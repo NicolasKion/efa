@@ -175,6 +175,16 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
         .map(|(_, o)| o)
         .collect();
     all.sort_by(|a, b| b.score.total_cmp(&a.score));
+    // Different paths reach the same tank (a variation picked through another candidate, the
+    // same rigs in another order): show each tank once.
+    let mut shown = HashSet::new();
+    all.retain(|o| {
+        let mut types = o.types.clone();
+        types.sort_unstable();
+        let mut rigs = o.rig_types.clone();
+        rigs.sort_unstable();
+        shown.insert((types, rigs))
+    });
     all.truncate(keep);
     Found {
         outcomes: all,
@@ -336,8 +346,6 @@ fn outcome(
         repair_ehp,
         ..
     } = numbers;
-    let layer = numbers.layer(problem.layer);
-    let layer_ehp = layer.ehp.unwrap_or(layer.hp);
     let mut score = match problem.goal {
         Goal::Ehp => ehp,
         // The multiplier, nudged towards more repair, then more EHP, among tanks that resist
@@ -345,7 +353,10 @@ fn outcome(
         Goal::Resists => {
             multiplier + 0.01 * repair_ehp / (repair_ehp + 100.0) + 0.001 * ehp / (ehp + 100_000.0)
         }
-        Goal::Repair => repair_ehp + layer_ehp * 1e-6,
+        // Repair alone: among tanks that repair the same, the one with the fewest modules and
+        // rigs, so a slot nothing improves the repair from stays free rather than taking
+        // buffer the goal did not ask for.
+        Goal::Repair => repair_ehp - 1e-6 * (modules.len() + rigs.len()) as f64,
     };
     if problem.need_repair && !modules.iter().any(|c| c.role == Role::Repair) {
         score *= 0.5;
