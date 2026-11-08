@@ -21,7 +21,7 @@ use gpui_kit::{
     prelude::FluentBuilder, px,
 };
 
-use super::{Efa, Hub, Loaded, item_stats, preferences::section, widgets::icon_box};
+use super::{Efa, Hub, Loaded, item_data, preferences::section, widgets::icon_box};
 use crate::{data::TypeId, icons::Icon, item_data::ItemData, overrides::Overrides};
 
 /// Most search hits the list shows, so a short query stays cheap to draw.
@@ -89,10 +89,10 @@ impl OverridesWindow {
     ) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search items"));
         // Starts loading the attribute names if no stats window did yet.
-        item_stats::hover_data(&loaded, cx);
+        item_data::hover_data(&loaded, cx);
         let subscriptions = vec![
             cx.observe(&hub, |_, _, cx| cx.notify()),
-            item_stats::observe_data(cx),
+            item_data::observe_data(cx),
             cx.subscribe(&search, |_, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     cx.notify();
@@ -578,7 +578,7 @@ impl OverridesWindow {
         let Some(type_id) = self.selected else {
             return muted("Pick an item on the left to see its attributes.");
         };
-        let data = match item_stats::data(cx) {
+        let data = match item_data::data(cx) {
             Some(Ok(data)) => data,
             Some(Err(e)) => {
                 return div().p_8().text_color(danger).child(e).into_any_element();

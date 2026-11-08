@@ -1,7 +1,7 @@
 //! pyfa's Browse EVE Fittings (gui/esiFittings.py `EveFittings`): the fittings a character keeps
 //! in the game, with their contents, to import into efa or delete from the game.
 
-use std::{collections::BTreeSet, rc::Rc, time::Duration};
+use std::{collections::BTreeSet, rc::Rc};
 
 use gpui_kit::component::{
     ActiveTheme, Disableable, IconName, Sizable, WindowExt,
@@ -14,7 +14,7 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, AppContext, ClickEvent, Context, Entity, FontWeight, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Task, WeakEntity, Window, div, prelude::FluentBuilder, px, relative,
+    Subscription, Task, Window, div, prelude::FluentBuilder, px, relative,
 };
 
 use super::{call, characters::login_status, pick};
@@ -26,10 +26,6 @@ use crate::{
     },
     ui::{Hub, Loaded, widgets::icon_box},
 };
-
-const ICON_POLL: Duration = Duration::from_millis(500);
-/// Polls for icons after a fetch, a minute's worth.
-const ICON_POLLS: u32 = 120;
 
 /// Where an item of a fitting sits, for the contents pane, in pyfa's order.
 fn section(flag: u32) -> (u8, &'static str) {
@@ -56,8 +52,6 @@ pub struct EsiFittingsWindow {
     search: Entity<InputState>,
     busy: Option<Task<()>>,
     message: Option<(SharedString, bool)>,
-    icon_polls: u32,
-    _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -77,20 +71,6 @@ impl EsiFittingsWindow {
                 }
             }),
         ];
-        let poll = cx.spawn(async move |this: WeakEntity<Self>, cx| {
-            loop {
-                cx.background_executor().timer(ICON_POLL).await;
-                let alive = this.update(cx, |w, cx| {
-                    if w.icon_polls > 0 {
-                        w.icon_polls -= 1;
-                        cx.notify();
-                    }
-                });
-                if alive.is_err() {
-                    break;
-                }
-            }
-        });
         let character = pick(&hub.read(cx).esi.accounts, None);
         let mut this = Self {
             hub,
@@ -102,8 +82,6 @@ impl EsiFittingsWindow {
             search,
             busy: None,
             message: None,
-            icon_polls: 0,
-            _poll: poll,
             _subscriptions: subscriptions,
         };
         this.fetch(cx);
@@ -157,7 +135,6 @@ impl EsiFittingsWindow {
                         w.fetched_for = Some(character);
                         w.selected
                             .retain(|id| w.fittings.iter().any(|f| f.fitting_id == Some(*id)));
-                        w.icon_polls = ICON_POLLS;
                     }
                     Err(e) => w.message = Some((e.into(), true)),
                 }

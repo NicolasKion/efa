@@ -26,7 +26,7 @@ use super::{
     fitting::{
         ChargeMenu, DragPreview, DragSource, Dragged, compatible_charges, structure_charges,
     },
-    item_stats,
+    item_data, item_stats,
     stats::format,
     widgets::{band, count, empty_line, entry, icon_box, list_row, on_each, on_efa, tree_row},
 };
@@ -1517,7 +1517,7 @@ pub(super) fn item_tooltip(
         lines.push(format!("Price: {}", format::currency(price)));
     }
     let description =
-        item_stats::hover_data(loaded, cx).and_then(|data| item_stats::description_text(&data, id));
+        item_data::hover_data(loaded, cx).and_then(|data| item_stats::description_text(&data, id));
     if let Some(description) = description {
         lines.push(String::new());
         let mut excerpt: String = description.chars().take(DESCRIPTION_MAX).collect();
@@ -1546,7 +1546,7 @@ fn ship_tooltip(
     cx: &mut App,
 ) -> AnyView {
     let rule = "─".repeat(20);
-    let traits = item_stats::hover_data(loaded, cx)
+    let traits = item_data::hover_data(loaded, cx)
         .and_then(|data| item_stats::traits_text(loaded, &data, ship));
     let mut text = match head {
         TipHead::Fit(Some(notes)) => notes,

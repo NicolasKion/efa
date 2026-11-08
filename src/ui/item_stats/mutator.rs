@@ -20,6 +20,7 @@ use gpui_kit::{
 };
 
 use super::{ItemStats, Target, format};
+use crate::ui::widgets::parse_decimal;
 use crate::{
     data::{TypeId, muta::Limits},
     icons::Icon,
@@ -291,11 +292,7 @@ impl ItemStats {
             .mutation()
             .and_then(|m| m.attrs.get(&attr).copied())
             .unwrap_or(row.limits.base);
-        let value = text
-            .trim()
-            .trim_end_matches('%')
-            .trim()
-            .parse::<f64>()
+        let value = parse_decimal::<f64>(text.trim().trim_end_matches('%'))
             .map_or(current, |shown| {
                 row.limits.clamp(complicate(row.unit.as_deref(), shown))
             });

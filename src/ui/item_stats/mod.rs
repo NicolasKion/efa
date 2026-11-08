@@ -16,7 +16,7 @@ mod tests;
 mod text;
 mod tree;
 
-use std::{cell::Cell, collections::HashSet, rc::Rc, time::Duration};
+use std::rc::Rc;
 
 use gpui_kit::component::{
     ActiveTheme, IconName, Selectable, Sizable,
@@ -29,13 +29,17 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, AnyWindowHandle, App, AppContext, Bounds, ClickEvent, ClipboardItem, Context, Div,
     Entity, FocusHandle, Global, InteractiveElement, IntoElement, KeyDownEvent, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Task, TitlebarOptions,
-    WeakEntity, Window, WindowBounds, WindowOptions, div, img, prelude::FluentBuilder, px, size,
+    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, TitlebarOptions,
+    Window, WindowBounds, WindowOptions, div, img, prelude::FluentBuilder, px, size,
 };
 
 pub use menu::{StatsOf, stats_entry};
 
-use super::{Hub, Loaded, widgets::entry};
+use super::{
+    Hub, Loaded,
+    item_data::{self, ensure_data},
+    widgets::{empty_line, entry, table_head, tree_row},
+};
 use crate::{
     data::{Kind, TypeId},
     engine::{FitItem, Inspection},
@@ -51,13 +55,8 @@ const WINDOW_W: f32 = 640.;
 const WINDOW_H: f32 = 600.;
 /// How far each new stats window sits from the previous one.
 const CASCADE: f32 = 30.;
-/// How often a window checks for icons that finished downloading.
-const ICON_POLL: Duration = Duration::from_millis(500);
-/// Checks before a window stops waiting for icons that may never come.
-const ICON_POLLS: u32 = 40;
 const ROW_H: f32 = 22.;
 const ICON: f32 = 16.;
-const INDENT: f32 = 16.;
 /// Width of the value columns of the Attributes tab.
 const VALUE_W: f32 = 150.;
 
@@ -75,64 +74,6 @@ pub struct Request {
     pub target: Target,
     /// The fit as the opening window has it, which may be newer than the hub's copy.
     pub fit: Option<Fit>,
-}
-
-/// The extra data, loaded once for all stats windows the first time one opens.
-enum DataState {
-    Loading,
-    Ready(Rc<ItemData>),
-    Failed(SharedString),
-}
-
-struct ItemDataGlobal(DataState);
-
-impl Global for ItemDataGlobal {}
-
-/// Start loading the stats window's data unless it is loaded or on its way.
-fn ensure_data(loaded: &Rc<Loaded>, cx: &mut App) {
-    if cx.has_global::<ItemDataGlobal>() {
-        return;
-    }
-    cx.set_global(ItemDataGlobal(DataState::Loading));
-    let source = loaded.source.clone();
-    let wanted: HashSet<TypeId> = loaded.catalog.types.keys().copied().collect();
-    cx.spawn(async move |cx| {
-        let result = cx
-            .background_spawn(async move { source.item_data(&wanted) })
-            .await;
-        cx.update(|cx| {
-            let state = match result {
-                Ok(data) => DataState::Ready(Rc::new(data)),
-                Err(e) => DataState::Failed(e.into()),
-            };
-            cx.set_global(ItemDataGlobal(state));
-        });
-    })
-    .detach();
-}
-
-/// The stats window's data for hover text, such as descriptions and traits. Starts loading it
-/// the first time; None until it is in.
-pub fn hover_data(loaded: &Rc<Loaded>, cx: &mut App) -> Option<Rc<ItemData>> {
-    ensure_data(loaded, cx);
-    match &cx.try_global::<ItemDataGlobal>()?.0 {
-        DataState::Ready(data) => Some(Rc::clone(data)),
-        DataState::Loading | DataState::Failed(_) => None,
-    }
-}
-
-/// The stats window's data as far as it is loaded: None while loading.
-pub fn data(cx: &App) -> Option<Result<Rc<ItemData>, SharedString>> {
-    match &cx.try_global::<ItemDataGlobal>()?.0 {
-        DataState::Loading => None,
-        DataState::Ready(data) => Some(Ok(Rc::clone(data))),
-        DataState::Failed(e) => Some(Err(e.clone())),
-    }
-}
-
-/// Redraw a view once the stats window's data is in.
-pub fn observe_data<V: 'static>(cx: &mut Context<V>) -> Subscription {
-    cx.observe_global::<ItemDataGlobal>(|_, cx| cx.notify())
 }
 
 /// A ship's bonuses as plain text, the way pyfa's browser tooltips show them.
@@ -311,6 +252,10 @@ pub struct ItemStats {
     pilot: Rc<crate::engine::Pilot>,
     /// The hub generation the fit was taken from.
     synced: u64,
+    /// The hub's revision of the fit and its engine generation when the fit was taken, so the
+    /// item is only inspected again when either moved on.
+    fit_revision: Option<u64>,
+    engine_generation: u64,
     /// The item's attributes after bonuses; kept when the item leaves the fit, like pyfa does.
     inspection: Option<Inspection>,
     tab: Option<Tab>,
@@ -323,13 +268,15 @@ pub struct ItemStats {
     compare: compare::State,
     /// The Mutations tab's sliders, built once it is first shown.
     mutator: Option<mutator::Panel>,
+    /// The tree the open tab shows, with what it was built for; dropped when the item's
+    /// numbers change.
+    tree_cache: Option<(TreeKey, Rc<[Node]>)>,
     focus: FocusHandle,
-    /// An icon was not on disk yet while drawing.
-    icon_missing: Cell<bool>,
-    icon_polls: u32,
     _subscriptions: Vec<Subscription>,
-    _tasks: Vec<Task<()>>,
 }
+
+/// What a cached tree was built for: the tab, raw values or not, and the Affected by tab's view.
+type TreeKey = (Tab, bool, affected::View);
 
 impl ItemStats {
     fn new(
@@ -340,7 +287,10 @@ impl ItemStats {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let synced = hub.read(cx).generation;
+        let (synced, engine_generation) = {
+            let hub = hub.read(cx);
+            (hub.generation, hub.engine_generation)
+        };
         let surroundings = request.fit.as_ref().map_or_default(|f| {
             crate::engine::surrounding_fits(f, &hub.read(cx).saved.fits)
                 .cloned()
@@ -348,7 +298,7 @@ impl ItemStats {
         });
         let subscriptions = vec![
             cx.observe(&hub, |this, _, cx| this.pull(cx)),
-            cx.observe_global::<ItemDataGlobal>(|_, cx| cx.notify()),
+            item_data::observe_data(cx),
             cx.observe_window_activation(window, |_, window, cx| {
                 if window.is_window_active() {
                     let handle = window.window_handle();
@@ -356,20 +306,6 @@ impl ItemStats {
                 }
             }),
         ];
-        let poll = cx.spawn(async move |this: WeakEntity<Self>, cx| {
-            loop {
-                cx.background_executor().timer(ICON_POLL).await;
-                let alive = this.update(cx, |this, cx| {
-                    if this.icon_missing.take() && this.icon_polls < ICON_POLLS {
-                        this.icon_polls += 1;
-                        cx.notify();
-                    }
-                });
-                if alive.is_err() {
-                    break;
-                }
-            }
-        });
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         let mut this = Self {
@@ -380,6 +316,8 @@ impl ItemStats {
             surroundings,
             fit: request.fit,
             synced,
+            fit_revision: None,
+            engine_generation,
             characters: None,
             pilot: Rc::new(crate::engine::Pilot::default()),
             inspection: None,
@@ -392,11 +330,9 @@ impl ItemStats {
             dep_open: Openness::new(false),
             compare: compare::State::default(),
             mutator: None,
+            tree_cache: None,
             focus,
-            icon_missing: Cell::new(false),
-            icon_polls: 0,
             _subscriptions: subscriptions,
-            _tasks: vec![poll],
         };
         this.recompute();
         this
@@ -419,14 +355,18 @@ impl ItemStats {
         if hub.generation == self.synced {
             if characters_changed {
                 self.recompute();
+                self.tree_cache = None;
                 cx.notify();
             }
             return;
         }
+        let synced = self.synced;
+        self.synced = hub.generation;
+        let mut changed = characters_changed;
         if let Target::Fitted { fit, .. } = &mut self.target {
             let mut gone = false;
             for &(generation, deleted) in &hub.deletions {
-                if generation <= self.synced || gone {
+                if generation <= synced || gone {
                     continue;
                 }
                 match deleted.cmp(fit) {
@@ -438,17 +378,37 @@ impl ItemStats {
             if gone {
                 // The fit is gone; the window keeps what it last showed.
                 self.target = Target::Type(self.type_id);
+                changed = true;
             } else if let Some(f) = hub.saved.fits.get(*fit) {
-                self.pilot = Rc::new(hub.characters.pilot(f.character, &self.loaded.catalog));
-                self.surroundings = crate::engine::surrounding_fits(f, &hub.saved.fits)
-                    .cloned()
-                    .collect();
-                self.fit = Some((**f).clone());
+                // The item's numbers follow the fit, the fits around it and the engine's data;
+                // when none of them moved on there is nothing to inspect again.
+                let revision = hub.fit_revision(*fit);
+                let surroundings: Vec<Rc<Fit>> =
+                    crate::engine::surrounding_fits(f, &hub.saved.fits)
+                        .cloned()
+                        .collect();
+                let same = self.fit_revision == Some(revision)
+                    && self.engine_generation == hub.engine_generation
+                    && surroundings.len() == self.surroundings.len()
+                    && surroundings
+                        .iter()
+                        .zip(&self.surroundings)
+                        .all(|(a, b)| Rc::ptr_eq(a, b));
+                if !same {
+                    self.fit_revision = Some(revision);
+                    self.engine_generation = hub.engine_generation;
+                    self.pilot = Rc::new(hub.characters.pilot(f.character, &self.loaded.catalog));
+                    self.surroundings = surroundings;
+                    self.fit = Some((**f).clone());
+                    changed = true;
+                }
             }
         }
-        self.synced = hub.generation;
-        self.recompute();
-        cx.notify();
+        if changed {
+            self.recompute();
+            self.tree_cache = None;
+            cx.notify();
+        }
     }
 
     fn recompute(&mut self) {
@@ -466,6 +426,7 @@ impl ItemStats {
                 .inspect_among(fit, &self.surroundings, &self.pilot, item)
         {
             self.inspection = Some(inspection);
+            self.tree_cache = None;
         }
     }
 
@@ -477,14 +438,6 @@ impl ItemStats {
         match self.target {
             Target::Fitted { fit, .. } => Some(fit),
             Target::Type(_) => None,
-        }
-    }
-
-    fn data(cx: &App) -> Option<Result<Rc<ItemData>, SharedString>> {
-        match &cx.try_global::<ItemDataGlobal>()?.0 {
-            DataState::Loading => None,
-            DataState::Ready(data) => Some(Ok(Rc::clone(data))),
-            DataState::Failed(e) => Some(Err(e.clone())),
         }
     }
 
@@ -530,11 +483,10 @@ impl ItemStats {
     fn icon(&self, icon: Option<Icon>, size: f32) -> Div {
         let slot = div().flex_none().size(px(size));
         let Some(icon) = icon else { return slot };
-        if let Some(path) = self.loaded.icons.path(&self.loaded.catalog, icon) {
-            slot.child(img(path).size(px(size)))
-        } else {
-            self.icon_missing.set(true);
-            slot
+        // One that is still downloading shows once the hub redraws every window for it.
+        match self.loaded.icons.path(&self.loaded.catalog, icon) {
+            Some(path) => slot.child(img(path).size(px(size))),
+            None => slot,
         }
     }
 
@@ -675,44 +627,26 @@ impl ItemStats {
             .map(|(n, line)| {
                 let node = line.node;
                 let has_children = !node.children.is_empty();
-                let chevron = if has_children {
-                    let icon = if line.open {
-                        IconName::ChevronDown
-                    } else {
-                        IconName::ChevronRight
-                    };
-                    div().flex_none().size(px(ICON)).child(
-                        gpui_kit::component::Icon::new(icon)
-                            .size(px(12.))
-                            .text_color(theme.muted_foreground),
-                    )
-                } else {
-                    div().flex_none().size(px(ICON))
-                };
-                let row = h_flex()
-                    .id(SharedString::from(format!("{which:?}-{n}")))
-                    .h(px(ROW_H))
-                    .px_1()
-                    .gap_1()
-                    .when(n % 2 == 1, |r| r.bg(theme.table_even))
-                    .hover(|s| s.bg(theme.table_hover))
-                    .child(div().flex_none().w(px(INDENT * line.depth as f32)))
-                    .child(chevron)
-                    .when_some(node.icon, |r, icon| r.child(self.icon(Some(icon), ICON)))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .child(node.label.clone()),
-                    )
-                    .children(node.cells.iter().map(|cell| {
-                        div()
-                            .flex_none()
-                            .w(px(VALUE_W))
-                            .truncate()
-                            .child(cell.clone())
-                    }));
+                let icon = node
+                    .icon
+                    .map(|icon| self.icon(Some(icon), ICON).into_any_element());
+                let row = tree_row(
+                    SharedString::from(format!("{which:?}-{n}")),
+                    line.depth,
+                    has_children.then_some(line.open),
+                    icon,
+                    node.label.clone(),
+                    false,
+                    cx,
+                )
+                .when(n % 2 == 1, |r| r.bg(theme.table_even))
+                .children(node.cells.iter().map(|cell| {
+                    div()
+                        .flex_none()
+                        .w(px(VALUE_W))
+                        .truncate()
+                        .child(cell.clone())
+                }));
                 let row = if has_children {
                     let key = node.key.clone();
                     row.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -786,11 +720,18 @@ impl ItemStats {
             .into_any_element()
     }
 
-    fn attributes_tab(&self, data: &ItemData, cx: &mut Context<Self>) -> AnyElement {
+    /// The item's own attributes, merged with its base item's when mutated, and their values.
+    fn attribute_values(&self, data: &ItemData) -> (Option<TypeInfo>, Vec<attributes::Value>) {
+        let merged = self
+            .mutated_info(data)
+            .or_else(|| data.type_info(self.type_id).cloned());
+        let values = self.values(merged.as_ref());
+        (merged, values)
+    }
+
+    fn attribute_nodes(&self, data: &ItemData) -> Vec<Node> {
         let catalog = &self.loaded.catalog;
-        let merged = self.mutated_info(data);
-        let info = merged.as_ref().or_else(|| data.type_info(self.type_id));
-        let values = self.values(info);
+        let (info, values) = self.attribute_values(data);
         let overridden = if self.fitted() {
             self.loaded.engine.overridden_attrs(self.type_id)
         } else {
@@ -799,27 +740,62 @@ impl ItemStats {
         let describe = attributes::Describe {
             data,
             catalog,
-            own: info,
+            own: info.as_ref(),
             fitted: self.fitted(),
             overridden: &overridden,
             raw: self.raw,
         };
         let category = catalog.get(self.type_id).map_or(0, |t| t.category_id);
-        let nodes = attributes::tree(&describe, category, &values);
-        let theme = cx.theme();
-        let head = h_flex()
-            .h(px(ROW_H))
-            .px_1()
-            .gap_1()
-            .bg(theme.table_head)
-            .text_color(theme.table_head_foreground)
+        attributes::tree(&describe, category, &values)
+    }
+
+    /// The tree `tab` shows, built once for what it depends on.
+    fn tree(&mut self, tab: Tab, data: &ItemData) -> Rc<[Node]> {
+        let key = (tab, self.raw, self.affected_view);
+        if let Some((cached, nodes)) = &self.tree_cache
+            && *cached == key
+        {
+            return Rc::clone(nodes);
+        }
+        let catalog = &self.loaded.catalog;
+        let nodes: Rc<[Node]> = match tab {
+            Tab::Attributes => self.attribute_nodes(data),
+            Tab::Requirements => requirements(catalog, data, self.type_id),
+            Tab::Dependents => dependents(catalog, self.type_id),
+            Tab::AffectedBy => self.inspection.as_ref().map_or_default(|inspection| {
+                let names = affected::Names { catalog, data };
+                affected::tree(&names, inspection, self.affected_view, self.fit_index())
+            }),
+            _ => Vec::new(),
+        }
+        .into();
+        self.tree_cache = Some((key, Rc::clone(&nodes)));
+        nodes
+    }
+
+    /// Save the Attributes tab as CSV, as pyfa's Export Item Stats does.
+    fn export(&self, cx: &mut App) {
+        let Some(Ok(data)) = item_data::data(cx) else {
+            return;
+        };
+        let (info, values) = self.attribute_values(&data);
+        let csv = attributes::csv(&data, info.as_ref(), &values);
+        let file_name = format!(
+            "{} ({}).csv",
+            self.loaded.catalog.name(self.type_id),
+            self.type_id
+        );
+        export_csv(&file_name, csv, cx);
+    }
+
+    fn attributes_tab(&mut self, data: &ItemData, cx: &mut Context<Self>) -> AnyElement {
+        let nodes = self.tree(Tab::Attributes, data);
+        let head = table_head(cx)
             .child(div().flex_1().child("Attribute"))
             .child(div().flex_none().w(px(VALUE_W)).child("Current Value"))
             .when(self.fitted(), |h| {
                 h.child(div().flex_none().w(px(VALUE_W)).child("Base Value"))
             });
-        let csv = attributes::csv(data, info, &values);
-        let file_name = format!("{} ({}).csv", catalog.name(self.type_id), self.type_id);
         v_flex()
             .flex_1()
             .min_h_0()
@@ -843,14 +819,14 @@ impl ItemStats {
                             .small()
                             .ghost()
                             .label("Export Item Stats")
-                            .on_click(move |_, _, cx| export_csv(&file_name, csv.clone(), cx)),
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.export(cx))),
                     ),
             )
             .into_any_element()
     }
 
-    fn requirements_tab(&self, data: &ItemData, cx: &mut Context<Self>) -> AnyElement {
-        let nodes = requirements(&self.loaded.catalog, data, self.type_id);
+    fn requirements_tab(&mut self, data: &ItemData, cx: &mut Context<Self>) -> AnyElement {
+        let nodes = self.tree(Tab::Requirements, data);
         if nodes.is_empty() {
             return Self::empty("No skills needed.", cx);
         }
@@ -858,8 +834,8 @@ impl ItemStats {
             .into_any_element()
     }
 
-    fn dependents_tab(&self, cx: &mut Context<Self>) -> AnyElement {
-        let nodes = dependents(&self.loaded.catalog, self.type_id);
+    fn dependents_tab(&mut self, data: &ItemData, cx: &mut Context<Self>) -> AnyElement {
+        let nodes = self.tree(Tab::Dependents, data);
         if nodes.is_empty() {
             return Self::empty("Nothing needs this skill.", cx);
         }
@@ -896,11 +872,7 @@ impl ItemStats {
             .min_h_0()
             .overflow_y_scroll()
             .child(
-                h_flex()
-                    .h(px(ROW_H))
-                    .px_1()
-                    .bg(theme.table_head)
-                    .text_color(theme.table_head_foreground)
+                table_head(cx)
                     .child(cell(None, "Name".into()))
                     .child(cell(Some(60.), "Active".into()))
                     .child(cell(Some(120.), "Type".into())),
@@ -922,15 +894,11 @@ impl ItemStats {
             .into_any_element()
     }
 
-    fn affected_tab(&self, data: &ItemData, cx: &mut Context<Self>) -> AnyElement {
-        let Some(inspection) = &self.inspection else {
+    fn affected_tab(&mut self, data: &ItemData, cx: &mut Context<Self>) -> AnyElement {
+        if self.inspection.is_none() {
             return Self::empty("Not part of a fit.", cx);
-        };
-        let names = affected::Names {
-            catalog: &self.loaded.catalog,
-            data,
-        };
-        let nodes = affected::tree(&names, inspection, self.affected_view, self.fit_index());
+        }
+        let nodes = self.tree(Tab::AffectedBy, data);
         let view = self.affected_view;
         let expanded = self.affected_open.default_open;
         v_flex()
@@ -1018,11 +986,7 @@ impl ItemStats {
     }
 
     fn empty(text: &'static str, cx: &App) -> AnyElement {
-        div()
-            .p_3()
-            .text_color(cx.theme().muted_foreground)
-            .child(text)
-            .into_any_element()
+        empty_line(text, cx).into_any_element()
     }
 }
 
@@ -1030,9 +994,6 @@ impl Render for ItemStats {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let root = v_flex()
             .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .text_sm()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|_, event: &KeyDownEvent, window, _| {
                 let m = event.keystroke.modifiers;
@@ -1042,7 +1003,7 @@ impl Render for ItemStats {
                 }
             }))
             .child(self.header(cx));
-        let data = match Self::data(cx) {
+        let data = match item_data::data(cx) {
             None => return root.child(Self::empty("Loading item data…", cx)),
             Some(Err(e)) => {
                 return root.child(
@@ -1077,7 +1038,7 @@ impl Render for ItemStats {
             Tab::Attributes => self.attributes_tab(&data, cx),
             Tab::Compare => self.compare_tab(&data, cx),
             Tab::Requirements => self.requirements_tab(&data, cx),
-            Tab::Dependents => self.dependents_tab(cx),
+            Tab::Dependents => self.dependents_tab(&data, cx),
             Tab::Effects => self.effects_tab(&data, cx),
             Tab::AffectedBy => self.affected_tab(&data, cx),
             Tab::Properties => self.properties_tab(&data, cx),

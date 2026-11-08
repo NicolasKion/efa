@@ -23,7 +23,7 @@ use super::{
     Action, Efa, Loaded,
     editor_kit::{self, INDENT, ListEntry, TREE_ROW, caption, empty_state, icon_button},
     fitting::{DragPreview, DragSource, Dragged},
-    item_stats, side,
+    item_data, item_stats, side,
     stats::format,
     widgets::icon_box,
 };
@@ -308,10 +308,10 @@ impl ImplantSetEditor {
             cx.subscribe(&search, redraw),
             cx.subscribe(&list_search, redraw),
             // Descriptions, for the bonus lines, load in the background.
-            item_stats::observe_data(cx),
+            item_data::observe_data(cx),
         ];
         // Start loading them now rather than while drawing.
-        item_stats::hover_data(&loaded, cx);
+        item_data::hover_data(&loaded, cx);
         let catalog = &loaded.catalog;
         let pirate_sets = implant_set::precalculated(catalog)
             .iter()
@@ -774,7 +774,7 @@ impl ImplantSetEditor {
                 .into_any_element();
         };
         let prices = self.prices(cx);
-        let data = item_stats::hover_data(&self.loaded, cx);
+        let data = item_data::hover_data(&self.loaded, cx);
         let known: Vec<f64> = set
             .implants
             .iter()
