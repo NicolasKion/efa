@@ -1,5 +1,6 @@
 //! "Export All Fittings to HTML" (gui/utils/exportHtml.py): every saved fit as a link that
-//! opens it in a browser fitting tool, by ship. The full page adds the EFT text under each fit;
+//! opens it in a browser fitting tool, by ship. pyfa links to Osmium, which is gone; these go to
+//! EVEShip.fit. The full page adds the EFT text under each fit;
 //! pyfa's full page pulls in jQuery Mobile for that, this one uses plain details elements.
 
 use std::{borrow::Borrow, fmt::Write};
@@ -7,8 +8,8 @@ use std::{borrow::Borrow, fmt::Write};
 use super::{dna, eft, escape_markup};
 use crate::{data::Catalog, fit::Fit};
 
-/// Where pyfa's links send a fit's DNA.
-const DNA_URL: &str = "https://o.smium.org/loadout/dna/";
+/// Where the links send a fit's DNA.
+const DNA_URL: &str = "https://eveship.fit/?fit=dna:";
 
 pub fn export(fits: &[impl Borrow<Fit>], catalog: &Catalog, minimal: bool) -> String {
     // pyfa groups by ship group and ship, both by name.
