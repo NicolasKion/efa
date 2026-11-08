@@ -17,7 +17,10 @@ use serde::{Deserialize, Serialize};
 use super::{Budget, Change, HullSize, Layer, SearchTiers, Setup, attr, group};
 use crate::{
     data::{Catalog, Slot, TypeId},
-    engine::{CalcOptions, Engine, Layer as EngineLayer, Pilot, Resource, Stats, TankProbe},
+    engine::{
+        CalcOptions, Cap, Engine, Layer as EngineLayer, Pilot, Resource, Stats, TankBench,
+        TankProbe,
+    },
     fit::{Fit, Module, ModuleState},
     prices::Prices,
 };
@@ -30,6 +33,8 @@ const RIG_SEEDS: usize = 8;
 const MAX_REPAIRERS: usize = 3;
 /// Damage-type specific modules of one kind a tank takes at most.
 const MAX_SPECIFIC: usize = 2;
+/// Threads a search spreads over at most, leaving the rest of the machine some room.
+const MAX_THREADS: usize = 6;
 
 const DAMAGE_TYPES: [&str; 4] = ["EM", "Thermal", "Kinetic", "Explosive"];
 
@@ -254,6 +259,24 @@ impl Numbers {
         Self::of(&engine.probe_tank(&judged(fit, change), pilot), layer)
     }
 
+    /// The numbers in a fit's full stats, for when those are worked out anyway.
+    pub fn of_stats(stats: &Stats, layer: Layer) -> Self {
+        Self::of(
+            &TankProbe {
+                cpu: stats.cpu,
+                powergrid: stats.powergrid,
+                calibration: stats.calibration,
+                shield: stats.shield,
+                armor: stats.armor,
+                hull: stats.hull,
+                incoming: stats.incoming,
+                sustained: stats.sustained,
+                cap_stable: matches!(stats.cap, Some(Cap::Stable(_))),
+            },
+            layer,
+        )
+    }
+
     /// The tanked layer's stats.
     pub fn layer(&self, layer: Layer) -> EngineLayer {
         match layer {
@@ -376,7 +399,7 @@ pub struct Rejected {
 impl Rejected {
     /// What the probed fit runs out of; all zero when it fits.
     pub fn of(probe: &TankProbe) -> Self {
-        let over = |r: &Resource| usize::from(r.output.is_some_and(|out| r.used > out + 1e-6));
+        let over = |r: &Resource| usize::from(r.is_over());
         Self {
             cpu: over(&probe.cpu),
             powergrid: over(&probe.powergrid),
@@ -458,6 +481,10 @@ struct State {
 /// The best tanks for the problem, best first, at most `keep` of them. Empty when nothing fits
 /// or the search was called off.
 pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: usize) -> Found {
+    let Some(bench) = engine.tank_bench(&problem.fit, &problem.pilot) else {
+        return Found::default();
+    };
+    let bench = &bench;
     let n = problem.candidates.len();
     let depth = problem.positions.len();
     let rig_depth = problem.rig_positions.len();
@@ -483,7 +510,7 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
         }
     }
     seen.extend(starts.iter().cloned());
-    let (beam, dropped) = evaluate_all(engine, problem, &starts, progress);
+    let (beam, dropped) = evaluate_all(bench, problem, &starts, progress);
     rejected += dropped;
     states.extend(beam.iter().cloned());
     let mut beam = beam;
@@ -524,7 +551,7 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
         if next.is_empty() || progress.cancelled() {
             break;
         }
-        let (mut scored, dropped) = evaluate_all(engine, problem, &next, progress);
+        let (mut scored, dropped) = evaluate_all(bench, problem, &next, progress);
         rejected += dropped;
         if scored.is_empty() {
             break;
@@ -557,7 +584,7 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
             if next.is_empty() || progress.cancelled() {
                 break;
             }
-            let (mut scored, dropped) = evaluate_all(engine, problem, &next, progress);
+            let (mut scored, dropped) = evaluate_all(bench, problem, &next, progress);
             rejected += dropped;
             if scored.is_empty() {
                 break;
@@ -623,19 +650,20 @@ fn sort(scored: &mut [(State, Outcome)]) {
 
 /// Score the states, spread over a few threads; those that do not fit are left out and counted.
 fn evaluate_all(
-    engine: &Engine,
+    bench: &TankBench,
     problem: &Problem,
     states: &[State],
     progress: &Progress,
 ) -> (Vec<(State, Outcome)>, Rejected) {
     let threads = std::thread::available_parallelism()
         .map_or(2, std::num::NonZero::get)
-        .clamp(1, 6);
+        .clamp(1, MAX_THREADS);
     let chunk = states.len().div_ceil(threads).max(1);
     std::thread::scope(|scope| {
         let handles: Vec<_> = states
             .chunks(chunk)
             .map(|chunk| {
+                let mut bench = bench.clone();
                 scope.spawn(move || {
                     let mut scored = Vec::new();
                     let mut rejected = Rejected::default();
@@ -643,7 +671,7 @@ fn evaluate_all(
                         if progress.cancelled() {
                             break;
                         }
-                        match evaluate(engine, problem, state) {
+                        match evaluate(&mut bench, problem, state) {
                             Ok(outcome) => scored.push((state.clone(), outcome)),
                             Err(dropped) => rejected += dropped,
                         }
@@ -665,14 +693,14 @@ fn evaluate_all(
 
 /// Fit the state's modules and rigs and score the result; what it ran out of when it does not
 /// fit.
-fn evaluate(engine: &Engine, problem: &Problem, state: &State) -> Result<Outcome, Rejected> {
+fn evaluate(bench: &mut TankBench, problem: &Problem, state: &State) -> Result<Outcome, Rejected> {
     let modules: Vec<&Candidate> = state
         .modules
         .iter()
         .map(|&m| &problem.candidates[m])
         .collect();
     let rigs: Vec<RigCandidate> = state.rigs.iter().map(|&r| problem.rigs[r]).collect();
-    try_score(engine, problem, &modules, &rigs)
+    try_score(bench, problem, &modules, &rigs)
 }
 
 /// Score a tank of the problem's kind made of these modules and rigs; None when it does not fit.
@@ -683,12 +711,13 @@ pub fn score(
     modules: &[&Candidate],
     rigs: &[RigCandidate],
 ) -> Option<Outcome> {
-    try_score(engine, problem, modules, rigs).ok()
+    let mut bench = engine.tank_bench(&problem.fit, &problem.pilot)?;
+    try_score(&mut bench, problem, modules, rigs).ok()
 }
 
 /// [`score`], with what the tank ran out of when it does not fit.
 fn try_score(
-    engine: &Engine,
+    bench: &mut TankBench,
     problem: &Problem,
     modules: &[&Candidate],
     rigs: &[RigCandidate],
@@ -701,18 +730,18 @@ fn try_score(
             ..Rejected::default()
         });
     }
-    let mut fit = problem.fit.clone();
     let slot = problem.layer.slot();
-    for (candidate, &at) in modules.iter().zip(&problem.positions) {
-        super::place(&mut fit, &(slot, at, candidate.module.clone()));
-    }
-    for (rig, &at) in rigs.iter().zip(&problem.rig_positions) {
-        if fit.rigs.len() <= at {
-            fit.rigs.resize(at + 1, None);
-        }
-        fit.rigs[at] = Some(rig.type_id);
-    }
-    let probe = engine.probe_tank(&fit, &problem.pilot);
+    let placed: Vec<(Slot, usize, &Module)> = modules
+        .iter()
+        .zip(&problem.positions)
+        .map(|(candidate, &at)| (slot, at, &candidate.module))
+        .collect();
+    let rig_types: Vec<TypeId> = rigs
+        .iter()
+        .zip(&problem.rig_positions)
+        .map(|(rig, _)| rig.type_id)
+        .collect();
+    let probe = bench.probe(&placed, &rig_types);
     let rejected = Rejected::of(&probe);
     if rejected.is_empty() {
         Ok(outcome(problem, modules, rigs, &probe))

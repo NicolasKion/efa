@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 
 use rc::stats::{
-    StatCapBlcSrcKinds, StatCapSim, StatCritOptions, StatDmgEntry, StatDmgItemKinds, StatResource,
-    StatSlot, StatTimeOptions,
+    FitStats, StatCapBlcSrcKinds, StatCapSim, StatCritOptions, StatDmgEntry, StatDmgItemKinds,
+    StatResource, StatSlot, StatTimeOptions,
 };
 
 use super::{
@@ -24,6 +24,17 @@ pub struct Slots {
 pub struct Resource {
     pub used: f64,
     pub output: Option<f64>,
+}
+
+/// Leeway for float noise when comparing what a fit uses with what it has.
+const RESOURCE_TOLERANCE: f64 = 1e-6;
+
+impl Resource {
+    /// Whether more is used than there is.
+    pub fn is_over(&self) -> bool {
+        self.output
+            .is_some_and(|out| self.used > out + RESOURCE_TOLERANCE)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -206,55 +217,14 @@ pub(super) fn fit_stats(
     stats.drone_dps = damage(&drones.dps).total();
     stats.weapon_dps = stats.dps.total() - stats.drone_dps;
 
-    if let Ok(hp) = s.get_stat_hp() {
-        stats.shield.hp = hp.shield.buffer.into_f64();
-        stats.armor.hp = hp.armor.buffer.into_f64();
-        stats.hull.hp = hp.hull.buffer.into_f64();
-    }
-    // The buffer already has the resist multiplier applied. Ancillary repairer charges stay out,
-    // like pyfa's EHP.
-    if let Ok(ehp) = s.get_stat_ehp(Some(incoming)) {
-        for (layer, ehp) in [
-            (&mut stats.shield, ehp.shield),
-            (&mut stats.armor, ehp.armor),
-            (&mut stats.hull, ehp.hull),
-        ] {
-            layer.ehp = ehp.map(|l| l.buffer.into_f64());
-            layer.mult = ehp.map(|l| l.mult.into_f64());
-        }
-    }
-    if let Ok(r) = s.get_stat_resists() {
-        for (layer, res) in [
-            (&mut stats.shield, r.shield),
-            (&mut stats.armor, r.armor),
-            (&mut stats.hull, r.hull),
-        ] {
-            layer.resists = [
-                res.em.into_f64(),
-                res.thermal.into_f64(),
-                res.kinetic.into_f64(),
-                res.explosive.into_f64(),
-            ];
-        }
-    }
+    [stats.shield, stats.armor, stats.hull] = layers(&mut s, incoming);
 
     stats.cap_amount = s.get_stat_cap_amount().ok().map(rc::PValue::into_f64);
     stats.cap_balance = s
         .get_stat_cap_balance(StatCapBlcSrcKinds::default(), StatTimeOptions::default())
         .ok()
         .map(rc::Value::into_f64);
-    stats.cap = s
-        .get_stat_cap_sim(
-            rc::UnitInterval::from_f64_clamped(1.0),
-            options.optional_reloads(),
-            &rc::stats::StatCapSimStagger::default(),
-            None,
-        )
-        .ok()
-        .map(|sim| match sim {
-            StatCapSim::Stable(level) => Cap::Stable(level.into_f64()),
-            StatCapSim::Time(secs) => Cap::Lasts(secs.into_f64()),
-        });
+    stats.cap = cap(&mut s, options);
 
     stats.speed = s.get_stat_speed().ok().map(rc::PValue::into_f64);
     stats.align_time = s.get_stat_align_time().ok().map(rc::PValue::into_f64);
@@ -264,6 +234,46 @@ pub(super) fn fit_stats(
     stats.scan_res = s.get_stat_scan_res().ok().map(rc::PValue::into_f64);
     stats.locks = s.get_stat_locks().ok().map(rc::Count::into_u32);
     stats.sensor_strength = s.get_stat_sensors().ok().map(|v| v.strength.into_f64());
+}
+
+/// Shield, armor and hull: HP, EHP against `incoming` and resists.
+pub(super) fn layers(s: &mut FitStats<'_>, incoming: rc::DpsProfile) -> [Layer; 3] {
+    let mut layers = [Layer::default(); 3];
+    if let Ok(hp) = s.get_stat_hp() {
+        for (layer, hp) in layers.iter_mut().zip([hp.shield, hp.armor, hp.hull]) {
+            layer.hp = hp.buffer.into_f64();
+        }
+    }
+    // The buffer already has the resist multiplier applied. Ancillary repairer charges stay out,
+    // like pyfa's EHP.
+    if let Ok(ehp) = s.get_stat_ehp(Some(incoming)) {
+        for (layer, ehp) in layers.iter_mut().zip([ehp.shield, ehp.armor, ehp.hull]) {
+            layer.ehp = ehp.map(|l| l.buffer.into_f64());
+            layer.mult = ehp.map(|l| l.mult.into_f64());
+        }
+    }
+    if let Ok(r) = s.get_stat_resists() {
+        for (layer, res) in layers.iter_mut().zip([r.shield, r.armor, r.hull]) {
+            layer.resists =
+                [res.em, res.thermal, res.kinetic, res.explosive].map(rc::UnitInterval::into_f64);
+        }
+    }
+    layers
+}
+
+/// How long the capacitor lasts with everything running, or where it settles.
+pub(super) fn cap(s: &mut FitStats<'_>, options: CalcOptions) -> Option<Cap> {
+    s.get_stat_cap_sim(
+        rc::UnitInterval::from_f64_clamped(1.0),
+        options.optional_reloads(),
+        &rc::stats::StatCapSimStagger::default(),
+        None,
+    )
+    .ok()
+    .map(|sim| match sim {
+        StatCapSim::Stable(level) => Cap::Stable(level.into_f64()),
+        StatCapSim::Time(secs) => Cap::Lasts(secs.into_f64()),
+    })
 }
 
 pub(super) fn slots(s: StatSlot) -> Slots {

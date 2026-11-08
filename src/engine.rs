@@ -38,7 +38,7 @@ pub use pane::{
     CalcOptions, CapDetail, FirepowerDetail, Mining, MiningRate, Misc, Outgoing, SpoolRange, Tank,
 };
 pub use pilot::{MAX_LEVEL, Pilot, SkillTarget};
-pub use probe::TankProbe;
+pub use probe::{TankBench, TankProbe};
 pub use source::{EngineSource, PackedEngine};
 pub use stats::{Breacher, Cap, Damage, Layer, ModuleInfo, Resource, Slots, Stats};
 pub use surroundings::{AbilityInfo, FighterClasses, FighterInfo, surrounding_fits};
