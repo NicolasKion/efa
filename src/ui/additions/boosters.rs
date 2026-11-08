@@ -15,7 +15,7 @@ use gpui_kit::{
 };
 
 use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, misc_entries, price_text};
-use crate::ui::widgets::DropHighlight;
+use crate::ui::widgets::{DropHighlight, empty_line};
 use crate::{
     data::{Catalog, ItemType, Kind, TypeId},
     engine::{ItemRef, Stats},
@@ -25,6 +25,7 @@ use crate::{
         Action, AddKind, Efa, Loaded,
         columns::STATE_W,
         fitting::{DragSource, Dragged},
+        stats::format::round_to_prec,
         validation::flag,
         widgets::{color, entry, icon_box, icon_label, item_entry, short},
     },
@@ -72,21 +73,6 @@ fn side_effect_label(effect_id: i32, strength: Option<f64>) -> String {
     match strength {
         Some(s) => format!("{}% {name}", round_to_prec(s, 5)),
         None => name,
-    }
-}
-
-/// pyfa's `roundToPrec`: round to `digits` significant digits, and drop a zero fraction.
-fn round_to_prec(value: f64, digits: i32) -> String {
-    if value == 0.0 || !value.is_finite() {
-        return format!("{value}");
-    }
-    let decimals = (digits - value.abs().log10().floor() as i32 - 1).max(0);
-    let scale = 10f64.powi(decimals);
-    let rounded = (value * scale).round() / scale;
-    if rounded.fract() == 0.0 {
-        format!("{rounded:.0}")
-    } else {
-        format!("{rounded}")
     }
 }
 
@@ -170,22 +156,21 @@ impl Efa {
         let Some(fit) = self.fit() else {
             return div().into_any_element();
         };
-        let theme = cx.theme();
         let mut content: Vec<AnyElement> = Vec::new();
         if fit.boosters.is_empty() {
             content.push(
-                div()
-                    .id("additions-empty")
-                    .p_2()
-                    .text_color(theme.muted_foreground)
-                    .child("Double-click boosters in the market, or drag them here, to add them.")
-                    .context_menu({
-                        let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
-                        move |menu, window, cx| {
-                            misc_entries(menu, &this, &loaded, AddKind::Boosters, None, window, cx)
-                        }
-                    })
-                    .into_any_element(),
+                empty_line(
+                    "Double-click boosters in the market, or drag them here, to add them.",
+                    cx,
+                )
+                .id("additions-empty")
+                .context_menu({
+                    let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
+                    move |menu, window, cx| {
+                        misc_entries(menu, &this, &loaded, AddKind::Boosters, None, window, cx)
+                    }
+                })
+                .into_any_element(),
             );
         } else {
             content.push(Self::booster_header(cx));
@@ -500,7 +485,7 @@ mod tests {
             (-12.345_678, "-12.346"),
             (0.0, "0"),
         ] {
-            assert_eq!(round_to_prec(value, 5), want, "value {value}");
+            assert_eq!(round_to_prec(value, 5).to_string(), want, "value {value}");
         }
     }
 

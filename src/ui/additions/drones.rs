@@ -24,7 +24,7 @@ use crate::{
         Action, AddKind, Efa, Loaded,
         columns::{ICON_W, STATE_W, text_width},
         fitting::{DragPreview, DragSource, Dragged},
-        stats::format::{capitalize, format_list},
+        stats::format::{self, capitalize, format_list},
         validation::flag,
         widgets::{color, icon, icon_box},
     },
@@ -270,43 +270,11 @@ fn order_rank(market_group: Option<&str>) -> usize {
 /// pyfa's formatAmount with three significant digits: 1234 -> 1.23k. Values of a thousand and up
 /// get a suffix, up to 10^`highest`.
 pub(super) fn format_amount(value: f64, highest: i32, force_sign: bool) -> String {
-    const SUFFIXES: [(i32, &str); 3] = [(9, "G"), (6, "M"), (3, "k")];
-    let (mut mantissa, mut suffix) = (value, "");
-    if value.abs() > 1.0 {
-        let found = SUFFIXES
-            .iter()
-            .position(|&(order, _)| value.abs() >= 10f64.powi(order) && order <= highest);
-        if let Some(at) = found {
-            let (order, s) = SUFFIXES[at];
-            mantissa = value / 10f64.powi(order);
-            suffix = s;
-            // 999999 would read 1000k; move up an order when rounding gets there.
-            if let Some(&(bigger, bigger_suffix)) = at.checked_sub(1).map(|a| &SUFFIXES[a])
-                && bigger <= highest
-                && round_to_prec(mantissa, 3).abs() >= 10f64.powi(bigger - order)
-            {
-                mantissa /= 10f64.powi(bigger - order);
-                suffix = bigger_suffix;
-            }
-        }
-    }
-    let mantissa = round_to_prec(mantissa, 3);
-    let sign = if force_sign && mantissa > 0.0 {
-        "+"
+    if force_sign {
+        format::signed(value, 3, 0, highest)
     } else {
-        ""
-    };
-    format!("{sign}{mantissa}{suffix}")
-}
-
-/// Round to `digits` significant digits, leaving whole numbers alone.
-fn round_to_prec(value: f64, digits: i32) -> f64 {
-    if value.fract() == 0.0 {
-        return value;
+        format::amount(value, 3, 0, highest)
     }
-    let decimals = (digits - value.abs().log10().floor() as i32 - 1).max(0);
-    let scale = 10f64.powi(decimals);
-    (value * scale).round() / scale
 }
 
 /// Range then falloff, the way pyfa's max range column writes them.
