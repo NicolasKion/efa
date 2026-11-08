@@ -342,10 +342,10 @@ impl<'a> Columns<'a> {
 }
 
 /// The fit list, `width` wide.
-pub fn sources(g: &mut GraphsWindow, width: f32, cx: &mut Context<GraphsWindow>) -> AnyElement {
+pub(super) fn sources(g: &GraphsWindow, width: f32, cx: &mut Context<GraphsWindow>) -> AnyElement {
     let this = cx.weak_entity();
     let cols = Columns::new(g.graph.src_columns(), width);
-    let (fits, tabs) = fit_choices(g);
+    let (fits, tabs) = (Rc::clone(&g.choices.0), Rc::clone(&g.choices.1));
     let rows: Vec<AnyElement> = (0..g.sources.len())
         .map(|i| source_row(g, i, cols, &this, &fits, &tabs, cx))
         .collect();
@@ -422,10 +422,10 @@ pub fn sources(g: &mut GraphsWindow, width: f32, cx: &mut Context<GraphsWindow>)
 }
 
 /// Fits by index and name, for the add menus.
-type Choices = Rc<Vec<(usize, String)>>;
+pub(super) type Choices = Rc<Vec<(usize, String)>>;
 
 /// Every fit by name, and the main window's open tabs, for the add menus.
-fn fit_choices(g: &GraphsWindow) -> (Choices, Choices) {
+pub(super) fn fit_choices(g: &GraphsWindow) -> (Choices, Choices) {
     let mut fits: Vec<(usize, String)> = (0..g.fits.len()).map(|i| (i, g.fit_name(i))).collect();
     fits.sort_by_cached_key(|f| f.1.to_lowercase());
     let tabs = g
@@ -604,7 +604,7 @@ fn pick_ammo(
 }
 
 fn source_row(
-    g: &mut GraphsWindow,
+    g: &GraphsWindow,
     i: usize,
     cols: Columns,
     this: &Weak,
@@ -613,7 +613,7 @@ fn source_row(
     cx: &mut Context<GraphsWindow>,
 ) -> AnyElement {
     let source = g.sources[i].clone();
-    let snap = g.snapshot(source.fit);
+    let snap = g.cached_snapshot(source.fit);
     let name = g.source_name(&source);
     let color = source.color.color(cx.theme());
     let selected = g.selected_source == Some(i);
@@ -680,11 +680,11 @@ fn source_row(
 }
 
 /// The target list, `width` wide.
-pub fn targets(g: &mut GraphsWindow, width: f32, cx: &mut Context<GraphsWindow>) -> AnyElement {
+pub(super) fn targets(g: &GraphsWindow, width: f32, cx: &mut Context<GraphsWindow>) -> AnyElement {
     let this = cx.weak_entity();
     let all = g.graph.tgt_columns(g.options().ignore_resists);
     let cols = Columns::new(&all, width);
-    let (fits, tabs) = fit_choices(g);
+    let (fits, tabs) = (Rc::clone(&g.choices.0), Rc::clone(&g.choices.1));
     let ignore_resists = g.options().ignore_resists;
     let rows: Vec<AnyElement> = (0..g.targets.len())
         .map(|i| target_row(g, i, cols, &this, &fits, &tabs, ignore_resists, cx))
@@ -866,7 +866,7 @@ fn target_menu(
     reason = "a row with its menus' inputs spelled out"
 )]
 fn target_row(
-    g: &mut GraphsWindow,
+    g: &GraphsWindow,
     i: usize,
     cols: Columns,
     this: &Weak,
@@ -876,11 +876,11 @@ fn target_row(
     cx: &mut Context<GraphsWindow>,
 ) -> AnyElement {
     let target = g.targets[i].clone();
-    let data = g.target_data(&target);
     let snap = match target.kind {
-        TargetKind::Fit(fit) => g.snapshot(fit),
+        TargetKind::Fit(fit) => g.cached_snapshot(fit),
         TargetKind::Profile(_) => None,
     };
+    let data = super::target_data(&target, snap.as_deref());
     // A target's swatch shows its shade of the first fit's color.
     let base = g
         .sources

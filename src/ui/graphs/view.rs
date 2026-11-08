@@ -14,8 +14,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, ClickEvent, Context, FontWeight, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    prelude::FluentBuilder, px,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, StyleRefinement, Styled,
+    Window, div, prelude::FluentBuilder, px,
 };
 
 use super::{Field, GraphsWindow, canvas, lists, panel, vector};
@@ -104,7 +104,7 @@ impl Render for GraphsWindow {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .child(self.plot_card(plot_min, cx))
+            .child(self.plot_area(plot_min))
             .child(self.settings_panel(cx))
             .child(lists);
         root.child(self.toolbar(cx))
@@ -255,20 +255,25 @@ impl GraphsWindow {
             .into_any_element()
     }
 
-    /// The plot in a card, under a header naming the axes, with the pinned readout or a hint.
     /// What the plot shows, and the pinned readout or a hint on the right.
     fn plot_header(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
-        let frame = &self.frame;
+        let plot = self.plot.read(cx);
+        let frame = &plot.frame;
         let title = canvas::axis_label(&frame.y_label, frame.y_unit);
         let subtitle = format!(
             "against {}",
             canvas::axis_label(&frame.x_label, frame.x_unit)
         );
-        let empty = self.lines.is_empty();
+        let (x_unit, empty, pinned, status) = (
+            frame.x_unit,
+            plot.lines.is_empty(),
+            plot.pinned,
+            plot.status.clone(),
+        );
+        let theme = cx.theme();
 
-        let aside = if let Some(x) = self.pinned_mark {
-            let text = match frame.x_unit {
+        let aside = if let Some(x) = pinned {
+            let text = match x_unit {
                 Some(unit) => format!("Pinned at {} {unit}", canvas::format(x)),
                 None => format!("Pinned at {}", canvas::format(x)),
             };
@@ -296,11 +301,11 @@ impl GraphsWindow {
                 .hover(|s| s.bg(theme.secondary))
                 .tooltip(|window, cx| Tooltip::new("Unpin the readout").build(window, cx))
                 .on_click(cx.listener(|g, _: &ClickEvent, _, cx| {
-                    g.pinned_mark = None;
+                    g.unpin(cx);
                     cx.notify();
                 }))
                 .into_any_element()
-        } else if let Some(status) = self.status.clone().filter(|_| !empty) {
+        } else if let Some(status) = status.filter(|_| !empty) {
             hint(AssetIcon::TriangleAlert, status, cx)
         } else if empty {
             div().into_any_element()
@@ -336,51 +341,12 @@ impl GraphsWindow {
             .into_any_element()
     }
 
-    fn plot_card(&self, min_h: f32, cx: &mut Context<Self>) -> impl IntoElement {
-        let plot = canvas::render(
-            &self.lines,
-            &self.frame,
-            self.pinned_mark,
-            self.hover_mark,
-            &self.plot_bounds,
-            cx,
-        );
-        let theme = cx.theme();
-        let empty = self.lines.is_empty();
-        // With nothing plotted, say why over the empty axes.
-        let notice = self.status.clone().filter(|_| empty).map(|status| {
-            v_flex()
-                .absolute()
-                .inset_0()
-                .items_center()
-                .justify_center()
-                .gap_2()
-                .child(
-                    v_flex()
-                        .items_center()
-                        .gap_2()
-                        .px_5()
-                        .py_4()
-                        .rounded(px(8.))
-                        .border_1()
-                        .border_color(theme.border)
-                        .bg(theme.background)
-                        .child(
-                            UiIcon::new(AssetIcon::ChartSpline)
-                                .size(px(22.))
-                                .text_color(theme.muted_foreground),
-                        )
-                        .child(div().text_color(theme.muted_foreground).child(status)),
-                )
-        });
-
+    /// The plot, kept from redrawing with the rest of the window unless it changed.
+    fn plot_area(&self, min_h: f32) -> impl IntoElement {
         v_flex().flex_1().min_h(px(min_h)).overflow_hidden().child(
-            div()
-                .relative()
-                .flex_1()
-                .min_h_0()
-                .child(plot)
-                .children(notice),
+            self.plot
+                .clone()
+                .cached(StyleRefinement::default().flex_1().min_h_0()),
         )
     }
 

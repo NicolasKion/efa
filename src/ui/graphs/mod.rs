@@ -11,17 +11,17 @@ mod style;
 mod vector;
 mod view;
 
-use std::{cell::Cell, collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc};
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::{
-    App, AppContext, Bounds, Context, Entity, FocusHandle, Pixels, Point, SharedString,
-    Subscription, Task, Window,
+    App, AppContext, Context, Entity, FocusHandle, Pixels, Point, SharedString, Subscription, Task,
+    Window,
 };
 
 use self::{
-    canvas::{Frame, PlotLine},
-    lists::{AmmoChoice, Source, Target, TargetKind},
+    canvas::{Frame, Plot, PlotLine},
+    lists::{AmmoChoice, Choices, Source, Target, TargetKind},
     style::LineStyle,
     vector::{Vector, Which},
 };
@@ -41,8 +41,9 @@ use crate::{
     },
 };
 
-/// Something read from a fit, with the fit it was read from to tell when it is stale.
-type Cached<T> = (String, Rc<T>);
+/// Something read from a fit, with the revisions of the fits it was read from (the fit's own,
+/// then those boosting or projecting onto it) to tell when it is stale.
+type Cached<T> = (Vec<u64>, Rc<T>);
 
 /// Open the graph window, or bring it forward, as pyfa does, with `fit` in its fit list when
 /// opened fresh. `hidden` also lists the graphs pyfa keeps behind Ctrl+Alt+G.
@@ -90,11 +91,17 @@ pub struct GraphsWindow {
     hub: Entity<Hub>,
     loaded: Option<Rc<Loaded>>,
     fits: Vec<Rc<Fit>>,
+    /// The hub's revision of each fit, in step with `fits`.
+    revisions: Vec<u64>,
     /// The main window's tabs, for "Add Currently Open Fit".
     open_tabs: Vec<usize>,
+    /// Every fit by name and the open tabs, for the add menus; built when the fits change.
+    choices: (Choices, Choices),
     synced: u64,
     /// The characters the snapshots were flown with; a new list means they are out of date.
     characters: Option<Rc<crate::character::Characters>>,
+    /// The engine data the snapshots were read with; changed overrides make them stale.
+    engine_generation: u64,
     /// Snapshots by fit and ammo override, with the fit they were read from, so only fits that
     /// changed are read again.
     snapshots: HashMap<(usize, Option<AmmoChoice>), Cached<FitSnapshot>>,
@@ -124,14 +131,8 @@ pub struct GraphsWindow {
     /// The lists take Delete for removing their selected row, as in pyfa.
     sources_focus: FocusHandle,
     targets_focus: FocusHandle,
-    lines: Vec<PlotLine>,
-    frame: Frame,
-    /// Where the pointer is over the plot.
-    pub(super) hover_mark: Option<f64>,
-    /// Where the plot was last clicked; stays when the pointer leaves.
-    pub(super) pinned_mark: Option<f64>,
-    plot_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
-    status: Option<SharedString>,
+    /// The plot, a view of its own so moving the pointer over it redraws only the plot.
+    plot: Entity<Plot>,
     _subscriptions: Vec<Subscription>,
     field_subscriptions: Vec<Subscription>,
 }
@@ -149,13 +150,17 @@ impl GraphsWindow {
             let hub = hub.read(cx);
             (hub.saved.settings.graphs, !hub.raw_hp)
         };
+        let owner = cx.entity_id();
         let mut this = Self {
             hub,
             loaded: None,
             fits: Vec::new(),
+            revisions: Vec::new(),
             open_tabs: Vec::new(),
+            choices: Default::default(),
             synced: u64::MAX,
             characters: None,
+            engine_generation: 0,
             snapshots: HashMap::new(),
             ammo_groups: HashMap::new(),
             graph: Graph::DamageStats,
@@ -180,12 +185,7 @@ impl GraphsWindow {
             selected_target: None,
             sources_focus: cx.focus_handle(),
             targets_focus: cx.focus_handle(),
-            lines: Vec::new(),
-            frame: Frame::default(),
-            hover_mark: None,
-            pinned_mark: None,
-            plot_bounds: Rc::default(),
-            status: None,
+            plot: cx.new(|_| Plot::new(owner)),
             _subscriptions: subscriptions,
             field_subscriptions: Vec::new(),
         };
@@ -218,12 +218,20 @@ impl GraphsWindow {
             self.ammo_groups.clear();
             changed = true;
         }
+        if self.engine_generation != hub.engine_generation {
+            self.engine_generation = hub.engine_generation;
+            self.snapshots.clear();
+            self.ammo_groups.clear();
+            changed = true;
+        }
         if self.effective_hp == hub.raw_hp {
             self.effective_hp = !hub.raw_hp;
             changed = true;
         }
         if hub.generation == self.synced {
             if changed {
+                // The fit names carry their ships' names once the data is in.
+                self.choices = lists::fit_choices(self);
                 self.recompute(cx);
                 cx.notify();
             }
@@ -236,6 +244,7 @@ impl GraphsWindow {
             .map(|&(_, index)| index)
             .collect();
         self.fits = hub.saved.fits.clone();
+        self.revisions = (0..self.fits.len()).map(|i| hub.fit_revision(i)).collect();
         // A user profile edited or deleted in the profile editor follows here, as in pyfa.
         let user = &hub.saved.target_profiles;
         self.targets.retain_mut(|t| match &mut t.kind {
@@ -257,6 +266,7 @@ impl GraphsWindow {
         self.sources.retain(|s| s.fit < count);
         self.targets
             .retain(|t| !matches!(t.kind, TargetKind::Fit(i) if i >= count));
+        self.choices = lists::fit_choices(self);
         // Snapshots of fits that changed are read again when next asked for.
         self.recompute(cx);
         cx.notify();
@@ -284,44 +294,53 @@ impl GraphsWindow {
         self.snapshot_with(fit, None)
     }
 
-    /// The fit with `ammo` loaded into every module of its type, as "Plot with Different Ammo"
-    /// asks for.
-    fn fit_with(&self, fit: usize, ammo: Option<AmmoChoice>) -> Option<Fit> {
-        let mut f = (**self.fits.get(fit)?).clone();
-        if let Some(choice) = ammo {
-            for m in f.modules_mut().filter(|m| m.type_id == choice.module) {
-                m.charge = Some(choice.charge);
-            }
-        }
-        Some(f)
+    /// A fit's snapshot as last read, without reading it again. The lists draw from these, and
+    /// every recalculation brings them up to date.
+    pub(super) fn cached_snapshot(&self, fit: usize) -> Option<Rc<FitSnapshot>> {
+        self.snapshots
+            .get(&(fit, None))
+            .map(|(_, snap)| Rc::clone(snap))
     }
 
     fn snapshot_with(&mut self, fit: usize, ammo: Option<AmmoChoice>) -> Option<Rc<FitSnapshot>> {
         let loaded = self.loaded.clone()?;
-        let f = self.fit_with(fit, ammo)?;
-        let key = self.cache_key(&f);
+        let key = self.cache_key(fit)?;
         if let Some((cached, snap)) = self.snapshots.get(&(fit, ammo))
             && *cached == key
         {
             return Some(Rc::clone(snap));
         }
-        let pilot = self.pilot(&f, &loaded);
+        let shared = &self.fits[fit];
+        // "Plot with Different Ammo" loads its charge into every module of the type.
+        let with_ammo = ammo.map(|choice| {
+            let mut f = (**shared).clone();
+            for m in f.modules_mut().filter(|m| m.type_id == choice.module) {
+                m.charge = Some(choice.charge);
+            }
+            f
+        });
+        let f: &Fit = with_ammo.as_ref().unwrap_or(shared);
+        let pilot = self.pilot(f, &loaded);
         let snap = Rc::new(
             loaded
                 .engine
-                .graph_snapshot(&f, &self.fits, &pilot, &loaded.catalog),
+                .graph_snapshot(f, &self.fits, &pilot, &loaded.catalog),
         );
         self.snapshots.insert((fit, ammo), (key, Rc::clone(&snap)));
         Some(snap)
     }
 
-    /// What a fit's numbers depend on: the fit and the fits boosting or projecting onto it.
-    fn cache_key(&self, f: &Fit) -> String {
-        let mut key = serde_json::to_string(f).unwrap_or_default();
+    /// What a fit's numbers depend on: the revisions of the fit and of the fits boosting or
+    /// projecting onto it. None for no such fit.
+    fn cache_key(&self, fit: usize) -> Option<Vec<u64>> {
+        let f = self.fits.get(fit)?;
+        let revision = |i: Option<usize>| i.and_then(|i| self.revisions.get(i).copied());
+        let mut key = vec![revision(Some(fit)).unwrap_or(0)];
         for other in crate::engine::surrounding_fits(f, &self.fits) {
-            key.push_str(&serde_json::to_string(other).unwrap_or_default());
+            let index = self.fits.iter().position(|f| Rc::ptr_eq(f, other));
+            key.push(revision(index).unwrap_or(0));
         }
-        key
+        Some(key)
     }
 
     /// Each fit flies with its own character, as in the main window.
@@ -335,8 +354,8 @@ impl GraphsWindow {
     fn ammo_groups(&mut self, fit: usize) -> Option<Rc<Vec<WeaponGroup>>> {
         let loaded = self.loaded.clone()?;
         let quality = self.settings.ammo_quality;
-        let f = self.fits.get(fit)?.clone();
-        let key = self.cache_key(&f);
+        let key = self.cache_key(fit)?;
+        let f = Rc::clone(&self.fits[fit]);
         if let Some((cached, groups)) = self.ammo_groups.get(&(fit, quality))
             && *cached == key
         {
@@ -363,9 +382,16 @@ impl GraphsWindow {
         self.recompute(cx);
         cx.notify();
         let settings = self.settings;
-        self.hub.update(cx, |hub, cx| {
+        let (before, after) = self.hub.update(cx, |hub, cx| {
+            let before = hub.generation;
             hub.update_saved(|s| s.settings.graphs = settings, cx);
+            (before, hub.generation)
         });
+        // Saving the settings changes nothing else, so the pull it sets off has nothing new to
+        // take in, unless this window was behind already.
+        if before == self.synced {
+            self.synced = after;
+        }
     }
 
     fn x_defs(&self) -> Vec<XDef> {
@@ -473,7 +499,7 @@ impl GraphsWindow {
         self.checkboxes.clear();
         self.atk_vector = Vector::new(1.0, 0.0);
         self.tgt_vector = Vector::new(1.0, 90.0);
-        self.pinned_mark = None;
+        self.unpin(cx);
         self.layout_inputs(window, cx);
         self.recompute(cx);
         cx.notify();
@@ -482,7 +508,7 @@ impl GraphsWindow {
     fn set_axes(&mut self, x: usize, y: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.x = x;
         self.y = y;
-        self.pinned_mark = None;
+        self.unpin(cx);
         self.layout_inputs(window, cx);
         self.recompute(cx);
         cx.notify();
@@ -504,16 +530,13 @@ impl GraphsWindow {
         }
     }
 
-    pub(super) fn hover_at(&mut self, position: Point<Pixels>, pin: bool, cx: &mut Context<Self>) {
-        let Some(x) = canvas::data_x(self.plot_bounds.get(), position, self.frame.x_range) else {
-            return;
-        };
-        let x = canvas::clamp_mark(x, self.frame.x_range);
-        self.hover_mark = Some(x);
-        if pin {
-            self.pinned_mark = Some(x);
-        }
-        cx.notify();
+    /// Drop the pinned readout.
+    pub(super) fn unpin(&self, cx: &mut App) {
+        self.plot.update(cx, |plot, cx| {
+            if plot.pinned.take().is_some() {
+                cx.notify();
+            }
+        });
     }
 
     fn checkbox(&self, key: CheckboxKey) -> bool {
@@ -567,16 +590,23 @@ impl GraphsWindow {
     }
 
     /// Recalculate every line. Snapshots are cached per fit, so this only samples.
-    fn recompute(&mut self, cx: &App) {
-        self.lines.clear();
+    fn recompute(&mut self, cx: &mut App) {
         if self.loaded.is_none() {
             return;
         }
         let req = self.request(cx);
-        self.plot_lines(&req);
+        let (lines, status) = self.plot_lines(&req);
+        let frame = self.frame_for(&req, &lines);
+        self.plot.update(cx, |plot, cx| {
+            plot.lines = lines;
+            plot.frame = frame;
+            plot.status = status;
+            cx.notify();
+        });
     }
 
-    fn plot_lines(&mut self, req: &Request) {
+    /// The lines for `req`, and why the plot is empty or what it is missing, if anything.
+    fn plot_lines(&mut self, req: &Request) -> (Vec<PlotLine>, Option<SharedString>) {
         let sources: Vec<Source> = self.sources.clone();
         let targets: Vec<Target> = self.targets.clone();
         let mut lines = Vec::new();
@@ -586,6 +616,10 @@ impl GraphsWindow {
             let Some(src) = self.snapshot_with(fit, source.ammo) else {
                 continue;
             };
+            if source.ammo.is_some() {
+                // The fit list shows the fit's own numbers.
+                self.snapshot(fit);
+            }
             let name = self.source_name(&source);
             if self.graph.has_segments() {
                 let Some(groups) = self.ammo_groups(fit) else {
@@ -660,7 +694,7 @@ impl GraphsWindow {
             }
         }
         // pyfa just draws nothing in these cases; say why instead.
-        self.status = if self.sources.is_empty() {
+        let status = if self.sources.is_empty() {
             Some("Add a fit with the Add button over the fit list, or right-click it.".into())
         } else if self.graph.has_targets() && self.targets.is_empty() {
             Some("Add a target with the Add button over the target list.".into())
@@ -674,22 +708,19 @@ impl GraphsWindow {
         } else {
             None
         };
-        self.lines = lines;
-        self.frame = self.frame_for(req);
+        (lines, status)
     }
 
-    fn frame_for(&self, req: &Request) -> Frame {
+    fn frame_for(&self, req: &Request, lines: &[PlotLine]) -> Frame {
         let x_main = req.x.main_input.1 == req.x.unit;
-        let mut xs: Vec<f64> = self
-            .lines
+        let mut xs: Vec<f64> = lines
             .iter()
             .flat_map(|l| l.series.xs.iter().copied())
             .collect();
         if x_main || xs.is_empty() {
             xs.extend([req.range.0, req.range.1]);
         }
-        let mut ys: Vec<f64> = self
-            .lines
+        let mut ys: Vec<f64> = lines
             .iter()
             .flat_map(|l| l.series.ys.iter().copied())
             .collect();
@@ -735,29 +766,12 @@ impl GraphsWindow {
         }
     }
 
-    pub(super) fn target_data(&mut self, target: &Target) -> Option<TargetData> {
-        Some(match &target.kind {
-            TargetKind::Fit(i) => {
-                let snap = self.snapshot(*i)?;
-                let ship = &snap.ship;
-                TargetData {
-                    max_velocity: ship.max_velocity,
-                    sig_radius: ship.sig_radius,
-                    radius: ship.radius,
-                    resists: target.resist_mode.resists(ship),
-                    hp: Some(ship.hp.iter().sum()),
-                    breacher_resist: ship.breacher_resist,
-                    scrammed: ship.scrammed,
-                }
-            }
-            TargetKind::Profile(p) => TargetData::profile(
-                p.max_velocity,
-                p.sig_radius.unwrap_or(f64::INFINITY),
-                p.radius,
-                p.resists,
-                p.hp,
-            ),
-        })
+    fn target_data(&mut self, target: &Target) -> Option<TargetData> {
+        let snap = match target.kind {
+            TargetKind::Fit(i) => Some(self.snapshot(i)?),
+            TargetKind::Profile(_) => None,
+        };
+        target_data(target, snap.as_deref())
     }
 
     pub(super) fn add_source(&mut self, fit: usize, ammo: Option<AmmoChoice>) {
@@ -801,6 +815,32 @@ impl GraphsWindow {
     }
 }
 
+/// What the lines are plotted against for `target`, given its fit's snapshot when it is a fit;
+/// None for a fit without one.
+fn target_data(target: &Target, snap: Option<&FitSnapshot>) -> Option<TargetData> {
+    Some(match &target.kind {
+        TargetKind::Fit(_) => {
+            let ship = &snap?.ship;
+            TargetData {
+                max_velocity: ship.max_velocity,
+                sig_radius: ship.sig_radius,
+                radius: ship.radius,
+                resists: target.resist_mode.resists(ship),
+                hp: Some(ship.hp.iter().sum()),
+                breacher_resist: ship.breacher_resist,
+                scrammed: ship.scrammed,
+            }
+        }
+        TargetKind::Profile(p) => TargetData::profile(
+            p.max_velocity,
+            p.sig_radius.unwrap_or(f64::INFINITY),
+            p.radius,
+            p.resists,
+            p.hp,
+        ),
+    })
+}
+
 /// pyfa's range field: "0-100", "10 - 50", or one number for both ends.
 fn parse_range(text: &str) -> Option<(f64, f64)> {
     let text = text.trim();
@@ -820,11 +860,7 @@ fn parse_range(text: &str) -> Option<(f64, f64)> {
 }
 
 fn parse_number(text: &str) -> Option<f64> {
-    text.trim()
-        .replace(',', ".")
-        .parse::<f64>()
-        .ok()
-        .filter(|v| v.is_finite())
+    super::widgets::parse_decimal::<f64>(text).filter(|v| v.is_finite())
 }
 
 #[cfg(test)]
