@@ -5,11 +5,11 @@ use std::rc::Rc;
 
 use gpui_kit::component::{h_flex, menu::PopupMenuItem, v_flex};
 use gpui_kit::{
-    AnyElement, ClickEvent, Context, InteractiveElement, IntoElement, ParentElement,
-    StatefulInteractiveElement, Styled, WeakEntity, div, prelude::FluentBuilder, px, relative,
+    AnyElement, App, ClickEvent, InteractiveElement, IntoElement, ParentElement,
+    StatefulInteractiveElement, Styled, div, prelude::FluentBuilder, px, relative,
 };
 
-use super::{Pane, Section, format, ids, muted, tip, title};
+use super::{Controls, MenuFn, Pane, Section, format, ids, muted, tip, title};
 use crate::{
     engine::{Damage, FirepowerDetail, MiningRate, SpoolRange},
     target_profile::{applied, applied_breacher},
@@ -112,25 +112,23 @@ fn swap_button(
     key: &'static str,
     icon_id: i32,
     text: &'static str,
-    cx: &Context<Efa>,
+    controls: &Controls<'_>,
 ) -> AnyElement {
+    let efa = controls.efa.clone();
     tip(key, p.icon(icon_id, 16.), text)
         .flex_none()
         .self_start()
         .cursor_pointer()
-        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-            this.stats_view.mining = !this.stats_view.mining;
-            cx.notify();
-        }))
+        .on_click(move |_: &ClickEvent, _, cx| {
+            Efa::app_update(&efa, cx, |this, cx| {
+                this.stats_view.mining = !this.stats_view.mining;
+                cx.notify();
+            });
+        })
         .into_any_element()
 }
 
-pub(super) fn firepower(
-    p: &Pane<'_>,
-    this: &WeakEntity<Efa>,
-    factor_reload: bool,
-    cx: &Context<Efa>,
-) -> Section {
+pub(super) fn firepower(p: &Pane<'_>, controls: Option<&Controls<'_>>, cx: &App) -> Section {
     let s = p.stats;
     let target = p.fit.target_profile.as_ref();
     // pyfa's "Effective" numbers only take the target's resists off. Spool-up scales every
@@ -243,29 +241,20 @@ pub(super) fn firepower(
             .into_any_element(),
         None => title("Firepower"),
     };
-    let this = this.clone();
-    let current = target.map(|t| t.name.clone());
-    let user = Rc::clone(&p.target_profiles);
-    let pick: PickProfile = {
-        let this = this.clone();
-        Rc::new(move |profile, _, cx| {
-            Efa::app_update(&this, cx, |g, cx| {
-                g.apply(Action::SetTargetProfile(profile), cx);
-            });
-        })
-    };
-    Section {
-        action: Some(swap_button(
-            p,
-            "fp-to-mining",
-            ids::MINING,
-            "Click to toggle to Mining Yield",
-            cx,
-        )),
-        key: "Firepower",
-        title: header,
-        body,
-        menu: Some(Rc::new(move |menu, window, cx| {
+    let factor_reload = p.factor_reload;
+    let menu = controls.map(|controls| -> MenuFn {
+        let this = controls.efa.clone();
+        let current = target.map(|t| t.name.clone());
+        let user = Rc::clone(&p.target_profiles);
+        let pick: PickProfile = {
+            let this = this.clone();
+            Rc::new(move |profile, _, cx| {
+                Efa::app_update(&this, cx, |g, cx| {
+                    g.apply(Action::SetTargetProfile(profile), cx);
+                });
+            })
+        };
+        Rc::new(move |menu, window, cx| {
             let this = this.clone();
             let (user, current, pick) = (Rc::clone(&user), current.clone(), Rc::clone(&pick));
             menu.item(
@@ -289,7 +278,22 @@ pub(super) fn firepower(
                     cx,
                 )
             })
-        })),
+        })
+    });
+    Section {
+        action: controls.map(|c| {
+            swap_button(
+                p,
+                "fp-to-mining",
+                ids::MINING,
+                "Click to toggle to Mining Yield",
+                c,
+            )
+        }),
+        key: "Firepower",
+        title: header,
+        body,
+        menu,
     }
 }
 
@@ -317,7 +321,7 @@ fn mining_tooltip(rate: MiningRate) -> String {
     )
 }
 
-pub(super) fn mining(p: &Pane<'_>, cx: &Context<Efa>) -> Section {
+pub(super) fn mining(p: &Pane<'_>, controls: Option<&Controls<'_>>) -> Section {
     let m = p.stats.mining;
     let total = MiningRate {
         yield_: m.miner.yield_ + m.drone.yield_,
@@ -360,13 +364,15 @@ pub(super) fn mining(p: &Pane<'_>, cx: &Context<Efa>) -> Section {
         title: title("Mining Yield"),
         body,
         menu: None,
-        action: Some(swap_button(
-            p,
-            "mining-to-fp",
-            icon::TURRET,
-            "Click to toggle to Firepower View",
-            cx,
-        )),
+        action: controls.map(|c| {
+            swap_button(
+                p,
+                "mining-to-fp",
+                icon::TURRET,
+                "Click to toggle to Firepower View",
+                c,
+            )
+        }),
     }
 }
 

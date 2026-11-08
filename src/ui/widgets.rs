@@ -2,21 +2,24 @@
 
 use gpui_kit::component::{ActiveTheme, Theme, ThemeMode, h_flex};
 use gpui_kit::{
-    App, Div, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled, div, img, px,
-    relative, rgb,
+    App, Div, ElementId, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement,
+    SharedString, Stateful, Styled, div, img, prelude::FluentBuilder, px, relative, rgb,
 };
 
 use std::rc::Rc;
 
 use gpui_kit::component::{IconName, menu::PopupMenuItem};
 
-use super::Loaded;
+use super::{
+    Loaded,
+    columns::{ICON_W, STATE_W},
+};
 
 /// What a dialog's OK button and Enter both run. It closes the dialog itself when it is done,
 /// and leaves it open to show a problem otherwise.
 pub type Submit = Rc<dyn Fn(&gpui_kit::ClickEvent, &mut gpui_kit::Window, &mut gpui_kit::App)>;
 use crate::{
-    data::{Catalog, TypeId},
+    data::{Catalog, Slot, TypeId},
     icons::{Icon, Icons},
     theme::{Palette, Rgb},
 };
@@ -130,6 +133,80 @@ pub fn gauge(
 
 pub fn section_title(text: impl Into<SharedString>) -> Div {
     div().font_weight(FontWeight::SEMIBOLD).child(text.into())
+}
+
+/// Height of a row in the fitting view and the lists that look like it.
+pub const ROW_H: f32 = 24.;
+
+/// A row of a list the way the fitting view draws one: its height, and the theme's colors for
+/// the picked row and the one under the mouse.
+pub fn list_row(id: impl Into<ElementId>, selected: bool, cx: &App) -> Stateful<Div> {
+    let theme = cx.theme();
+    h_flex()
+        .id(id)
+        .h(px(ROW_H))
+        .flex_none()
+        .px_1()
+        .gap_1()
+        .when(selected, |r| r.bg(theme.list_active))
+        .hover(|s| s.bg(theme.list_hover))
+}
+
+/// The look of the fitting view's rack labels, a strip set off by borders over a run of rows.
+pub fn band<E: Styled>(row: E, cx: &App) -> E {
+    let theme = cx.theme();
+    row.bg(theme.secondary)
+        .border_t_1()
+        .border_b_1()
+        .border_color(theme.border)
+}
+
+/// A rack label's text: the rack's name and, muted after it, how many slots it has.
+pub fn band_label(title: impl Into<SharedString>, count: impl Into<SharedString>, cx: &App) -> Div {
+    h_flex()
+        .gap_1()
+        .child(div().font_weight(FontWeight::SEMIBOLD).child(title.into()))
+        .child(
+            div()
+                .text_color(cx.theme().muted_foreground)
+                .child(count.into()),
+        )
+}
+
+/// A rack label's content, lined up with the fitting view's rows under it: the rack's icon over
+/// their item icons, then its name and slot count.
+pub fn rack_band_label(loaded: &Loaded, slot: Slot, total: u32, cx: &App) -> Div {
+    let (label, icon_id) = rack_label(slot);
+    h_flex()
+        .gap_1()
+        .child(div().w(px(STATE_W)).flex_none())
+        .child(div().w(px(ICON_W - 4.)).flex_none().children(
+            icon_id.map(|id| icon_box(&loaded.catalog, &loaded.icons, Icon::Id(id), 18.)),
+        ))
+        .child(band_label(label, total.to_string(), cx))
+}
+
+/// The fitting view's table head: a row in the theme's head colors that columns go in.
+pub fn table_head(cx: &App) -> Div {
+    let theme = cx.theme();
+    h_flex()
+        .h(px(ROW_H))
+        .px_1()
+        .gap_1()
+        .bg(theme.table_head)
+        .text_color(theme.table_head_foreground)
+}
+
+/// A rack's label in the fitting view and its icon, pyfa's "High Slots".
+pub fn rack_label(slot: Slot) -> (&'static str, Option<i32>) {
+    match slot {
+        Slot::High => ("High Slots", Some(icon::HIGH)),
+        Slot::Mid => ("Med Slots", Some(icon::MID)),
+        Slot::Low => ("Low Slots", Some(icon::LOW)),
+        Slot::Rig => ("Rig Slots", Some(icon::RIG)),
+        Slot::Subsystem => ("Subsystem Slots", Some(icon::SUBSYSTEM)),
+        Slot::Service => ("Service Slots", None),
+    }
 }
 
 /// Map the Omarchy palette onto gpui-component's theme.

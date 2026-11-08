@@ -1,8 +1,9 @@
 //! The tank section: what to aim for (max EHP, max resist multiplier or max repair in EHP/s),
-//! the layer and what the search may use on the left; the best tanks it found as cards in the
-//! middle, each with its goal number, the change against the fit and the modules it fits; and
-//! the picked one in detail on the right, against the fit as it is. The search runs off the UI
-//! thread, after the prices of everything it may try are in.
+//! the layer and what the search may use on the left; the best tanks it found as rows in the
+//! middle, each with the modules it fits, its goal number and the change against the fit; and
+//! the picked one on the right in the main window's stats sections, with what it changes and the
+//! modules it puts on and takes off. The search runs off the UI thread, after the prices of
+//! everything it may try are in.
 
 use std::{rc::Rc, sync::Arc, time::Duration};
 
@@ -23,16 +24,23 @@ use gpui_kit::{
 };
 
 use super::{
-    Efa, Layout, Segment, Shared, Stat, Target, bar, chip, divider, join_and, label, muted, notice,
+    Efa, Layout, Segment, Shared, Stat, Target, chip, divider, join_and, label, muted, notice,
     plural, segmented,
 };
 use crate::{
     data::{Slot, TypeId},
-    engine::Resource,
-    fit::DamageProfile,
+    engine::{Resource, Stats},
+    fit::{DamageProfile, Fit},
     icons::Icon,
     prices::Prices,
-    ui::{side, widgets},
+    theme::Palette,
+    ui::{
+        columns,
+        editor_kit::empty_state,
+        side,
+        stats::{self, SectionKind},
+        widgets,
+    },
     wizard::{
         self, Budget, Change, Layer, SearchGroup,
         tank::{Choices, Found, Goal, Limit, Numbers, Outcome, Problem, Progress},
@@ -41,12 +49,17 @@ use crate::{
 
 /// Tanks the search lists.
 const RESULTS: usize = 6;
-/// The controls column, and the picked tank's, in a wide window.
+/// The controls column in a wide window.
 const CONTROLS_W: f32 = 250.;
-const DETAIL_W: f32 = 320.;
-const ICON: f32 = 18.;
+/// The picked tank's column: the main window's stats pane with its padding.
+const DETAIL_W: f32 = stats::PANE_WIDTH + 16.;
 /// Icons in a result row.
-const STRIP_ICON: f32 = 20.;
+const ICON: f32 = 18.;
+/// Result columns: the goal number with its change, the other two numbers, fitting and price.
+const GOAL_W: f32 = 96.;
+const OTHER_W: f32 = 52.;
+const FITTING_W: f32 = 44.;
+const PRICE_W: f32 = 56.;
 /// The most repairers the stepper goes to.
 const MAX_REPAIRERS: u8 = 6;
 
@@ -95,6 +108,15 @@ enum Mark {
     Removed,
 }
 
+/// A picked tank: its change, the numbers the fit gets with it, and the fit with it made and its
+/// stats, which the preview shows in the main window's sections.
+struct Picked {
+    change: Change,
+    numbers: Numbers,
+    fit: Fit,
+    stats: Stats,
+}
+
 pub(in crate::ui) struct TankSection {
     shared: Rc<Shared>,
     pub(super) focus: FocusHandle,
@@ -111,8 +133,8 @@ pub(in crate::ui) struct TankSection {
     searched: Option<Searched>,
     /// Index into the found tanks.
     selected: Option<usize>,
-    /// The picked tank's change and the numbers the fit gets with it.
-    after: Option<(Change, Numbers)>,
+    /// The picked tank, with what the fit becomes.
+    after: Option<Picked>,
     /// Why the last search found nothing, or what it is waiting for.
     note: Option<SharedString>,
     sort: Sort,
@@ -469,8 +491,15 @@ impl TankSection {
             &change,
             searched.choices.layer,
         );
+        let (fit, stats) =
+            wizard::tank::stats_after(&shared.loaded.engine, &shared.pilot, &shared.fit, &change);
         self.selected = Some(i);
-        self.after = Some((change, numbers));
+        self.after = Some(Picked {
+            change,
+            numbers,
+            fit,
+            stats,
+        });
         cx.notify();
     }
 
@@ -500,7 +529,7 @@ impl TankSection {
         if !self.can_apply() {
             return;
         }
-        let Some((change, _)) = self.after.take() else {
+        let Some(Picked { change, .. }) = self.after.take() else {
             return;
         };
         self.search = None;
@@ -830,15 +859,18 @@ impl TankSection {
                                     .text_color(theme.primary),
                             )
                             .child(div().flex_1().child("Searching tanks"))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child(format!("{:.0}%", fraction * 100.0)),
-                            )
                             .child(cancel),
                     )
-                    .child(bar(f64::from(fraction), theme.primary, cx)),
+                    .child(
+                        widgets::gauge(
+                            f64::from(fraction),
+                            palette.accent,
+                            format!("{:.0}%", fraction * 100.0),
+                            0.,
+                            cx,
+                        )
+                        .w_full(),
+                    ),
             );
         } else {
             let fetching = self.fetching.is_some();
@@ -933,7 +965,7 @@ impl TankSection {
     fn results(&self, cx: &mut Context<Self>) -> Div {
         let palette = self.shared.palette;
         let Some(searched) = &self.searched else {
-            return v_flex().px_3().child(self.empty_results(cx));
+            return self.empty_results(cx);
         };
         let busy = self.busy();
         let goal = searched.choices.goal;
@@ -961,7 +993,7 @@ impl TankSection {
         v_flex()
             .gap_2()
             .when(self.stale() && !busy, |d| {
-                d.child(div().px_3().child(notice(
+                d.child(div().px_2().child(notice(
                     AssetIcon::RotateCcw,
                     palette.yellow,
                     "The choices changed since these were found; search again for fresh ones.",
@@ -977,39 +1009,35 @@ impl TankSection {
             )
             .children(notes.into_iter().map(|n| {
                 div()
-                    .px_3()
+                    .px_2()
                     .child(notice(AssetIcon::Info, palette.blue, n, cx))
             }))
     }
 
-    /// The column titles; those the list sorts by are buttons.
+    /// The column titles in the fitting view's table head; those the list sorts by are buttons.
     fn results_head(&self, goal: Goal, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme();
-        let goal_name = match goal {
-            Goal::Ehp => "EHP",
-            Goal::Resists => "Resists",
-            Goal::Repair => "Repair",
-        };
-        let right = |text: &'static str| {
+        let right = |text: &'static str, width: f32| {
             div()
-                .w(px(56.))
+                .w(px(width))
                 .flex_none()
                 .text_right()
                 .child(text)
                 .into_any_element()
         };
-        let sort_head = |sort: Sort, text: &'static str, width: Option<f32>, right: bool| {
+        let sort_head = |sort: Sort, text: &'static str, width: f32| {
             let on = self.sort == sort;
             h_flex()
                 .id(SharedString::from(format!("wizard-sort-{sort:?}")))
-                .when_some(width, |d, w| d.w(px(w)).flex_none())
-                .when(right, gpui_kit::Styled::justify_end)
+                .w(px(width))
+                .flex_none()
+                .justify_end()
                 .gap_0p5()
                 .cursor_pointer()
                 .when(on, |d| d.text_color(theme.foreground))
                 .hover(|h| h.text_color(theme.foreground))
-                .child(text)
                 .when(on, |d| d.child(UiIcon::new(AssetIcon::ArrowDown).xsmall()))
+                .child(text)
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _: &gpui_kit::MouseDownEvent, window, cx| {
@@ -1018,62 +1046,45 @@ impl TankSection {
                         this.refocus(window, cx);
                     }),
                 )
+                .into_any_element()
         };
         let others: Vec<AnyElement> = Goal::ALL
             .into_iter()
             .filter(|&g| g != goal)
             .map(|g| match g {
-                Goal::Ehp => sort_head(Sort::Ehp, "EHP", Some(56.), true).into_any_element(),
-                Goal::Resists => right("Resists"),
-                Goal::Repair => right("EHP/s"),
+                Goal::Ehp => sort_head(Sort::Ehp, "EHP", OTHER_W),
+                g => right(goal_unit(g), OTHER_W),
             })
             .collect();
-        h_flex()
-            .h(px(28.))
-            .gap_2()
-            .px_3()
-            .border_b_1()
-            .border_color(theme.border)
-            .text_xs()
-            .text_color(theme.muted_foreground)
-            .child(div().w(px(16.)).flex_none().child("#"))
-            .child(sort_head(Sort::Goal, goal_name, Some(108.), false))
+        widgets::table_head(cx)
+            .child(div().w(px(columns::STATE_W)).flex_none().child("#"))
+            .child(div().flex_1().min_w_0().child("Modules"))
+            .child(sort_head(Sort::Goal, goal_unit(goal), GOAL_W))
             .children(others)
-            .child(div().w(px(56.)).flex_none().text_right().child("Fitting"))
-            .child(sort_head(Sort::Price, "Price", Some(64.), true))
+            .child(right("Fitting", FITTING_W))
+            .child(sort_head(Sort::Price, "Price", PRICE_W))
     }
 
     fn empty_results(&self, cx: &App) -> Div {
-        let theme = cx.theme();
-        let (icon, title, text) = if self.busy() {
-            (
+        if self.busy() {
+            empty_state(
                 AssetIcon::LoaderCircle,
                 "Searching",
                 "The best tanks show up here.",
+                cx,
             )
         } else {
-            (
+            empty_state(
                 AssetIcon::Sparkles,
                 "No tanks yet",
                 "Pick a goal and what the search may use, then Find best tanks.",
+                cx,
             )
-        };
-        v_flex()
-            .gap_0p5()
-            .py_2()
-            .child(
-                h_flex()
-                    .gap_1p5()
-                    .text_sm()
-                    .text_color(theme.muted_foreground)
-                    .child(UiIcon::new(icon).xsmall())
-                    .child(title),
-            )
-            .child(muted(text, cx))
+        }
     }
 
-    /// One found tank as a row: its goal number with the change against now, the other two
-    /// numbers, how full the fitting gets, the price, and what it puts on.
+    /// One found tank as a list row: what it puts on, its goal number with the change against
+    /// now, the other two numbers, how full the fitting gets and the price.
     fn result_row(
         &self,
         rank: usize,
@@ -1084,38 +1095,17 @@ impl TankSection {
     ) -> AnyElement {
         let theme = cx.theme();
         let palette = self.shared.palette;
-        let selected = self.selected == Some(i);
         let n = &o.numbers;
         let value = n.value(goal);
-        let delta = value - self.now.value(goal);
-        let (big, unit) = goal_value(goal, value);
-        let up = delta > 1e-6 * value.abs().max(1.0);
-        let down = delta < -1e-6 * value.abs().max(1.0);
-        let delta_text = match goal {
-            _ if !up && !down => "same".to_owned(),
-            Goal::Resists => format!("{delta:+.2}x"),
-            Goal::Ehp => format!(
-                "{}{}",
-                if delta >= 0.0 { "+" } else { "-" },
-                widgets::short(delta.abs())
-            ),
-            Goal::Repair => format!("{delta:+.0}"),
-        };
-        let delta_color = if up {
-            widgets::color(palette.green)
-        } else if down {
-            widgets::color(palette.red)
-        } else {
-            theme.muted_foreground
-        };
+        let (delta_text, delta_color) = delta(goal, self.now.value(goal), value, palette, cx);
         let others: Vec<String> = Goal::ALL
             .into_iter()
             .filter(|&g| g != goal)
-            .map(|g| goal_value(g, n.value(g)).0)
+            .map(|g| goal_number(g, n.value(g)))
             .collect();
         // The fuller of CPU and powergrid, as a share of the ship's output.
         let share = |r: &Resource| r.output.filter(|&o| o > 0.0).map_or(0.0, |o| r.used / o);
-        let (cpu, pg) = (share(&n.cpu), share(&n.powergrid));
+        let full = share(&n.cpu).max(share(&n.powergrid));
         let fitting_tip = SharedString::from(format!(
             "CPU {:.0} / {:.0}, powergrid {:.0} / {:.0}",
             n.cpu.used,
@@ -1123,7 +1113,6 @@ impl TankSection {
             n.powergrid.used,
             n.powergrid.output.unwrap_or(0.0)
         ));
-        let full = cpu.max(pg);
         let price = if o.price > 0.0 {
             format!(
                 "{}{}",
@@ -1133,113 +1122,63 @@ impl TankSection {
         } else {
             "?".to_owned()
         };
-        let strip = self.module_strip(i, o, cx);
-        v_flex()
-            .id(SharedString::from(format!("wizard-row-{i}")))
-            .gap_1()
-            .px_3()
-            .py_2()
-            .border_b_1()
-            .border_color(theme.border.opacity(0.5))
-            .relative()
-            .cursor_pointer()
-            .text_xs()
-            .when(selected, |d| {
-                d.bg(theme.primary.opacity(0.1)).child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top_0()
-                        .bottom_0()
-                        .w(px(2.))
-                        .bg(theme.primary),
-                )
-            })
-            .when(!selected, |d| {
-                d.hover(|h| h.bg(theme.secondary.opacity(0.4)))
-            })
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(
-                        div()
-                            .w(px(16.))
-                            .flex_none()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(if selected {
-                                theme.primary
-                            } else {
-                                theme.muted_foreground
-                            })
-                            .child(format!("{}", rank + 1)),
-                    )
-                    .child(
-                        h_flex()
-                            .w(px(108.))
-                            .flex_none()
-                            .items_baseline()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_base()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(big),
-                            )
-                            .child(div().text_color(theme.muted_foreground).child(unit))
-                            .child(div().text_color(delta_color).child(delta_text)),
-                    )
-                    .children(others.into_iter().map(|v| {
-                        div()
-                            .w(px(56.))
-                            .flex_none()
-                            .text_right()
-                            .text_color(theme.muted_foreground)
-                            .child(v)
-                    }))
-                    .child(
-                        v_flex()
-                            .id(SharedString::from(format!("wizard-row-{i}-fit")))
-                            .w(px(56.))
-                            .flex_none()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_right()
-                                    .when(full > 0.99, |d| {
-                                        d.text_color(widgets::color(palette.yellow))
-                                    })
-                                    .when(full <= 0.99, |d| d.text_color(theme.muted_foreground))
-                                    .child(format!("{:.0}%", full * 100.0)),
-                            )
-                            .child(bar(
-                                full,
-                                if full > 0.99 {
-                                    widgets::color(palette.yellow)
-                                } else {
-                                    theme.primary.opacity(0.7)
-                                },
-                                cx,
-                            ))
-                            .tooltip(move |window, cx| {
-                                Tooltip::new(fitting_tip.clone()).build(window, cx)
-                            }),
-                    )
-                    .child(
-                        div()
-                            .w(px(64.))
-                            .flex_none()
-                            .text_right()
-                            .font_weight(FontWeight::MEDIUM)
-                            .when(!o.priced, |d| d.text_color(theme.muted_foreground))
-                            .child(price),
-                    ),
-            )
-            .child(strip)
-            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                this.select(i, cx);
-                this.refocus(window, cx);
-            }))
-            .into_any_element()
+        widgets::list_row(
+            SharedString::from(format!("wizard-row-{i}")),
+            self.selected == Some(i),
+            cx,
+        )
+        .cursor_pointer()
+        .child(
+            div()
+                .w(px(columns::STATE_W))
+                .flex_none()
+                .text_color(theme.muted_foreground)
+                .child(format!("{}", rank + 1)),
+        )
+        .child(self.module_strip(i, o, cx))
+        .child(
+            h_flex()
+                .w(px(GOAL_W))
+                .flex_none()
+                .justify_end()
+                .gap_1()
+                .child(div().text_xs().text_color(delta_color).child(delta_text))
+                .child(goal_number(goal, value)),
+        )
+        .children(others.into_iter().map(|v| {
+            div()
+                .w(px(OTHER_W))
+                .flex_none()
+                .text_right()
+                .text_color(theme.muted_foreground)
+                .child(v)
+        }))
+        .child(
+            div()
+                .id(SharedString::from(format!("wizard-row-{i}-fit")))
+                .w(px(FITTING_W))
+                .flex_none()
+                .text_right()
+                .when(full > 0.99, |d| {
+                    d.text_color(widgets::color(palette.yellow))
+                })
+                .when(full <= 0.99, |d| d.text_color(theme.muted_foreground))
+                .child(format!("{:.0}%", full * 100.0))
+                .tooltip(move |window, cx| Tooltip::new(fitting_tip.clone()).build(window, cx)),
+        )
+        .child(
+            div()
+                .w(px(PRICE_W))
+                .flex_none()
+                .text_right()
+                .when(!o.priced, |d| d.text_color(theme.muted_foreground))
+                .child(price),
+        )
+        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+            this.select(i, cx);
+            this.refocus(window, cx);
+        }))
+        .into_any_element()
     }
 
     /// What a found tank puts on, as icons with their counts, rigs after the modules;
@@ -1255,26 +1194,27 @@ impl TankSection {
             }
         }
         h_flex()
+            .flex_1()
             .min_w_0()
-            .pl(px(28.))
-            .flex_wrap()
-            .gap_x_2()
-            .gap_y_0p5()
+            .overflow_hidden()
+            .gap_2()
             .children(lines.into_iter().map(|(id, n)| {
                 let tip = Rc::clone(loaded);
                 let price = self.prices.get(id);
                 h_flex()
                     .id(SharedString::from(format!("wizard-row-{i}-{id}")))
+                    .flex_none()
                     .gap_0p5()
                     .child(widgets::icon_box(
                         &loaded.catalog,
                         &loaded.icons,
                         Icon::Type(id),
-                        STRIP_ICON,
+                        ICON,
                     ))
                     .when(n > 1, |d| {
                         d.child(
                             div()
+                                .text_xs()
                                 .text_color(theme.muted_foreground)
                                 .child(format!("{n}")),
                         )
@@ -1285,213 +1225,136 @@ impl TankSection {
 
     // The picked tank.
 
-    fn detail(&self, cx: &App) -> Div {
-        let theme = cx.theme();
-        let (Some((change, after)), Some(i)) = (&self.after, self.selected) else {
-            return v_flex()
-                .items_center()
-                .gap_2()
-                .py_10()
-                .child(
-                    UiIcon::new(AssetIcon::MousePointerClick)
-                        .text_color(theme.muted_foreground.opacity(0.6)),
-                )
-                .child(
-                    muted("Pick a result to compare it with the fit as it is.", cx).text_center(),
-                );
+    /// The picked tank: what it changes against the fit as it is, then the fit with it in the
+    /// main window's resources, resistances and recharge sections, then its modules: under them
+    /// in a `column`, else beside them.
+    fn detail(&self, column: bool, cx: &App) -> Div {
+        let (Some(picked), Some(i)) = (&self.after, self.selected) else {
+            return empty_state(
+                AssetIcon::MousePointerClick,
+                "No tank picked",
+                "Pick a result to see the fit with it.",
+                cx,
+            );
         };
+        let shared = &self.shared;
+        let pane = stats::Pane::plain(
+            &shared.loaded,
+            &picked.stats,
+            &picked.fit,
+            shared.palette,
+            &self.prices,
+        );
+        let sections = stats::render_sections(
+            &pane,
+            &[
+                SectionKind::Resources,
+                SectionKind::Resistances,
+                SectionKind::Recharge,
+            ],
+            None,
+            cx,
+        );
+        // Under the results the stats keep the stats pane's width, with the modules beside them
+        // when there is room.
+        let stats = v_flex()
+            .gap_2()
+            .text_size(px(stats::TEXT_SIZE))
+            .child(self.changes(i, picked, cx))
+            .children(sections);
+        let modules = self.module_list(&picked.change, cx);
+        if column {
+            v_flex().gap_2().child(stats).child(modules)
+        } else {
+            h_flex()
+                .items_start()
+                .flex_wrap()
+                .gap_x_4()
+                .gap_y_2()
+                .child(stats.w(px(stats::PANE_WIDTH)).flex_none())
+                .child(modules.flex_1().min_w(px(stats::PANE_WIDTH)))
+        }
+    }
+
+    /// The picked tank's numbers against the fit's now, in a line under its name.
+    fn changes(&self, i: usize, picked: &Picked, cx: &App) -> Div {
+        let theme = cx.theme();
         let palette = self.shared.palette;
         let layer = self
             .searched
             .as_ref()
-            .map_or(self.choices.layer, |s| s.choices.layer);
-        let now = &self.now;
+            .map_or(self.choices.layer, |s| s.choices.layer)
+            .label();
         let rank = self.order().iter().position(|&o| o == i).unwrap_or(i) + 1;
-        let name = layer.label();
-        let rows = v_flex()
-            .gap_1()
-            .child(
-                h_flex()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(div().flex_1())
-                    .child(div().w(px(64.)).text_right().child("Now"))
-                    .child(div().w(px(70.)).text_right().child("After")),
-            )
-            .child(compare(
-                palette,
-                "Effective HP",
-                (now.ehp, after.ehp),
-                widgets::short,
-                cx,
-            ))
-            .child(compare(
-                palette,
-                &format!("{name} resists"),
-                (now.multiplier, after.multiplier),
-                |v| format!("{v:.2}x"),
-                cx,
-            ))
-            .child(compare(
-                palette,
-                &format!("{name} repair"),
-                (now.repair_ehp, after.repair_ehp),
-                |v| format!("{v:.0}/s"),
-                cx,
-            ))
-            .child(
-                h_flex()
-                    .text_xs()
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_color(theme.muted_foreground)
-                            .child("Capacitor"),
-                    )
-                    .child(
-                        div()
-                            .w(px(64.))
-                            .text_right()
-                            .child(cap_word(now.cap_stable)),
-                    )
-                    .child(
-                        div()
-                            .w(px(70.))
-                            .text_right()
-                            .font_weight(FontWeight::MEDIUM)
-                            .when(!after.cap_stable, |d| {
-                                d.text_color(widgets::color(palette.yellow))
-                            })
-                            .child(cap_word(after.cap_stable)),
-                    ),
-            );
-        let resists = v_flex().gap_1p5().children(
-            [
-                (widgets::icon::SHIELD, 0, "Shield"),
-                (widgets::icon::ARMOR, 1, "Armor"),
-                (widgets::icon::HULL, 2, "Hull"),
-            ]
-            .into_iter()
-            .map(|(icon, at, title)| {
-                let before = now.layers[at].resists;
-                let r = after.layers[at].resists;
-                let tanked =
-                    (at == 0 && layer == Layer::Shield) || (at == 1 && layer == Layer::Armor);
-                h_flex()
-                    .gap_2()
-                    .child(
-                        h_flex()
-                            .w(px(64.))
-                            .flex_none()
-                            .gap_1()
-                            .child(widgets::icon_box(
-                                &self.shared.loaded.catalog,
-                                &self.shared.loaded.icons,
-                                Icon::Id(icon),
-                                14.,
-                            ))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .when(!tanked, |d| d.text_color(theme.muted_foreground))
-                                    .when(tanked, |d| d.font_weight(FontWeight::SEMIBOLD))
-                                    .child(title),
-                            ),
-                    )
-                    .children((0..4).map(|k| {
-                        let fill = widgets::color(widgets::DAMAGE_COLORS[k]);
-                        let changed = (r[k] - before[k]).abs() > 0.0005;
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_0p5()
-                            .child(bar(r[k], fill, cx))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .when(!changed, |d| d.text_color(theme.muted_foreground))
-                                    .when(changed && r[k] > before[k], |d| {
-                                        d.text_color(widgets::color(palette.green))
-                                    })
-                                    .when(changed && r[k] < before[k], |d| {
-                                        d.text_color(widgets::color(palette.red))
-                                    })
-                                    .child(format!("{:.0}%", r[k] * 100.0)),
-                            )
-                    }))
-            }),
-        );
-        let fitting = v_flex()
-            .gap_2()
-            .child(resource_bar(
-                palette, "CPU", &now.cpu, &after.cpu, " tf", cx,
-            ))
-            .child(resource_bar(
-                palette,
-                "Powergrid",
-                &now.powergrid,
-                &after.powergrid,
-                " MW",
-                cx,
-            ))
-            .child(resource_bar(
-                palette,
-                "Calibration",
-                &now.calibration,
-                &after.calibration,
-                "",
-                cx,
+        let (now, after) = (&self.now, &picked.numbers);
+        let item = |goal: Goal, label: String| {
+            let (before, value) = (now.value(goal), after.value(goal));
+            let (text, color) = delta(goal, before, value, palette, cx);
+            let tip = SharedString::from(format!(
+                "{label}: {} now, {} with this tank",
+                goal_number(goal, before),
+                goal_number(goal, value)
             ));
+            h_flex()
+                .id(SharedString::from(format!("wizard-change-{goal:?}")))
+                .gap_1()
+                .child(div().text_color(theme.muted_foreground).child(label))
+                .child(div().text_color(color).child(text))
+                .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+        };
         let price = self
             .outcomes()
             .get(i)
             .map_or_default(|o| (o.price, o.priced));
+        let cap_lost = now.cap_stable && !after.cap_stable;
         v_flex()
-            .gap_4()
+            .gap_1()
             .child(
                 h_flex()
-                    .items_end()
-                    .gap_2()
+                    .gap_1()
+                    .child(widgets::section_title(format!("Tank {rank}")))
                     .child(
                         div()
-                            .text_base()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(format!("Tank {rank}")),
+                            .text_color(theme.muted_foreground)
+                            .child(goal_text_short(self.choices.goal)),
                     )
-                    .child(muted(goal_text_short(self.choices.goal), cx).pb(px(2.)))
                     .child(div().flex_1())
                     .when(price.0 > 0.0, |d| {
+                        d.child(format!(
+                            "{}{} ISK",
+                            if price.1 { "" } else { "~" },
+                            widgets::short(price.0)
+                        ))
+                    }),
+            )
+            .child(
+                h_flex()
+                    .pl_1()
+                    .flex_wrap()
+                    .gap_x_3()
+                    .child(item(Goal::Ehp, "EHP".to_owned()))
+                    .child(item(Goal::Resists, format!("{layer} resists")))
+                    .child(item(Goal::Repair, format!("{layer} repair")))
+                    .when(cap_lost, |d| {
                         d.child(
                             div()
-                                .text_sm()
-                                .font_weight(FontWeight::MEDIUM)
-                                .child(format!(
-                                    "{}{} ISK",
-                                    if price.1 { "" } else { "~" },
-                                    widgets::short(price.0)
-                                )),
+                                .text_color(widgets::color(palette.yellow))
+                                .child("Capacitor runs out"),
                         )
                     }),
             )
-            .child(panel("Before and after", rows, cx))
-            .child(divider(cx))
-            .child(panel("Resists", resists, cx))
-            .child(divider(cx))
-            .child(panel("Fitting", fitting, cx))
-            .child(divider(cx))
-            .child(panel("Modules", self.module_list(change, cx), cx))
     }
 
-    /// The racks the change touches, line by line: what goes on, what stays and what comes
-    /// off, with the price of what goes on.
+    /// The racks the change touches under the fitting view's rack labels: what goes on, what
+    /// stays and what comes off, with the price of what goes on.
     fn module_list(&self, change: &Change, cx: &App) -> Div {
         let shared = &self.shared;
         let fit = &shared.fit;
         let slot = self.choices.layer.slot();
         let removed = |s: Slot, at: usize| change.removed.contains(&(s, at));
         let placed = |s: Slot| change.placements.iter().filter(move |p| p.0 == s);
-        let mut out = v_flex().gap_3();
-        for (rack, title) in [(slot, rack_title(slot)), (Slot::Rig, "Rigs")] {
+        let mut out = v_flex();
+        for rack in [slot, Slot::Rig] {
             let fitted: Vec<(TypeId, bool)> = if rack == Slot::Rig {
                 fit.rigs
                     .iter()
@@ -1546,41 +1409,27 @@ impl TankSection {
             if net.is_empty() {
                 continue;
             }
-            out = out.child(
-                v_flex()
-                    .gap_0p5()
-                    .child(muted(title, cx).pb_0p5())
-                    .children(
-                        net.into_iter()
-                            .enumerate()
-                            .map(|(k, (id, mark, n))| self.module_line(rack, k, id, mark, n, cx)),
-                    ),
-            );
+            let total = u32::try_from(shared.facts.total(rack)).unwrap_or(u32::MAX);
+            out = out
+                .child(widgets::band(
+                    h_flex()
+                        .h(px(widgets::ROW_H))
+                        .px_1()
+                        .gap_1()
+                        .mt_2()
+                        .child(widgets::rack_band_label(&shared.loaded, rack, total, cx)),
+                    cx,
+                ))
+                .children(
+                    net.into_iter()
+                        .enumerate()
+                        .map(|(k, (id, mark, n))| self.module_line(rack, k, id, mark, n, cx)),
+                );
         }
-        let added: f64 = change
-            .placements
-            .iter()
-            .filter_map(|p| self.prices.get(p.2.type_id))
-            .sum();
-        out.when(added > 0.0, |d| {
-            d.child(
-                h_flex()
-                    .text_xs()
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("What goes on costs"),
-                    )
-                    .child(
-                        div()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(format!("{} ISK", widgets::short(added))),
-                    ),
-            )
-        })
+        out
     }
 
+    /// A module the change puts on, keeps or takes off, as a row of the fitting view.
     fn module_line(
         &self,
         rack: Slot,
@@ -1599,44 +1448,51 @@ impl TankSection {
             Mark::Kept => (IconName::Check, theme.muted_foreground, "kept"),
             Mark::Removed => (IconName::Minus, widgets::color(palette.red), "off"),
         };
-        let tip = Rc::clone(loaded);
-        h_flex()
-            .id(SharedString::from(format!("wizard-line-{rack:?}-{k}")))
-            .gap_2()
-            .h(px(26.))
-            .px_1p5()
-            .rounded(px(5.))
-            .text_xs()
-            .when(mark == Mark::Added, |d| d.bg(color.opacity(0.08)))
-            .hover(|h| h.bg(theme.secondary.opacity(0.6)))
-            .child(UiIcon::new(icon).xsmall().flex_none().text_color(color))
-            .child(
-                widgets::icon_box(&loaded.catalog, &loaded.icons, Icon::Type(id), ICON)
-                    .when(mark != Mark::Added, |d| d.opacity(0.6)),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .when(mark == Mark::Removed, |d| {
-                        d.line_through().text_color(theme.muted_foreground)
-                    })
-                    .when(mark == Mark::Kept, |d| d.text_color(theme.muted_foreground))
-                    .child(if n > 1 {
-                        format!("{n}x {}", loaded.catalog.name(id))
-                    } else {
-                        loaded.catalog.name(id)
-                    }),
-            )
-            .child(div().flex_none().text_color(theme.muted_foreground).child(
-                match (mark, price) {
+        let item_tip = Rc::clone(loaded);
+        widgets::list_row(
+            SharedString::from(format!("wizard-line-{rack:?}-{k}")),
+            false,
+            cx,
+        )
+        .child(
+            div()
+                .w(px(columns::STATE_W))
+                .flex_none()
+                .flex()
+                .items_center()
+                .child(UiIcon::new(icon).size(px(15.)).text_color(color)),
+        )
+        .child(widgets::icon_box(
+            &loaded.catalog,
+            &loaded.icons,
+            Icon::Type(id),
+            22.,
+        ))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .when(mark == Mark::Removed, |d| {
+                    d.line_through().text_color(theme.muted_foreground)
+                })
+                .child(if n > 1 {
+                    format!("{n}x {}", loaded.catalog.name(id))
+                } else {
+                    loaded.catalog.name(id)
+                }),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_color(theme.muted_foreground)
+                .child(match (mark, price) {
                     (Mark::Added, Some(p)) => widgets::short(p * n as f64),
                     _ => tag.to_owned(),
-                },
-            ))
-            .tooltip(move |window, cx| side::item_tooltip(&tip, id, price, window, cx))
-            .into_any_element()
+                }),
+        )
+        .tooltip(move |window, cx| side::item_tooltip(&item_tip, id, price, window, cx))
+        .into_any_element()
     }
 
     fn footer(&self, cx: &mut Context<Self>) -> Div {
@@ -1684,22 +1540,16 @@ impl Render for TankSection {
         let controls = self.controls(across, cx);
         let search = self.search_block(cx);
         let results = self.results(cx);
-        let detail = self.detail(cx);
+        let detail = self.detail(layout == Layout::Wide, cx);
         let theme = cx.theme();
         let scroll = |id: &'static str| v_flex().id(id).h_full().min_h_0().overflow_y_scroll();
-        let side = theme.sidebar.opacity(0.6);
+        let side = theme.sidebar;
         let body: AnyElement = match layout {
             Layout::Wide => h_flex()
                 .size_full()
                 .items_start()
                 .child(controls_column(controls, search, CONTROLS_W, side, cx))
-                .child(
-                    scroll("wizard-results")
-                        .flex_1()
-                        .min_w_0()
-                        .py_1()
-                        .child(results),
-                )
+                .child(scroll("wizard-results").flex_1().min_w_0().child(results))
                 .child(
                     scroll("wizard-detail")
                         .w(px(DETAIL_W))
@@ -1725,22 +1575,22 @@ impl Render for TankSection {
                     scroll("wizard-results")
                         .flex_1()
                         .min_w_0()
-                        .py_1()
+                        .pb_2()
                         .gap_2()
                         .child(results)
                         .child(divider(cx))
-                        .child(div().px_3().child(detail)),
+                        .child(div().px_2().child(detail)),
                 )
                 .into_any_element(),
             Layout::Narrow => scroll("wizard-all")
                 .size_full()
                 .py_1()
                 .gap_2()
-                .child(div().px_3().child(controls.child(search)))
+                .child(div().px_2().child(controls.child(search)))
                 .child(divider(cx))
                 .child(results)
                 .child(divider(cx))
-                .child(div().px_3().child(detail))
+                .child(div().px_2().child(detail))
                 .into_any_element(),
         };
         v_flex()
@@ -1789,117 +1639,46 @@ fn group(title: &str, body: AnyElement, cx: &App) -> Div {
     v_flex().gap_1().child(label(title, cx)).child(body)
 }
 
-/// A titled block of the picked tank's detail.
-fn panel(title: &str, body: impl IntoElement, cx: &App) -> Div {
-    v_flex().gap_1().child(label(title, cx)).child(body)
-}
-
-/// A number now and after, the after green when better and red when worse, with the change.
-fn compare(
-    palette: crate::theme::Palette,
-    title: &str,
-    (now, after): (f64, f64),
-    format: fn(f64) -> String,
-    cx: &App,
-) -> Div {
-    let theme = cx.theme();
-    let changed = (after - now).abs() > 1e-6 * now.abs().max(1.0);
-    let color: Hsla = if !changed {
-        theme.foreground
-    } else if after > now {
-        widgets::color(palette.green)
-    } else {
-        widgets::color(palette.red)
-    };
-    h_flex()
-        .text_xs()
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_color(theme.muted_foreground)
-                .child(title.to_owned()),
-        )
-        .child(
-            div()
-                .w(px(64.))
-                .text_right()
-                .text_color(theme.muted_foreground)
-                .child(format(now)),
-        )
-        .child(
-            div()
-                .w(px(70.))
-                .text_right()
-                .text_sm()
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(color)
-                .child(format(after)),
-        )
-}
-
-/// A fitting resource after the change, as used of output with a bar, and what it was.
-fn resource_bar(
-    palette: crate::theme::Palette,
-    title: &str,
-    now: &Resource,
-    after: &Resource,
-    unit: &str,
-    cx: &App,
-) -> Div {
-    let theme = cx.theme();
-    let out = after.output.unwrap_or(0.0);
-    let fraction = if out > 0.0 { after.used / out } else { 0.0 };
-    let over = after.used > out + 1e-6;
-    let fill = if over {
-        widgets::color(palette.red)
-    } else if fraction > 0.95 {
-        widgets::color(palette.yellow)
-    } else {
-        theme.primary
-    };
-    let changed = (after.used - now.used).abs() > 1e-6;
-    v_flex()
-        .gap_1()
-        .child(
-            h_flex()
-                .gap_1()
-                .text_xs()
-                .child(
-                    div()
-                        .flex_1()
-                        .text_color(theme.muted_foreground)
-                        .child(title.to_owned()),
-                )
-                .when(changed, |d| {
-                    d.child(
-                        div()
-                            .text_color(theme.muted_foreground)
-                            .child(format!("was {:.0}", now.used)),
-                    )
-                })
-                .child(
-                    div()
-                        .font_weight(FontWeight::MEDIUM)
-                        .when(over, |d| d.text_color(widgets::color(palette.red)))
-                        .child(format!("{:.0} / {out:.0}{unit}", after.used)),
-                ),
-        )
-        .child(bar(fraction, fill, cx))
-}
-
-/// A goal's number as shown big, and its unit.
-fn goal_value(goal: Goal, value: f64) -> (String, &'static str) {
+/// A goal's number in a results column.
+fn goal_number(goal: Goal, value: f64) -> String {
     match goal {
-        Goal::Ehp => (widgets::short(value), "EHP"),
-        Goal::Resists => (format!("{value:.2}x"), "resists"),
-        Goal::Repair => (format!("{value:.0}"), "EHP/s"),
+        Goal::Ehp => widgets::short(value),
+        Goal::Resists => format!("{value:.2}x"),
+        Goal::Repair => format!("{value:.0}"),
     }
 }
 
-fn cap_word(stable: bool) -> &'static str {
-    if stable { "Stable" } else { "Runs out" }
+/// A goal's column title, which names its unit.
+fn goal_unit(goal: Goal) -> &'static str {
+    match goal {
+        Goal::Ehp => "EHP",
+        Goal::Resists => "Resists",
+        Goal::Repair => "EHP/s",
+    }
+}
+
+/// How a goal's number moves from `now` to `after`, green up and red down.
+fn delta(goal: Goal, now: f64, after: f64, palette: Palette, cx: &App) -> (String, Hsla) {
+    let change = after - now;
+    let margin = 1e-6 * after.abs().max(1.0);
+    if change.abs() <= margin {
+        return ("same".to_owned(), cx.theme().muted_foreground);
+    }
+    let text = match goal {
+        Goal::Resists => format!("{change:+.2}x"),
+        Goal::Ehp => format!(
+            "{}{}",
+            if change >= 0.0 { "+" } else { "-" },
+            widgets::short(change.abs())
+        ),
+        Goal::Repair => format!("{change:+.0}"),
+    };
+    let color = if change > 0.0 {
+        palette.green
+    } else {
+        palette.red
+    };
+    (text, widgets::color(color))
 }
 
 /// What a goal aims for, in a sentence.
@@ -1944,14 +1723,6 @@ fn slot_word(slot: Slot) -> &'static str {
         Slot::Mid => "mid",
         Slot::Low => "low",
         _ => "rig",
-    }
-}
-
-fn rack_title(slot: Slot) -> &'static str {
-    match slot {
-        Slot::Mid => "Mid slots",
-        Slot::Low => "Low slots",
-        _ => "Rigs",
     }
 }
 

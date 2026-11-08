@@ -4,7 +4,7 @@
 
 pub mod misc;
 
-use gpui_kit::component::{ActiveTheme, h_flex};
+use gpui_kit::component::ActiveTheme;
 use gpui_kit::{
     AppContext, ClickEvent, Context, CursorStyle, Div, DragMoveEvent, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
@@ -13,7 +13,7 @@ use gpui_kit::{
 
 use super::{
     Efa, Loaded, stats,
-    widgets::{icon, icon_box, km, short},
+    widgets::{self, icon, icon_box, km, short},
 };
 use crate::{
     data::{Catalog, Slot},
@@ -379,13 +379,7 @@ impl Efa {
         layout: Layout,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
-        let theme = cx.theme();
-        h_flex()
-            .h(px(24.))
-            .px_1()
-            .gap_1()
-            .bg(theme.table_head)
-            .text_color(theme.table_head_foreground)
+        widgets::table_head(cx)
             .child(div().w(px(STATE_W + ICON_W)).flex_none())
             .children(Col::ALL.into_iter().map(|col| {
                 let content = match col.header_icon() {

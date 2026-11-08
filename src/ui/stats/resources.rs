@@ -2,19 +2,16 @@
 //! fighter tubes, calibration, then gauges for fitting resources and the bay the open tab is about.
 
 use gpui_kit::component::{ActiveTheme, h_flex, v_flex};
-use gpui_kit::{Context, IntoElement, ParentElement, Styled, div};
+use gpui_kit::{App, IntoElement, ParentElement, Styled, div};
 
 use super::{AdditionsTab, Pane, Section, format, ids, muted, tip, title, warn};
 use crate::{
     engine::{Resource, Slots},
     theme::Rgb,
-    ui::{
-        Efa,
-        widgets::{gauge, icon},
-    },
+    ui::widgets::{gauge, icon},
 };
 
-pub(super) fn section(p: &Pane<'_>, cx: &Context<Efa>) -> Section {
+pub(super) fn section(p: &Pane<'_>, cx: &App) -> Section {
     let s = p.stats;
     let fighters = s.fighter_tubes.total.unwrap_or(0) > 0;
     let (minions, minions_tip) = if fighters {

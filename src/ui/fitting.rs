@@ -24,7 +24,10 @@ use super::{
     mutations::{copy_entry, mutation_entries},
     profile_menus::{PickPattern, damage_pattern_menu},
     validation::flag,
-    widgets::{color, entry, icon, icon_box, icon_label, item_entry, item_label, short},
+    widgets::{
+        ROW_H, band, color, entry, icon_box, icon_label, item_entry, item_label, rack_band_label,
+        short,
+    },
 };
 use crate::{
     damage_pattern::DamagePattern,
@@ -34,7 +37,6 @@ use crate::{
     icons::Icon,
 };
 
-const ROW_HEIGHT: f32 = 24.;
 /// Tallest a long menu grows before it scrolls.
 const MENU_MAX_H: f32 = 480.;
 
@@ -43,8 +45,6 @@ enum Row {
     /// A rack's label, pyfa's "Show Rack Labels".
     Header {
         slot: Slot,
-        label: &'static str,
-        icon_id: Option<i32>,
         total: u32,
     },
     /// A blank row between racks, when they are set apart without labels.
@@ -217,7 +217,7 @@ impl Efa {
         });
         let base = h_flex()
             .id(SharedString::from(format!("fit-row-{n}")))
-            .h(px(ROW_HEIGHT))
+            .h(px(ROW_H))
             .px_1()
             .gap_1()
             .when_some(slot_tint, Styled::bg)
@@ -237,12 +237,7 @@ impl Efa {
         // Rack labels are section bands, set off from the rack above; without labels, racks are
         // only set apart by the gap and border. Only real rows highlight.
         let base = match row {
-            Row::Header { .. } | Row::ModeHeader => base
-                .when(n > 0, Styled::mt_2)
-                .bg(theme.secondary)
-                .border_t_1()
-                .border_b_1()
-                .border_color(theme.border),
+            Row::Header { .. } | Row::ModeHeader => band(base.when(n > 0, Styled::mt_2), cx),
             Row::Separator => base
                 .h(px(1.))
                 .mt_2()
@@ -251,22 +246,8 @@ impl Efa {
             _ => base.hover(|s| s.bg(theme.table_hover)),
         };
         match row {
-            Row::Header {
-                slot,
-                label,
-                icon_id,
-                total,
-            } => base
-                .child(div().w(px(STATE_W)).flex_none())
-                .child(div().w(px(ICON_W - 4.)).flex_none().children(
-                    icon_id.map(|id| icon_box(catalog, &loaded.icons, Icon::Id(id), 18.)),
-                ))
-                .child(div().font_weight(FontWeight::SEMIBOLD).child(label))
-                .child(
-                    div()
-                        .text_color(theme.muted_foreground)
-                        .child(total.to_string()),
-                )
+            Row::Header { slot, total } => base
+                .child(rack_band_label(loaded, slot, total, cx))
                 .when(matches!(slot, Slot::High | Slot::Mid | Slot::Low), |row| {
                     row.child(self.group_toggle(slot, cx))
                 })
@@ -1608,25 +1589,12 @@ fn fitting_rows(fit: &Fit, stats: &Stats, style: RackStyle) -> Vec<Row> {
         RackStyle::Separators => rows.push(Row::Separator),
         RackStyle::Labels => rows.push(header),
     };
-    let rack = |rows: &mut Vec<Row>,
-                slot: Slot,
-                label: &'static str,
-                icon_id: Option<i32>,
-                slots: crate::engine::Slots,
-                filled: Vec<Cell>| {
+    let rack = |rows: &mut Vec<Row>, slot: Slot, slots: crate::engine::Slots, filled: Vec<Cell>| {
         let total = slots.total.unwrap_or(0);
         if total == 0 && !filled.iter().any(|&c| c != Cell::Empty) {
             return;
         }
-        set_apart(
-            rows,
-            Row::Header {
-                slot,
-                label,
-                icon_id,
-                total,
-            },
-        );
+        set_apart(rows, Row::Header { slot, total });
         let positions = filled.len().max(total as usize);
         for pos in 0..positions {
             match filled.get(pos).copied().unwrap_or(Cell::Empty) {
@@ -1639,41 +1607,28 @@ fn fitting_rows(fit: &Fit, stats: &Stats, style: RackStyle) -> Vec<Row> {
             }
         }
     };
-    for (slot, label, icon_id, slots) in [
-        (Slot::High, "High Slots", Some(icon::HIGH), stats.high),
-        (Slot::Mid, "Med Slots", Some(icon::MID), stats.mid),
-        (Slot::Low, "Low Slots", Some(icon::LOW), stats.low),
+    for (slot, slots) in [
+        (Slot::High, stats.high),
+        (Slot::Mid, stats.mid),
+        (Slot::Low, stats.low),
     ] {
-        rack(
-            &mut rows,
-            slot,
-            label,
-            icon_id,
-            slots,
-            rack_cells(fit, slot),
-        );
+        rack(&mut rows, slot, slots, rack_cells(fit, slot));
     }
     rack(
         &mut rows,
         Slot::Rig,
-        "Rig Slots",
-        Some(icon::RIG),
         stats.rig,
         fit.rigs.iter().map(|r| Cell::of(r.is_some())).collect(),
     );
     rack(
         &mut rows,
         Slot::Subsystem,
-        "Subsystem Slots",
-        Some(icon::SUBSYSTEM),
         stats.subsystem,
         vec![Cell::Item; fit.subsystems.len()],
     );
     rack(
         &mut rows,
         Slot::Service,
-        "Service Slots",
-        None,
         stats.service,
         rack_cells(fit, Slot::Service),
     );

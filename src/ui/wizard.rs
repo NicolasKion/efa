@@ -18,10 +18,10 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, AnyView, App, AppContext, Context, Div, Entity, FocusHandle, Hsla,
-    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window,
-    WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, relative, size,
+    AnyElement, AnyView, App, AppContext, Context, Div, Entity, FocusHandle, InteractiveElement,
+    IntoElement, KeyDownEvent, MouseButton, ParentElement, Render, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, WindowBounds,
+    WindowOptions, div, prelude::FluentBuilder, px, size,
 };
 
 use super::{Efa, Loaded, hub::Hub, item_stats, widgets};
@@ -605,6 +605,7 @@ impl Render for WizardDialog {
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)
+            .text_sm()
             .child(header)
             .children(banner)
             .child(div().flex_1().min_h_0().children(view))
@@ -766,22 +767,6 @@ fn notice(icon: AssetIcon, color: Rgb, text: impl Into<SharedString>, cx: &App) 
                 .child(UiIcon::new(icon).xsmall()),
         )
         .child(div().flex_1().min_w_0().child(text.into()))
-}
-
-/// A thin rounded bar, filled to `fraction`.
-fn bar(fraction: f64, fill: Hsla, cx: &App) -> Div {
-    div()
-        .h(px(4.))
-        .w_full()
-        .rounded_full()
-        .bg(cx.theme().secondary)
-        .child(
-            div()
-                .h_full()
-                .rounded_full()
-                .bg(fill)
-                .w(relative(fraction.clamp(0.0, 1.0) as f32)),
-        )
 }
 
 /// A hairline between parts of a pane.
