@@ -2,8 +2,9 @@
 
 use gpui_kit::component::{ActiveTheme, Theme, ThemeMode, h_flex};
 use gpui_kit::{
-    App, Div, ElementId, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement,
-    SharedString, Stateful, Styled, div, img, prelude::FluentBuilder, px, relative, rgb,
+    App, ClickEvent, Context, Div, ElementId, FontWeight, Hsla, InteractiveElement, IntoElement,
+    ParentElement, SharedString, Stateful, Styled, WeakEntity, Window, div, img,
+    prelude::FluentBuilder, px, relative, rgb,
 };
 
 use std::rc::Rc;
@@ -11,7 +12,7 @@ use std::rc::Rc;
 use gpui_kit::component::{IconName, menu::PopupMenuItem};
 
 use super::{
-    Loaded,
+    Efa, Loaded,
     columns::{ICON_W, STATE_W},
 };
 
@@ -394,6 +395,33 @@ pub fn icon_label(
 ) -> impl Fn(&mut gpui_kit::Window, &mut App) -> Div + 'static {
     let label = label.into();
     move |_, cx| menu_row(ui_icon(icon.clone(), cx), label.clone())
+}
+
+/// A menu entry's click handler that runs `f` on the fit window behind `this`, while it is
+/// still open.
+pub fn on_efa(
+    this: &WeakEntity<Efa>,
+    f: impl Fn(&mut Efa, &ClickEvent, &mut Window, &mut Context<Efa>) + 'static,
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    let this = this.clone();
+    move |event, window, cx| {
+        let _ = this.update(cx, |g, cx| f(g, event, window, cx));
+    }
+}
+
+/// [`on_efa`] for an entry acting on several things at once, such as the picked market items:
+/// `f` runs for each of `items`, in order, in one update of the window.
+pub fn on_each<T: Copy + 'static>(
+    this: &WeakEntity<Efa>,
+    items: &Rc<[T]>,
+    f: impl Fn(&mut Efa, T, &mut Window, &mut Context<Efa>) + 'static,
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    let items = Rc::clone(items);
+    on_efa(this, move |g, _, window, cx| {
+        for &item in items.iter() {
+            f(g, item, window, cx);
+        }
+    })
 }
 
 /// Short numbers the way pyfa writes them: 1.38k, 16.6k, 2.25M.

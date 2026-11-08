@@ -252,7 +252,7 @@ impl EsiFittingsWindow {
                 ids.len()
             ),
         };
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         window.open_dialog(cx, move |dialog, _, _| {
             let (this, ids) = (this.clone(), ids.clone());
             dialog.title("Confirm Delete").w(px(380.)).child(
@@ -336,7 +336,7 @@ impl EsiFittingsWindow {
             .into_iter()
             .map(|a| (a.character_id, a.name.clone()))
             .collect();
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         Button::new("esi-fittings-character")
             .small()
             .outline()

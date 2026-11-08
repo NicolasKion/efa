@@ -65,7 +65,7 @@ impl Efa {
             "Are you sure you wish to ignore fitting restrictions for the current fit? This \
              could lead to wildly inaccurate results and possible errors."
         };
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         window.open_dialog(cx, move |dialog, _, _| {
             let yes = this.clone();
             dialog.title("Confirm").w(px(420.)).child(

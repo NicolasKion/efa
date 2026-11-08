@@ -668,7 +668,7 @@ impl ItemStats {
             TreeId::Dependents => &self.dep_open,
         };
         let theme = cx.theme().clone();
-        let weak = cx.entity().downgrade();
+        let weak = cx.weak_entity();
         let rows: Vec<AnyElement> = tree::lines(nodes, openness)
             .into_iter()
             .enumerate()

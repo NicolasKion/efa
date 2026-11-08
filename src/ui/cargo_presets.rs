@@ -146,7 +146,7 @@ impl Efa {
                 None => items.push((t, n)),
             }
         }
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         let check = {
             let this = this.clone();
             move |name: &str, cx: &App| {
@@ -300,7 +300,7 @@ impl CargoPresetEditor {
             ),
             Naming::Rename => ("Rename Cargo Preset", "Enter a new name:", current.clone()),
         };
-        let editor = cx.entity().downgrade();
+        let editor = cx.weak_entity();
         let check = {
             let (editor, current) = (editor.clone(), current.clone());
             move |name: &str, cx: &App| {
@@ -356,7 +356,7 @@ impl CargoPresetEditor {
         let Some(name) = self.selected.clone() else {
             return;
         };
-        let editor = cx.entity().downgrade();
+        let editor = cx.weak_entity();
         editor_kit::confirm_delete(
             window,
             cx,
@@ -744,7 +744,7 @@ impl CargoPresetEditor {
             .icon(UiIcon::new(AssetIcon::Settings2))
             .tooltip("When applied, and adding the fit's cargo")
             .dropdown_menu({
-                let this = cx.entity().downgrade();
+                let this = cx.weak_entity();
                 move |menu, _, _| {
                     let mut menu = menu.label("When applied");
                     for value in CargoPolicy::ALL {

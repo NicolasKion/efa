@@ -249,7 +249,7 @@ impl OverridesWindow {
     }
 
     fn confirm_clear(window: &mut Window, cx: &mut Context<Self>) {
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         window.open_dialog(cx, move |dialog, _, _| {
             let yes = this.clone();
             dialog.title("Confirm Delete").w(px(380.)).child(

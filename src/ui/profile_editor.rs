@@ -692,7 +692,7 @@ impl<K: Kind> Editor<K> {
         };
         let input = cx.new(|cx| InputState::new(window, cx).default_value(default));
         let error = cx.new(|_| None::<SharedString>);
-        let editor = cx.entity().downgrade();
+        let editor = cx.weak_entity();
         window.open_dialog(cx, move |dialog, _, cx| {
             let (input, error, editor) = (input.clone(), error.clone(), editor.clone());
             let problem = error.read(cx).clone();
@@ -756,7 +756,7 @@ impl<K: Kind> Editor<K> {
         let Some(Selection::User(name)) = self.selected.clone() else {
             return;
         };
-        let editor = cx.entity().downgrade();
+        let editor = cx.weak_entity();
         window.open_dialog(cx, move |dialog, _, _| {
             let yes = editor.clone();
             dialog.title("Confirm Delete").w(px(380.)).child(

@@ -22,7 +22,7 @@ use gpui_kit::{
 use super::{
     Efa, Hub, Loaded,
     character_editor::CharacterEditor,
-    widgets::{entry, icon_label},
+    widgets::{entry, icon_label, on_efa},
 };
 use crate::{
     character::{
@@ -276,7 +276,7 @@ impl Efa {
             (true, true) => theme.danger,
             (true, false) => theme.success,
         };
-        let this = Self::weak(cx);
+        let this = cx.weak_entity();
         let choices: Vec<(CharacterId, String)> = self
             .characters
             .ordered()
@@ -354,10 +354,7 @@ impl Efa {
             )
         });
         let on = |f: fn(&mut Efa, &mut Window, &mut Context<Efa>)| {
-            let this = this.clone();
-            move |_: &gpui_kit::ClickEvent, window: &mut Window, cx: &mut App| {
-                let _ = this.update(cx, |g, cx| f(g, window, cx));
-            }
+            on_efa(this, move |g, _, window, cx| f(g, window, cx))
         };
         menu.item(
             entry(IconName::User, "Character Editor…")
@@ -378,7 +375,7 @@ impl Efa {
                 .on_click(on(|g, window, cx| {
                     let id = g.fit_character();
                     let initial = format!("{} Copy", g.characters.name(id));
-                    let this = cx.entity().downgrade();
+                    let this = cx.weak_entity();
                     name_dialog(
                         &g.hub,
                         "Save Character As...",

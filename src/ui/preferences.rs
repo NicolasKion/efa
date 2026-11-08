@@ -1120,7 +1120,7 @@ impl PreferencesWindow {
             WindowExt,
             button::{Button, ButtonVariants},
         };
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         window.open_dialog(cx, move |dialog, _, _| {
             let this = this.clone();
             dialog.title("Confirm").w(px(380.)).child(

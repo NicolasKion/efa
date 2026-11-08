@@ -198,7 +198,7 @@ impl GraphsWindow {
     }
 
     fn graph_selector(&self, cx: &mut Context<Self>) -> AnyElement {
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         let current = self.graph;
         let graphs: Vec<Graph> = Graph::ALL
             .into_iter()
@@ -232,7 +232,7 @@ impl GraphsWindow {
         pick: fn(&mut Self, usize, &mut Window, &mut Context<Self>),
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         let label = labels.get(current).cloned().unwrap_or_default();
         Button::new(id)
             .outline()

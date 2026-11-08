@@ -88,7 +88,7 @@ impl Efa {
                 .text_color(theme.muted_foreground)
                 .when(rows.is_empty(), |d| d.child(empty_text))
                 .context_menu({
-                    let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
+                    let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
                     move |menu, window, cx| implant_menu(menu, &this, &loaded, None, window, cx)
                 })
                 .into_any_element(),
@@ -173,7 +173,7 @@ impl Efa {
         let selected = self.additions_selection.contains(&i);
         let own = source == ImplantSource::Fit;
         let slot = catalog.get(type_id).and_then(|t| t.implant_slot);
-        let this = Self::weak(cx);
+        let this = cx.weak_entity();
         h_flex()
             .id(SharedString::from(format!("implant-{i}")))
             .gap_2()
@@ -239,7 +239,7 @@ impl Efa {
                 }),
             )
             .context_menu({
-                let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
+                let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
                 move |menu, window, cx| implant_menu(menu, &this, &loaded, Some(i), window, cx)
             })
             .into_any_element()

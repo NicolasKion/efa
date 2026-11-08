@@ -129,7 +129,7 @@ impl Efa {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         let check = {
             let this = this.clone();
             move |name: &str, cx: &App| name_problem(&this, name, None, cx)
@@ -391,7 +391,7 @@ impl ImplantSetEditor {
 
     fn create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let initial = implant_set::free_name(self.sets(cx), NEW_SET);
-        let (efa, this) = (self.efa.clone(), cx.entity().downgrade());
+        let (efa, this) = (self.efa.clone(), cx.weak_entity());
         editor_kit::prompt_name(
             window,
             cx,
@@ -414,7 +414,7 @@ impl ImplantSetEditor {
         let Some(old) = self.selected.clone() else {
             return;
         };
-        let (efa, this, keep) = (self.efa.clone(), cx.entity().downgrade(), old.clone());
+        let (efa, this, keep) = (self.efa.clone(), cx.weak_entity(), old.clone());
         editor_kit::prompt_name(
             window,
             cx,
@@ -452,7 +452,7 @@ impl ImplantSetEditor {
         let Some(name) = self.selected.clone() else {
             return;
         };
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         editor_kit::confirm_delete(
             window,
             cx,

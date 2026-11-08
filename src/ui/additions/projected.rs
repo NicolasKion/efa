@@ -516,7 +516,7 @@ impl Efa {
                         g.link(Link::Projected, &[drag.index], cx);
                     }))
                     .context_menu({
-                        let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
+                        let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
                         move |menu, window, cx| {
                             projected_view_menu(menu, &this, &loaded, window, cx)
                         }
@@ -710,7 +710,7 @@ impl Efa {
                 }),
             )
             .context_menu({
-                let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
+                let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
                 move |menu, window, cx| {
                     let menu = projected_item_menu(menu, &this, &loaded, n, row, window, cx);
                     projected_view_menu(menu.separator(), &this, &loaded, window, cx)

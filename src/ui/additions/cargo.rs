@@ -202,7 +202,7 @@ impl Efa {
                     .p_2()
                     .text_color(theme.muted_foreground)
                     .child("Drag items here, or right-click them in the market.")
-                    .context_menu(space_menu(Self::weak(cx), Rc::clone(loaded)))
+                    .context_menu(space_menu(cx.weak_entity(), Rc::clone(loaded)))
                     .into_any_element(),
             );
         }
@@ -244,7 +244,7 @@ impl Efa {
                                 .id("cargo-space")
                                 .flex_1()
                                 .min_h(px(ROW_HEIGHT))
-                                .context_menu(space_menu(Self::weak(cx), Rc::clone(loaded))),
+                                .context_menu(space_menu(cx.weak_entity(), Rc::clone(loaded))),
                         )
                     }),
             )
@@ -336,7 +336,7 @@ impl Efa {
             None => row,
         };
         row.context_menu({
-            let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
+            let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
             move |menu, window, cx| {
                 addition_menu(menu, &this, &loaded, AddKind::Cargo, n, window, cx)
             }

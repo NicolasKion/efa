@@ -179,7 +179,7 @@ impl Efa {
                     .text_color(theme.muted_foreground)
                     .child("Double-click boosters in the market, or drag them here, to add them.")
                     .context_menu({
-                        let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
+                        let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
                         move |menu, window, cx| {
                             misc_entries(menu, &this, &loaded, AddKind::Boosters, None, window, cx)
                         }
@@ -347,7 +347,7 @@ impl Efa {
                 }),
             )
             .context_menu({
-                let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
+                let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
                 move |menu, window, cx| booster_menu(menu, &this, &loaded, i, window, cx)
             })
             .into_any_element()

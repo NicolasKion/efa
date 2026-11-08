@@ -343,7 +343,7 @@ impl<'a> Columns<'a> {
 
 /// The fit list, `width` wide.
 pub fn sources(g: &mut GraphsWindow, width: f32, cx: &mut Context<GraphsWindow>) -> AnyElement {
-    let this = cx.entity().downgrade();
+    let this = cx.weak_entity();
     let cols = Columns::new(g.graph.src_columns(), width);
     let (fits, tabs) = fit_choices(g);
     let rows: Vec<AnyElement> = (0..g.sources.len())
@@ -681,7 +681,7 @@ fn source_row(
 
 /// The target list, `width` wide.
 pub fn targets(g: &mut GraphsWindow, width: f32, cx: &mut Context<GraphsWindow>) -> AnyElement {
-    let this = cx.entity().downgrade();
+    let this = cx.weak_entity();
     let all = g.graph.tgt_columns(g.options().ignore_resists);
     let cols = Columns::new(&all, width);
     let (fits, tabs) = fit_choices(g);

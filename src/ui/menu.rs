@@ -1,8 +1,9 @@
 //! The menu bar and its keyboard shortcuts, laid out like pyfa's (gui/mainMenuBar.py): File,
 //! Fit, Character, Global, Editors, Help.
 //!
-//! Entries that belong to windows built elsewhere are marked "Hook:" below and stay disabled
-//! until those windows exist.
+//! Every command is an action, handled once in [`Efa::bind_actions`]: a shortcut and the menu
+//! entry both dispatch it. The Character menu reads the window when it opens and is built in
+//! `characters.rs`.
 
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
@@ -13,8 +14,8 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    App, ClickEvent, Context, Div, InteractiveElement, IntoElement, KeyBinding, ParentElement,
-    SharedString, Styled, WeakEntity, Window, div, prelude::FluentBuilder, px,
+    App, Context, Div, InteractiveElement, IntoElement, KeyBinding, ParentElement, SharedString,
+    Styled, Window, div, prelude::FluentBuilder, px,
 };
 
 use super::{AdditionsTab, BrowserTab, Efa, actions::Action, widgets};
@@ -70,6 +71,18 @@ gpui_kit::actions!(
         MarketItem7,
         MarketItem8,
         MarketItem9,
+        BackupFits,
+        ExportHtml,
+        ImportText,
+        ToggleRestrictions,
+        DuplicateFit,
+        DeleteFit,
+        CargoPresets,
+        DamagePatternEditor,
+        TargetProfileEditor,
+        AttributeOverrides,
+        ToggleOverrides,
+        About,
     ]
 );
 
@@ -151,44 +164,37 @@ pub fn cycle_tab(open: &[usize], current: Option<usize>, forward: bool) -> Optio
     open.get(next).copied()
 }
 
-/// A menu entry that runs `f` on the window and shows `action`'s shortcut.
+/// A menu bar entry that dispatches `action`, showing its shortcut if it has one.
 fn command(
-    this: &WeakEntity<Efa>,
     icon: impl Into<gpui_kit::component::Icon>,
-    label: &'static str,
-    action: Option<Box<dyn gpui_kit::Action>>,
-    f: fn(&mut Efa, &mut Window, &mut Context<Efa>),
+    label: impl Into<SharedString>,
+    action: impl gpui_kit::Action,
 ) -> PopupMenuItem {
-    let this = this.clone();
-    let item = PopupMenuItem::new(label)
+    PopupMenuItem::new(label)
         .icon(icon)
-        .on_click(move |_: &ClickEvent, window, cx| {
-            let _ = this.update(cx, |g, cx| f(g, window, cx));
-        });
-    match action {
-        Some(action) => item.action(action),
-        None => item,
-    }
+        .action(Box::new(action))
 }
 
 impl Efa {
     /// The root element with the menu's shortcuts wired to this window.
-    pub(super) fn bind_actions(root: Div, cx: &mut Context<Self>) -> Div {
+    pub(super) fn bind_actions(&self, root: Div, cx: &mut Context<Self>) -> Div {
         let root = root
             .key_context(CONTEXT)
+            .track_focus(&self.root_focus)
             .on_action(cx.listener(|g, _: &NewTab, _, cx| g.new_tab(cx)))
-            .on_action(cx.listener(|g, _: &CloseTab, _, cx| {
-                if let Some(current) = g.saved.current {
-                    g.close_fit(current, cx);
-                }
-            }))
+            .on_action(cx.listener(|g, _: &CloseTab, _, cx| g.close_current_tab(cx)))
             .on_action(cx.listener(|g, _: &CloseAllTabs, _, cx| g.close_all_tabs(cx)))
             .on_action(cx.listener(|g, _: &Undo, _, cx| g.undo(cx)))
             .on_action(cx.listener(|g, _: &Redo, _, cx| g.redo(cx)))
             .on_action(cx.listener(|g, _: &CopyFit, _, cx| g.open_export_window(cx)))
             .on_action(cx.listener(|g, _: &PasteFit, _, cx| g.paste_from_clipboard(cx)))
             .on_action(cx.listener(|_, _: &ImportFits, _, cx| Efa::import_files_dialog(cx)))
+            .on_action(cx.listener(|_, _: &ImportText, window, cx| {
+                Efa::open_import_dialog(window, cx);
+            }))
             .on_action(cx.listener(|g, _: &ExportFit, _, cx| g.save_fit_dialog(cx)))
+            .on_action(cx.listener(|g, _: &BackupFits, _, cx| g.backup_dialog(cx)))
+            .on_action(cx.listener(|g, _: &ExportHtml, _, cx| g.export_html(cx)))
             .on_action(cx.listener(|g, _: &OpenPreferences, _, cx| g.open_preferences(cx)))
             .on_action(cx.listener(|g, _: &CharacterEditor, _, cx| {
                 g.open_character_editor(cx);
@@ -196,6 +202,17 @@ impl Efa {
             .on_action(cx.listener(|g, _: &ImplantSetEditor, window, cx| {
                 g.open_implant_set_editor(None, window, cx);
             }))
+            .on_action(cx.listener(|g, _: &CargoPresets, _, cx| {
+                g.open_cargo_preset_editor(None, cx);
+            }))
+            .on_action(cx.listener(|g, _: &DamagePatternEditor, _, cx| {
+                super::profile_editor::open_damage_pattern_editor(g.hub.clone(), None, cx);
+            }))
+            .on_action(cx.listener(|g, _: &TargetProfileEditor, _, cx| {
+                super::profile_editor::open_target_profile_editor(g.hub.clone(), None, cx);
+            }))
+            .on_action(cx.listener(|g, _: &AttributeOverrides, _, cx| g.open_overrides(cx)))
+            .on_action(cx.listener(|g, _: &ToggleOverrides, _, cx| g.toggle_overrides(cx)))
             .on_action(cx.listener(|g, _: &Graphs, _, cx| g.open_graphs(cx)))
             .on_action(cx.listener(|g, _: &HiddenGraphs, _, cx| g.open_hidden_graphs(cx)))
             .on_action(cx.listener(|g, _: &FittingWizard, window, cx| {
@@ -204,6 +221,17 @@ impl Efa {
             .on_action(cx.listener(|g, _: &BrowseEsiFittings, _, cx| g.open_esi_fittings(cx)))
             .on_action(cx.listener(|g, _: &ExportToEve, _, cx| g.open_export_to_eve(cx)))
             .on_action(cx.listener(|g, _: &OptimizeFitPrice, _, cx| g.optimize_fit_price(cx)))
+            .on_action(cx.listener(|g, _: &ToggleRestrictions, window, cx| {
+                g.confirm_restrictions_toggle(window, cx);
+            }))
+            .on_action(cx.listener(|g, _: &DuplicateFit, _, cx| g.duplicate_fit(cx)))
+            .on_action(cx.listener(|g, _: &DeleteFit, window, cx| {
+                if let Some(current) = g.saved.current {
+                    let shift = window.modifiers().shift;
+                    g.confirm_delete_fit(current, shift, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|_, _: &About, window, cx| Efa::open_about(window, cx)))
             .on_action(cx.listener(|_, _: &Quit, _, cx| cx.quit()))
             .on_action(cx.listener(|g, _: &NextTab, _, cx| g.cycle_tab(true, cx)))
             .on_action(cx.listener(|g, _: &PreviousTab, _, cx| g.cycle_tab(false, cx)))
@@ -303,6 +331,12 @@ impl Efa {
         });
     }
 
+    fn close_current_tab(&mut self, cx: &mut Context<Self>) {
+        if let Some(current) = self.saved.current {
+            self.close_fit(current, cx);
+        }
+    }
+
     fn close_all_tabs(&mut self, cx: &mut Context<Self>) {
         self.clear_selection();
         self.saved.open.clear();
@@ -311,363 +345,42 @@ impl Efa {
     }
 
     pub(super) fn menu_bar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         let has_fit = self.saved.current.is_some();
         let has_ship = self.fit().is_some_and(|f| f.ship.is_some());
         let has_fits = !self.saved.fits.is_empty();
         let unrestricted = self.fit().is_some_and(|f| f.ignore_restrictions);
         let (can_undo, can_redo) = (self.can_undo(), self.can_redo());
+        let overrides_on = self.saved.overrides.enabled;
+        let root = self.root_focus.clone();
         let menu =
-            |id: &'static str, label: &'static str, build: Box<dyn Fn(PopupMenu) -> PopupMenu>| {
-                Button::new(id)
-                    .ghost()
-                    .small()
-                    .label(label)
-                    .dropdown_menu(move |menu, window, _| build(fit_window(menu, window)))
+            |id: &'static str, label: &'static str, build: fn(PopupMenu, Flags) -> PopupMenu| {
+                let flags = Flags {
+                    has_fit,
+                    has_ship,
+                    has_fits,
+                    unrestricted,
+                    can_undo,
+                    can_redo,
+                    overrides_on,
+                };
+                // The entries' actions go to the window's root, where they are handled.
+                let root = root.clone();
+                Button::new(id).ghost().small().label(label).dropdown_menu(
+                    move |menu, window, _| {
+                        build(fit_window(menu, window).action_context(root.clone()), flags)
+                    },
+                )
             };
 
-        let file = {
-            let this = this.clone();
-            Box::new(move |menu: PopupMenu| {
-                menu.item(command(
-                    &this,
-                    IconName::Plus,
-                    "New Tab",
-                    Some(Box::new(NewTab)),
-                    |g, _, cx| g.new_tab(cx),
-                ))
-                .item(
-                    command(
-                        &this,
-                        IconName::Close,
-                        "Close Tab",
-                        Some(Box::new(CloseTab)),
-                        |g, _, cx| {
-                            if let Some(current) = g.saved.current {
-                                g.close_fit(current, cx);
-                            }
-                        },
-                    )
-                    .disabled(!has_fit),
-                )
-                .item(
-                    command(
-                        &this,
-                        IconName::Close,
-                        "Close All Tabs",
-                        Some(Box::new(CloseAllTabs)),
-                        |g, _, cx| g.close_all_tabs(cx),
-                    )
-                    .disabled(!has_fit),
-                )
-                .separator()
-                .item(
-                    command(
-                        &this,
-                        IconName::Folder,
-                        "Backup All Fittings",
-                        None,
-                        |g, _, cx| g.backup_dialog(cx),
-                    )
-                    .disabled(!has_fits),
-                )
-                .item(
-                    command(
-                        &this,
-                        IconName::Globe,
-                        "Export All Fittings to HTML",
-                        None,
-                        |g, _, cx| g.export_html(cx),
-                    )
-                    .disabled(!has_fits),
-                )
-                .separator()
-                .item(command(
-                    &this,
-                    IconName::WindowClose,
-                    "Quit",
-                    Some(Box::new(Quit)),
-                    |_, _, cx| cx.quit(),
-                ))
-            }) as Box<dyn Fn(PopupMenu) -> PopupMenu>
-        };
-
-        let fit = {
-            let this = this.clone();
-            Box::new(move |menu: PopupMenu| {
-                menu.item(
-                    command(
-                        &this,
-                        IconName::Undo,
-                        "Undo",
-                        Some(Box::new(Undo)),
-                        |g, _, cx| g.undo(cx),
-                    )
-                    .disabled(!can_undo),
-                )
-                .item(
-                    command(
-                        &this,
-                        IconName::Redo,
-                        "Redo",
-                        Some(Box::new(Redo)),
-                        |g, _, cx| g.redo(cx),
-                    )
-                    .disabled(!can_redo),
-                )
-                .separator()
-                .item(
-                    command(
-                        &this,
-                        gpui_kit::assets::IconName::WandSparkles,
-                        "Fitting Wizard…",
-                        Some(Box::new(FittingWizard)),
-                        Efa::open_wizard,
-                    )
-                    .disabled(!has_ship),
-                )
-                .separator()
-                .item(
-                    command(
-                        &this,
-                        IconName::Copy,
-                        "To Clipboard",
-                        Some(Box::new(CopyFit)),
-                        |g, _, cx| g.open_export_window(cx),
-                    )
-                    .disabled(!has_fit),
-                )
-                .item(command(
-                    &this,
-                    IconName::FileText,
-                    "From Clipboard",
-                    Some(Box::new(PasteFit)),
-                    |g, _, cx| g.paste_from_clipboard(cx),
-                ))
-                .item(command(
-                    &this,
-                    IconName::FileText,
-                    "From Text…",
-                    None,
-                    |_, window, cx| Efa::open_import_dialog(window, cx),
-                ))
-                .separator()
-                .item(command(
-                    &this,
-                    IconName::FolderOpen,
-                    "Import Fittings",
-                    Some(Box::new(ImportFits)),
-                    |_, _, cx| Efa::import_files_dialog(cx),
-                ))
-                .item(
-                    command(
-                        &this,
-                        IconName::File,
-                        "Export Fitting",
-                        Some(Box::new(ExportFit)),
-                        |g, _, cx| g.save_fit_dialog(cx),
-                    )
-                    .disabled(!has_fit),
-                )
-                .separator()
-                .item(
-                    command(
-                        &this,
-                        AssetIcon::PiggyBank,
-                        "Optimize Fit Price",
-                        Some(Box::new(OptimizeFitPrice)),
-                        |g, _, cx| g.optimize_fit_price(cx),
-                    )
-                    .disabled(!has_fit),
-                )
-                .item(command(
-                    &this,
-                    IconName::ChartPie,
-                    "Graphs",
-                    Some(Box::new(Graphs)),
-                    |g, _, cx| g.open_graphs(cx),
-                ))
-                .separator()
-                .item(
-                    command(
-                        &this,
-                        IconName::TriangleAlert,
-                        if unrestricted {
-                            "Enable Fitting Restrictions"
-                        } else {
-                            "Disable Fitting Restrictions"
-                        },
-                        None,
-                        Efa::confirm_restrictions_toggle,
-                    )
-                    .disabled(!has_fit),
-                )
-                .separator()
-                .item(command(
-                    &this,
-                    IconName::Inbox,
-                    "Browse ESI Fittings…",
-                    Some(Box::new(BrowseEsiFittings)),
-                    |g, _, cx| g.open_esi_fittings(cx),
-                ))
-                .item(
-                    command(
-                        &this,
-                        IconName::ArrowUp,
-                        "Export to EVE…",
-                        Some(Box::new(ExportToEve)),
-                        |g, _, cx| g.open_export_to_eve(cx),
-                    )
-                    .disabled(!has_ship),
-                )
-                .separator()
-                .item(
-                    command(&this, IconName::Copy, "Duplicate Fit", None, |g, _, cx| {
-                        g.duplicate_fit(cx);
-                    })
-                    .disabled(!has_fit),
-                )
-                .item(
-                    command(
-                        &this,
-                        IconName::Delete,
-                        "Delete Fit",
-                        None,
-                        |g, window, cx| {
-                            if let Some(current) = g.saved.current {
-                                let shift = window.modifiers().shift;
-                                g.confirm_delete_fit(current, shift, window, cx);
-                            }
-                        },
-                    )
-                    .disabled(!has_fit),
-                )
-            }) as Box<dyn Fn(PopupMenu) -> PopupMenu>
-        };
-
         // The character menu reads the window's state when it opens, so it needs the app.
-        let character = {
-            let this = this.clone();
-            Button::new("menu-character")
-                .ghost()
-                .small()
-                .label("Character")
-                .dropdown_menu(move |menu, window, cx| {
-                    Self::character_menu(fit_window(menu, window), &this, cx)
-                })
-        };
-
-        let overrides_on = self.saved.overrides.enabled;
-        let global = {
-            let this = this.clone();
-            Box::new(move |menu: PopupMenu| {
-                menu.item(command(
-                    &this,
-                    IconName::Settings,
-                    "Preferences",
-                    Some(Box::new(OpenPreferences)),
-                    |g, _, cx| g.open_preferences(cx),
-                ))
-                .separator()
-                .item(command(
-                    &this,
-                    UiIcon::new(AssetIcon::SlidersHorizontal),
-                    "Attribute Overrides",
-                    None,
-                    |g, _, cx| g.open_overrides(cx),
-                ))
-                .item(command(
-                    &this,
-                    UiIcon::new(if overrides_on {
-                        AssetIcon::ToggleRight
-                    } else {
-                        AssetIcon::ToggleLeft
-                    }),
-                    if overrides_on {
-                        "Turn Overrides Off"
-                    } else {
-                        "Turn Overrides On"
-                    },
-                    None,
-                    |g, _, cx| g.toggle_overrides(cx),
-                ))
-            }) as Box<dyn Fn(PopupMenu) -> PopupMenu>
-        };
-
-        let editors = {
-            let this = this.clone();
-            let hub = self.hub.clone();
-            Box::new(move |menu: PopupMenu| {
-                let (patterns, profiles) = (hub.clone(), hub.clone());
-                menu.item(command(
-                    &this,
-                    IconName::CircleUser,
-                    "Character Editor",
-                    Some(Box::new(CharacterEditor)),
-                    |g, _, cx| g.open_character_editor(cx),
-                ))
-                .item(command(
-                    &this,
-                    IconName::Settings2,
-                    "Implant Set Editor",
-                    Some(Box::new(ImplantSetEditor)),
-                    |g, window, cx| g.open_implant_set_editor(None, window, cx),
-                ))
-                .item(command(
-                    &this,
-                    IconName::Inbox,
-                    "Cargo Presets",
-                    None,
-                    |g, _, cx| g.open_cargo_preset_editor(None, cx),
-                ))
-                .item(
-                    PopupMenuItem::new("Damage Pattern Editor")
-                        .icon(IconName::Settings2)
-                        .on_click(move |_, _, cx| {
-                            super::profile_editor::open_damage_pattern_editor(
-                                patterns.clone(),
-                                None,
-                                cx,
-                            );
-                        }),
-                )
-                .item(
-                    PopupMenuItem::new("Target Profile Editor")
-                        .icon(IconName::Settings2)
-                        .on_click(move |_, _, cx| {
-                            super::profile_editor::open_target_profile_editor(
-                                profiles.clone(),
-                                None,
-                                cx,
-                            );
-                        }),
-                )
-            }) as Box<dyn Fn(PopupMenu) -> PopupMenu>
-        };
-
-        let help = {
-            let this = this.clone();
-            Box::new(move |menu: PopupMenu| {
-                menu.item(
-                    PopupMenuItem::new("Wiki")
-                        .icon(IconName::BookOpen)
-                        .on_click(|_, _, cx| cx.open_url(WIKI_URL)),
-                )
-                .item(
-                    PopupMenuItem::new("Forums")
-                        .icon(IconName::Globe)
-                        .on_click(|_, _, cx| cx.open_url(FORUM_URL)),
-                )
-                .separator()
-                .item(command(
-                    &this,
-                    IconName::Info,
-                    "About",
-                    None,
-                    |_, window, cx| Efa::open_about(window, cx),
-                ))
-            }) as Box<dyn Fn(PopupMenu) -> PopupMenu>
-        };
+        let character = Button::new("menu-character")
+            .ghost()
+            .small()
+            .label("Character")
+            .dropdown_menu(move |menu, window, cx| {
+                Self::character_menu(fit_window(menu, window), &this, cx)
+            });
 
         let builtin = super::chrome::builtin(cx);
         h_flex()
@@ -678,12 +391,12 @@ impl Efa {
             .border_b_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().title_bar)
-            .child(menu("menu-file", "File", file))
-            .child(menu("menu-fit", "Fit", fit))
+            .child(menu("menu-file", "File", file_menu))
+            .child(menu("menu-fit", "Fit", fit_menu))
             .child(character)
-            .child(menu("menu-global", "Global", global))
-            .child(menu("menu-editors", "Editors", editors))
-            .child(menu("menu-help", "Help", help))
+            .child(menu("menu-global", "Global", global_menu))
+            .child(menu("menu-editors", "Editors", editors_menu))
+            .child(menu("menu-help", "Help", help_menu))
             // With the window buttons in the bar, the room left over moves the window.
             .when(builtin, |bar| {
                 bar.child(
@@ -714,6 +427,137 @@ impl Efa {
             )
         });
     }
+}
+
+/// What the menu bar's entries depend on, read when the bar is drawn.
+#[derive(Debug, Clone, Copy)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent facts about the window, one per entry they enable"
+)]
+struct Flags {
+    has_fit: bool,
+    has_ship: bool,
+    has_fits: bool,
+    unrestricted: bool,
+    can_undo: bool,
+    can_redo: bool,
+    overrides_on: bool,
+}
+
+fn file_menu(menu: PopupMenu, f: Flags) -> PopupMenu {
+    menu.item(command(IconName::Plus, "New Tab", NewTab))
+        .item(command(IconName::Close, "Close Tab", CloseTab).disabled(!f.has_fit))
+        .item(command(IconName::Close, "Close All Tabs", CloseAllTabs).disabled(!f.has_fit))
+        .separator()
+        .item(command(IconName::Folder, "Backup All Fittings", BackupFits).disabled(!f.has_fits))
+        .item(
+            command(IconName::Globe, "Export All Fittings to HTML", ExportHtml)
+                .disabled(!f.has_fits),
+        )
+        .separator()
+        .item(command(IconName::WindowClose, "Quit", Quit))
+}
+
+fn fit_menu(menu: PopupMenu, f: Flags) -> PopupMenu {
+    let restrictions = if f.unrestricted {
+        "Enable Fitting Restrictions"
+    } else {
+        "Disable Fitting Restrictions"
+    };
+    menu.item(command(IconName::Undo, "Undo", Undo).disabled(!f.can_undo))
+        .item(command(IconName::Redo, "Redo", Redo).disabled(!f.can_redo))
+        .separator()
+        .item(
+            command(AssetIcon::WandSparkles, "Fitting Wizard…", FittingWizard)
+                .disabled(!f.has_ship),
+        )
+        .separator()
+        .item(command(IconName::Copy, "To Clipboard", CopyFit).disabled(!f.has_fit))
+        .item(command(IconName::FileText, "From Clipboard", PasteFit))
+        .item(command(IconName::FileText, "From Text…", ImportText))
+        .separator()
+        .item(command(IconName::FolderOpen, "Import Fittings", ImportFits))
+        .item(command(IconName::File, "Export Fitting", ExportFit).disabled(!f.has_fit))
+        .separator()
+        .item(
+            command(AssetIcon::PiggyBank, "Optimize Fit Price", OptimizeFitPrice)
+                .disabled(!f.has_fit),
+        )
+        .item(command(IconName::ChartPie, "Graphs", Graphs))
+        .separator()
+        .item(
+            command(IconName::TriangleAlert, restrictions, ToggleRestrictions).disabled(!f.has_fit),
+        )
+        .separator()
+        .item(command(
+            IconName::Inbox,
+            "Browse ESI Fittings…",
+            BrowseEsiFittings,
+        ))
+        .item(command(IconName::ArrowUp, "Export to EVE…", ExportToEve).disabled(!f.has_ship))
+        .separator()
+        .item(command(IconName::Copy, "Duplicate Fit", DuplicateFit).disabled(!f.has_fit))
+        .item(command(IconName::Delete, "Delete Fit", DeleteFit).disabled(!f.has_fit))
+}
+
+fn global_menu(menu: PopupMenu, f: Flags) -> PopupMenu {
+    let (toggle_icon, toggle_label) = if f.overrides_on {
+        (AssetIcon::ToggleRight, "Turn Overrides Off")
+    } else {
+        (AssetIcon::ToggleLeft, "Turn Overrides On")
+    };
+    menu.item(command(IconName::Settings, "Preferences", OpenPreferences))
+        .separator()
+        .item(command(
+            UiIcon::new(AssetIcon::SlidersHorizontal),
+            "Attribute Overrides",
+            AttributeOverrides,
+        ))
+        .item(command(
+            UiIcon::new(toggle_icon),
+            toggle_label,
+            ToggleOverrides,
+        ))
+}
+
+fn editors_menu(menu: PopupMenu, _: Flags) -> PopupMenu {
+    menu.item(command(
+        IconName::CircleUser,
+        "Character Editor",
+        CharacterEditor,
+    ))
+    .item(command(
+        IconName::Settings2,
+        "Implant Set Editor",
+        ImplantSetEditor,
+    ))
+    .item(command(IconName::Inbox, "Cargo Presets", CargoPresets))
+    .item(command(
+        IconName::Settings2,
+        "Damage Pattern Editor",
+        DamagePatternEditor,
+    ))
+    .item(command(
+        IconName::Settings2,
+        "Target Profile Editor",
+        TargetProfileEditor,
+    ))
+}
+
+fn help_menu(menu: PopupMenu, _: Flags) -> PopupMenu {
+    menu.item(
+        PopupMenuItem::new("Wiki")
+            .icon(IconName::BookOpen)
+            .on_click(|_, _, cx| cx.open_url(WIKI_URL)),
+    )
+    .item(
+        PopupMenuItem::new("Forums")
+            .icon(IconName::Globe)
+            .on_click(|_, _, cx| cx.open_url(FORUM_URL)),
+    )
+    .separator()
+    .item(command(IconName::Info, "About", About))
 }
 
 /// A menu bar menu, which scrolls when the window is too short to show it whole.

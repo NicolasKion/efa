@@ -26,8 +26,8 @@ use super::{
     selection::{ListKey, list_key},
     validation::flag,
     widgets::{
-        ROW_H, band, color, entry, icon_box, icon_label, item_entry, item_label, rack_band_label,
-        short,
+        ROW_H, band, color, entry, icon_box, icon_label, item_entry, item_label, on_efa,
+        rack_band_label, short,
     },
 };
 use crate::{
@@ -247,10 +247,10 @@ impl Efa {
                 .when(matches!(slot, Slot::High | Slot::Mid | Slot::Low), |row| {
                     row.child(self.group_toggle(slot, cx))
                 })
-                .context_menu(ship_menu_builder(Self::weak(cx), ship))
+                .context_menu(ship_menu_builder(cx.weak_entity(), ship))
                 .into_any_element(),
             Row::Separator => base
-                .context_menu(ship_menu_builder(Self::weak(cx), ship))
+                .context_menu(ship_menu_builder(cx.weak_entity(), ship))
                 .into_any_element(),
             Row::ModeHeader => base
                 .child(div().w(px(STATE_W + ICON_W - 4.)).flex_none())
@@ -259,7 +259,7 @@ impl Efa {
                         .font_weight(FontWeight::SEMIBOLD)
                         .child("Tactical Mode"),
                 )
-                .context_menu(ship_menu_builder(Self::weak(cx), ship))
+                .context_menu(ship_menu_builder(cx.weak_entity(), ship))
                 .into_any_element(),
             Row::Mode(mode) => base
                 .when_some(self.problems_of(loaded, ItemRef::Mode), |row, why| {
@@ -275,8 +275,8 @@ impl Efa {
                 )
                 .context_menu({
                     // pyfa's fittingMode entries come before the ship's.
-                    let ship_menu = ship_menu_builder(Self::weak(cx), ship);
-                    let this = Self::weak(cx);
+                    let ship_menu = ship_menu_builder(cx.weak_entity(), ship);
+                    let this = cx.weak_entity();
                     move |menu, window, cx| {
                         let menu = menu
                             .item(stats_entry(
@@ -296,7 +296,7 @@ impl Efa {
                         .child(format!("[Empty {} slot]", slot_name(slot))),
                 );
                 drop_target(row, DropOn::Empty(slot, pos), cx)
-                    .context_menu(ship_menu_builder(Self::weak(cx), ship))
+                    .context_menu(ship_menu_builder(cx.weak_entity(), ship))
                     .into_any_element()
             }
             Row::Item(item) => {
@@ -556,7 +556,7 @@ fn item_row_behaviour(
     ship: TypeId,
     cx: &mut Context<Efa>,
 ) -> AnyElement {
-    let this = Efa::weak(cx);
+    let this = cx.weak_entity();
     let loaded = Rc::clone(loaded);
     base.on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
         window.focus(&g.fitting_focus, cx);
@@ -817,17 +817,6 @@ impl MenuSnapshot {
     }
 }
 
-/// A menu entry handler that runs `f` on the app.
-fn handler(
-    this: &WeakEntity<Efa>,
-    f: impl Fn(&mut Efa, &ClickEvent, &mut Window, &mut Context<Efa>) + 'static,
-) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
-    let this = this.clone();
-    move |event, window, cx| {
-        let _ = this.update(cx, |g, cx| f(g, event, window, cx));
-    }
-}
-
 /// Act on `item` and whatever the click's scope adds to it.
 fn scoped(
     this: &WeakEntity<Efa>,
@@ -835,7 +824,7 @@ fn scoped(
     default: Scope,
     action: impl Fn(Vec<RowRef>) -> Action + 'static,
 ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
-    handler(this, move |g, event, _, cx| {
+    on_efa(this, move |g, event, _, cx| {
         let targets = g.targets(item, Scope::from_click(default, event));
         g.apply(action(targets), cx);
     })
@@ -904,7 +893,7 @@ fn item_menu(
         .is_some_and(|t| t.market_group.is_some())
     {
         menu = menu.item(
-            entry(IconName::Search, "Module Market Group").on_click(handler(
+            entry(IconName::Search, "Module Market Group").on_click(on_efa(
                 this,
                 move |g, _, window, cx| {
                     g.jump_to_market(market_type, window, cx);
@@ -934,7 +923,7 @@ fn item_menu(
     let slot = (rack != Slot::Subsystem && shown.module_fill).then_some(rack);
     if let Some(slot) = slot {
         menu = menu.item(
-            entry(IconName::Plus, format!("Fill With {}", t.category_label())).on_click(handler(
+            entry(IconName::Plus, format!("Fill With {}", t.category_label())).on_click(on_efa(
                 this,
                 move |g, _, _, cx| {
                     let action = match item {
@@ -976,7 +965,7 @@ fn item_menu(
             .is_some_and(|c| c.market_group.is_some())
     {
         menu = menu.item(
-            entry(IconName::Search, "Charge Market Group").on_click(handler(
+            entry(IconName::Search, "Charge Market Group").on_click(on_efa(
                 this,
                 move |g, _, window, cx| {
                     g.jump_to_market(charge, window, cx);
@@ -986,7 +975,7 @@ fn item_menu(
     }
     if takes_charges {
         menu = menu.item(
-            entry(IconName::BatteryCharging, "Show Compatible Charges").on_click(handler(
+            entry(IconName::BatteryCharging, "Show Compatible Charges").on_click(on_efa(
                 this,
                 move |g, _, window, cx| {
                     g.show_charges_for(type_id, window, cx);
@@ -1069,7 +1058,7 @@ pub(super) fn ship_entries(
                     menu.item(
                         item_entry(&loaded, id, label)
                             .checked(mode == Some(id))
-                            .on_click(handler(&this, move |g, _, _, cx| {
+                            .on_click(on_efa(&this, move |g, _, _, cx| {
                                 g.apply(Action::SetMode(id), cx);
                             })),
                     )
@@ -1091,7 +1080,7 @@ pub(super) fn ship_entries(
                     menu.item(
                         PopupMenuItem::new(option.label())
                             .checked(security == option)
-                            .on_click(handler(&this, move |g, _, _, cx| {
+                            .on_click(on_efa(&this, move |g, _, _, cx| {
                                 g.apply(Action::SetSystemSecurity(option), cx);
                             })),
                     )
@@ -1108,7 +1097,7 @@ pub(super) fn ship_entries(
             cx,
             move |menu, _, _| {
                 let set = |value: Option<f64>| {
-                    handler(&this, move |g, _, _, cx| {
+                    on_efa(&this, move |g, _, _, cx| {
                         g.apply(Action::SetSecStatus(value), cx);
                     })
                 };
@@ -1126,7 +1115,7 @@ pub(super) fn ship_entries(
                     .item(
                         PopupMenuItem::new(custom_label)
                             .checked(custom.is_some())
-                            .on_click(handler(&this, move |_, _, window, cx| {
+                            .on_click(on_efa(&this, move |_, _, window, cx| {
                                 Efa::open_value_dialog(
                                     "Security Status (-10 to 5)",
                                     custom.unwrap_or(0.0).to_string(),
@@ -1151,7 +1140,7 @@ pub(super) fn ship_entries(
     // pyfa leaves this out while the browser already lists the ship's fits.
     if !browsing_ship {
         menu = menu.item(
-            entry(IconName::FolderOpen, "Open in Fitting Browser").on_click(handler(
+            entry(IconName::FolderOpen, "Open in Fitting Browser").on_click(on_efa(
                 this,
                 move |g, _, _, cx| {
                     g.jump_to_fittings(ship, cx);
@@ -1195,7 +1184,7 @@ fn ammo_scoped(
     item: RowRef,
     action: impl Fn(Vec<RowRef>) -> Action + 'static,
 ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
-    handler(this, move |g, event, _, cx| {
+    on_efa(this, move |g, event, _, cx| {
         let default = if g.saved.preferences.general.ammo_change_all {
             Scope::Similar
         } else {

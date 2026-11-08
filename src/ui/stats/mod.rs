@@ -290,7 +290,7 @@ impl Efa {
             .filter(|s| self.saved.preferences.stats.shows(s.key()))
             .collect();
         let controls = Controls {
-            efa: Self::weak(cx),
+            efa: cx.weak_entity(),
             collapsed: &self.collapsed_sections,
         };
         let sections = render_sections(&pane, &which, Some(&controls), cx);

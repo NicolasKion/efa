@@ -275,7 +275,7 @@ impl Efa {
 
     /// Log a character in without opening a window, for the Character menu.
     pub(super) fn add_esi_character(&mut self, cx: &mut Context<Self>) {
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         self.hub.update(cx, |hub, cx| {
             hub.esi_login(cx, move |result, cx| {
                 let failure = result.err().map(|e| format!("ESI login failed: {e}"));

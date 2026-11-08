@@ -144,7 +144,7 @@ impl Efa {
                 g.link(Link::Command, &[drag.index], cx);
             }))
             .context_menu({
-                let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
+                let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
                 move |menu, window, cx| command_view_menu(menu, &this, &loaded, window, cx)
             })
             .into_any_element()
@@ -222,7 +222,7 @@ impl Efa {
                 }),
             )
             .context_menu({
-                let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
+                let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
                 let fit_index = row.fit;
                 move |menu, window, cx| {
                     let menu = command_fit_menu(menu, &this, n, fit_index, cx);

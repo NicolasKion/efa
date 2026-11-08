@@ -27,7 +27,7 @@ use super::{
     },
     item_stats,
     stats::format,
-    widgets::{band, entry, icon_box},
+    widgets::{band, entry, icon_box, on_each, on_efa},
 };
 use crate::{
     data::{Catalog, Kind, Slot, TypeId},
@@ -270,7 +270,7 @@ impl Efa {
         let results = self.results_pane(loaded, jump, cx);
         let tree = self.market_tree(loaded, jump, cx);
         let results_height = self.saved.market_results.unwrap_or(DEFAULT_RESULTS);
-        let weak = Self::weak(cx);
+        let weak = cx.weak_entity();
         v_flex()
             .flex_1()
             .min_h_0()
@@ -676,7 +676,7 @@ impl Efa {
             Vec::new()
         };
         let price = self.prices.get(id).filter(|&p| p > 0.0);
-        let weak = Self::weak(cx);
+        let weak = cx.weak_entity();
         h_flex()
             .id(SharedString::from(format!("item-{id}")))
             .w_full()
@@ -724,7 +724,7 @@ impl Efa {
                 },
             )
             .context_menu({
-                let this = Self::weak(cx);
+                let this = cx.weak_entity();
                 move |menu, window, cx| market_menu(menu, &this, id, context, window, cx)
             })
             .into_any_element()
@@ -996,7 +996,7 @@ impl Efa {
                 ))
                 .child(title)
                 .context_menu({
-                    let this = Self::weak(cx);
+                    let this = cx.weak_entity();
                     move |menu, _, _| ship_menu(menu, &this, ship)
                 })
                 .into_any_element()
@@ -1153,7 +1153,7 @@ impl Efa {
                 }
             }))
             .context_menu({
-                let this = Self::weak(cx);
+                let this = cx.weak_entity();
                 move |menu, _, _| ship_menu(menu, &this, ship)
             })
             .into_any_element()
@@ -1227,7 +1227,7 @@ impl Efa {
                 |drag, _, _, cx| cx.new(|_| drag.clone()),
             )
             .context_menu({
-                let this = Self::weak(cx);
+                let this = cx.weak_entity();
                 let has_fit = self.saved.current.is_some();
                 move |menu, _, _| fit_menu(menu, &this, i, has_fit)
             })
@@ -1441,31 +1441,23 @@ fn ship_tooltip(
 
 /// pyfa's baseShip menu, with the browser's New Fit.
 fn ship_menu(menu: PopupMenu, this: &WeakEntity<Efa>, ship: TypeId) -> PopupMenu {
-    let new_fit = this.clone();
     menu.item(item_stats::stats_entry(
         this,
         "Ship Basic",
         item_stats::StatsOf::Type(ship),
     ))
-    .item(entry(IconName::Plus, "New Fit").on_click(move |_, _, cx| {
-        Efa::app_update(&new_fit, cx, |g, cx| g.new_fit_for_ship(ship, cx));
-    }))
+    .item(
+        entry(IconName::Plus, "New Fit").on_click(on_efa(this, move |g, _, _, cx| {
+            g.new_fit_for_ship(ship, cx)
+        })),
+    )
 }
 
 /// pyfa's fit row menu, plus the copy, rename and delete buttons pyfa has on the row.
 fn fit_menu(menu: PopupMenu, this: &WeakEntity<Efa>, i: usize, has_fit: bool) -> PopupMenu {
-    let on = |f: fn(&mut Efa, usize, &mut Context<Efa>)| {
-        let this = this.clone();
-        move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-            Efa::app_update(&this, cx, |g, cx| f(g, i, cx));
-        }
-    };
-    let link = |link: Link| {
-        let this = this.clone();
-        move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-            Efa::app_update(&this, cx, |g, cx| g.link(link, &[i], cx));
-        }
-    };
+    let on =
+        |f: fn(&mut Efa, usize, &mut Context<Efa>)| on_efa(this, move |g, _, _, cx| f(g, i, cx));
+    let link = |link: Link| on_efa(this, move |g, _, _, cx| g.link(link, &[i], cx));
     let mut menu =
         menu.item(entry(IconName::FolderOpen, "Open in new tab").on_click(on(Efa::open_fit)));
     if has_fit {
@@ -1473,25 +1465,20 @@ fn fit_menu(menu: PopupMenu, this: &WeakEntity<Efa>, i: usize, has_fit: bool) ->
             .item(entry(IconName::Globe, "Project onto Active Fit").on_click(link(Link::Projected)))
             .item(entry(IconName::Network, "Add Command Booster").on_click(link(Link::Command)));
     }
-    let (rename, delete) = (this.clone(), this.clone());
     menu.separator()
         .item(entry(IconName::Copy, "Copy").on_click(on(Efa::copy_fit)))
         .item(
-            entry(IconName::Replace, "Rename").on_click(move |_, window, cx| {
-                let _ = rename.update(cx, |g, cx| {
-                    g.open_from_browser(i, cx);
-                    g.start_rename(window, cx);
-                });
-            }),
+            entry(IconName::Replace, "Rename").on_click(on_efa(this, move |g, _, window, cx| {
+                g.open_from_browser(i, cx);
+                g.start_rename(window, cx);
+            })),
         )
-        .item(
-            entry(IconName::Delete, "Delete").on_click(move |event, window, cx| {
-                let shift = event.modifiers().shift;
-                Efa::app_update(&delete, cx, |g, cx| {
-                    g.confirm_delete_fit(i, shift, window, cx);
-                });
-            }),
-        )
+        .item(entry(IconName::Delete, "Delete").on_click(on_efa(
+            this,
+            move |g, event, window, cx| {
+                g.confirm_delete_fit(i, event.modifiers().shift, window, cx);
+            },
+        )))
 }
 
 /// pyfa's marketItemGroup / marketItemMisc menu.
@@ -1513,7 +1500,7 @@ fn market_menu(
         return menu;
     };
     // A right-click inside a selection of several acts on all of them.
-    let ids: Rc<Vec<TypeId>> = Rc::new(g.market_selection.targets(id));
+    let ids: Rc<[TypeId]> = g.market_selection.targets(id).into();
     let several = ids.len() > 1;
     let category = if several {
         format!("{} Items", ids.len())
@@ -1526,33 +1513,19 @@ fn market_menu(
         .and_then(|f| f.ship)
         .and_then(|s| loaded.catalog.get(s))
         .is_some_and(crate::data::ItemType::is_structure);
-    let on = |f: fn(&mut Efa, TypeId, &mut Window, &mut Context<Efa>)| {
-        let this = this.clone();
-        move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-            Efa::app_update(&this, cx, |g, cx| f(g, id, window, cx));
-        }
-    };
-    // Adding an item from here counts as using it, as pyfa's commands remember it. Done for
-    // every selected item.
-    let use_with = |f: fn(&mut Efa, TypeId, &mut Window, &mut Context<Efa>)| {
-        let (this, ids) = (this.clone(), Rc::clone(&ids));
-        move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-            Efa::app_update(&this, cx, |g, cx| {
-                for &id in ids.iter() {
-                    g.used_from_market(id);
-                    f(g, id, window, cx);
-                }
-            });
-        }
+    // Adding an item from here counts as using it, as pyfa's commands remember it: for every
+    // selected item, or the one clicked.
+    let use_each = |f: fn(&mut Efa, TypeId, &mut Context<Efa>)| {
+        on_each(this, &ids, move |g, id, _, cx| {
+            g.used_from_market(id);
+            f(g, id, cx);
+        })
     };
     let apply = |action: Action| {
-        let this = this.clone();
-        move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-            Efa::app_update(&this, cx, |g, cx| {
-                g.used_from_market(id);
-                g.apply(action.clone(), cx);
-            });
-        }
+        on_efa(this, move |g, _, _, cx| {
+            g.used_from_market(id);
+            g.apply(action.clone(), cx);
+        })
     };
 
     let mut menu = menu.item(item_stats::stats_entry(
@@ -1567,19 +1540,21 @@ fn market_menu(
     if context == MarketContext::Search && listed && !several {
         menu = menu.item(
             entry(IconName::Search, format!("{category} Market Group"))
-                .on_click(on(super::Efa::jump_to_market)),
+                .on_click(on_efa(this, move |g, _, window, cx| {
+                    g.jump_to_market(id, window, cx)
+                })),
         );
     }
     if !has_fit {
         return menu.item(
             entry(IconName::Plus, format!("Add {category} to Fit"))
-                .on_click(use_with(|g, id, _, cx| g.add_item(id, cx))),
+                .on_click(use_each(Efa::add_item)),
         );
     }
     if several {
         menu = menu.item(
             entry(IconName::Plus, format!("Add {category} to Fit"))
-                .on_click(use_with(|g, id, _, cx| g.add_item(id, cx))),
+                .on_click(use_each(Efa::add_item)),
         );
     }
     if let Kind::Module(slot) = t.kind
@@ -1604,15 +1579,10 @@ fn market_menu(
         }
     }
     let to_cargo = |count: u32| {
-        let (this, ids) = (this.clone(), Rc::clone(&ids));
-        move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-            Efa::app_update(&this, cx, |g, cx| {
-                for &id in ids.iter() {
-                    g.used_from_market(id);
-                    g.add_to_cargo(id, count, cx);
-                }
-            });
-        }
+        on_each(this, &ids, move |g, id, _, cx| {
+            g.used_from_market(id);
+            g.add_to_cargo(id, count, cx);
+        })
     };
     // pyfa offers structures only charges for their cargo.
     if !structure || t.kind == Kind::Charge {
@@ -1622,7 +1592,7 @@ fn market_menu(
     if goes_to_cargo(t.kind) && shown.cargo_fill && !several {
         menu = menu.item(
             entry(IconName::Inbox, format!("Fill Cargo With {category}"))
-                .on_click(use_with(|g, id, _, cx| g.fill_cargo_with(id, cx))),
+                .on_click(use_each(Efa::fill_cargo_with)),
         );
     }
     if t.kind == Kind::Charge {
@@ -1644,23 +1614,20 @@ fn market_menu(
             name: crate::damage_pattern::SELECTED_AMMO.to_owned(),
             amounts: t.damage,
         };
-        let this = this.clone();
         menu = menu.item(
             entry(
                 IconName::ChartPie,
                 format!("Set {category} as Damage Pattern"),
             )
-            .on_click(move |_, _, cx| {
-                Efa::app_update(&this, cx, |g, cx| {
-                    g.apply(Action::SetDamageProfile(profile.clone()), cx);
-                });
-            }),
+            .on_click(on_efa(this, move |g, _, _, cx| {
+                g.apply(Action::SetDamageProfile(profile.clone()), cx);
+            })),
         );
     }
     if shown.project && !structure && loaded.catalog.projection.projectable.contains(&id) {
         menu = menu.item(
-            entry(IconName::Globe, format!("Project {category} onto Fit")).on_click(use_with(
-                |g, id, _, cx| {
+            entry(IconName::Globe, format!("Project {category} onto Fit")).on_click(use_each(
+                |g, id, cx| {
                     g.project_item(id, cx);
                     g.show_additions_tab(AdditionsTab::Projected);
                     cx.notify();

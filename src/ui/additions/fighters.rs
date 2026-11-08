@@ -302,7 +302,7 @@ impl Efa {
                     .text_color(theme.muted_foreground)
                     .child("Double-click fighters in the market to add them.")
                     .context_menu({
-                        let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
+                        let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
                         move |menu, _, cx| fighter_misc(menu, &this, &loaded, None, cx)
                     })
                     .into_any_element(),
@@ -515,7 +515,7 @@ impl Efa {
                 }),
             )
             .context_menu({
-                let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
+                let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
                 move |menu, window, cx| {
                     let menu = fighter_menu(menu, &this, &loaded, n, i, window, cx);
                     fighter_misc(menu.separator(), &this, &loaded, Some(n), cx)

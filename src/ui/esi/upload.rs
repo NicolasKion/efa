@@ -111,7 +111,7 @@ impl ExportToEveWindow {
             .into_iter()
             .map(|a| (a.character_id, a.name.clone()))
             .collect();
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         Button::new("export-eve-character")
             .small()
             .outline()

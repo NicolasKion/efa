@@ -92,7 +92,7 @@ impl Efa {
         apply: impl Fn(&mut Efa, T, &mut Context<Efa>) + 'static,
     ) {
         let input = cx.new(|cx| InputState::new(window, cx).default_value(initial));
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         let apply = Rc::new(apply);
         window.open_dialog(cx, move |dialog, _, _| {
             let (input, this, apply) = (input.clone(), this.clone(), Rc::clone(&apply));
@@ -162,7 +162,7 @@ impl Efa {
             })
             .collect();
         fits.sort_by(|a, b| a.label.cmp(&b.label));
-        let efa = cx.entity().downgrade();
+        let efa = cx.weak_entity();
         let loaded = Rc::clone(loaded);
         let picker = cx.new(|cx| FitPicker::new(efa, loaded, fits, Rc::new(on_pick), window, cx));
         window.open_dialog(cx, move |dialog, _, _| {

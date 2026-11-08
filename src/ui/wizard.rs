@@ -218,7 +218,7 @@ impl Efa {
         let Some(data) = item_stats::hover_data(&loaded, cx) else {
             self.set_status("Loading item data for the fitting wizard…");
             cx.notify();
-            let this = cx.entity().downgrade();
+            let this = cx.weak_entity();
             let window_handle = window.window_handle();
             cx.spawn(async move |_, cx| {
                 for _ in 0..600 {
@@ -251,7 +251,7 @@ impl Efa {
         let pilot = self.pilot(&loaded);
         let Some(shared) = Shared::new(
             self.hub.clone(),
-            cx.entity().downgrade(),
+            cx.weak_entity(),
             loaded,
             data,
             pilot,
@@ -624,7 +624,7 @@ fn segmented<T: 'static>(
     cx: &Context<T>,
     pick: impl Fn(&mut T, usize, &mut Window, &mut Context<T>) + 'static,
 ) -> AnyElement {
-    let this = cx.entity().downgrade();
+    let this = cx.weak_entity();
     // The kit marks a selected button with its pressed shade, which barely shows; the picked
     // option takes the accent tint the lists use for what is picked. The outline goes on the
     // others only, since an outlined button drops its fill.

@@ -195,7 +195,7 @@ impl CharacterEditor {
     }
 
     fn create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         name_dialog(
             &self.hub,
             "New Character",
@@ -214,7 +214,7 @@ impl CharacterEditor {
 
     fn copy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let from = self.selected;
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         name_dialog(
             &self.hub,
             "Copy Character",
@@ -236,7 +236,7 @@ impl CharacterEditor {
         if id.is_builtin() {
             return;
         }
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         name_dialog(
             &self.hub,
             "Rename Character",
@@ -259,7 +259,7 @@ impl CharacterEditor {
             "Do you really want to delete the {} Character?",
             self.characters.name(id)
         );
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         window.open_dialog(cx, move |dialog, _, _| {
             let (yes, no) = (this.clone(), question.clone());
             dialog.title("Confirm Delete").w(px(360.)).child(
@@ -294,7 +294,7 @@ impl CharacterEditor {
 
     fn save_as(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let id = self.selected;
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         name_dialog(
             &self.hub,
             "Save Character As...",
@@ -344,7 +344,7 @@ impl CharacterEditor {
         let id = self.selected;
         let current = self.characters.sec_status(id);
         let input = cx.new(|cx| InputState::new(window, cx).default_value(format!("{current:.2}")));
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         window.open_dialog(cx, move |dialog, _, _| {
             let (input, this) = (input.clone(), this.clone());
             // The OK button and Enter both submit; it closes the dialog itself when done.
@@ -421,7 +421,7 @@ impl CharacterEditor {
             .into_iter()
             .map(|id| (id, self.characters.name(id)))
             .collect();
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         let picker = Button::new("editor-character")
             .small()
             .outline()
@@ -547,7 +547,7 @@ impl CharacterEditor {
                     .map(|c| (Some(c.id), c.name.clone())),
             )
             .collect();
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         Button::new("alpha-clone")
             .small()
             .outline()
@@ -625,7 +625,7 @@ impl CharacterEditor {
                     cx.notify();
                 }),
             );
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         row.context_menu(move |menu, _, _| {
             let stats = {
                 let this = this.clone();
@@ -871,7 +871,7 @@ impl CharacterEditor {
             .iter()
             .map(|s| (s.name.clone(), s.implants.clone()))
             .collect();
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         h_flex()
             .flex_1()
             .min_h_0()
@@ -1028,7 +1028,7 @@ impl CharacterEditor {
     /// cannot be linked, so a new character named after the EVE one is made and filled in.
     fn esi_login(&mut self, cx: &mut Context<Self>) {
         let target = self.selected;
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         self.hub.update(cx, |hub, cx| {
             hub.esi_login(cx, move |result, cx| {
                 if let Ok(esi) = result {
@@ -1089,7 +1089,7 @@ impl CharacterEditor {
                     .map(|a| (Some(a.character_id), a.name.clone())),
             )
             .collect();
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         Button::new("esi-link")
             .small()
             .outline()

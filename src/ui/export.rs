@@ -56,7 +56,7 @@ impl Efa {
         // updated, so it must not read this view.
         let window = ExportWindow {
             hub: self.hub.clone(),
-            efa: cx.entity().downgrade(),
+            efa: cx.weak_entity(),
             loaded,
             fit,
             stats: self.stats.clone(),

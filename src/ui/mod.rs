@@ -267,6 +267,8 @@ pub struct Efa {
     drones_focus: FocusHandle,
     /// Takes the fitting view's keys: Delete, Escape, Ctrl+A.
     fitting_focus: FocusHandle,
+    /// The whole window's, where the menu bar's commands are dispatched to.
+    root_focus: FocusHandle,
     collapsed_sections: HashSet<&'static str>,
     /// Undo and redo steps per fit.
     history: history::History,
@@ -422,6 +424,7 @@ impl Efa {
             additions_focus: cx.focus_handle(),
             drones_focus: cx.focus_handle(),
             fitting_focus: cx.focus_handle(),
+            root_focus: cx.focus_handle(),
             // Which sections show at all is a preference; bombing is off by default, as in pyfa.
             collapsed_sections: HashSet::new(),
             history: history::History::default(),
@@ -932,7 +935,7 @@ impl Efa {
         let Some(uid) = self.saved.ensure_uid(index) else {
             return;
         };
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let this = this.clone();
             alert
@@ -1027,7 +1030,7 @@ impl Efa {
                 .rows(4)
                 .placeholder("[Vexor, My Vexor]\nDrone Damage Amplifier II\n…")
         });
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         window.open_dialog(cx, move |dialog, window, _| {
             let (text, this) = (text.clone(), this.clone());
             // The OK button and Enter both submit; it closes the dialog itself when done.
@@ -1260,7 +1263,7 @@ impl Efa {
                     label: label.into(),
                 },
                 {
-                    let this = cx.entity().downgrade();
+                    let this = cx.weak_entity();
                     move |drag, _, _, cx| {
                         // The drop zone only shows while a tab is in flight.
                         let _ = this.update(cx, |g, cx| {
@@ -1277,25 +1280,19 @@ impl Efa {
                 g.move_tab(drag.index, i, cx);
             }))
             .context_menu({
-                let this = cx.entity().downgrade();
+                let this = cx.weak_entity();
                 let ship = fit.ship.filter(|_| selected);
                 move |menu, window, cx| {
                     let on = |f: fn(&mut Efa, usize, &mut Context<Efa>)| {
-                        let this = this.clone();
-                        move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                            let _ = this.update(cx, |g, cx| f(g, i, cx));
-                        }
+                        widgets::on_efa(&this, move |g, _, _, cx| f(g, i, cx))
                     };
-                    let rename = this.clone();
                     let menu = menu
                         .item(widgets::entry(IconName::Replace, "Rename").on_click(
-                            move |_, window, cx| {
-                                let _ = rename.update(cx, |g, cx| {
-                                    g.saved.current = Some(i);
-                                    g.changed(cx);
-                                    g.start_rename(window, cx);
-                                });
-                            },
+                            widgets::on_efa(&this, move |g, _, window, cx| {
+                                g.saved.current = Some(i);
+                                g.changed(cx);
+                                g.start_rename(window, cx);
+                            }),
                         ))
                         .item(
                             widgets::entry(IconName::ExternalLink, "Open in New Window")
@@ -1474,7 +1471,7 @@ impl Render for Efa {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .text_sm();
-        let root = Self::bind_actions(root, cx);
+        let root = self.bind_actions(root, cx);
         let loaded = match &self.loading {
             Loading::Ready(loaded) => Rc::clone(loaded),
             // The menu bar stays, so the window can still be moved and closed when efa draws
@@ -1620,10 +1617,6 @@ impl Efa {
 
     fn notes_field(&self) -> Textarea {
         Textarea::new(&self.notes_input)
-    }
-
-    fn weak(cx: &Context<Self>) -> WeakEntity<Self> {
-        cx.entity().downgrade()
     }
 
     fn app_update(

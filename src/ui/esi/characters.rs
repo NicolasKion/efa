@@ -31,7 +31,7 @@ impl EsiCharactersWindow {
     }
 
     fn add(&mut self, cx: &mut Context<Self>) {
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         self.hub.update(cx, |hub, cx| {
             hub.esi_login(cx, move |result, cx| {
                 if let Ok(id) = result {

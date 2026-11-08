@@ -366,7 +366,7 @@ impl TankSection {
         let generation = self.generation;
         self.fetching = Some(generation);
         cx.notify();
-        let section = cx.entity().downgrade();
+        let section = cx.weak_entity();
         Efa::app_update(&self.shared.efa, cx, move |g, cx| {
             g.with_prices_for(types, cx, move |g, cx| {
                 let prices = Rc::clone(&g.prices);
@@ -722,7 +722,7 @@ impl TankSection {
 
     /// What the search may use, as checkboxes in two columns.
     fn kinds(&self, cx: &mut Context<Self>) -> AnyElement {
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         let boxes = SearchGroup::ALL.into_iter().zip(KIND_TIPS).map(|(g, tip)| {
             let this = this.clone();
             div()
@@ -768,7 +768,7 @@ impl TankSection {
                 "Per module",
             )
         };
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         let menu = Button::new(SharedString::from(format!("wizard-budget-presets-{total}")))
             .ghost()
             .xsmall()

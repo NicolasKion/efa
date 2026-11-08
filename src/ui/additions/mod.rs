@@ -390,7 +390,7 @@ impl Efa {
         action: impl Fn(T) -> Action + 'static,
     ) {
         let input = cx.new(|cx| InputState::new(window, cx).default_value(initial));
-        let this = cx.entity().downgrade();
+        let this = cx.weak_entity();
         let action = Rc::new(action);
         window.open_dialog(cx, move |dialog, _, _| {
             let (input, this, action) = (input.clone(), this.clone(), Rc::clone(&action));
