@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use super::{Budget, Change, HullSize, Layer, SearchTiers, Setup, attr, group};
 use crate::{
     data::{Catalog, Slot, TypeId},
-    engine::{Engine, Layer as EngineLayer, Pilot, Resource, TankProbe},
+    engine::{CalcOptions, Engine, Layer as EngineLayer, Pilot, Resource, Stats, TankProbe},
     fit::{Fit, Module, ModuleState},
     prices::Prices,
 };
@@ -251,10 +251,7 @@ impl Numbers {
 
     /// The numbers of `fit` with `change` made.
     pub fn after(engine: &Engine, pilot: &Pilot, fit: &Fit, change: &Change, layer: Layer) -> Self {
-        let mut next = fit.clone();
-        super::apply(&mut next, change);
-        idle_guns(&mut next);
-        Self::of(&engine.probe_tank(&next, pilot), layer)
+        Self::of(&engine.probe_tank(&judged(fit, change), pilot), layer)
     }
 
     /// The tanked layer's stats.
@@ -273,6 +270,25 @@ impl Numbers {
             Goal::Repair => self.repair_ehp,
         }
     }
+}
+
+/// `fit` with `change` made, as the tank numbers judge it: the guns idle.
+pub fn judged(fit: &Fit, change: &Change) -> Fit {
+    let mut next = fit.clone();
+    super::apply(&mut next, change);
+    idle_guns(&mut next);
+    next
+}
+
+/// The full stats of `fit` with `change` made, judged the way [`Numbers::after`] judges it.
+pub fn stats_after(engine: &Engine, pilot: &Pilot, fit: &Fit, change: &Change) -> (Fit, Stats) {
+    let next = judged(fit, change);
+    let options = CalcOptions {
+        factor_reload: true,
+        ..CalcOptions::default()
+    };
+    let stats = engine.compute_for(&next, pilot, options);
+    (next, stats)
 }
 
 /// Turn active guns off, so the capacitor goes to the tank.
