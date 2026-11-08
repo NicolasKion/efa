@@ -19,6 +19,7 @@ use gpui_kit::{
 
 use super::menus::market_menu;
 use crate::market::charges::{ChargeMenu, compatible_charges, structure_charges};
+use crate::ui::BrowserTab;
 use crate::ui::tooltips::item_tooltip;
 use crate::ui::{
     Efa, Loaded,
@@ -765,5 +766,59 @@ fn module_charge_sections(catalog: &Catalog, module: TypeId) -> Vec<Section> {
             })
             .collect(),
         ChargeMenu::Flat(list) => vec![Section::untitled(list)],
+    }
+}
+impl Efa {
+    /// Show an item in the market browser: clear the search, open its groups, scroll to it.
+    pub(in crate::ui) fn jump_to_market(
+        &mut self,
+        id: TypeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(loaded) = self.loaded() else { return };
+        self.show_in_market(window, cx);
+        let path = loaded.catalog.market_path(id);
+        if let Some(&group) = path.last() {
+            self.listing = Some(crate::market::Listing::Group(group));
+        }
+        self.expanded_groups.extend(path);
+        // The item would not show with its meta button off, or with the ship filter on.
+        if let Some(t) = loaded.catalog.get(id) {
+            self.meta_filter
+                .enable(crate::market::MetaCategory::of_item(t));
+        }
+        self.fits_ship_only = false;
+        self.market_highlight = Some(id);
+        self.market_scroll_pending = true;
+        cx.notify();
+    }
+
+    /// List every charge a module can load in the market's results pane.
+    pub(in crate::ui) fn show_charges_for(
+        &mut self,
+        module: TypeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_in_market(window, cx);
+        self.listing = Some(crate::market::Listing::ModuleCharges(module));
+        self.market_highlight = None;
+        self.market_scroll.scroll_to_item(0, ScrollStrategy::Top);
+        cx.notify();
+    }
+
+    /// Bring up the market tab with its search and the results filter cleared, so what is
+    /// listed next shows in full.
+    fn show_in_market(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.browser_tab = BrowserTab::Market;
+        self.side_stats = false;
+        self.search_text.clear();
+        self.search_debounce = None;
+        self.search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.results_filter_text.clear();
+        self.results_filter
+            .update(cx, |input, cx| input.set_value("", window, cx));
     }
 }

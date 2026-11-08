@@ -16,6 +16,7 @@ use gpui_kit::{
 };
 
 use super::menus::{fit_menu, ship_menu};
+use crate::ui::BrowserTab;
 use crate::ui::tooltips::{TipHead, ship_tooltip};
 use crate::ui::widgets::TipExt;
 use crate::ui::{
@@ -647,4 +648,19 @@ fn section_header(title: &'static str, cx: &App) -> AnyElement {
         .text_color(theme.muted_foreground)
         .child(title)
         .into_any_element()
+}
+impl Efa {
+    /// Show one ship's fits in the fittings browser, pyfa's shipJump.
+    pub(in crate::ui) fn jump_to_fittings(&mut self, ship: TypeId, cx: &mut Context<Self>) {
+        self.browser_tab = BrowserTab::Fittings;
+        self.side_stats = false;
+        self.ship_browser.go(crate::ship_browser::Stage::Fits(ship));
+        cx.notify();
+    }
+
+    /// Whether the fittings browser shows this ship's fits right now.
+    pub(in crate::ui) fn browsing_fits_of(&self, ship: TypeId) -> bool {
+        self.browser_tab == BrowserTab::Fittings
+            && self.ship_browser.stage == crate::ship_browser::Stage::Fits(ship)
+    }
 }
