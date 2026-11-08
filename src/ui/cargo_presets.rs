@@ -961,27 +961,29 @@ pub(super) fn menu_entries(
             move |menu, _, _| {
                 names.iter().fold(menu, |menu, name| {
                     let name = name.clone();
-                    menu.item(
-                        entry(IconName::Inbox, name.clone())
-                            .on_click(on_efa(&this, move |g, _, _, cx| {
-                                g.apply_cargo_preset(&name, cx)
-                            })),
-                    )
+                    menu.item(entry(IconName::Inbox, name.clone()).on_click(on_efa(
+                        &this,
+                        move |g, _, _, cx| {
+                            g.apply_cargo_preset(&name, cx);
+                        },
+                    )))
                 })
             },
         );
     }
     if has_cargo {
         menu = menu.item(
-            entry(IconName::Plus, "Save Cargo as Preset…")
-                .on_click(on_efa(this, |g, _, window, cx| {
-                    g.save_cargo_preset_dialog(window, cx)
-                })),
+            entry(IconName::Plus, "Save Cargo as Preset…").on_click(on_efa(
+                this,
+                |g, _, window, cx| {
+                    g.save_cargo_preset_dialog(window, cx);
+                },
+            )),
         );
     }
     menu.item(
         entry(IconName::Settings2, "Edit Cargo Presets…").on_click(on_efa(this, |g, _, _, cx| {
-            g.open_cargo_preset_editor(None, cx)
+            g.open_cargo_preset_editor(None, cx);
         })),
     )
 }

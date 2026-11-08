@@ -683,26 +683,20 @@ impl<K: Kind> Editor<K> {
     fn prompt_name(&mut self, naming: Naming, window: &mut Window, cx: &mut Context<Self>) {
         let Some(item) = self.selected_item(cx) else {
             if naming == Naming::New {
-                self.ask_name(naming, String::new(), window, cx);
+                Self::ask_name(naming, String::new(), window, cx);
             }
             return;
         };
         let current = K::name(&item).to_owned();
         match naming {
-            Naming::New => self.ask_name(naming, String::new(), window, cx),
-            Naming::Rename if self.can_edit(cx) => self.ask_name(naming, current, window, cx),
+            Naming::New => Self::ask_name(naming, String::new(), window, cx),
+            Naming::Rename if self.can_edit(cx) => Self::ask_name(naming, current, window, cx),
             Naming::Rename => {}
-            Naming::Copy => self.ask_name(naming, format!("{current} Copy"), window, cx),
+            Naming::Copy => Self::ask_name(naming, format!("{current} Copy"), window, cx),
         }
     }
 
-    fn ask_name(
-        &mut self,
-        naming: Naming,
-        default: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn ask_name(naming: Naming, default: String, window: &mut Window, cx: &mut Context<Self>) {
         let (title, message) = match naming {
             Naming::New => (
                 format!("New {}", K::ENTITY),
