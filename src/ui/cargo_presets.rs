@@ -681,9 +681,16 @@ impl CargoPresetEditor {
                     .child(catalog.name(type_id)),
             )
             .child(
+                // A press in the field is the field's: it must not start dragging the row or
+                // end in the row's click, which takes the focus back.
                 div()
+                    .id(SharedString::from(format!("preset-quantity-{type_id}")))
                     .w(px(QUANTITY_W))
                     .flex_none()
+                    .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .on_click(|_, _, cx| cx.stop_propagation())
                     .child(Input::new(&input).small()),
             )
             .when(!compact, |row| {
