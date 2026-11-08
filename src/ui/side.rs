@@ -470,8 +470,8 @@ impl Efa {
                 .collect(),
         );
         // Only what is listed stays selected, so nothing hidden is dragged along.
-        let order = Rc::clone(&self.market_order);
-        self.market_selection.retain(|id| order.contains(id));
+        let listed: HashSet<TypeId> = self.market_order.iter().copied().collect();
+        self.market_selection.retain(|id| listed.contains(id));
         if jump
             && let Some(target) = self.market_highlight
             && let Some(index) = filtered
@@ -667,6 +667,7 @@ impl Efa {
         // Dragging a selected item takes the rest of the selection along.
         let more: Vec<TypeId> = if selected {
             self.market_selection
+                .items()
                 .iter()
                 .copied()
                 .filter(|&other| other != id)
@@ -708,9 +709,7 @@ impl Efa {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, _: &MouseDownEvent, _, cx| {
-                    if !this.market_selection.contains(&id) {
-                        this.market_selection = vec![id];
-                        this.market_anchor = Some(id);
+                    if this.market_selection.right_click(id) {
                         cx.notify();
                     }
                 }),
@@ -735,26 +734,7 @@ impl Efa {
     /// removes one, Shift takes the range from the last clicked item.
     fn select_market_item(&mut self, id: TypeId, modifiers: Modifiers) {
         let order = Rc::clone(&self.market_order);
-        if modifiers.shift
-            && let Some(anchor) = self.market_anchor
-            && let (Some(a), Some(b)) = (
-                order.iter().position(|&o| o == anchor),
-                order.iter().position(|&o| o == id),
-            )
-        {
-            self.market_selection = order[a.min(b)..=a.max(b)].to_vec();
-            return;
-        }
-        if modifiers.control {
-            if let Some(at) = self.market_selection.iter().position(|&s| s == id) {
-                self.market_selection.remove(at);
-            } else {
-                self.market_selection.push(id);
-            }
-        } else {
-            self.market_selection = vec![id];
-        }
-        self.market_anchor = Some(id);
+        self.market_selection.click(id, modifiers, &order);
     }
 
     /// Search ships and fits from the fittings browser's box; clearing it goes back.
@@ -1533,13 +1513,7 @@ fn market_menu(
         return menu;
     };
     // A right-click inside a selection of several acts on all of them.
-    let ids: Rc<Vec<TypeId>> = Rc::new(
-        if g.market_selection.len() > 1 && g.market_selection.contains(&id) {
-            g.market_selection.clone()
-        } else {
-            vec![id]
-        },
-    );
+    let ids: Rc<Vec<TypeId>> = Rc::new(g.market_selection.targets(id));
     let several = ids.len() > 1;
     let category = if several {
         format!("{} Items", ids.len())

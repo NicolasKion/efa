@@ -25,6 +25,7 @@ mod port;
 mod preferences;
 pub mod profile_editor;
 pub mod profile_menus;
+mod selection;
 mod side;
 mod splash;
 mod stats;
@@ -61,6 +62,7 @@ use gpui_kit::{
 pub use actions::{Action, AddKind, RowRef, Scope};
 pub use hub::Hub;
 pub use menu::init as init_menus;
+use selection::ListSelection;
 
 /// Which window this is: the main one, whose tabs are remembered, or one torn off for a fit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -230,8 +232,7 @@ pub struct Efa {
     /// Item to scroll the market to and highlight, after a market group jump.
     market_highlight: Option<TypeId>,
     /// Items picked in the market results, for dragging or acting on several at once.
-    market_selection: Vec<TypeId>,
-    market_anchor: Option<TypeId>,
+    market_selection: ListSelection<TypeId>,
     /// The items the results pane lists, top to bottom, for Shift-click ranges.
     market_order: Rc<Vec<TypeId>>,
     market_scroll_pending: bool,
@@ -251,16 +252,15 @@ pub struct Efa {
     ship_browser: crate::ship_browser::Browser,
     /// The fittings browser's search box, for ships and fits by name.
     fit_search: Entity<InputState>,
-    selection: Vec<RowRef>,
-    /// Where a Shift-click selection range starts.
-    anchor: Option<RowRef>,
+    /// Rows picked in the fitting view.
+    selection: ListSelection<RowRef>,
     /// Changes not written yet; the poll saves them, so dragging does not write every frame.
     unsaved: bool,
     /// The fitting view's column widths for the frame being drawn.
     column_layout: columns::Layout,
-    /// Selected rows of the open additions tab.
-    additions_selection: Vec<usize>,
-    additions_anchor: Option<usize>,
+    /// Selected rows of the open additions tab, by their place in the list as shown. Tabs that
+    /// sort their rows map these to the fit's own indices before acting on them.
+    additions_selection: ListSelection<usize>,
     /// Keyboard focus of the additions list, for Delete, Ctrl+A and Escape.
     additions_focus: FocusHandle,
     /// Takes the drones pane's keys: Delete, Escape, Ctrl+A.
@@ -403,8 +403,7 @@ impl Efa {
             expanded_groups: HashSet::new(),
             listing: None,
             market_highlight: None,
-            market_selection: Vec::new(),
-            market_anchor: None,
+            market_selection: ListSelection::default(),
             market_order: Rc::default(),
             market_scroll_pending: false,
             market_scroll: UniformListScrollHandle::new(),
@@ -416,12 +415,10 @@ impl Efa {
             results_cache: None,
             ship_browser: crate::ship_browser::Browser::default(),
             fit_search,
-            selection: Vec::new(),
-            anchor: None,
+            selection: ListSelection::default(),
             unsaved: false,
             column_layout: columns::Layout::default(),
-            additions_selection: Vec::new(),
-            additions_anchor: None,
+            additions_selection: ListSelection::default(),
             additions_focus: cx.focus_handle(),
             drones_focus: cx.focus_handle(),
             fitting_focus: cx.focus_handle(),

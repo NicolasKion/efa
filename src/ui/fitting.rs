@@ -23,6 +23,7 @@ use super::{
     item_stats::{StatsOf, stats_entry},
     mutations::{copy_entry, mutation_entries},
     profile_menus::{PickPattern, damage_pattern_menu},
+    selection::{ListKey, list_key},
     validation::flag,
     widgets::{
         ROW_H, band, color, entry, icon_box, icon_label, item_entry, item_label, rack_band_label,
@@ -146,22 +147,17 @@ impl Efa {
     /// pyfa's keys in the fitting view: Delete removes the selection, Ctrl+A selects every
     /// module, Escape clears the selection.
     fn fitting_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        let m = keystroke.modifiers;
-        let plain = !(m.control || m.alt || m.shift || m.platform);
-        match keystroke.key.as_str() {
-            "delete" if plain && !self.selection.is_empty() => {
-                let rows = std::mem::take(&mut self.selection);
-                self.anchor = None;
+        match list_key(event) {
+            Some(ListKey::Delete) if !self.selection.is_empty() => {
+                let rows = self.selection.take();
                 self.apply(Action::Remove(rows), cx);
             }
-            "a" if m.control && !m.alt && !m.shift => {
-                self.selection = self.row_order();
+            Some(ListKey::SelectAll) => {
+                self.selection.select_all(self.row_order());
                 cx.notify();
             }
-            "escape" if plain => {
+            Some(ListKey::Clear) => {
                 self.selection.clear();
-                self.anchor = None;
                 cx.notify();
             }
             _ => return,
@@ -568,16 +564,15 @@ fn item_row_behaviour(
             g.apply(Action::Remove(vec![item]), cx);
         } else {
             let order = g.row_order();
-            g.select(item, event.modifiers(), &order, cx);
+            g.selection.click(item, event.modifiers(), &order);
+            cx.notify();
         }
     }))
     // A right-click on an unselected row makes it the selection, as list views do.
     .on_mouse_down(
         MouseButton::Right,
         cx.listener(move |g, _: &MouseDownEvent, _, cx| {
-            if !g.selection.contains(&item) {
-                g.selection = vec![item];
-                g.anchor = Some(item);
+            if g.selection.right_click(item) {
                 cx.notify();
             }
         }),

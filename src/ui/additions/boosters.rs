@@ -200,7 +200,7 @@ impl Efa {
             .overflow_y_scroll()
             .track_focus(&self.additions_focus)
             .on_key_down(cx.listener(move |g, event: &KeyDownEvent, _, cx| {
-                g.list_key(event, AddKind::Boosters, len, true, cx);
+                g.additions_key(event, AddKind::Boosters, len, true, cx);
             }))
             .children(content)
             .drag_over::<Dragged>(|style, _, _, cx| style.bg(cx.theme().drop_target))
@@ -341,9 +341,7 @@ impl Efa {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |g, _: &MouseDownEvent, _, cx| {
-                    if !g.additions_selection.contains(&i) {
-                        g.additions_selection = vec![i];
-                        g.additions_anchor = Some(i);
+                    if g.additions_selection.right_click(i) {
                         cx.notify();
                     }
                 }),

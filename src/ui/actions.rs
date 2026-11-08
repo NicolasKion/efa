@@ -164,8 +164,7 @@ impl Efa {
             return Vec::new();
         };
         match scope {
-            Scope::Selection if self.selection.contains(&clicked) => self.selection.clone(),
-            Scope::Selection => vec![clicked],
+            Scope::Selection => self.selection.targets(clicked),
             Scope::Similar => {
                 let Some(type_id) = self.row_type(clicked) else {
                     return vec![clicked];
@@ -200,42 +199,9 @@ impl Efa {
         }
     }
 
-    /// Click selection the way list views do it: plain click selects one row, Ctrl toggles,
-    /// Shift extends from the last clicked row.
-    pub(super) fn select(
-        &mut self,
-        row: RowRef,
-        modifiers: Modifiers,
-        order: &[RowRef],
-        cx: &mut Context<Self>,
-    ) {
-        if modifiers.shift
-            && let Some(anchor) = self.anchor
-        {
-            let position = |r: RowRef| order.iter().position(|&o| o == r);
-            if let (Some(a), Some(b)) = (position(anchor), position(row)) {
-                let (from, to) = (a.min(b), a.max(b));
-                self.selection = order[from..=to].to_vec();
-            }
-        } else if modifiers.control {
-            if let Some(at) = self.selection.iter().position(|&r| r == row) {
-                self.selection.remove(at);
-            } else {
-                self.selection.push(row);
-            }
-            self.anchor = Some(row);
-        } else {
-            self.selection = vec![row];
-            self.anchor = Some(row);
-        }
-        cx.notify();
-    }
-
     pub(super) fn clear_selection(&mut self) {
         self.selection.clear();
-        self.anchor = None;
         self.additions_selection.clear();
-        self.additions_anchor = None;
     }
 
     pub fn apply(&mut self, action: Action, cx: &mut Context<Self>) {

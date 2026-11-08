@@ -241,7 +241,7 @@ impl Render for NoPreview {
 }
 
 /// Stack indices in display order.
-fn display_order(catalog: &Catalog, drones: &[DroneStack]) -> Vec<usize> {
+pub(super) fn display_order(catalog: &Catalog, drones: &[DroneStack]) -> Vec<usize> {
     // Mutated drones go by their base drone's group, after the plain ones, as in pyfa.
     let rank = |stack: &DroneStack| {
         let group = catalog
@@ -600,7 +600,7 @@ impl Efa {
     ) -> AnyElement {
         let catalog = &loaded.catalog;
         let theme = cx.theme();
-        let selected = self.additions_selection.contains(&i);
+        let selected = self.additions_selection.contains(&n);
         let (mark, mark_color) = if stack.active > 0 {
             ("✓", self.palette.green)
         } else {
@@ -614,7 +614,7 @@ impl Efa {
             .child(mark)
             .on_click(cx.listener(move |g, _: &ClickEvent, _, cx| {
                 cx.stop_propagation();
-                let targets = g.addition_targets(i);
+                let targets = g.kind_targets(AddKind::Drones, n);
                 g.apply(Action::ToggleDrones(i, targets), cx);
             }));
         let [name, range, misc_text, speed, hp, regen, price] = cells;
@@ -672,15 +672,13 @@ impl Efa {
                     };
                     g.apply(action, cx);
                 } else {
-                    g.select_drone(i, event.modifiers(), cx);
+                    g.select_addition(n, event.modifiers(), cx);
                 }
             }))
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |g, _: &MouseDownEvent, _, cx| {
-                    if !g.additions_selection.contains(&i) {
-                        g.additions_selection = vec![i];
-                        g.additions_anchor = Some(i);
+                    if g.additions_selection.right_click(n) {
                         cx.notify();
                     }
                 }),
@@ -688,7 +686,7 @@ impl Efa {
             .context_menu({
                 let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
                 move |menu, window, cx| {
-                    addition_menu(menu, &this, &loaded, AddKind::Drones, i, window, cx)
+                    addition_menu(menu, &this, &loaded, AddKind::Drones, n, window, cx)
                 }
             })
             .into_any_element()
@@ -761,55 +759,11 @@ impl Efa {
             .into_any_element()
     }
 
-    /// List selection over the rows as shown, which are sorted, while the selection itself keeps
-    /// stack indices.
-    fn select_drone(&mut self, i: usize, modifiers: Modifiers, cx: &mut Context<Self>) {
-        let Some(loaded) = self.loaded() else { return };
-        let Some(fit) = self.fit() else { return };
-        let order = display_order(&loaded.catalog, &fit.drones);
-        let position = |r: usize| order.iter().position(|&o| o == r);
-        if modifiers.shift
-            && let Some(anchor) = self.additions_anchor
-            && let (Some(a), Some(b)) = (position(anchor), position(i))
-        {
-            self.additions_selection = order[a.min(b)..=a.max(b)].to_vec();
-        } else if modifiers.control {
-            if let Some(at) = self.additions_selection.iter().position(|&r| r == i) {
-                self.additions_selection.remove(at);
-            } else {
-                self.additions_selection.push(i);
-            }
-            self.additions_anchor = Some(i);
-        } else {
-            self.additions_selection = vec![i];
-            self.additions_anchor = Some(i);
-        }
-        cx.notify();
-    }
-
     /// pyfa's keys in the drone pane: Escape clears the selection, Ctrl+A selects every stack,
     /// Delete removes the selected stacks.
     fn drone_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        let plain = !keystroke.modifiers.modified();
-        match keystroke.key.as_str() {
-            "escape" if plain => {
-                self.additions_selection.clear();
-                self.additions_anchor = None;
-                cx.notify();
-            }
-            "a" if keystroke.modifiers == Modifiers::control() => {
-                let count = self.fit().map_or(0, |f| f.drones.len());
-                self.additions_selection = (0..count).collect();
-                cx.notify();
-            }
-            "delete" if plain && !self.additions_selection.is_empty() => {
-                let stacks = self.additions_selection.clone();
-                self.apply(Action::RemoveAdditions(AddKind::Drones, stacks), cx);
-            }
-            _ => return,
-        }
-        cx.stop_propagation();
+        let count = self.fit().map_or(0, |f| f.drones.len());
+        self.additions_key(event, AddKind::Drones, count, true, cx);
     }
 
     /// pyfa's drops on the drone pane: a drone from the market is added (a full stack with Alt),

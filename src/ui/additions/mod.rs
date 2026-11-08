@@ -33,6 +33,7 @@ use gpui_kit::{
 use super::{
     Action, AddKind, AdditionsTab, Efa, Loaded,
     item_stats::{StatsOf, stats_entry},
+    selection::{ListKey, list_key},
     stats::format,
     widgets::{entry, icon_label, item_entry},
 };
@@ -77,6 +78,16 @@ impl AddKind {
             Self::Implants => matches!(kind, Kind::Implant),
             Self::Boosters => matches!(kind, Kind::Booster),
             Self::Cargo => true,
+        }
+    }
+
+    /// The fit's indices of the tab's rows in the order the tab shows them.
+    fn order(self, catalog: &Catalog, fit: &Fit) -> Vec<usize> {
+        match self {
+            Self::Drones => drones::display_order(catalog, &fit.drones),
+            Self::Cargo => cargo::display_order(catalog, &fit.cargo),
+            Self::Implants => (0..fit.implants.len()).collect(),
+            Self::Boosters => (0..fit.boosters.len()).collect(),
         }
     }
 
@@ -291,41 +302,42 @@ impl Efa {
         if self.additions_tab != tab {
             self.additions_tab = tab;
             self.additions_selection.clear();
-            self.additions_anchor = None;
         }
     }
 
-    fn select_addition(&mut self, i: usize, modifiers: Modifiers, cx: &mut Context<Self>) {
-        if modifiers.shift
-            && let Some(anchor) = self.additions_anchor
-        {
-            self.additions_selection = (anchor.min(i)..=anchor.max(i)).collect();
-        } else if modifiers.control {
-            if let Some(at) = self.additions_selection.iter().position(|&r| r == i) {
-                self.additions_selection.remove(at);
-            } else {
-                self.additions_selection.push(i);
-            }
-            self.additions_anchor = Some(i);
-        } else {
-            self.additions_selection = vec![i];
-            self.additions_anchor = Some(i);
-        }
+    /// A click on the row shown at place `n`.
+    fn select_addition(&mut self, n: usize, modifiers: Modifiers, cx: &mut Context<Self>) {
+        self.additions_selection.click_position(n, modifiers);
         cx.notify();
     }
 
-    /// The selection when it includes the clicked row, the clicked row otherwise.
+    /// The places of the rows an action on the row shown at place `clicked` applies to.
     fn addition_targets(&self, clicked: usize) -> Vec<usize> {
-        if self.additions_selection.contains(&clicked) {
-            self.additions_selection.clone()
-        } else {
-            vec![clicked]
+        self.additions_selection.targets(clicked)
+    }
+
+    /// The fit's indices of a tab's rows shown at `places`.
+    fn addition_indices(&self, kind: AddKind, places: &[usize]) -> Vec<usize> {
+        match (self.loaded(), self.fit()) {
+            (Some(loaded), Some(fit)) => {
+                let order = kind.order(&loaded.catalog, fit);
+                places
+                    .iter()
+                    .filter_map(|&n| order.get(n).copied())
+                    .collect()
+            }
+            _ => Vec::new(),
         }
+    }
+
+    /// The fit's indices of the rows an action on the row shown at place `clicked` applies to.
+    fn kind_targets(&self, kind: AddKind, clicked: usize) -> Vec<usize> {
+        self.addition_indices(kind, &self.addition_targets(clicked))
     }
 
     /// pyfa's list keys (implantView.py, boosterView.py kbEvent): Delete removes the selection
     /// when the rows are `removable` as `kind`, Ctrl+A selects all `len` rows, Escape clears.
-    fn list_key(
+    fn additions_key(
         &mut self,
         event: &KeyDownEvent,
         kind: AddKind,
@@ -333,22 +345,34 @@ impl Efa {
         removable: bool,
         cx: &mut Context<Self>,
     ) {
-        let keystroke = &event.keystroke;
-        let m = keystroke.modifiers;
-        let plain = !(m.control || m.alt || m.shift || m.platform);
-        match keystroke.key.as_str() {
-            "delete" if plain && removable && !self.additions_selection.is_empty() => {
-                let rows = std::mem::take(&mut self.additions_selection);
-                self.additions_anchor = None;
-                self.apply(Action::RemoveAdditions(kind, rows), cx);
+        let remove = |g: &mut Self, places: Vec<usize>, cx: &mut Context<Self>| {
+            let rows = g.addition_indices(kind, &places);
+            g.apply(Action::RemoveAdditions(kind, rows), cx);
+        };
+        self.list_keys(event, len, removable, remove, cx);
+    }
+
+    /// pyfa's list keys for the open additions tab: Delete hands the selected places to
+    /// `remove` when the rows are `removable`, Ctrl+A selects all `len` rows, Escape clears.
+    fn list_keys(
+        &mut self,
+        event: &KeyDownEvent,
+        len: usize,
+        removable: bool,
+        remove: impl FnOnce(&mut Self, Vec<usize>, &mut Context<Self>),
+        cx: &mut Context<Self>,
+    ) {
+        match list_key(event) {
+            Some(ListKey::Delete) if removable && !self.additions_selection.is_empty() => {
+                let places = self.additions_selection.take();
+                remove(self, places, cx);
             }
-            "a" if m.control && !m.alt && !m.shift => {
-                self.additions_selection = (0..len).collect();
+            Some(ListKey::SelectAll) => {
+                self.additions_selection.select_all(0..len);
                 cx.notify();
             }
-            "escape" if plain => {
+            Some(ListKey::Clear) => {
                 self.additions_selection.clear();
-                self.additions_anchor = None;
                 cx.notify();
             }
             _ => return,
@@ -409,16 +433,16 @@ fn addition_menu(
     this: &WeakEntity<Efa>,
     loaded: &Rc<Loaded>,
     kind: AddKind,
-    i: usize,
+    n: usize,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let catalog = &loaded.catalog;
-    let Some((type_id, amount)) = this
-        .upgrade()
-        .and_then(|g| g.read(cx).fit().map(|f| kind.rows(f)))
-        .and_then(|rows| rows.get(i).copied())
-    else {
+    let Some((i, (type_id, amount))) = this.upgrade().and_then(|g| {
+        let fit = g.read(cx).fit()?;
+        let i = *kind.order(catalog, fit).get(n)?;
+        Some((i, *kind.rows(fit).get(i)?))
+    }) else {
         return menu;
     };
     let Some(t) = catalog.get(type_id) else {
@@ -435,7 +459,7 @@ fn addition_menu(
         let this = this.clone();
         move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
             Efa::app_update(&this, cx, |g, cx| {
-                let targets = g.addition_targets(i);
+                let targets = g.kind_targets(kind, n);
                 g.apply(make(targets), cx);
             });
         }
@@ -487,7 +511,7 @@ fn addition_menu(
         menu = menu.item(
             entry(IconName::Settings2, label).on_click(move |_, window, cx| {
                 Efa::app_update(&this, cx, |g, cx| {
-                    let targets = g.addition_targets(i);
+                    let targets = g.kind_targets(kind, n);
                     Efa::open_value_dialog(
                         "New Amount",
                         amount.to_string(),
@@ -536,7 +560,7 @@ fn addition_menu(
                                 .checked(v == type_id)
                                 .on_click(move |_, _, cx| {
                                     Efa::app_update(&this, cx, |g, cx| {
-                                        let targets = g.addition_targets(i);
+                                        let targets = g.kind_targets(kind, n);
                                         g.apply(Action::SwapAdditions(kind, targets, v), cx);
                                     });
                                 }),
@@ -583,7 +607,7 @@ fn addition_menu(
     if kind == AddKind::Cargo {
         menu = super::cargo_presets::menu_entries(menu.separator(), this, window, cx);
     }
-    misc_entries(menu.separator(), this, loaded, kind, Some(i), window, cx)
+    misc_entries(menu.separator(), this, loaded, kind, Some(n), window, cx)
 }
 
 /// pyfa's *`ItemMisc` entries: copy the selection or the whole tab, paste into it.
@@ -609,13 +633,13 @@ fn misc_entries(
         .and_then(|item| item.text())
         .is_some_and(|text| !text.trim().is_empty());
     let mut menu = menu;
-    if let Some(i) = clicked {
+    if let Some(n) = clicked {
         let (this, loaded) = (this.clone(), Rc::clone(loaded));
         menu = menu.item(
             entry(IconName::Copy, format!("Copy Selected {noun}")).on_click(move |_, _, cx| {
                 Efa::app_update(&this, cx, |g, cx| {
+                    let picked = g.kind_targets(kind, n);
                     let Some(fit) = g.fit() else { return };
-                    let picked = g.addition_targets(i);
                     let text = copy_text(&loaded.catalog, fit, kind, &picked);
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 });

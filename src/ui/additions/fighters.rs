@@ -12,7 +12,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, ClickEvent, ClipboardItem, Context, InteractiveElement, IntoElement,
-    KeyDownEvent, Modifiers, MouseButton, MouseDownEvent, ParentElement, SharedString,
+    KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
@@ -509,9 +509,7 @@ impl Efa {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |g, _: &MouseDownEvent, _, cx| {
-                    if !g.additions_selection.contains(&n) {
-                        g.additions_selection = vec![n];
-                        g.additions_anchor = Some(n);
+                    if g.additions_selection.right_click(n) {
                         cx.notify();
                     }
                 }),
@@ -528,32 +526,22 @@ impl Efa {
 
     /// pyfa's keys: Escape clears the selection, Ctrl+A selects every squadron, Delete removes.
     fn fighter_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        let plain = !keystroke.modifiers.modified();
-        match keystroke.key.as_str() {
-            "escape" if plain => {
-                self.additions_selection.clear();
-                self.additions_anchor = None;
-                cx.notify();
-            }
-            "a" if keystroke.modifiers == Modifiers::control() => {
-                let count = self.fit().map_or(0, |f| f.fighters.len());
-                self.additions_selection = (0..count).collect();
-                cx.notify();
-            }
-            "delete" if plain && !self.additions_selection.is_empty() => {
-                let Some(loaded) = self.loaded() else { return };
-                let order = self.fighter_order(&loaded);
-                let rows = self
-                    .additions_selection
+        let count = self.fit().map_or(0, |f| f.fighters.len());
+        self.list_keys(
+            event,
+            count,
+            true,
+            |g, places, cx| {
+                let Some(loaded) = g.loaded() else { return };
+                let order = g.fighter_order(&loaded);
+                let rows = places
                     .iter()
                     .filter_map(|&n| order.get(n).copied())
                     .collect();
-                self.remove_fighters(rows, cx);
-            }
-            _ => return,
-        }
-        cx.stop_propagation();
+                g.remove_fighters(rows, cx);
+            },
+            cx,
+        );
     }
 
     /// A fighter from the market goes in like one double-clicked there.

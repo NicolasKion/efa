@@ -10,9 +10,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, ClickEvent, Context, InteractiveElement, IntoElement, KeyDownEvent, Modifiers,
-    MouseButton, MouseDownEvent, ParentElement, SharedString, StatefulInteractiveElement, Styled,
-    WeakEntity, Window, div, prelude::FluentBuilder, px,
+    AnyElement, ClickEvent, Context, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
+    MouseDownEvent, ParentElement, SharedString, StatefulInteractiveElement, Styled, WeakEntity,
+    Window, div, prelude::FluentBuilder, px,
 };
 
 use super::{
@@ -216,9 +216,7 @@ impl Efa {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |g, _: &MouseDownEvent, _, cx| {
-                    if !g.additions_selection.contains(&n) {
-                        g.additions_selection = vec![n];
-                        g.additions_anchor = Some(n);
+                    if g.additions_selection.right_click(n) {
                         cx.notify();
                     }
                 }),
@@ -236,32 +234,22 @@ impl Efa {
 
     /// pyfa's keys: Escape clears the selection, Ctrl+A selects everything, Delete removes.
     fn command_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        let plain = !keystroke.modifiers.modified();
-        match keystroke.key.as_str() {
-            "escape" if plain => {
-                self.additions_selection.clear();
-                self.additions_anchor = None;
-                cx.notify();
-            }
-            "a" if keystroke.modifiers == Modifiers::control() => {
-                let count = self.fit().map_or(0, |f| rows(&self.saved, f).len());
-                self.additions_selection = (0..count).collect();
-                cx.notify();
-            }
-            "delete" if plain && !self.additions_selection.is_empty() => {
-                let Some(fit) = self.fit() else { return };
-                let rows = rows(&self.saved, fit);
-                let entries = self
-                    .additions_selection
+        let count = self.fit().map_or(0, |f| rows(&self.saved, f).len());
+        self.list_keys(
+            event,
+            count,
+            true,
+            |g, places, cx| {
+                let Some(fit) = g.fit() else { return };
+                let rows = rows(&g.saved, fit);
+                let entries = places
                     .iter()
                     .filter_map(|&n| rows.get(n).map(|r| r.entry))
                     .collect();
-                self.remove_command_fits(entries, cx);
-            }
-            _ => return,
-        }
-        cx.stop_propagation();
+                g.remove_command_fits(entries, cx);
+            },
+            cx,
+        );
     }
 }
 

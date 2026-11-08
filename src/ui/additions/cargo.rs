@@ -142,7 +142,7 @@ fn space_menu(
 }
 
 /// Indices into the cargo in the order pyfa lists them: by category, group, then name.
-fn display_order(catalog: &Catalog, cargo: &[(TypeId, u32)]) -> Vec<usize> {
+pub(super) fn display_order(catalog: &Catalog, cargo: &[(TypeId, u32)]) -> Vec<usize> {
     let key = |i: usize| {
         let t = catalog.get(cargo[i].0);
         let category = t.map_or("", |t| t.category_label());
@@ -263,7 +263,7 @@ impl Efa {
     ) -> AnyElement {
         let catalog = &loaded.catalog;
         let theme = cx.theme();
-        let selected = self.additions_selection.contains(&i);
+        let selected = self.additions_selection.contains(&n);
         let unit = catalog.get(type_id).map_or(0.0, |t| t.volume);
         let row = h_flex()
             .id(SharedString::from(format!("cargo-{i}")))
@@ -318,15 +318,13 @@ impl Efa {
                 if event.click_count() >= 2 {
                     g.apply(Action::RemoveAdditions(AddKind::Cargo, vec![i]), cx);
                 } else {
-                    g.select_cargo(i, event.modifiers(), cx);
+                    g.select_addition(n, event.modifiers(), cx);
                 }
             }))
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |g, _: &MouseDownEvent, _, cx| {
-                    if !g.additions_selection.contains(&i) {
-                        g.additions_selection = vec![i];
-                        g.additions_anchor = Some(i);
+                    if g.additions_selection.right_click(n) {
                         cx.notify();
                     }
                 }),
@@ -340,60 +338,16 @@ impl Efa {
         row.context_menu({
             let (this, loaded) = (Self::weak(cx), Rc::clone(loaded));
             move |menu, window, cx| {
-                addition_menu(menu, &this, &loaded, AddKind::Cargo, i, window, cx)
+                addition_menu(menu, &this, &loaded, AddKind::Cargo, n, window, cx)
             }
         })
         .into_any_element()
     }
 
-    /// List selection over the displayed order, which is sorted and so differs from the cargo's.
-    fn select_cargo(&mut self, i: usize, modifiers: Modifiers, cx: &mut Context<Self>) {
-        let Some(loaded) = self.loaded() else { return };
-        let Some(fit) = self.fit() else { return };
-        let order = display_order(&loaded.catalog, &fit.cargo);
-        let place = |r: usize| order.iter().position(|&o| o == r);
-        if modifiers.shift
-            && let Some(anchor) = self.additions_anchor
-            && let (Some(a), Some(b)) = (place(anchor), place(i))
-        {
-            self.additions_selection = order[a.min(b)..=a.max(b)].to_vec();
-        } else if modifiers.control {
-            if let Some(at) = self.additions_selection.iter().position(|&r| r == i) {
-                self.additions_selection.remove(at);
-            } else {
-                self.additions_selection.push(i);
-            }
-            self.additions_anchor = Some(i);
-        } else {
-            self.additions_selection = vec![i];
-            self.additions_anchor = Some(i);
-        }
-        cx.notify();
-    }
-
     /// pyfa's cargo keys: Delete removes the selection, Ctrl+A selects all, Escape clears.
     fn cargo_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        let m = keystroke.modifiers;
-        let plain = !(m.control || m.alt || m.shift || m.platform);
-        match keystroke.key.as_str() {
-            "delete" if plain && !self.additions_selection.is_empty() => {
-                let rows = std::mem::take(&mut self.additions_selection);
-                self.apply(Action::RemoveAdditions(AddKind::Cargo, rows), cx);
-            }
-            "a" if m.control && !m.alt && !m.shift => {
-                let len = self.fit().map_or(0, |f| f.cargo.len());
-                self.additions_selection = (0..len).collect();
-                cx.notify();
-            }
-            "escape" if plain => {
-                self.additions_selection.clear();
-                self.additions_anchor = None;
-                cx.notify();
-            }
-            _ => return,
-        }
-        cx.stop_propagation();
+        let len = self.fit().map_or(0, |f| f.cargo.len());
+        self.additions_key(event, AddKind::Cargo, len, true, cx);
     }
 
     /// pyfa's cargo drop target: fitted items go into the hold (onto a cargo module, they trade

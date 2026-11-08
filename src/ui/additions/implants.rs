@@ -62,7 +62,6 @@ impl Efa {
         // Older saves kept implants in the order they were added; pyfa lists them by slot.
         if self.saved.fits[current].sort_implants(&loaded.catalog) {
             self.additions_selection.clear();
-            self.additions_anchor = None;
             self.unsaved = true;
         }
         let fit = &self.saved.fits[current];
@@ -104,7 +103,7 @@ impl Efa {
             .overflow_y_scroll()
             .track_focus(&self.additions_focus)
             .on_key_down(cx.listener(move |g, event: &KeyDownEvent, _, cx| {
-                g.list_key(event, AddKind::Implants, len, own, cx);
+                g.additions_key(event, AddKind::Implants, len, own, cx);
             }))
             .children(content)
             .drag_over::<Dragged>(|style, _, _, cx| style.bg(cx.theme().drop_target))
@@ -234,9 +233,7 @@ impl Efa {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |g, _: &MouseDownEvent, _, cx| {
-                    if !g.additions_selection.contains(&i) {
-                        g.additions_selection = vec![i];
-                        g.additions_anchor = Some(i);
+                    if g.additions_selection.right_click(i) {
                         cx.notify();
                     }
                 }),
