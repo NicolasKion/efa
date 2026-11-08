@@ -1,6 +1,4 @@
-//! Saved fits and which of them are open, kept as JSON in the user's data directory.
-
-use std::path::PathBuf;
+//! Saved fits and which of them are open, and the settings kept with them in [`crate::db`].
 
 use serde::{Deserialize, Serialize};
 
@@ -83,16 +81,11 @@ impl Default for PriceTotals {
 }
 
 impl Saved {
-    /// What was saved last time, or nothing if there is no save or it cannot be read.
-    pub fn load() -> Self {
-        let Some(path) = path() else {
-            return Self::default();
-        };
-        let mut saved: Self = crate::persist::load(&path);
-        saved.open.retain(|&i| i < saved.fits.len());
-        saved.current = saved.current.filter(|c| saved.open.contains(c));
-        saved.dedupe_uids();
-        saved
+    /// Drop tabs of fits that are gone and split shared identities, after loading.
+    pub fn tidy(&mut self) {
+        self.open.retain(|&i| i < self.fits.len());
+        self.current = self.current.filter(|c| self.open.contains(c));
+        self.dedupe_uids();
     }
 
     /// The identity of a fit, handing out a fresh one when it has none yet or shares it with an
@@ -154,16 +147,6 @@ impl Saved {
             }
         }
     }
-
-    /// Write the fits out, keeping the previous file as a backup.
-    pub fn save(&self) -> Result<(), String> {
-        crate::persist::save(&path().ok_or("no home directory")?, self)
-    }
-}
-
-/// Where the fits and settings are kept.
-pub fn path() -> Option<PathBuf> {
-    crate::paths::data_file("fits.json")
 }
 
 #[cfg(test)]

@@ -1,10 +1,10 @@
 //! Characters as pyfa keeps them: the read-only All 0 and All 5, and the user's own with their
-//! skill levels, implants and security status. Written to their own JSON file next to the fits.
+//! skill levels, implants and security status, kept in [`crate::db`] next to the fits.
 
 pub mod evemon;
 pub mod requirements;
 
-use std::{collections::BTreeMap, path::PathBuf};
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -110,7 +110,7 @@ impl Character {
     }
 }
 
-/// Every user character, kept in `characters.json`.
+/// Every user character.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Characters {
@@ -121,16 +121,6 @@ pub struct Characters {
 }
 
 impl Characters {
-    /// What was saved last time, or none if there is nothing readable.
-    pub fn load() -> Self {
-        path().map_or_else(Self::default, |path| crate::persist::load(&path))
-    }
-
-    /// Write the characters out, keeping the previous file as a backup.
-    pub fn save(&self) -> Result<(), String> {
-        crate::persist::save(&path().ok_or("no home directory")?, self)
-    }
-
     pub fn get(&self, id: CharacterId) -> Option<&Character> {
         let CharacterId::User(id) = id else {
             return None;
@@ -573,11 +563,6 @@ pub fn roman(level: u8) -> String {
         1..=MAX_LEVEL => ROMAN[usize::from(level) - 1].to_owned(),
         _ => level.to_string(),
     }
-}
-
-/// Where the characters are kept.
-pub fn path() -> Option<PathBuf> {
-    crate::paths::data_file("characters.json")
 }
 
 #[cfg(test)]

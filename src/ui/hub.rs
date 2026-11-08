@@ -85,11 +85,15 @@ pub struct Hub {
     overrides_task: Option<Task<()>>,
     /// Update checks and installs, shown by the main window and the preferences.
     pub updates: Entity<super::updates::Updates>,
+    /// The database the fits, characters and logins are written to. None when it could not be
+    /// opened, which was reported; changes are then not saved.
+    store: Option<crate::db::Store>,
 }
 
 impl Hub {
     pub fn new(import: Option<String>, cx: &mut Context<Self>) -> Self {
-        let mut saved = Saved::load();
+        let (store, contents) = crate::db::Store::open_default();
+        let mut saved = contents.saved;
         let overrides = saved.overrides.active();
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let result = cx.background_spawn(async move { load(&overrides) }).await;
@@ -123,12 +127,32 @@ impl Hub {
             open_requests: Vec::new(),
             mutation_edits: Vec::new(),
             raw_hp: false,
-            characters: Rc::new(Characters::load()),
+            characters: Rc::new(contents.characters),
             character_editor: None,
-            esi: super::esi::EsiState::load(),
+            esi: super::esi::EsiState::new(contents.accounts),
             fit_imports: Vec::new(),
             overrides_task: None,
             updates: cx.new(super::updates::Updates::new),
+            store,
+        }
+    }
+
+    /// Write the fits and settings, only what changed.
+    fn write_saved(&mut self) -> Result<(), String> {
+        match &mut self.store {
+            Some(store) => store.save_saved(&self.saved),
+            None => Ok(()),
+        }
+    }
+
+    /// Write the ESI logins, only what changed.
+    pub(super) fn write_accounts(
+        &mut self,
+        accounts: &crate::esi::accounts::Accounts,
+    ) -> Result<(), String> {
+        match &mut self.store {
+            Some(store) => store.save_accounts(accounts),
+            None => Ok(()),
         }
     }
 
@@ -141,7 +165,9 @@ impl Hub {
         let mut characters = (*self.characters).clone();
         let result = edit(&mut characters);
         if characters != *self.characters {
-            if let Err(e) = characters.save() {
+            if let Some(store) = &mut self.store
+                && let Err(e) = store.save_characters(&characters)
+            {
                 crate::errors::report("Saving characters failed", e);
             }
             self.characters = Rc::new(characters);
@@ -180,7 +206,7 @@ impl Hub {
             overrides: std::mem::take(&mut self.saved.overrides),
             ..saved.clone()
         };
-        if let Err(e) = self.saved.save() {
+        if let Err(e) = self.write_saved() {
             crate::errors::report("Saving fits failed", e);
         }
         self.sync_preferences(cx);
@@ -192,7 +218,7 @@ impl Hub {
     pub fn update_saved(&mut self, edit: impl FnOnce(&mut Saved), cx: &mut Context<Self>) {
         edit(&mut self.saved);
         self.generation += 1;
-        if let Err(e) = self.saved.save() {
+        if let Err(e) = self.write_saved() {
             crate::errors::report("Saving settings failed", e);
         }
         self.sync_preferences(cx);

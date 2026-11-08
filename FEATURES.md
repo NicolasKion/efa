@@ -10,8 +10,8 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 ## Fit management and tabs
 
 - [x] Multiple fit tabs (gui/chrome_tabs.py, gui/mainFrame.py)
-- [x] Fits persisted between runs (eos/db): fits.json in the XDG data dir, written through a temp file
-- [ ] Safe loading and backups of saved data (eos/db/migration.py backs the DB up before migrating): a fits.json that fails to parse loads as empty and the next save overwrites it; no backup copy is kept
+- [x] Fits persisted between runs (eos/db): efa.db, a SQLite database in the data dir with fits, characters, ESI logins and settings; a save writes only the rows that changed
+- [x] Safe loading and backups of saved data (eos/db/migration.py backs the DB up before migrating): efa.db.bak is made with VACUUM INTO on every start, and a database that fails to open or its integrity check is set aside and the backup loads; the JSON files of earlier versions are imported once and kept as `*.migrated`
 - [x] Delete confirmation (builtinShipBrowser/fitItem.py "Do you really want to delete this fit?", skipped with Shift), from the fittings browser and Fit > Delete Fit; Enter says Yes as in pyfa, Escape cancels
 - [x] Middle-click a tab to close it (chrome_tabs.py OnMiddleUp)
 - [x] New fit (mainMenuBar.py New Tab)

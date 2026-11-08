@@ -1105,8 +1105,11 @@ impl PreferencesWindow {
             section(
                 "Locations",
                 vec![
-                    path_row("Fits and settings", shown(crate::store::path()), cx),
-                    path_row("Characters", shown(crate::character::path()), cx),
+                    path_row(
+                        "Fits, characters and settings",
+                        shown(crate::db::path()),
+                        cx,
+                    ),
                     path_row("Cache", shown(cache_dir), cx),
                 ],
                 cx,

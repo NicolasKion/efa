@@ -1,6 +1,6 @@
-//! Where efa keeps things. User data (fits, characters, logins, the crash note) goes in the
-//! platform's data folder and everything that can be fetched or built again (icons, prices, the
-//! CDN index, caches of a development dump) in its cache folder:
+//! Where efa keeps things. User data (the database of fits, characters and logins, the crash
+//! note) goes in the platform's data folder and everything that can be fetched or built again
+//! (icons, prices, the CDN index, caches of a development dump) in its cache folder:
 //!
 //! - Linux: `$XDG_DATA_HOME/efa` (`~/.local/share/efa`) and `$XDG_CACHE_HOME/efa` (`~/.cache/efa`)
 //! - macOS: `~/Library/Application Support/efa` and `~/Library/Caches/efa`

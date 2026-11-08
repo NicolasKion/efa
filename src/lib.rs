@@ -4,6 +4,7 @@ pub mod cdn;
 pub mod character;
 pub mod damage_pattern;
 pub mod data;
+pub mod db;
 pub mod desktop;
 pub mod engine;
 pub mod errors;

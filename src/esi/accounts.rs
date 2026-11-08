@@ -1,14 +1,11 @@
 //! Characters logged in with EVE SSO, pyfa's SSO characters. Their refresh tokens are kept in
-//! `esi.json` in the data directory, readable by the user only; access tokens stay in memory and
-//! are refreshed shortly before they run out.
-
-use std::path::{Path, PathBuf};
+//! [`crate::db`], readable by the user only; access tokens stay in memory and are refreshed
+//! shortly before they run out.
 
 use serde::{Deserialize, Serialize};
 
 /// Refresh an access token this many seconds before it expires, so a request does not race it.
 pub const REFRESH_MARGIN: u64 = 60;
-const FILE: &str = "esi.json";
 
 /// A character efa may act for.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,22 +67,6 @@ pub struct Accounts {
 }
 
 impl Accounts {
-    pub fn load() -> Self {
-        path().map_or_else(Self::default, |p| Self::load_from(&p))
-    }
-
-    pub fn load_from(path: &Path) -> Self {
-        crate::persist::load(path)
-    }
-
-    pub fn save(&self) -> Result<(), String> {
-        self.save_to(&path().ok_or("no home directory")?)
-    }
-
-    pub fn save_to(&self, path: &Path) -> Result<(), String> {
-        crate::persist::save_private(path, self)
-    }
-
     pub fn get(&self, character_id: u64) -> Option<&Account> {
         self.accounts
             .iter()
@@ -123,10 +104,6 @@ impl Accounts {
         accounts.sort_by(|a, b| a.name.cmp(&b.name));
         accounts
     }
-}
-
-fn path() -> Option<PathBuf> {
-    crate::paths::data_file(FILE)
 }
 
 #[cfg(test)]
@@ -185,31 +162,5 @@ mod tests {
         assert_eq!(accounts.accounts.len(), 1);
         accounts.remove(1);
         assert_eq!(accounts, Accounts::default());
-    }
-
-    #[test]
-    fn saved_privately_without_access_tokens() {
-        let dir = std::env::temp_dir().join(format!("efa-esi-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let path = dir.join(FILE);
-        let mut a = account(7, "secret");
-        a.access = Some(Access {
-            token: "access".to_owned(),
-            expires_at: 9,
-        });
-        let accounts = Accounts { accounts: vec![a] };
-        accounts.save_to(&path).expect("save");
-        let text = std::fs::read_to_string(&path).expect("read");
-        assert!(text.contains("secret") && !text.contains("access\""));
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            let mode = std::fs::metadata(&path).expect("meta").permissions().mode();
-            assert_eq!(mode & 0o777, 0o600);
-        }
-        let loaded = Accounts::load_from(&path);
-        assert_eq!(loaded.accounts[0].refresh_token, "secret");
-        assert!(loaded.accounts[0].access.is_none());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

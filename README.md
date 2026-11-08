@@ -62,6 +62,12 @@ a dump) live in the platform's folders:
 - macOS: `~/Library/Application Support/efa` and `~/Library/Caches/efa`
 - Windows: `%APPDATA%\efa` and `%LOCALAPPDATA%\efa`
 
+Fits, characters, ESI logins and settings are kept in one SQLite database, `efa.db` in the data
+folder, readable by the user only. Each start leaves a copy of it as `efa.db.bak`; a database that
+cannot be read is renamed out of the way and the copy loads instead. The JSON files earlier versions
+kept (`fits.json`, `characters.json`, `esi.json`) are imported on the first start and renamed to
+`<name>.migrated`.
+
 A gyfa folder from before the rename is copied over on the first start.
 
 Item icons come from CCP's client CDN the first time they are shown. On Omarchy the app follows the

@@ -34,6 +34,8 @@ dirs = "6"
 # The embedded data pack: zstd-compressed postcard, with its blobs as plain bytes.
 zstd = "0.14"
 serde_bytes = "0.11"
+# The user's fits, characters, logins and settings. Bundled, so no platform needs SQLite installed.
+rusqlite = { version = "0.41", features = ["bundled"] }
 # Self-updates from the signed bundles each release carries (latest.json).
 cargo-packager-updater = "0.2"
 

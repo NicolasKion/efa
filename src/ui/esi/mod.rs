@@ -41,9 +41,9 @@ pub struct EsiState {
 }
 
 impl EsiState {
-    pub fn load() -> Self {
+    pub fn new(accounts: Accounts) -> Self {
         Self {
-            accounts: Rc::new(Accounts::load()),
+            accounts: Rc::new(accounts),
             ..Self::default()
         }
     }
@@ -179,7 +179,7 @@ impl Hub {
         }
         let mut accounts = (*self.esi.accounts).clone();
         if accounts.upsert(account)
-            && let Err(e) = accounts.save()
+            && let Err(e) = self.write_accounts(&accounts)
         {
             eprintln!("saving ESI logins: {e}");
         }
@@ -191,7 +191,7 @@ impl Hub {
     pub fn esi_remove(&mut self, character_id: u64, cx: &mut Context<Self>) {
         let mut accounts = (*self.esi.accounts).clone();
         accounts.remove(character_id);
-        if let Err(e) = accounts.save() {
+        if let Err(e) = self.write_accounts(&accounts) {
             eprintln!("saving ESI logins: {e}");
         }
         self.esi.accounts = Rc::new(accounts);
