@@ -226,7 +226,6 @@ impl Source {
         }
     }
 
-    /// For the log: which data this is.
     /// The deimos release the data came from, `sde-<build>-client-<build>`, when it says.
     pub fn version(&self) -> Option<String> {
         match self {
@@ -238,6 +237,7 @@ impl Source {
         }
     }
 
+    /// For the log: which data this is.
     pub fn describe(&self) -> String {
         match self {
             Self::Pack(pack) => format!("the embedded data pack ({})", pack.version()),

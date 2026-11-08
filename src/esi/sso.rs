@@ -402,6 +402,8 @@ pub fn account(response: TokenResponse, claims: Claims) -> Account {
 pub enum Callback {
     /// Not the callback path, such as the browser asking for a favicon.
     Other,
+    /// A callback for another login, such as an old tab reloaded; this login waits on.
+    Stray,
     Code(String),
     Refused(String),
 }
@@ -423,6 +425,11 @@ pub fn parse_callback(request_line: &str, expected_state: &str) -> Callback {
             .find(|(k, _)| k == name)
             .map(|(_, v)| v.into_owned())
     };
+    // Only an answer carrying this login's state ends it; anything else is left alone, so a
+    // stray request cannot cut the login short.
+    if param("state").as_deref() != Some(expected_state) {
+        return Callback::Stray;
+    }
     if let Some(error) = param("error") {
         let description = param("error_description").unwrap_or_default();
         return Callback::Refused(if description.is_empty() {
@@ -430,9 +437,6 @@ pub fn parse_callback(request_line: &str, expected_state: &str) -> Callback {
         } else {
             format!("EVE SSO refused the login: {description}")
         });
-    }
-    if param("state").as_deref() != Some(expected_state) {
-        return Callback::Refused("the login answer does not belong to this login".to_owned());
     }
     match param("code") {
         Some(code) if !code.is_empty() => Callback::Code(code),
@@ -497,7 +501,7 @@ impl Listener {
             for socket in &self.sockets {
                 match socket.accept() {
                     Ok((stream, _)) => match answer(stream, state) {
-                        Callback::Other => {}
+                        Callback::Other | Callback::Stray => {}
                         Callback::Code(code) => return Ok(code),
                         Callback::Refused(e) => return Err(e),
                     },
@@ -527,6 +531,11 @@ fn answer(mut stream: TcpStream, state: &str) -> Callback {
     let callback = parse_callback(text.lines().next().unwrap_or_default(), state);
     let (status, message) = match &callback {
         Callback::Other => ("404 Not Found", "Nothing here.".to_owned()),
+        Callback::Stray => (
+            "400 Bad Request",
+            "This answer belongs to another login. Finish the login in the tab efa opened last."
+                .to_owned(),
+        ),
         Callback::Code(_) => (
             "200 OK",
             "Logged in. You can close this tab and go back to efa.".to_owned(),
@@ -673,10 +682,19 @@ mod tests {
             parse_callback("GET /favicon.ico HTTP/1.1", "s1"),
             Callback::Other
         );
-        assert!(matches!(
+        assert_eq!(
             parse_callback("GET /callback?code=xyz&state=other HTTP/1.1", "s1"),
-            Callback::Refused(_)
-        ));
+            Callback::Stray
+        );
+        assert_eq!(
+            parse_callback("GET /callback?error=access_denied&state=old HTTP/1.1", "s1"),
+            Callback::Stray,
+            "a refusal for another login does not end this one"
+        );
+        assert_eq!(
+            parse_callback("GET /callback?code=xyz HTTP/1.1", "s1"),
+            Callback::Stray
+        );
         assert!(matches!(
             parse_callback("GET /callback?error=access_denied&state=s1 HTTP/1.1", "s1"),
             Callback::Refused(e) if e.contains("access_denied")

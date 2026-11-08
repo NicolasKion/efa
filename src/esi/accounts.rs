@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 pub const REFRESH_MARGIN: u64 = 60;
 
 /// A character efa may act for.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Account {
     pub character_id: u64,
@@ -21,11 +21,35 @@ pub struct Account {
     pub access: Option<Access>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Access {
     pub token: String,
     /// Seconds since the epoch.
     pub expires_at: u64,
+}
+
+/// What a log shows instead of a token.
+const REDACTED: &str = "<redacted>";
+
+impl std::fmt::Debug for Account {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Account")
+            .field("character_id", &self.character_id)
+            .field("name", &self.name)
+            .field("refresh_token", &REDACTED)
+            .field("scopes", &self.scopes)
+            .field("access", &self.access)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for Access {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Access")
+            .field("token", &REDACTED)
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
 }
 
 impl Account {
@@ -162,5 +186,17 @@ mod tests {
         assert_eq!(accounts.accounts.len(), 1);
         accounts.remove(1);
         assert_eq!(accounts, Accounts::default());
+    }
+
+    #[test]
+    fn debug_output_keeps_tokens_out() {
+        let mut account = account(1, "refresh-secret");
+        account.access = Some(Access {
+            token: "access-secret".to_owned(),
+            expires_at: 5,
+        });
+        let shown = format!("{account:?}");
+        assert!(!shown.contains("secret"), "{shown}");
+        assert!(shown.contains("expires_at: 5"), "{shown}");
     }
 }
