@@ -2,12 +2,16 @@
 //! it whenever it changes.
 
 pub mod cargo;
+mod drones;
 pub mod fighters;
+mod implants;
 pub mod mutation;
 pub mod projected;
 
 use serde::{Deserialize, Serialize};
 
+pub use drones::DroneStack;
+pub use implants::{Booster, implant_slot, plug_implant};
 pub use mutation::Mutation;
 
 use crate::{
@@ -98,48 +102,12 @@ pub enum RahPattern {
     Pattern(DamageProfile),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DroneStack {
-    pub type_id: TypeId,
-    pub count: u32,
-    pub active: u32,
-    /// What a mutaplasmid made of these drones; `type_id` is then the mutated drone type.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mutation: Option<Mutation>,
-}
-
 /// The most of one item a cargo stack holds, and the most any amount read from text counts
 /// for: far beyond what any hold carries, and small enough that sums of stacks stay sane.
 pub const MAX_STACK: u32 = 1_000_000;
 /// The most drones one stack holds, and fighters one squadron. The engine adds every drone as
 /// an item of its own, so a pasted "x4000000000" must not reach it.
 pub const MAX_DRONES: u32 = 1_000;
-
-impl DroneStack {
-    /// A stack of `count` drones, at most [`MAX_DRONES`], `active` of them launched.
-    pub fn new(type_id: TypeId, count: u32, active: u32) -> Self {
-        let count = count.min(MAX_DRONES);
-        Self {
-            type_id,
-            count,
-            active: active.min(count),
-            mutation: None,
-        }
-    }
-
-    /// The drone before any mutation.
-    pub fn base_type(&self) -> TypeId {
-        self.mutation.as_ref().map_or(self.type_id, |m| m.base)
-    }
-
-    pub fn mutate(&mut self, catalog: &Catalog, mutaplasmid: TypeId) -> bool {
-        mutate(catalog, &mut self.type_id, &mut self.mutation, mutaplasmid)
-    }
-
-    pub fn revert(&mut self) -> bool {
-        revert(&mut self.type_id, &mut self.mutation)
-    }
-}
 
 fn mutate(
     catalog: &Catalog,
@@ -165,61 +133,6 @@ fn revert(type_id: &mut TypeId, mutation: &mut Option<Mutation>) -> bool {
             true
         }
         None => false,
-    }
-}
-
-/// A booster and the switches pyfa keeps for it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(from = "BoosterSave")]
-pub struct Booster {
-    pub type_id: TypeId,
-    pub active: bool,
-    /// Side effects switched on, by effect ID. pyfa starts every booster with none.
-    pub side_effects: Vec<i32>,
-}
-
-impl Booster {
-    pub fn new(type_id: TypeId) -> Self {
-        Self {
-            type_id,
-            active: true,
-            side_effects: Vec::new(),
-        }
-    }
-}
-
-/// Saves from before boosters had switches hold bare type IDs.
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum BoosterSave {
-    Bare(TypeId),
-    Full {
-        type_id: TypeId,
-        #[serde(default = "active_default")]
-        active: bool,
-        #[serde(default)]
-        side_effects: Vec<i32>,
-    },
-}
-
-fn active_default() -> bool {
-    true
-}
-
-impl From<BoosterSave> for Booster {
-    fn from(save: BoosterSave) -> Self {
-        match save {
-            BoosterSave::Bare(type_id) => Self::new(type_id),
-            BoosterSave::Full {
-                type_id,
-                active,
-                side_effects,
-            } => Self {
-                type_id,
-                active,
-                side_effects,
-            },
-        }
     }
 }
 
@@ -491,14 +404,6 @@ impl Fit {
         }
     }
 
-    /// Add a stack of its own, launching as many of it as there is room for in space.
-    pub fn add_drone_stack(&mut self, mut stack: DroneStack) {
-        stack.active = MAX_LAUNCHED
-            .saturating_sub(self.launched())
-            .min(stack.count);
-        self.drones.push(stack);
-    }
-
     /// Put a module into the first free position of its rack.
     pub fn place_module(&mut self, slot: Slot, module: Module) {
         place_first_free(self.rack_mut(slot), module);
@@ -541,150 +446,6 @@ impl Fit {
             .sum()
     }
 
-    /// Add `count` drones of a type, launching as many as there is room for in space.
-    pub fn add_drones(&mut self, type_id: TypeId, count: u32) {
-        let launch = MAX_LAUNCHED.saturating_sub(self.launched()).min(count);
-        match self.drones.iter_mut().find(|d| d.type_id == type_id) {
-            Some(stack) => {
-                stack.count = stack.count.saturating_add(count).min(MAX_DRONES);
-                stack.active = stack.active.saturating_add(launch).min(stack.count);
-            }
-            None => self.drones.push(DroneStack::new(type_id, count, launch)),
-        }
-    }
-
-    /// Add a booster the way pyfa does: one already on the fit is left alone, and one sharing its
-    /// slot is replaced. Returns whether the fit changed.
-    pub fn add_booster(&mut self, catalog: &Catalog, booster: Booster) -> bool {
-        if self.boosters.iter().any(|b| b.type_id == booster.type_id) {
-            return false;
-        }
-        let slot = |id: TypeId| catalog.get(id).and_then(|t| t.booster_slot);
-        let wanted = slot(booster.type_id);
-        if wanted.is_some() {
-            self.boosters.retain(|b| slot(b.type_id) != wanted);
-        }
-        self.boosters.push(booster);
-        // pyfa lists boosters by slot; keeping them stored that way makes rows and indices agree.
-        self.boosters.sort_by_key(|b| slot(b.type_id).unwrap_or(0));
-        true
-    }
-
-    /// Swap a booster for a variation, keeping whether it is on and those of its side effects the
-    /// new one has too.
-    pub fn swap_booster(&mut self, catalog: &Catalog, index: usize, type_id: TypeId) -> bool {
-        let Some(old) = self.boosters.get(index) else {
-            return false;
-        };
-        if self.boosters.iter().any(|b| b.type_id == type_id) {
-            return false;
-        }
-        let effects = catalog
-            .get(type_id)
-            .map_or(&[][..], |t| t.side_effects.as_slice());
-        let new = Booster {
-            type_id,
-            active: old.active,
-            side_effects: old
-                .side_effects
-                .iter()
-                .copied()
-                .filter(|e| effects.contains(e))
-                .collect(),
-        };
-        self.boosters.remove(index);
-        self.add_booster(catalog, new)
-    }
-
-    /// Plug in an implant the way pyfa does: the fit switches to its own implants, an implant
-    /// already in that slot makes way, and the list stays in slot order. Returns false when
-    /// nothing changed.
-    pub fn add_implant(&mut self, catalog: &Catalog, type_id: TypeId) -> bool {
-        let switched = self.implant_source != ImplantSource::Fit;
-        self.implant_source = ImplantSource::Fit;
-        let plugged = plug_implant(&mut self.implants, catalog, type_id);
-        self.inactive_implants.retain(|t| self.implants.contains(t));
-        switched || plugged
-    }
-
-    pub fn remove_implant(&mut self, i: usize) {
-        if i < self.implants.len() {
-            let gone = self.implants.remove(i);
-            self.inactive_implants.retain(|&t| t != gone);
-        }
-    }
-
-    /// Swap an implant for another type, keeping whether it is switched on.
-    pub fn swap_implant(&mut self, catalog: &Catalog, i: usize, type_id: TypeId) {
-        let Some(&old) = self.implants.get(i) else {
-            return;
-        };
-        if old == type_id {
-            return;
-        }
-        let active = self.implant_active(old);
-        self.remove_implant(i);
-        self.add_implant(catalog, type_id);
-        if !active && self.implants.contains(&type_id) {
-            self.inactive_implants.push(type_id);
-        }
-    }
-
-    pub fn implant_active(&self, type_id: TypeId) -> bool {
-        !self.inactive_implants.contains(&type_id)
-    }
-
-    /// pyfa's state toggle: if the clicked implant is on, switch every target off, otherwise
-    /// switch them all on.
-    pub fn toggle_implants(&mut self, clicked: usize, rows: &[usize]) {
-        let Some(&main) = self.implants.get(clicked) else {
-            return;
-        };
-        let turn_on = !self.implant_active(main);
-        let targets: Vec<TypeId> = rows
-            .iter()
-            .chain([&clicked])
-            .filter_map(|&r| self.implants.get(r).copied())
-            .collect();
-        self.inactive_implants.retain(|t| !targets.contains(t));
-        if !turn_on {
-            self.inactive_implants.extend(targets);
-            self.inactive_implants.sort_unstable();
-            self.inactive_implants.dedup();
-        }
-    }
-
-    /// Put the implants in slot order, which older saves did not keep. Returns whether any moved.
-    pub fn sort_implants(&mut self, catalog: &Catalog) -> bool {
-        if self.implants_in_slot_order(catalog) {
-            return false;
-        }
-        let slot = |&t: &TypeId| implant_slot(catalog, t);
-        self.implants.sort_by_key(slot);
-        true
-    }
-
-    /// Whether the implants are in slot order, as the Implants tab lists them.
-    pub fn implants_in_slot_order(&self, catalog: &Catalog) -> bool {
-        self.implants
-            .is_sorted_by_key(|&t: &TypeId| implant_slot(catalog, t))
-    }
-
-    /// Implants the fit is calculated with, as (type, switched on): its own, or `character`'s
-    /// when the fit uses the character's implants.
-    pub fn applied_implants<'a>(
-        &'a self,
-        character: &'a [TypeId],
-    ) -> impl Iterator<Item = (TypeId, bool)> + 'a {
-        let (implants, own) = match self.implant_source {
-            ImplantSource::Fit => (self.implants.as_slice(), true),
-            ImplantSource::Character => (character, false),
-        };
-        implants
-            .iter()
-            .map(move |&t| (t, !own || self.implant_active(t)))
-    }
-
     /// The mutation of the module or drone stack at `item`, if it is mutated.
     pub fn mutation(&self, item: crate::engine::FitItem) -> Option<&Mutation> {
         use crate::engine::FitItem;
@@ -720,60 +481,6 @@ impl Fit {
             .into_iter()
             .flatten()
             .flatten()
-    }
-
-    pub fn launched(&self) -> u32 {
-        self.drones.iter().map(|d| d.active).sum()
-    }
-
-    /// pyfa's drone state toggle: if the clicked stack has drones out, recall every stack in
-    /// `stacks`, otherwise launch all of them in full. Stacks are all-or-nothing, so a partly
-    /// launched stack counts as launched.
-    pub fn toggle_drones(&mut self, clicked: usize, stacks: &[usize]) {
-        let Some(launch) = self.drones.get(clicked).map(|d| d.active == 0) else {
-            return;
-        };
-        for &i in stacks.iter().chain([&clicked]) {
-            if let Some(stack) = self.drones.get_mut(i) {
-                stack.active = if launch { stack.count } else { 0 };
-            }
-        }
-    }
-
-    /// Take one drone out of a stack, dropping the stack once it is empty.
-    pub fn remove_drone(&mut self, i: usize) {
-        let Some(stack) = self.drones.get_mut(i) else {
-            return;
-        };
-        stack.count = stack.count.saturating_sub(1);
-        stack.active = stack.active.min(stack.count);
-        if stack.count == 0 {
-            self.drones.remove(i);
-        }
-    }
-
-    /// Fold stack `from` into stack `to`. Only stacks of the same drone merge; `to` keeps its
-    /// launched count. Returns whether anything changed.
-    pub fn merge_drones(&mut self, from: usize, to: usize) -> bool {
-        let (Some(src), Some(dst)) = (self.drones.get(from), self.drones.get(to)) else {
-            return false;
-        };
-        // Mutated drones only merge with drones rolled the same.
-        if from == to || src.type_id != dst.type_id || src.mutation != dst.mutation {
-            return false;
-        }
-        let moved = src.count;
-        let stack = &mut self.drones[to];
-        stack.count = stack.count.saturating_add(moved).min(MAX_DRONES);
-        self.drones.remove(from);
-        true
-    }
-
-    /// Add a copy of a stack as a stack of its own, launched state included.
-    pub fn clone_drones(&mut self, i: usize) {
-        if let Some(stack) = self.drones.get(i).cloned() {
-            self.drones.push(stack);
-        }
     }
 
     /// Parse an EFT block; see [`crate::port::eft::parse`].
@@ -888,29 +595,6 @@ impl Item {
     }
 }
 
-/// The slot an implant takes; implants without one sort last.
-pub fn implant_slot(catalog: &Catalog, type_id: TypeId) -> u8 {
-    catalog
-        .get(type_id)
-        .and_then(|t| t.implant_slot)
-        .unwrap_or(u8::MAX)
-}
-
-/// Add an implant to a slot-ordered list, replacing whatever is in its slot. Returns false when
-/// it is already there or is not an implant.
-pub fn plug_implant(implants: &mut Vec<TypeId>, catalog: &Catalog, type_id: TypeId) -> bool {
-    let Some(slot) = catalog.get(type_id).and_then(|t| t.implant_slot) else {
-        return false;
-    };
-    if implants.contains(&type_id) {
-        return false;
-    }
-    implants.retain(|&t| implant_slot(catalog, t) != slot);
-    let at = implants.partition_point(|&t| implant_slot(catalog, t) <= slot);
-    implants.insert(at, type_id);
-    true
-}
-
 /// Put an item into the first empty position, or after the last one.
 fn place_first_free<T>(rack: &mut Vec<Option<T>>, item: T) {
     match rack.iter_mut().find(|slot| slot.is_none()) {
@@ -934,99 +618,4 @@ pub fn split_count(line: &str) -> (&str, Option<u32>) {
         return (name.trim(), Some(count.min(MAX_STACK)));
     }
     (line, None)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn boosters_from_old_saves_load() {
-        let old: Vec<Booster> = serde_json::from_str("[10155]").expect("old boosters parse");
-        assert_eq!(old, [Booster::new(10155)]);
-
-        let booster = Booster {
-            type_id: 10155,
-            active: false,
-            side_effects: vec![2737],
-        };
-        let json = serde_json::to_string(&booster).expect("booster serializes");
-        let again: Booster = serde_json::from_str(&json).expect("booster parses");
-        assert_eq!(again, booster);
-    }
-}
-
-#[cfg(test)]
-mod drone_stack_tests {
-    use super::*;
-
-    fn stack(type_id: TypeId, count: u32, active: u32) -> DroneStack {
-        DroneStack::new(type_id, count, active)
-    }
-
-    fn fit_with(drones: Vec<DroneStack>) -> Fit {
-        Fit {
-            drones,
-            ..Fit::default()
-        }
-    }
-
-    fn counts(fit: &Fit) -> Vec<(TypeId, u32, u32)> {
-        fit.drones
-            .iter()
-            .map(|d| (d.type_id, d.count, d.active))
-            .collect()
-    }
-
-    #[test]
-    fn toggle_follows_the_clicked_stack() {
-        let mut fit = fit_with(vec![stack(1, 5, 2), stack(2, 3, 0)]);
-        // The clicked stack is out, so everything targeted is recalled.
-        fit.toggle_drones(0, &[0, 1]);
-        assert_eq!(counts(&fit), [(1, 5, 0), (2, 3, 0)]);
-        // Now it is in, so everything targeted launches in full.
-        fit.toggle_drones(1, &[0, 1]);
-        assert_eq!(counts(&fit), [(1, 5, 5), (2, 3, 3)]);
-    }
-
-    #[test]
-    fn toggle_includes_the_clicked_stack_outside_the_selection() {
-        let mut fit = fit_with(vec![stack(1, 2, 0), stack(2, 2, 0)]);
-        fit.toggle_drones(1, &[0]);
-        assert_eq!(counts(&fit), [(1, 2, 2), (2, 2, 2)]);
-    }
-
-    #[test]
-    fn removing_one_drone_shrinks_then_drops_the_stack() {
-        let mut fit = fit_with(vec![stack(1, 2, 2), stack(2, 1, 0)]);
-        fit.remove_drone(0);
-        assert_eq!(counts(&fit), [(1, 1, 1), (2, 1, 0)]);
-        fit.remove_drone(1);
-        assert_eq!(counts(&fit), [(1, 1, 1)]);
-        fit.remove_drone(7);
-        assert_eq!(counts(&fit), [(1, 1, 1)]);
-    }
-
-    #[test]
-    fn merge_only_joins_the_same_drone() {
-        let mut fit = fit_with(vec![stack(1, 2, 2), stack(2, 3, 0), stack(1, 4, 0)]);
-        assert!(!fit.merge_drones(0, 1), "different drones");
-        assert!(!fit.merge_drones(0, 0), "same stack");
-        assert!(fit.merge_drones(2, 0));
-        assert_eq!(counts(&fit), [(1, 6, 2), (2, 3, 0)]);
-    }
-
-    #[test]
-    fn merge_into_a_later_stack_keeps_indices_straight() {
-        let mut fit = fit_with(vec![stack(1, 2, 0), stack(2, 1, 0), stack(1, 3, 1)]);
-        assert!(fit.merge_drones(0, 2));
-        assert_eq!(counts(&fit), [(2, 1, 0), (1, 5, 1)]);
-    }
-
-    #[test]
-    fn clone_adds_a_separate_stack() {
-        let mut fit = fit_with(vec![stack(1, 3, 1)]);
-        fit.clone_drones(0);
-        assert_eq!(counts(&fit), [(1, 3, 1), (1, 3, 1)]);
-    }
 }
