@@ -1,6 +1,6 @@
 [package]
 name = "efa"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "EVE Online fitting tool: GPUI on top of the refine fitting engine"
 # refine is AGPL, and efa links it.
