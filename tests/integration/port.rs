@@ -1,15 +1,12 @@
 //! Every import and export format against real fits and the real data. Skipped when no dump is
 //! present.
 
-use std::path::Path;
-
+use crate::common::catalog;
 use efa::{
     data::Catalog,
     fit::{Fit, ModuleState},
     port::{self, dna, eft, esi, html, multibuy, xml},
 };
-
-const DATA: &str = "data/eve";
 
 const VEXOR: &str = "[Vexor, Drone Vexor]
 Drone Damage Amplifier II
@@ -69,14 +66,6 @@ Scourge Rage Heavy Assault Missile x1000
 Nanite Repair Paste x50
 ";
 
-fn catalog() -> Option<Catalog> {
-    if !Path::new(DATA).join("phobos/metadata.json").exists() {
-        eprintln!("no EVE data in {DATA}, skipping");
-        return None;
-    }
-    Some(Catalog::load_cached(Path::new(DATA), Path::new("data/cache")).expect("the dump loads"))
-}
-
 fn fit(catalog: &Catalog, text: &str) -> Fit {
     let (fit, unknown) = Fit::from_eft(catalog, text).expect("the fit parses");
     assert!(unknown.is_empty(), "unknown items: {unknown:?}");
@@ -113,12 +102,12 @@ fn fitted(fit: &Fit) -> Vec<Vec<i32>> {
 fn eft_in_pyfa_layout_round_trips() {
     let Some(catalog) = catalog() else { return };
     for text in [VEXOR, TENGU] {
-        let original = fit(&catalog, text);
+        let original = fit(catalog, text);
         let options = eft::Options::default();
-        let exported = eft::export(&original, &catalog, &options, None);
-        let again = one(port::import(&catalog, &exported, None).expect("the export imports"));
+        let exported = eft::export(&original, catalog, &options, None);
+        let again = one(port::import(catalog, &exported, None).expect("the export imports"));
         assert_eq!(
-            eft::export(&again, &catalog, &options, None),
+            eft::export(&again, catalog, &options, None),
             exported,
             "export is stable"
         );
@@ -132,32 +121,32 @@ fn eft_in_pyfa_layout_round_trips() {
 #[test]
 fn eft_keeps_offline_state_and_empty_positions() {
     let Some(catalog) = catalog() else { return };
-    let original = fit(&catalog, VEXOR);
-    let exported = eft::export(&original, &catalog, &eft::Options::default(), None);
+    let original = fit(catalog, VEXOR);
+    let exported = eft::export(&original, catalog, &eft::Options::default(), None);
     assert!(
         exported.contains("Damage Control II /offline"),
         "{exported}"
     );
-    let again = one(port::import(&catalog, &exported, None).expect("the export imports"));
+    let again = one(port::import(catalog, &exported, None).expect("the export imports"));
     let dc = again.low[4]
         .as_ref()
         .expect("the damage control is in place");
     assert_eq!(dc.state, ModuleState::Offline);
 
-    let tengu = fit(&catalog, TENGU);
+    let tengu = fit(catalog, TENGU);
     assert!(
         tengu.high[2].is_none(),
         "the empty high slot stays a position"
     );
-    let exported = eft::export(&tengu, &catalog, &eft::Options::default(), None);
-    let again = one(port::import(&catalog, &exported, None).expect("the export imports"));
+    let exported = eft::export(&tengu, catalog, &eft::Options::default(), None);
+    let again = one(port::import(catalog, &exported, None).expect("the export imports"));
     assert!(again.high[2].is_none());
 }
 
 #[test]
 fn eft_options_leave_things_out() {
     let Some(catalog) = catalog() else { return };
-    let tengu = fit(&catalog, TENGU);
+    let tengu = fit(catalog, TENGU);
     let bare = eft::Options {
         loaded_charges: false,
         implants: false,
@@ -165,7 +154,7 @@ fn eft_options_leave_things_out() {
         cargo: false,
         mutations: false,
     };
-    let exported = eft::export(&tengu, &catalog, &bare, None);
+    let exported = eft::export(&tengu, catalog, &bare, None);
     for gone in ["Scourge", "Snake", "Blue Pill", "Nanite"] {
         assert!(!exported.contains(gone), "{gone} left in:\n{exported}");
     }
@@ -176,7 +165,7 @@ fn eft_options_leave_things_out() {
         rig: 3,
         service: 0,
     };
-    let padded = eft::export(&tengu, &catalog, &bare, Some(sizes));
+    let padded = eft::export(&tengu, catalog, &bare, Some(sizes));
     assert_eq!(padded.matches("[Empty High slot]").count(), 3, "{padded}");
 }
 
@@ -184,7 +173,7 @@ fn eft_options_leave_things_out() {
 fn several_eft_fits_in_one_paste() {
     let Some(catalog) = catalog() else { return };
     let text = format!("{VEXOR}\n\n{TENGU}");
-    let imported = port::import(&catalog, &text, None).expect("both import");
+    let imported = port::import(catalog, &text, None).expect("both import");
     assert!(imported.unknown.is_empty(), "{:?}", imported.unknown);
     let names: Vec<&str> = imported.fits.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, ["Drone Vexor", "Missile Tengu"]);
@@ -206,7 +195,7 @@ Description=Close range|brawler
 [Second]
 Damage Control II
 ";
-    let imported = port::import(&catalog, cfg, Some("Vexor.cfg")).expect("the config imports");
+    let imported = port::import(catalog, cfg, Some("Vexor.cfg")).expect("the config imports");
     assert!(imported.unknown.is_empty(), "{:?}", imported.unknown);
     assert_eq!(imported.fits.len(), 2);
     let brawler = &imported.fits[0];
@@ -224,17 +213,17 @@ Damage Control II
 fn dna_round_trips() {
     let Some(catalog) = catalog() else { return };
     for text in [VEXOR, TENGU] {
-        let original = fit(&catalog, text);
-        let plain = dna::export(&original, &catalog, &dna::Options { formatting: false });
+        let original = fit(catalog, text);
+        let plain = dna::export(&original, catalog, &dna::Options { formatting: false });
         assert!(plain.ends_with("::"), "{plain}");
-        let again = one(port::import(&catalog, &plain, None).expect("the DNA imports"));
+        let again = one(port::import(catalog, &plain, None).expect("the DNA imports"));
         assert_eq!(fitted(&again), fitted(&original));
         assert_eq!(again.ship, original.ship);
         // Loaded charges come back as cargo, as in pyfa.
         assert_ne!(again.cargo.len(), 0);
 
-        let link = dna::export(&original, &catalog, &dna::Options { formatting: true });
-        let again = one(port::import(&catalog, &link, None).expect("the chat link imports"));
+        let link = dna::export(&original, catalog, &dna::Options { formatting: true });
+        let again = one(port::import(catalog, &link, None).expect("the chat link imports"));
         assert_eq!(again.name, original.name);
         assert_eq!(fitted(&again), fitted(&original));
     }
@@ -246,7 +235,7 @@ fn dna_alt_form_imports() {
     let vexor = catalog.find("Vexor").expect("the Vexor exists").id;
     let hob = catalog.find("Hobgoblin II").expect("the drone exists").id;
     let text = format!("DNA:{vexor}:{hob}*5");
-    let fit = one(port::import(&catalog, &text, None).expect("the DNA imports"));
+    let fit = one(port::import(catalog, &text, None).expect("the DNA imports"));
     assert_eq!(fit.drones[0].count, 5);
 }
 
@@ -254,14 +243,14 @@ fn dna_alt_form_imports() {
 fn esi_json_round_trips() {
     let Some(catalog) = catalog() else { return };
     for text in [VEXOR, TENGU] {
-        let mut original = fit(&catalog, text);
+        let mut original = fit(catalog, text);
         original.notes = "line one\nline two".to_owned();
-        let json = esi::export(&original, &catalog).expect("the fit exports");
-        let again = one(port::import(&catalog, &json, None).expect("the JSON imports"));
+        let json = esi::export(&original, catalog).expect("the fit exports");
+        let again = one(port::import(catalog, &json, None).expect("the JSON imports"));
         assert_eq!(fitted(&again), fitted(&original));
         assert_eq!(again.notes, original.notes);
         assert_eq!(
-            esi::export(&again, &catalog).expect("the fit exports again"),
+            esi::export(&again, catalog).expect("the fit exports again"),
             json,
             "export is stable"
         );
@@ -271,13 +260,13 @@ fn esi_json_round_trips() {
 #[test]
 fn esi_upload_names_flags_and_carries_extras() {
     let Some(catalog) = catalog() else { return };
-    let tengu = fit(&catalog, TENGU);
+    let tengu = fit(catalog, TENGU);
     let options = esi::UploadOptions {
         charges: true,
         implants: true,
         boosters: true,
     };
-    let json = esi::upload(&tengu, &catalog, options).expect("the fit uploads");
+    let json = esi::upload(&tengu, catalog, options).expect("the fit uploads");
     let body: serde_json::Value = serde_json::from_str(&json).expect("JSON");
     let items = body["items"].as_array().expect("items");
     let flags: Vec<&str> = items.iter().filter_map(|i| i["flag"].as_str()).collect();
@@ -299,21 +288,21 @@ fn esi_upload_names_flags_and_carries_extras() {
     let missiles = id("Scourge Rage Heavy Assault Missile");
     assert!(cargo(missiles) > 1000, "loaded charges join the cargo");
     // Without the extras, only what the fit carries itself.
-    let plain = esi::upload(&tengu, &catalog, esi::UploadOptions::default()).expect("uploads");
+    let plain = esi::upload(&tengu, catalog, esi::UploadOptions::default()).expect("uploads");
     assert!(!plain.contains(&format!("{}", id("High-grade Snake Alpha"))));
     // What the game sends back reads in again.
-    let again = one(port::import(&catalog, &json, None).expect("the upload JSON imports"));
+    let again = one(port::import(catalog, &json, None).expect("the upload JSON imports"));
     assert_eq!(again.subsystems.len(), 4);
 }
 
 #[test]
 fn esi_fitting_from_the_list_becomes_a_fit() {
     let Some(catalog) = catalog() else { return };
-    let vexor = fit(&catalog, VEXOR);
-    let json = esi::export(&vexor, &catalog).expect("exports");
+    let vexor = fit(catalog, VEXOR);
+    let json = esi::export(&vexor, catalog).expect("exports");
     let mut fitting: esi::Fitting = serde_json::from_str(&json).expect("parses");
     fitting.fitting_id = Some(7);
-    let imported = esi::to_fit(&catalog, &fitting).expect("imports");
+    let imported = esi::to_fit(catalog, &fitting).expect("imports");
     assert_eq!(fitted(&imported.fits[0]), fitted(&vexor));
 }
 
@@ -332,7 +321,7 @@ fn esi_json_with_named_flags_imports() {
             {{"flag": "DroneBay", "quantity": 4, "type_id": {hob}}}
         ]}}"#
     );
-    let fit = one(port::import(&catalog, &json, None).expect("the JSON imports"));
+    let fit = one(port::import(catalog, &json, None).expect("the JSON imports"));
     assert_eq!(fit.mid.len(), 1);
     assert_eq!(fit.drones[0].count, 4);
 }
@@ -340,12 +329,12 @@ fn esi_json_with_named_flags_imports() {
 #[test]
 fn xml_round_trips_several_fits() {
     let Some(catalog) = catalog() else { return };
-    let mut vexor = fit(&catalog, VEXOR);
+    let mut vexor = fit(catalog, VEXOR);
     vexor.name = "Quotes \"&\" <brackets>".to_owned();
     vexor.notes = "first\nsecond".to_owned();
-    let tengu = fit(&catalog, TENGU);
-    let doc = xml::export(&[&vexor, &tengu], &catalog);
-    let imported = port::import(&catalog, &doc, None).expect("the XML imports");
+    let tengu = fit(catalog, TENGU);
+    let doc = xml::export(&[&vexor, &tengu], catalog);
+    let imported = port::import(catalog, &doc, None).expect("the XML imports");
     assert!(imported.unknown.is_empty(), "{:?}", imported.unknown);
     assert_eq!(imported.fits.len(), 2);
     assert_eq!(imported.fits[0].name, vexor.name);
@@ -354,33 +343,33 @@ fn xml_round_trips_several_fits() {
     assert_eq!(fitted(&imported.fits[1]), fitted(&tengu));
     let refs: Vec<&Fit> = imported.fits.iter().collect();
     // Loaded charges become cargo on the way through, so the second export is the stable one.
-    let again = xml::export(&refs, &catalog);
-    let twice = port::import(&catalog, &again, None).expect("the XML imports again");
+    let again = xml::export(&refs, catalog);
+    let twice = port::import(catalog, &again, None).expect("the XML imports again");
     let refs: Vec<&Fit> = twice.fits.iter().collect();
-    assert_eq!(xml::export(&refs, &catalog), again);
+    assert_eq!(xml::export(&refs, catalog), again);
 }
 
 #[test]
 fn multibuy_lists_the_ship_and_totals() {
     let Some(catalog) = catalog() else { return };
-    let vexor = fit(&catalog, VEXOR);
-    let list = multibuy::export(&vexor, &catalog, &multibuy::Options::default());
+    let vexor = fit(catalog, VEXOR);
+    let list = multibuy::export(&vexor, catalog, &multibuy::Options::default());
     let lines: Vec<&str> = list.lines().collect();
     assert_eq!(lines[0], "Vexor");
     assert!(lines.contains(&"Heavy Neutron Blaster II x4"), "{list}");
     assert!(lines.contains(&"Hobgoblin II x5"), "{list}");
     // Every line is something the item paste reads back.
-    let items = port::parse_items(&catalog, &list).expect("the list reads back");
+    let items = port::parse_items(catalog, &list).expect("the list reads back");
     assert_eq!(items.len(), lines.len());
 }
 
 #[test]
 fn html_links_every_fit() {
     let Some(catalog) = catalog() else { return };
-    let fits = [fit(&catalog, VEXOR), fit(&catalog, TENGU)];
-    let full = html::export(&fits, &catalog, false);
+    let fits = [fit(catalog, VEXOR), fit(catalog, TENGU)];
+    let full = html::export(&fits, catalog, false);
     assert_eq!(full.matches("<details>").count(), 2);
-    let minimal = html::export(&fits, &catalog, true);
+    let minimal = html::export(&fits, catalog, true);
     assert_eq!(minimal.matches("<a ").count(), 2);
     assert!(minimal.contains("Tengu: Missile Tengu"), "{minimal}");
 }
@@ -388,8 +377,8 @@ fn html_links_every_fit() {
 #[test]
 fn junk_is_not_a_fit() {
     let Some(catalog) = catalog() else { return };
-    assert!(port::import(&catalog, "hello there", None).is_err());
-    assert!(port::import(&catalog, "   ", None).is_err());
+    assert!(port::import(catalog, "hello there", None).is_err());
+    assert!(port::import(catalog, "   ", None).is_err());
 }
 
 #[test]
@@ -399,7 +388,7 @@ fn renamed_items_import_under_their_new_names() {
     let new = "Multispectrum Energized Membrane II";
     assert!(catalog.find(new).is_some_and(|t| t.name == new));
     let text = format!("[Rifter, Old Names]\n\n{old}\n");
-    let fit = one(port::import(&catalog, &text, None).expect("the fit imports"));
+    let fit = one(port::import(catalog, &text, None).expect("the fit imports"));
     let low: Vec<i32> = fit.low.iter().flatten().map(|m| m.type_id).collect();
     assert_eq!(low, [catalog.find(new).expect("exists").id]);
 }
@@ -430,7 +419,7 @@ fn squadrons(catalog: &Catalog, fit: &Fit) -> Vec<(i32, u32)> {
 #[test]
 fn fighters_survive_every_format() {
     let Some(catalog) = catalog() else { return };
-    let original = fit(&catalog, THANATOS);
+    let original = fit(catalog, THANATOS);
     let firbolg = catalog.find("Firbolg I").expect("the fighter exists").id;
     assert_eq!(original.fighters.len(), 3, "the fighter bay section");
     assert_eq!(original.cargo.len(), 2, "the spare squadron stays in cargo");
@@ -442,7 +431,7 @@ fn fighters_survive_every_format() {
             .any(|f| f.type_id == firbolg && f.amount == Some(5)),
         "the short squadron keeps its size"
     );
-    let expected = squadrons(&catalog, &original);
+    let expected = squadrons(catalog, &original);
     let cargo = |fit: &Fit| {
         let mut cargo = fit.cargo.clone();
         cargo.sort_unstable();
@@ -454,31 +443,31 @@ fn fighters_survive_every_format() {
             again.drones.is_empty(),
             "{format}: fighters in the drone bay"
         );
-        assert_eq!(squadrons(&catalog, again), expected, "{format}");
+        assert_eq!(squadrons(catalog, again), expected, "{format}");
         assert_eq!(fitted(again), fitted(&original), "{format}");
     };
 
     let options = eft::Options::default();
-    let text = eft::export(&original, &catalog, &options, None);
-    let again = one(port::import(&catalog, &text, None).expect("the EFT imports"));
+    let text = eft::export(&original, catalog, &options, None);
+    let again = one(port::import(catalog, &text, None).expect("the EFT imports"));
     check("EFT", &again);
     assert_eq!(
         cargo(&again),
         cargo(&original),
         "EFT keeps the spare squadron"
     );
-    assert_eq!(eft::export(&again, &catalog, &options, None), text);
+    assert_eq!(eft::export(&again, catalog, &options, None), text);
 
-    let plain = dna::export(&original, &catalog, &dna::Options { formatting: false });
+    let plain = dna::export(&original, catalog, &dna::Options { formatting: false });
     assert!(plain.contains(&format!(":{firbolg};5:")), "{plain}");
     check(
         "DNA",
-        &one(port::import(&catalog, &plain, None).expect("the DNA imports")),
+        &one(port::import(catalog, &plain, None).expect("the DNA imports")),
     );
 
-    let json = esi::export(&original, &catalog).expect("the fit exports");
+    let json = esi::export(&original, catalog).expect("the fit exports");
     assert!(json.contains(r#""flag":158"#), "{json}");
-    let again = one(port::import(&catalog, &json, None).expect("the JSON imports"));
+    let again = one(port::import(catalog, &json, None).expect("the JSON imports"));
     check("ESI", &again);
     assert_eq!(
         cargo(&again),
@@ -486,12 +475,12 @@ fn fighters_survive_every_format() {
         "ESI keeps the spare squadron"
     );
 
-    let doc = xml::export(&[&original], &catalog);
+    let doc = xml::export(&[&original], catalog);
     assert!(
         doc.contains(r#"<hardware qty="5" slot="fighter bay" type="Firbolg I"/>"#),
         "{doc}"
     );
-    let again = one(port::import(&catalog, &doc, None).expect("the XML imports"));
+    let again = one(port::import(catalog, &doc, None).expect("the XML imports"));
     check("XML", &again);
     assert_eq!(
         cargo(&again),
@@ -499,7 +488,7 @@ fn fighters_survive_every_format() {
         "XML keeps the spare squadron"
     );
 
-    let list = multibuy::export(&original, &catalog, &multibuy::Options::default());
+    let list = multibuy::export(&original, catalog, &multibuy::Options::default());
     // Squadrons at full size count as the type's size before skills, the spare one as 9.
     let firbolgs: u32 = expected
         .iter()
@@ -525,16 +514,16 @@ fn huge_counts_do_not_run_away() {
 
     // A rack fills up to what any hull has, and the rest is dropped.
     let dna = format!("{rifter}:{dc};4000000000:{hob};4000000000:{ammo};4000000000::");
-    let fit = one(port::import(&catalog, &dna, None).expect("the DNA imports"));
+    let fit = one(port::import(catalog, &dna, None).expect("the DNA imports"));
     assert!(fit.low.len() <= 8, "{} low slots", fit.low.len());
     assert!(fit.drones[0].count <= efa::fit::MAX_DRONES);
     assert!(fit.cargo[0].1 <= efa::fit::MAX_STACK);
 
     // Stacks of one item add up without overflowing.
     let many = format!("{rifter}:{ammo};4000000000:{ammo};4000000000:{ammo};4000000000::");
-    let fit = one(port::import(&catalog, &many, None).expect("the DNA imports"));
+    let fit = one(port::import(catalog, &many, None).expect("the DNA imports"));
     assert_eq!(fit.cargo, vec![(ammo, efa::fit::MAX_STACK)]);
-    let exported = dna::export(&fit, &catalog, &dna::Options { formatting: false });
+    let exported = dna::export(&fit, catalog, &dna::Options { formatting: false });
     assert!(exported.contains(&format!("{ammo};{}", efa::fit::MAX_STACK)));
 
     let xml = r#"<?xml version="1.0" ?><fittings count="1"><fitting name="x"><shipType value="Rifter"/>
@@ -542,7 +531,7 @@ fn huge_counts_do_not_run_away() {
         <hardware qty="4000000000" slot="drone bay" type="Hobgoblin II"/>
         <hardware qty="4000000000" slot="cargo" type="EMP S"/>
         </fitting></fittings>"#;
-    let fit = one(port::import(&catalog, xml, None).expect("the XML imports"));
+    let fit = one(port::import(catalog, xml, None).expect("the XML imports"));
     assert!(fit.low.len() <= 8);
     assert!(fit.drones[0].count <= efa::fit::MAX_DRONES);
     assert!(fit.cargo[0].1 <= efa::fit::MAX_STACK);
@@ -555,15 +544,15 @@ fn huge_counts_do_not_run_away() {
             {{"flag": 5, "quantity": 4000000000, "type_id": {ammo}}}
         ]}}"#
     );
-    let fit = one(port::import(&catalog, &json, None).expect("the JSON imports"));
+    let fit = one(port::import(catalog, &json, None).expect("the JSON imports"));
     assert!(fit.low.len() <= 8);
     assert!(fit.drones[0].count <= efa::fit::MAX_DRONES);
     assert_eq!(fit.cargo, vec![(ammo, efa::fit::MAX_STACK)]);
 
     let eft = "[Rifter, x]\n\nHobgoblin II x4000000000\n\nEMP S x4000000000\n";
-    let fit = one(port::import(&catalog, eft, None).expect("the EFT imports"));
+    let fit = one(port::import(catalog, eft, None).expect("the EFT imports"));
     assert!(fit.drones[0].count <= efa::fit::MAX_DRONES);
     assert!(fit.cargo[0].1 <= efa::fit::MAX_STACK);
-    let list = multibuy::export(&fit, &catalog, &multibuy::Options::default());
+    let list = multibuy::export(&fit, catalog, &multibuy::Options::default());
     assert!(list.contains("EMP S x"), "{list}");
 }

@@ -1,10 +1,7 @@
 //! EFT import and export against the real data. Skipped when no dump is present.
 
-use std::path::Path;
-
-use efa::{data::Catalog, fit::Fit, port::eft};
-
-const DATA: &str = "data/eve";
+use crate::common::catalog;
+use efa::{fit::Fit, port::eft};
 
 const VEXOR: &str = "[Vexor, Drone Vexor]
 Drone Damage Amplifier II
@@ -32,18 +29,10 @@ Hobgoblin II x5
 Void M x2000
 ";
 
-fn catalog() -> Option<Catalog> {
-    if !Path::new(DATA).join("phobos/metadata.json").exists() {
-        eprintln!("no EVE data in {DATA}, skipping");
-        return None;
-    }
-    Some(Catalog::load_cached(Path::new(DATA), Path::new("data/cache")).expect("the dump loads"))
-}
-
 #[test]
 fn eft_round_trips() {
     let Some(catalog) = catalog() else { return };
-    let (fit, unknown) = Fit::from_eft(&catalog, VEXOR).expect("the fit parses");
+    let (fit, unknown) = Fit::from_eft(catalog, VEXOR).expect("the fit parses");
     assert!(unknown.is_empty(), "unknown items: {unknown:?}");
     assert_eq!(
         (fit.high.len(), fit.mid.len(), fit.low.len(), fit.rigs.len()),
@@ -55,9 +44,9 @@ fn eft_round_trips() {
     assert_eq!(fit.launched(), 5);
     assert_eq!(fit.drones[0].active, 5);
 
-    let export = |fit: &Fit| eft::export(fit, &catalog, &eft::Options::default(), None);
+    let export = |fit: &Fit| eft::export(fit, catalog, &eft::Options::default(), None);
     let exported = export(&fit);
-    let (again, unknown) = Fit::from_eft(&catalog, &exported).expect("the export parses");
+    let (again, unknown) = Fit::from_eft(catalog, &exported).expect("the export parses");
     assert!(
         unknown.is_empty(),
         "unknown items after export: {unknown:?}"

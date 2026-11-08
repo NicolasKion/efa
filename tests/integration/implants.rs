@@ -1,31 +1,12 @@
 //! Implant slots, states, sources and sets against the real data. Skipped when no dump is
 //! present.
 
-use std::{path::Path, sync::OnceLock};
-
+use crate::common::catalog;
 use efa::{
     data::{Catalog, TypeId},
     fit::{Fit, ImplantSource},
     implant_set::{self, ImplantSet},
 };
-
-const DATA: &str = "data/eve";
-
-fn catalog() -> Option<&'static Catalog> {
-    static CATALOG: OnceLock<Option<Catalog>> = OnceLock::new();
-    CATALOG
-        .get_or_init(|| {
-            if !Path::new(DATA).join("phobos/metadata.json").exists() {
-                eprintln!("no EVE data in {DATA}, skipping");
-                return None;
-            }
-            Some(
-                Catalog::load_cached(Path::new(DATA), Path::new("data/cache"))
-                    .expect("the dump loads"),
-            )
-        })
-        .as_ref()
-}
 
 fn id(catalog: &Catalog, name: &str) -> TypeId {
     catalog

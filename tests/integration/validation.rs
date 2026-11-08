@@ -1,36 +1,12 @@
 //! Fit validation against the real data: refine's checks come back tied to the right rows.
 //! Skipped when no dump is present.
 
-use std::{path::Path, sync::OnceLock};
-
+use crate::common::setup;
 use efa::{
     data::{Catalog, Slot, TypeId},
     engine::{CalcOptions, Engine, ItemRef, Pilot, Problem},
     fit::Fit,
 };
-
-const DATA: &str = "data/eve";
-
-fn setup() -> Option<&'static (Catalog, Engine)> {
-    static SETUP: OnceLock<Option<(Catalog, Engine)>> = OnceLock::new();
-    SETUP
-        .get_or_init(|| {
-            if !Path::new(DATA).join("phobos/metadata.json").exists() {
-                eprintln!("no EVE data in {DATA}, skipping");
-                return None;
-            }
-            let catalog = Catalog::load_cached(Path::new(DATA), Path::new("data/cache"))
-                .expect("the dump loads");
-            let engine = Engine::load(
-                Path::new(DATA),
-                Path::new("data/cache"),
-                catalog.skills.clone(),
-            )
-            .expect("the engine loads");
-            Some((catalog, engine))
-        })
-        .as_ref()
-}
 
 fn id(catalog: &Catalog, name: &str) -> TypeId {
     catalog

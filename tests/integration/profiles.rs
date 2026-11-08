@@ -1,17 +1,13 @@
 //! User damage patterns and target profiles against the real data. Skipped when no dump is
 //! present.
 
-use std::path::Path;
-
+use crate::common::setup;
 use efa::{
     damage_pattern::{self, DamagePattern},
     data::Catalog,
-    engine::Engine,
     fit::Fit,
     target_profile::{self, TargetProfile},
 };
-
-const DATA: &str = "data/eve";
 
 const VEXOR: &str = "[Vexor, Profiles Vexor]
 Medium Armor Repairer II
@@ -25,21 +21,6 @@ Heavy Neutron Blaster II, Void M
 
 Garde II x2
 ";
-
-fn setup() -> Option<(Catalog, Engine)> {
-    if !Path::new(DATA).join("phobos/metadata.json").exists() {
-        eprintln!("no EVE data in {DATA}, skipping");
-        return None;
-    }
-    let catalog = Catalog::load(Path::new(DATA)).expect("the dump loads");
-    let engine = Engine::load(
-        Path::new(DATA),
-        Path::new("data/cache"),
-        catalog.skills.clone(),
-    )
-    .expect("the engine loads");
-    Some((catalog, engine))
-}
 
 fn vexor(catalog: &Catalog) -> Fit {
     let (mut fit, unknown) = Fit::from_eft(catalog, VEXOR).expect("the fit parses");
@@ -63,7 +44,7 @@ fn ehp_under_a_user_pattern_matches_pyfa() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let mut fit = vexor(&catalog);
+    let mut fit = vexor(catalog);
     let pattern = DamagePattern::new("[Mine]Kinetic heavy", [0.0, 10.0, 30.0, 5.0]);
     fit.damage_profile = pattern.to_profile();
     let stats = engine.compute(&fit);
@@ -84,7 +65,7 @@ fn applied_dps_against_a_profile() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let fit = vexor(&catalog);
+    let fit = vexor(catalog);
     let stats = engine.compute(&fit);
     let profile = target_profile::BUILTINS
         .iter()

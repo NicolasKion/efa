@@ -1,16 +1,13 @@
 //! What the item stats window reads, against the real data: per-item attributes after bonuses,
 //! where each modification comes from, and the extra type data. Skipped when no dump is present.
 
-use std::{collections::HashSet, path::Path};
-
+use crate::common::{item_data, setup};
 use efa::{
-    data::{Catalog, Slot, TypeId},
-    engine::{Engine, FitItem, ModOp, SourceKind},
+    data::{Catalog, Slot},
+    engine::{FitItem, ModOp, SourceKind},
     fit::Fit,
-    item_data::{ItemData, type_attr},
+    item_data::type_attr,
 };
-
-const DATA: &str = "data/eve";
 
 const RIFTER: &str = "[Rifter, Stats]
 Gyrostabilizer II
@@ -24,34 +21,6 @@ Gyrostabilizer II
 /// Damage multiplier, which gyrostabilizers and skills raise.
 const DAMAGE_MULTIPLIER: i32 = 64;
 
-fn setup() -> Option<(Catalog, Engine)> {
-    if !Path::new(DATA).join("phobos/metadata.json").exists() {
-        eprintln!("no EVE data in {DATA}, skipping");
-        return None;
-    }
-    let catalog =
-        Catalog::load_cached(Path::new(DATA), Path::new("data/cache")).expect("the dump loads");
-    let engine = Engine::load(
-        Path::new(DATA),
-        Path::new("data/cache"),
-        catalog.skills.clone(),
-    )
-    .expect("the engine loads");
-    Some((catalog, engine))
-}
-
-fn item_data(catalog: &Catalog) -> ItemData {
-    let wanted: HashSet<TypeId> = catalog.types.keys().copied().collect();
-    let key = efa::data::cache_key(Path::new(DATA));
-    ItemData::load_cached(
-        Path::new(DATA),
-        Path::new("data/cache"),
-        key.as_deref(),
-        &wanted,
-    )
-    .expect("the item data loads")
-}
-
 fn rifter(catalog: &Catalog) -> Fit {
     let (fit, unknown) = Fit::from_eft(catalog, RIFTER).expect("the fit parses");
     assert!(unknown.is_empty(), "unknown items: {unknown:?}");
@@ -63,7 +32,7 @@ fn a_turret_shows_its_bonuses_and_where_they_come_from() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let fit = rifter(&catalog);
+    let fit = rifter(catalog);
     let turret = engine
         .inspect(&fit, engine.all5(), FitItem::Module(Slot::High, 0))
         .expect("the turret is there");
@@ -107,7 +76,7 @@ fn charges_ships_and_empty_places() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let fit = rifter(&catalog);
+    let fit = rifter(catalog);
     let charge = engine
         .inspect(&fit, engine.all5(), FitItem::Charge(Slot::High, 0))
         .expect("the turret is loaded");
@@ -137,7 +106,7 @@ fn charges_ships_and_empty_places() {
 #[test]
 fn type_data_has_descriptions_traits_and_requirements() {
     let Some((catalog, _)) = setup() else { return };
-    let data = item_data(&catalog);
+    let data = item_data(catalog);
     let rifter = catalog.find("Rifter").unwrap().id;
     let info = data.type_info(rifter).expect("the Rifter is described");
     assert!(

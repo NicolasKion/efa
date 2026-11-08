@@ -1,14 +1,11 @@
 //! Stats pane numbers against the real data. Skipped when no dump is present.
 
-use std::path::Path;
-
+use crate::common::setup;
 use efa::{
     data::Catalog,
-    engine::{Engine, Layer, Stats},
+    engine::{Layer, Stats},
     fit::{DamageProfile, Fit},
 };
-
-const DATA: &str = "data/eve";
 
 /// Shield and armor tanked, with an armor repairer that cannot run forever.
 const VEXOR: &str = "[Vexor, Tank Vexor]
@@ -30,21 +27,6 @@ Medium Capacitor Control Circuit I
 
 Garde II x2
 ";
-
-fn setup() -> Option<(Catalog, Engine)> {
-    if !Path::new(DATA).join("phobos/metadata.json").exists() {
-        eprintln!("no EVE data in {DATA}, skipping");
-        return None;
-    }
-    let catalog = Catalog::load(Path::new(DATA)).expect("the dump loads");
-    let engine = Engine::load(
-        Path::new(DATA),
-        Path::new("data/cache"),
-        catalog.skills.clone(),
-    )
-    .expect("the engine loads");
-    Some((catalog, engine))
-}
 
 fn vexor(catalog: &Catalog) -> Fit {
     let (mut fit, unknown) = Fit::from_eft(catalog, VEXOR).expect("the fit parses");
@@ -77,7 +59,7 @@ fn ehp_applies_resists_once() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let mut fit = vexor(&catalog);
+    let mut fit = vexor(catalog);
     let stats = engine.compute(&fit);
     let mut total = (0.0, 0.0);
     for (name, layer) in layers(&stats) {
@@ -104,7 +86,7 @@ fn sentries_count_as_drone_damage() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let stats = engine.compute(&vexor(&catalog));
+    let stats = engine.compute(&vexor(catalog));
     assert!(stats.drone_dps > 0.0, "sentry DPS: {}", stats.drone_dps);
     assert_close(
         stats.weapon_dps + stats.drone_dps,
@@ -118,7 +100,7 @@ fn sustained_repair_never_beats_reinforced() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let stats = engine.compute(&vexor(&catalog));
+    let stats = engine.compute(&vexor(catalog));
     assert!(stats.tank.armor > 0.0, "armor repair: {}", stats.tank.armor);
     assert!(
         stats.sustained.armor < stats.tank.armor,

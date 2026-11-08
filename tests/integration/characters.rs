@@ -1,19 +1,16 @@
 //! Characters, skill levels and requirements against the real data. Skipped when no dump is
 //! present.
 
-use std::{path::Path, sync::OnceLock};
-
+pub(crate) use crate::common::setup;
 use efa::{
     character::{
         CharacterId, Characters, Keep,
         requirements::{self, Numerals},
     },
     data::{Catalog, Slot, TypeId},
-    engine::{CalcOptions, Engine, SkillTarget},
+    engine::{CalcOptions, SkillTarget},
     fit::Fit,
 };
-
-const DATA: &str = "data/eve";
 
 const RIFTER: &str = "[Rifter, Test]
 200mm AutoCannon II, EMP S
@@ -21,27 +18,6 @@ const RIFTER: &str = "[Rifter, Test]
 
 Hobgoblin II x1
 ";
-
-pub(crate) fn setup() -> Option<&'static (Catalog, Engine)> {
-    static SETUP: OnceLock<Option<(Catalog, Engine)>> = OnceLock::new();
-    SETUP
-        .get_or_init(|| {
-            if !Path::new(DATA).join("phobos/metadata.json").exists() {
-                eprintln!("no EVE data in {DATA}, skipping");
-                return None;
-            }
-            let catalog = Catalog::load_cached(Path::new(DATA), Path::new("data/cache"))
-                .expect("the dump loads");
-            let engine = Engine::load(
-                Path::new(DATA),
-                Path::new("data/cache"),
-                catalog.skills.clone(),
-            )
-            .expect("the engine loads");
-            Some((catalog, engine))
-        })
-        .as_ref()
-}
 
 pub(crate) fn id(catalog: &Catalog, name: &str) -> TypeId {
     catalog

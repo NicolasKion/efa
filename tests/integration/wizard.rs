@@ -1,7 +1,5 @@
 //! The fitting wizard's tank section against the real data. Skipped when no dump is present.
 
-use std::{collections::HashSet, path::Path, sync::OnceLock};
-
 use efa::{
     data::{Catalog, Slot, TypeId},
     engine::Engine,
@@ -14,27 +12,12 @@ use efa::{
     },
 };
 
-const DATA: &str = "data/eve";
+/// The shared catalog, engine and item data.
+type All = (&'static Catalog, &'static Engine, &'static ItemData);
 
-fn setup() -> Option<&'static (Catalog, Engine, ItemData)> {
-    static SETUP: OnceLock<Option<(Catalog, Engine, ItemData)>> = OnceLock::new();
-    SETUP
-        .get_or_init(|| {
-            if !Path::new(DATA).join("phobos/metadata.json").exists() {
-                eprintln!("no EVE data in {DATA}, skipping");
-                return None;
-            }
-            let cache = Path::new("data/cache");
-            let catalog = Catalog::load_cached(Path::new(DATA), cache).expect("the dump loads");
-            let engine = Engine::load(Path::new(DATA), cache, catalog.skills.clone())
-                .expect("the engine loads");
-            let wanted: HashSet<TypeId> = catalog.types.keys().copied().collect();
-            let key = efa::data::cache_key(Path::new(DATA));
-            let data = ItemData::load_cached(Path::new(DATA), cache, key.as_deref(), &wanted)
-                .expect("the item data loads");
-            Some((catalog, engine, data))
-        })
-        .as_ref()
+fn setup() -> Option<All> {
+    let (catalog, engine) = crate::common::setup()?;
+    Some((catalog, engine, crate::common::item_data(catalog)))
 }
 
 fn ship(catalog: &Catalog, name: &str) -> Fit {
@@ -54,7 +37,7 @@ fn facts(catalog: &Catalog, engine: &Engine, data: &ItemData, fit: &Fit) -> Fact
 /// The search for the choices on `fit`, the layer the hull is built for unless `edit` says
 /// otherwise.
 fn problem(
-    (catalog, engine, data): &(Catalog, Engine, ItemData),
+    (catalog, engine, data): All,
     fit: &Fit,
     prices: &Prices,
     edit: impl FnOnce(&mut Choices),
@@ -69,13 +52,9 @@ fn problem(
 }
 
 /// The best tanks for the choices on `fit`.
-fn best(
-    all: &(Catalog, Engine, ItemData),
-    fit: &Fit,
-    edit: impl FnOnce(&mut Choices),
-) -> (Problem, Vec<Outcome>) {
+fn best(all: All, fit: &Fit, edit: impl FnOnce(&mut Choices)) -> (Problem, Vec<Outcome>) {
     let problem = problem(all, fit, &Prices::default(), edit);
-    let found = tank::optimise(&all.1, &problem, &Progress::default(), 5);
+    let found = tank::optimise(all.1, &problem, &Progress::default(), 5);
     (problem, found.outcomes)
 }
 
@@ -125,7 +104,7 @@ fn max_resists_beats_max_ehp_on_the_multiplier() {
     let Some(all) = setup() else {
         return;
     };
-    let fit = ship(&all.0, "Abaddon");
+    let fit = ship(all.0, "Abaddon");
     let run = |goal| {
         best(all, &fit, |c| {
             c.layer = Layer::Armor;
@@ -217,7 +196,7 @@ fn max_repair_ranks_by_repaired_ehp_a_second() {
     let rigs = vec![pump; problem.rig_positions.len()];
     let naive = (1..=naive.len())
         .rev()
-        .find_map(|n| tank::score(&all.1, &problem, &naive[..n], &rigs))
+        .find_map(|n| tank::score(all.1, &problem, &naive[..n], &rigs))
         .expect("some of the hand fit fits");
     assert!(found.numbers.repair_ehp > naive.numbers.repair_ehp);
 }
@@ -277,7 +256,7 @@ fn two_repairers_fit_with_an_ancillary_current_router() {
     );
     // Without the fitting rigs, two do not fit.
     problem.rigs.retain(|r| !r.fitting);
-    let without = tank::optimise(&all.1, &problem, &Progress::default(), 5);
+    let without = tank::optimise(all.1, &problem, &Progress::default(), 5);
     assert_eq!(without.repairers_short, Some(1), "{without:?}");
 }
 
@@ -429,7 +408,7 @@ fn a_tank_budget_caps_the_price() {
             c.search_tiers = SearchTiers::of(&[SearchGroup::T2, SearchGroup::Faction]);
             c.budget = budget;
         });
-        tank::optimise(&all.1, &problem, &Progress::default(), 5)
+        tank::optimise(all.1, &problem, &Progress::default(), 5)
     };
     let free = run(Budget::default());
     let best = free.outcomes.first().expect("a tank");
@@ -458,7 +437,7 @@ fn a_budget_leaves_out_what_has_no_price() {
     let Some(all) = setup() else {
         return;
     };
-    let fit = ship(&all.0, "Abaddon");
+    let fit = ship(all.0, "Abaddon");
     let problem = problem(all, &fit, &Prices::default(), |c| {
         c.layer = Layer::Armor;
         c.budget.total = Some(1_000_000_000);
@@ -491,7 +470,7 @@ fn refit_redoes_the_fitted_tank_and_keeps_the_rest() {
         c.refit = true;
     });
     assert_eq!(problem.removed, [(Slot::Low, 0), (Slot::Low, 2)]);
-    let facts = facts(catalog, engine, &all.2, &fit);
+    let facts = facts(catalog, engine, all.2, &fit);
     assert_eq!(problem.positions.len(), facts.total(Slot::Low) - 1);
     let found = outcomes.first().expect("a tank");
     let mut next = fit.clone();
@@ -525,7 +504,7 @@ fn refit_redoes_the_fitted_tank_and_keeps_the_rest() {
     assert_eq!(kept.positions.len(), facts.total(Slot::Low) - 3);
 }
 
-fn problem_free(all: &(Catalog, Engine, ItemData), fit: &Fit) -> Problem {
+fn problem_free(all: All, fit: &Fit) -> Problem {
     problem(all, fit, &Prices::default(), |c| {
         c.layer = Layer::Armor;
         c.refit = false;

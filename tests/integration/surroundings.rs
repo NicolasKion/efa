@@ -1,30 +1,12 @@
 //! Projected items, environmental effects, fleet boosts and fighters change the stats of the fit
 //! they act on. Skipped when no dump is present.
 
-use std::path::Path;
-
+use crate::common::setup;
 use efa::{
     data::Catalog,
-    engine::{CalcOptions, Engine, Stats},
+    engine::{CalcOptions, Stats},
     fit::{Fit, ModuleState},
 };
-
-const DATA: &str = "data/eve";
-
-fn setup() -> Option<(Catalog, Engine)> {
-    if !Path::new(DATA).join("phobos/metadata.json").exists() {
-        eprintln!("no EVE data in {DATA}, skipping");
-        return None;
-    }
-    let catalog = Catalog::load(Path::new(DATA)).expect("the dump loads");
-    let engine = Engine::load(
-        Path::new(DATA),
-        Path::new("data/cache"),
-        catalog.skills.clone(),
-    )
-    .expect("the engine loads");
-    Some((catalog, engine))
-}
 
 fn id(catalog: &Catalog, name: &str) -> i32 {
     catalog
@@ -66,9 +48,9 @@ fn command_bursts_boost_fleet_members() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let mut target = rifter(&catalog);
+    let mut target = rifter(catalog);
     let booster = eft(
-        &catalog,
+        catalog,
         "[Vulture, Booster]\n\n\nShield Command Burst II, Shield Extension Charge\n",
         2,
     );
@@ -94,12 +76,12 @@ fn projected_webs_slow_the_target() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let mut target = rifter(&catalog);
+    let mut target = rifter(catalog);
     let base = speed(&engine.compute(&target));
 
     target
         .projected
-        .add_module(id(&catalog, "Stasis Webifier II"), true);
+        .add_module(id(catalog, "Stasis Webifier II"), true);
     let webbed = speed(&engine.compute(&target));
     assert!(webbed < base * 0.6, "speed {base} -> {webbed}");
 
@@ -119,8 +101,8 @@ fn projected_fits_apply_once_per_copy() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let mut target = rifter(&catalog);
-    let webber = eft(&catalog, "[Rifter, Webber]\n\nStasis Webifier I\n\n", 5);
+    let mut target = rifter(catalog);
+    let webber = eft(catalog, "[Rifter, Webber]\n\nStasis Webifier I\n\n", 5);
     let fits = vec![target.clone(), webber];
     let base = speed(&engine.compute_among(&target, &fits, engine.all5(), CalcOptions::default()));
     target.projected.add_fit(5);
@@ -136,11 +118,11 @@ fn projected_drones_apply_while_out() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let mut target = rifter(&catalog);
+    let mut target = rifter(catalog);
     let base = speed(&engine.compute(&target));
     target
         .projected
-        .add_drones(id(&catalog, "Berserker SW-900"), 2);
+        .add_drones(id(catalog, "Berserker SW-900"), 2);
     let webbed = speed(&engine.compute(&target));
     assert!(webbed < base, "speed {base} -> {webbed}");
     target.projected.drones[0].active = false;
@@ -153,11 +135,11 @@ fn environment_effects_change_the_fit() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let mut target = rifter(&catalog);
+    let mut target = rifter(catalog);
     let base = engine.compute(&target);
 
     // A class 6 pulsar adds a lot of shield.
-    let pulsar = env(&catalog, "Class 6 Pulsar Effects");
+    let pulsar = env(catalog, "Class 6 Pulsar Effects");
     target.projected.add_env(pulsar);
     let in_pulsar = engine.compute(&target);
     assert!(
@@ -171,8 +153,8 @@ fn environment_effects_change_the_fit() {
     assert!((off.shield.hp - base.shield.hp).abs() < 1e-6);
 
     // Abyssal weather projects onto ships rather than acting on the system.
-    let mut target = rifter(&catalog);
-    let weather = env(&catalog, "Exotic Particle Storm 3");
+    let mut target = rifter(catalog);
+    let weather = env(catalog, "Exotic Particle Storm 3");
     target.projected.add_env(weather);
     let stormed = engine.compute(&target);
     let fingerprint = |s: &Stats| {
@@ -193,7 +175,7 @@ fn fighters_launch_and_their_abilities_switch() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let mut carrier = eft(&catalog, "[Thanatos, Carrier]\n\nFirbolg I x9\n", 3);
+    let mut carrier = eft(catalog, "[Thanatos, Carrier]\n\nFirbolg I x9\n", 3);
     assert!(carrier.drones.is_empty(), "fighters are not drones");
     assert_eq!(carrier.fighters.len(), 1);
     let stats = engine.compute(&carrier);
@@ -227,10 +209,10 @@ fn projected_fighters_report_their_abilities() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let mut target = rifter(&catalog);
+    let mut target = rifter(catalog);
     let base = speed(&engine.compute(&target));
     // A support fighter with a web: no attack, so pyfa switches everything else on.
-    target.projected.add_fighter(id(&catalog, "Dromi I"));
+    target.projected.add_fighter(id(catalog, "Dromi I"));
     let stats = engine.compute(&target);
     let info = &stats.projected_fighters[0];
     assert!(info.abilities.iter().any(|a| a.active));

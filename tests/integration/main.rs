@@ -6,6 +6,7 @@ mod browsers;
 mod cargo;
 mod characters;
 mod columns;
+mod common;
 mod db;
 mod drones;
 mod efs;

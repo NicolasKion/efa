@@ -1,38 +1,15 @@
 //! Optimize Fit Price and the multibuy "Optimize Prices" option against the real data, with a
 //! fixed price table. Skipped when no dump is present.
 
-use std::{collections::HashMap, path::Path, sync::OnceLock};
+use std::collections::HashMap;
 
+use crate::common::setup;
 use efa::{
     data::{Catalog, TypeId},
-    engine::Engine,
     fit::Fit,
     port::multibuy,
     prices::optimize,
 };
-
-const DATA: &str = "data/eve";
-
-fn setup() -> Option<&'static (Catalog, Engine)> {
-    static SETUP: OnceLock<Option<(Catalog, Engine)>> = OnceLock::new();
-    SETUP
-        .get_or_init(|| {
-            if !Path::new(DATA).join("phobos/metadata.json").exists() {
-                eprintln!("no EVE data in {DATA}, skipping");
-                return None;
-            }
-            let catalog = Catalog::load_cached(Path::new(DATA), Path::new("data/cache"))
-                .expect("the dump loads");
-            let engine = Engine::load(
-                Path::new(DATA),
-                Path::new("data/cache"),
-                catalog.skills.clone(),
-            )
-            .expect("the engine loads");
-            Some((catalog, engine))
-        })
-        .as_ref()
-}
 
 fn id(catalog: &Catalog, name: &str) -> TypeId {
     catalog
@@ -51,7 +28,6 @@ Light Neutron Blaster II, Federation Navy Antimatter Charge S
 Light Neutron Blaster II, Federation Navy Antimatter Charge S
 
 Small Hybrid Burst Aerator I
-
 
 Federation Navy Antimatter Charge S x200
 Federation Navy Iron Charge S x100

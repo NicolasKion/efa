@@ -1,14 +1,11 @@
 //! Per-drone numbers from the engine against the real data. Skipped when no dump is present.
 
-use std::path::Path;
-
 use efa::{
-    data::Catalog,
-    engine::{Engine, drone_attr, drone_effect},
+    engine::{drone_attr, drone_effect},
     fit::Fit,
 };
 
-const DATA: &str = "data/eve";
+use crate::common::setup;
 
 const VEXOR: &str = "[Vexor, Drone Vexor]
 
@@ -20,19 +17,10 @@ Warrior SW-300 x2
 
 #[test]
 fn stacks_get_their_own_numbers() {
-    let data = Path::new(DATA);
-    if !data.join("phobos/metadata.json").exists() {
-        eprintln!("no EVE data in {DATA}, skipping");
+    let Some((catalog, engine)) = setup() else {
         return;
-    }
-    let catalog = Catalog::load_cached(
-        data,
-        &data.parent().expect("data/eve has a parent").join("cache"),
-    )
-    .expect("the dump loads");
-    let engine = Engine::load(data, &data.join("../cache"), catalog.skills.clone())
-        .expect("the engine loads");
-    let (mut fit, unknown) = Fit::from_eft(&catalog, VEXOR).expect("the fit parses");
+    };
+    let (mut fit, unknown) = Fit::from_eft(catalog, VEXOR).expect("the fit parses");
     assert!(unknown.is_empty(), "unknown items: {unknown:?}");
     // Everything in the bay: what a drone does is shown whether it is out or not.
     for stack in &mut fit.drones {

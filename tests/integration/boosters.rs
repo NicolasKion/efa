@@ -1,23 +1,12 @@
 //! Boosters against the real data: one per slot, switches kept on swaps, side effects reaching the
 //! engine. Skipped when no dump is present.
 
-use std::path::Path;
-
 use efa::{
     data::Catalog,
-    engine::Engine,
     fit::{Booster, Fit},
 };
 
-const DATA: &str = "data/eve";
-
-fn catalog() -> Option<Catalog> {
-    if !Path::new(DATA).join("phobos/metadata.json").exists() {
-        eprintln!("no EVE data in {DATA}, skipping");
-        return None;
-    }
-    Some(Catalog::load_cached(Path::new(DATA), Path::new("data/cache")).expect("the dump loads"))
-}
+use crate::common::{catalog, setup};
 
 fn id(catalog: &Catalog, name: &str) -> i32 {
     catalog
@@ -31,8 +20,8 @@ fn one_booster_per_slot_in_slot_order() {
     let Some(catalog) = catalog() else { return };
     let mut fit = Fit::new("test");
     // Crash is slot 3, Blue Pill slot 1.
-    assert!(fit.add(&catalog, id(&catalog, "Standard Crash Booster")));
-    assert!(fit.add(&catalog, id(&catalog, "Standard Blue Pill Booster")));
+    assert!(fit.add(catalog, id(catalog, "Standard Crash Booster")));
+    assert!(fit.add(catalog, id(catalog, "Standard Blue Pill Booster")));
     let names = |fit: &Fit| -> Vec<String> {
         fit.boosters
             .iter()
@@ -45,11 +34,8 @@ fn one_booster_per_slot_in_slot_order() {
     );
 
     // Another slot 1 booster replaces the Blue Pill; the same booster twice changes nothing.
-    fit.add(&catalog, id(&catalog, "Standard Exile Booster"));
-    assert!(!fit.add_booster(
-        &catalog,
-        Booster::new(id(&catalog, "Standard Exile Booster"))
-    ));
+    fit.add(catalog, id(catalog, "Standard Exile Booster"));
+    assert!(!fit.add_booster(catalog, Booster::new(id(catalog, "Standard Exile Booster"))));
     assert_eq!(
         names(&fit),
         ["Standard Exile Booster", "Standard Crash Booster"]
@@ -60,14 +46,14 @@ fn one_booster_per_slot_in_slot_order() {
 fn swapping_keeps_switches() {
     let Some(catalog) = catalog() else { return };
     let mut fit = Fit::new("test");
-    let strong = id(&catalog, "Strong Blue Pill Booster");
-    fit.add(&catalog, strong);
+    let strong = id(catalog, "Strong Blue Pill Booster");
+    fit.add(catalog, strong);
     let effect = catalog.get(strong).expect("booster").side_effects[0];
     fit.boosters[0].active = false;
     fit.boosters[0].side_effects.push(effect);
 
-    let improved = id(&catalog, "Improved Blue Pill Booster");
-    assert!(fit.swap_booster(&catalog, 0, improved));
+    let improved = id(catalog, "Improved Blue Pill Booster");
+    assert!(fit.swap_booster(catalog, 0, improved));
     assert_eq!(
         fit.boosters,
         [Booster {
@@ -80,16 +66,12 @@ fn swapping_keeps_switches() {
 
 #[test]
 fn side_effects_change_stats() {
-    let Some(catalog) = catalog() else { return };
-    let cache = Path::new(DATA)
-        .parent()
-        .expect("data has a parent")
-        .join("cache");
-    let engine =
-        Engine::load(Path::new(DATA), &cache, catalog.skills.clone()).expect("engine loads");
+    let Some((catalog, engine)) = setup() else {
+        return;
+    };
     let mut fit = Fit::new("test");
-    fit.ship = Some(id(&catalog, "Rifter"));
-    fit.add(&catalog, id(&catalog, "Strong Blue Pill Booster"));
+    fit.ship = Some(id(catalog, "Rifter"));
+    fit.add(catalog, id(catalog, "Strong Blue Pill Booster"));
     let base = engine.compute(&fit);
     let info = &base.boosters[0];
     assert!(info.side_effects.iter().all(|se| !se.active));

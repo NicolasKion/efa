@@ -2,30 +2,12 @@
 //! read, the reactive armor hardener's own pattern, and structures with services. Skipped when
 //! no dump is present.
 
-use std::path::Path;
-
+use crate::common::setup;
 use efa::{
     data::{Catalog, Kind, Slot},
-    engine::{Engine, FitItem, Stats, misc_attr},
+    engine::{FitItem, Stats, misc_attr},
     fit::{DamageProfile, Fit, ModuleState, RahPattern},
 };
-
-const DATA: &str = "data/eve";
-
-fn setup() -> Option<(Catalog, Engine)> {
-    if !Path::new(DATA).join("phobos/metadata.json").exists() {
-        eprintln!("no EVE data in {DATA}, skipping");
-        return None;
-    }
-    let catalog = Catalog::load(Path::new(DATA)).expect("the dump loads");
-    let engine = Engine::load(
-        Path::new(DATA),
-        Path::new("data/cache"),
-        catalog.skills.clone(),
-    )
-    .expect("the engine loads");
-    Some((catalog, engine))
-}
 
 fn fit(catalog: &Catalog, eft: &str) -> Fit {
     let (fit, unknown) = Fit::from_eft(catalog, eft).expect("the fit parses");
@@ -58,7 +40,7 @@ fn misc_column_reads_module_numbers() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let stats = engine.compute(&fit(&catalog, VEXOR));
+    let stats = engine.compute(&fit(catalog, VEXOR));
     // A web's speed factor, whatever state it is in.
     assert_eq!(
         misc(&stats, Slot::Mid, 0).attr(misc_attr::SPEED_FACTOR),
@@ -85,7 +67,7 @@ fn charge_column_reads_charge_count_and_cycles() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let stats = engine.compute(&fit(&catalog, VEXOR));
+    let stats = engine.compute(&fit(catalog, VEXOR));
     // A blaster fires one charge a cycle, so its charges and cycles agree.
     let blaster = stats.modules[&(Slot::High, 0)];
     let charges = blaster.charges.expect("the blaster holds charges");
@@ -100,7 +82,7 @@ fn overheated_modules_get_a_burnout_time() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let mut fit = fit(&catalog, VEXOR);
+    let mut fit = fit(catalog, VEXOR);
     let stats = engine.compute(&fit);
     assert_eq!(stats.modules[&(Slot::High, 0)].burnout, None);
     for m in fit.high.iter_mut().take(2).flatten() {
@@ -139,7 +121,7 @@ fn reactive_hardener_follows_its_own_pattern() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let mut fit = fit(&catalog, VEXOR);
+    let mut fit = fit(catalog, VEXOR);
     let set = |fit: &mut Fit, rah: Option<RahPattern>| {
         fit.low[0].as_mut().expect("the hardener").rah = rah;
     };
@@ -174,8 +156,8 @@ fn structures_fit_services() {
     assert_eq!(plant.kind, Kind::Module(Slot::Service));
 
     let mut fit = Fit::new("test");
-    assert!(fit.add(&catalog, astrahus.id));
-    assert!(fit.add(&catalog, plant.id));
+    assert!(fit.add(catalog, astrahus.id));
+    assert!(fit.add(catalog, plant.id));
     assert_eq!(fit.services.iter().flatten().count(), 1);
     let stats = engine.compute(&fit);
     assert!(
@@ -186,9 +168,9 @@ fn structures_fit_services() {
     assert_eq!(stats.service.used, 1);
 
     // Services go in and out of EFT text in their own section.
-    let text = efa::port::eft::export(&fit, &catalog, &efa::port::eft::Options::default(), None);
+    let text = efa::port::eft::export(&fit, catalog, &efa::port::eft::Options::default(), None);
     assert!(text.contains("Standup Manufacturing Plant I"), "{text}");
-    let (back, unknown) = Fit::from_eft(&catalog, &text).expect("parses");
+    let (back, unknown) = Fit::from_eft(catalog, &text).expect("parses");
     assert!(unknown.is_empty(), "{unknown:?}");
     assert_eq!(back.services.iter().flatten().count(), 1);
 }

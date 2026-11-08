@@ -1,16 +1,12 @@
 //! Mutaplasmids against the real data: what the catalog knows, what refine makes of the rolls,
 //! and pyfa's mutated item text. Skipped when no dump is present.
 
-use std::path::Path;
-
+use crate::common::{catalog, own_engine};
 use efa::{
-    data::Catalog,
-    engine::{Engine, FitItem},
+    engine::FitItem,
     fit::{Fit, Module, Mutation},
     port::{eft, muta},
 };
-
-const DATA: &str = "data/eve";
 
 const MWD: i32 = 12076;
 const UNSTABLE_MWD: i32 = 47297;
@@ -29,10 +25,8 @@ Stasis Webifier II
 
 Heavy Neutron Blaster II, Void M
 
-
 Hobgoblin II x5 [2]
 Hammerhead II x2
-
 
 [1] 50MN Microwarpdrive II
   Unstable 50MN Microwarpdrive Mutaplasmid
@@ -41,23 +35,6 @@ Hammerhead II x2
   Exigent Light Drone Firepower Mutaplasmid
   damageMultiplier 2.5
 ";
-
-fn catalog() -> Option<Catalog> {
-    if !Path::new(DATA).join("phobos/metadata.json").exists() {
-        eprintln!("no EVE data in {DATA}, skipping");
-        return None;
-    }
-    Some(Catalog::load(Path::new(DATA)).expect("the dump loads"))
-}
-
-fn engine(catalog: &Catalog) -> Engine {
-    Engine::load(
-        Path::new(DATA),
-        Path::new("data/cache"),
-        catalog.skills.clone(),
-    )
-    .expect("the engine loads")
-}
 
 #[test]
 fn catalog_knows_mutaplasmids() {
@@ -95,18 +72,18 @@ fn catalog_knows_mutaplasmids() {
 #[test]
 fn mutating_starts_at_base_values_and_clamps() {
     let Some(catalog) = catalog() else { return };
-    let mut module = Module::new(&catalog, MWD);
-    assert!(module.mutate(&catalog, UNSTABLE_MWD));
+    let mut module = Module::new(catalog, MWD);
+    assert!(module.mutate(catalog, UNSTABLE_MWD));
     assert_eq!(module.type_id, ABYSSAL_MWD);
     assert_eq!(module.base_type(), MWD);
     let mutation = module.mutation.as_mut().expect("mutated");
     assert_eq!(mutation.attrs[&SPEED_FACTOR], 510.0);
-    assert_eq!(mutation.set(&catalog, SPEED_FACTOR, 9999.0), Some(561.0));
+    assert_eq!(mutation.set(catalog, SPEED_FACTOR, 9999.0), Some(561.0));
     assert_eq!(
-        mutation.full_name(&catalog, ABYSSAL_MWD),
+        mutation.full_name(catalog, ABYSSAL_MWD),
         "Unstable 50MN Microwarpdrive II"
     );
-    assert!(!module.mutate(&catalog, UNSTABLE_MWD), "already mutated");
+    assert!(!module.mutate(catalog, UNSTABLE_MWD), "already mutated");
     assert!(module.revert());
     assert_eq!(module.type_id, MWD);
     assert!(module.mutation.is_none());
@@ -115,22 +92,22 @@ fn mutating_starts_at_base_values_and_clamps() {
 #[test]
 fn engine_applies_rolls() {
     let Some(catalog) = catalog() else { return };
-    let engine = engine(&catalog);
+    let engine = own_engine(catalog);
     let (plain, unknown) = Fit::from_eft(
-        &catalog,
+        catalog,
         "[Vexor, Plain]\n50MN Microwarpdrive II\n\nHobgoblin II x5",
     )
     .expect("parses");
     assert_eq!(unknown, Vec::<String>::new());
     let mut rolled = plain.clone();
     let module = rolled.mid[0].as_mut().expect("MWD");
-    assert!(module.mutate(&catalog, UNSTABLE_MWD));
+    assert!(module.mutate(catalog, UNSTABLE_MWD));
     let mutation = module.mutation.as_mut().expect("mutated");
-    mutation.set(&catalog, SPEED_FACTOR, 561.0);
-    mutation.set(&catalog, CAP_NEED, 96.0);
-    assert!(rolled.drones[0].mutate(&catalog, FIREPOWER));
+    mutation.set(catalog, SPEED_FACTOR, 561.0);
+    mutation.set(catalog, CAP_NEED, 96.0);
+    assert!(rolled.drones[0].mutate(catalog, FIREPOWER));
     rolled.drones[0].mutation.as_mut().expect("mutated").set(
-        &catalog,
+        catalog,
         DAMAGE_MULTIPLIER,
         1.92 * 1.2,
     );
@@ -161,7 +138,7 @@ fn engine_applies_rolls() {
 #[test]
 fn eft_reads_and_writes_mutations() {
     let Some(catalog) = catalog() else { return };
-    let (fit, unknown) = Fit::from_eft(&catalog, VEXOR).expect("the fit parses");
+    let (fit, unknown) = Fit::from_eft(catalog, VEXOR).expect("the fit parses");
     assert!(unknown.is_empty(), "unknown items: {unknown:?}");
     let mwd = fit.mid[0].as_ref().expect("MWD");
     assert_eq!(mwd.type_id, ABYSSAL_MWD);
@@ -176,7 +153,7 @@ fn eft_reads_and_writes_mutations() {
     let damage = hobgoblins.mutation.as_ref().expect("mutated").attrs[&DAMAGE_MULTIPLIER];
     assert!((damage - 2.304).abs() < 1e-9, "{damage}");
 
-    let exported = eft::export(&fit, &catalog, &eft::Options::default(), None);
+    let exported = eft::export(&fit, catalog, &eft::Options::default(), None);
     assert!(
         exported.contains("50MN Microwarpdrive II [1]\n"),
         "{exported}"
@@ -191,7 +168,7 @@ fn eft_reads_and_writes_mutations() {
         ),
         "{exported}"
     );
-    let (again, unknown) = Fit::from_eft(&catalog, &exported).expect("the export parses");
+    let (again, unknown) = Fit::from_eft(catalog, &exported).expect("the export parses");
     assert!(unknown.is_empty(), "{unknown:?}");
     assert_eq!(
         again.mid[0].as_ref().and_then(|m| m.mutation.clone()),
@@ -203,26 +180,26 @@ fn eft_reads_and_writes_mutations() {
         mutations: false,
         ..eft::Options::default()
     };
-    let exported = eft::export(&fit, &catalog, &plain, None);
+    let exported = eft::export(&fit, catalog, &plain, None);
     assert!(!exported.contains("[1]"), "{exported}");
 }
 
 #[test]
 fn muta_text_round_trips() {
     let Some(catalog) = catalog() else { return };
-    let (_, mutation) = Mutation::with_values(&catalog, MWD, UNSTABLE_MWD, [(SPEED_FACTOR, 530.5)])
+    let (_, mutation) = Mutation::with_values(catalog, MWD, UNSTABLE_MWD, [(SPEED_FACTOR, 530.5)])
         .expect("mutates");
-    let text = muta::render(&catalog, &mutation, "", "");
+    let text = muta::render(catalog, &mutation, "", "");
     assert_eq!(
         text,
         "50MN Microwarpdrive II\nUnstable 50MN Microwarpdrive Mutaplasmid\n\
          capacitorNeed 160.0, cpu 50.0, power 165.0, signatureRadiusBonus 475.0, \
          speedFactor 530.5"
     );
-    let parsed = muta::parse_single(&catalog, &text).expect("one mutated item");
-    let (result, again) = parsed.mutation(&catalog).expect("mutates again");
+    let parsed = muta::parse_single(catalog, &text).expect("one mutated item");
+    let (result, again) = parsed.mutation(catalog).expect("mutates again");
     assert_eq!(result, ABYSSAL_MWD);
     assert_eq!(again, mutation);
     // A plain module name is not a mutated item.
-    assert!(muta::parse_single(&catalog, "50MN Microwarpdrive II").is_none());
+    assert!(muta::parse_single(catalog, "50MN Microwarpdrive II").is_none());
 }

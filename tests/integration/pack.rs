@@ -4,7 +4,6 @@
 use std::{path::Path, sync::Arc, time::Instant};
 
 use efa::{
-    data::Catalog,
     engine::{Engine, EngineSource, FitItem, PackedEngine, Stats},
     fit::Fit,
     item_data::ItemData,
@@ -12,7 +11,8 @@ use efa::{
     pack::Pack,
 };
 
-const DATA: &str = "data/eve";
+use crate::common::{DATA, own_engine};
+
 const SHIELD_CAPACITY: i32 = 263;
 
 const VEXOR: &str = "[Vexor, Pack Vexor]
@@ -74,9 +74,9 @@ fn a_pack_gives_what_the_dump_gives() {
     eprintln!("loaded from the pack in {} ms", start.elapsed().as_millis());
 
     let start = Instant::now();
-    let dump_catalog = Catalog::load(dir).expect("the dump loads");
-    let dump_engine = Engine::load(dir, Path::new("data/cache"), dump_catalog.skills.clone())
-        .expect("the engine loads from the dump");
+    let dump_catalog = crate::common::catalog().expect("the dump loads");
+    // Its own, since the overrides below change it.
+    let dump_engine = own_engine(dump_catalog);
     eprintln!("loaded from the dump in {} ms", start.elapsed().as_millis());
 
     assert_eq!(

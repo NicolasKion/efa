@@ -1,24 +1,13 @@
 //! The market and fittings browsers against the real data: jargon search, meta buttons, charges
 //! for a fit, ship groups, races and the Omega marker. Skipped when no dump is present.
 
-use std::path::Path;
-
+use crate::common::catalog;
 use efa::{
     data::Catalog,
     fit::{Fit, Module, ModuleState},
     market::{MetaCategory, charges_for_fit},
     ship_browser::Race,
 };
-
-const DATA: &str = "data/eve";
-
-fn catalog() -> Option<Catalog> {
-    if !Path::new(DATA).join("phobos/metadata.json").exists() {
-        eprintln!("no EVE data in {DATA}, skipping");
-        return None;
-    }
-    Some(Catalog::load_cached(Path::new(DATA), Path::new("data/cache")).expect("the dump loads"))
-}
 
 fn names(catalog: &Catalog, query: &str) -> Vec<String> {
     efa::market::search(catalog, query, 300)
@@ -30,13 +19,13 @@ fn names(catalog: &Catalog, query: &str) -> Vec<String> {
 #[test]
 fn jargon_finds_what_it_abbreviates() {
     let Some(catalog) = catalog() else { return };
-    let hml = names(&catalog, "hml 2");
+    let hml = names(catalog, "hml 2");
     assert!(
         hml.contains(&"Heavy Missile Launcher II".to_owned()),
         "{hml:?}"
     );
     assert!(!hml.iter().any(|n| n.starts_with("Rapid")), "{hml:?}");
-    let lse = names(&catalog, "lse");
+    let lse = names(catalog, "lse");
     assert!(
         lse.contains(&"Large Shield Extender II".to_owned()),
         "{lse:?}"
@@ -46,7 +35,7 @@ fn jargon_finds_what_it_abbreviates() {
 #[test]
 fn search_lists_variations_together() {
     let Some(catalog) = catalog() else { return };
-    let found = names(&catalog, "small armor repairer");
+    let found = names(catalog, "small armor repairer");
     let t1 = found.iter().position(|n| n == "Small Armor Repairer I");
     let t2 = found.iter().position(|n| n == "Small Armor Repairer II");
     assert!(t1.zip(t2).is_some_and(|(a, b)| a < b), "{found:?}");
@@ -84,7 +73,7 @@ fn charges_for_a_fit() {
         })],
         ..Fit::new("test")
     };
-    let charges: Vec<String> = charges_for_fit(&catalog, &fit)
+    let charges: Vec<String> = charges_for_fit(catalog, &fit)
         .into_iter()
         .map(|t| catalog.name(t))
         .collect();
@@ -97,7 +86,7 @@ fn charges_for_a_fit() {
         "{charges:?}"
     );
     assert_eq!(
-        charges_for_fit(&catalog, &Fit::new("empty")),
+        charges_for_fit(catalog, &Fit::new("empty")),
         Vec::<i32>::new()
     );
 }
@@ -135,7 +124,7 @@ fn off_market_boosters_get_a_group_of_their_own() {
     let group = &catalog.market_groups[&efa::data::MARKET_SPECIAL_BOOSTERS];
     assert!(group.types.contains(&booster.id));
     assert!(
-        efa::market::search(&catalog, "air repairer booster", 50).contains(&booster.id),
+        efa::market::search(catalog, "air repairer booster", 50).contains(&booster.id),
         "found by search"
     );
     // Accelerators stay out of it.
@@ -153,9 +142,9 @@ fn off_market_boosters_get_a_group_of_their_own() {
 #[test]
 fn search_stops_at_the_limit_in_market_order() {
     let Some(catalog) = catalog() else { return };
-    let all = efa::market::search(&catalog, "launcher", 1000);
+    let all = efa::market::search(catalog, "launcher", 1000);
     assert!(all.len() > 20, "{}", all.len());
-    assert_eq!(efa::market::search(&catalog, "launcher", 20), all[..20]);
+    assert_eq!(efa::market::search(catalog, "launcher", 20), all[..20]);
     let mut sorted = all.clone();
     efa::market::sort_items(&catalog.types, &mut sorted);
     assert_eq!(sorted, all, "results come in market order");
@@ -171,7 +160,7 @@ fn the_charge_index_finds_what_a_scan_finds() {
     ] {
         let module = catalog.find(name).expect("in the catalog");
         let fit = Fit {
-            high: vec![Some(Module::new(&catalog, module.id))],
+            high: vec![Some(Module::new(catalog, module.id))],
             ..Fit::new("test")
         };
         let mut scanned: Vec<i32> = catalog
@@ -181,7 +170,7 @@ fn the_charge_index_finds_what_a_scan_finds() {
             .map(|c| c.id)
             .collect();
         efa::market::sort_items(&catalog.types, &mut scanned);
-        assert_eq!(charges_for_fit(&catalog, &fit), scanned, "{name}");
+        assert_eq!(charges_for_fit(catalog, &fit), scanned, "{name}");
     }
 }
 

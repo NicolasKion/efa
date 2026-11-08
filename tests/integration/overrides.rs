@@ -1,8 +1,6 @@
 //! Attribute overrides against the real data: an overridden base value changes the stats while
 //! overrides are on and not while they are off. Skipped when no dump is present.
 
-use std::path::Path;
-
 use efa::{
     data::{Catalog, Slot},
     engine::{Engine, FitItem},
@@ -10,7 +8,6 @@ use efa::{
     overrides::Overrides,
 };
 
-const DATA: &str = "data/eve";
 const SHIELD_CAPACITY: i32 = 263;
 const DAMAGE_MULTIPLIER: i32 = 64;
 
@@ -23,19 +20,10 @@ Heavy Neutron Blaster II, Void M
 Heavy Neutron Blaster II, Void M
 ";
 
-fn setup() -> Option<(Catalog, Engine)> {
-    if !Path::new(DATA).join("phobos/metadata.json").exists() {
-        eprintln!("no EVE data in {DATA}, skipping");
-        return None;
-    }
-    let catalog = Catalog::load(Path::new(DATA)).expect("the dump loads");
-    let engine = Engine::load(
-        Path::new(DATA),
-        Path::new("data/cache"),
-        catalog.skills.clone(),
-    )
-    .expect("the engine loads");
-    Some((catalog, engine))
+/// The shared catalog with an engine of the test's own, since overrides change the engine.
+fn setup() -> Option<(&'static Catalog, Engine)> {
+    let catalog = crate::common::catalog()?;
+    Some((catalog, crate::common::own_engine(catalog)))
 }
 
 fn id(catalog: &Catalog, name: &str) -> i32 {
@@ -50,10 +38,10 @@ fn overrides_change_stats_only_while_on() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let (fit, unknown) = Fit::from_eft(&catalog, VEXOR).expect("the fit parses");
+    let (fit, unknown) = Fit::from_eft(catalog, VEXOR).expect("the fit parses");
     assert!(unknown.is_empty(), "unknown items: {unknown:?}");
-    let vexor = id(&catalog, "Vexor");
-    let blaster = id(&catalog, "Heavy Neutron Blaster II");
+    let vexor = id(catalog, "Vexor");
+    let blaster = id(catalog, "Heavy Neutron Blaster II");
 
     let plain = engine.compute(&fit);
     let base_shield = engine

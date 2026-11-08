@@ -1,8 +1,7 @@
 //! Cargo against the real data: which items the catalog offers for cargo, and moving items
 //! between the hold and the fit. Skipped when no dump is present.
 
-use std::path::Path;
-
+use crate::common::catalog;
 use efa::{
     data::{Catalog, Kind, Slot, TypeId},
     fit::{
@@ -10,16 +9,6 @@ use efa::{
         cargo::{Transfer, charges_per_module},
     },
 };
-
-const DATA: &str = "data/eve";
-
-fn catalog() -> Option<Catalog> {
-    if !Path::new(DATA).join("phobos/metadata.json").exists() {
-        eprintln!("no EVE data in {DATA}, skipping");
-        return None;
-    }
-    Some(Catalog::load_cached(Path::new(DATA), Path::new("data/cache")).expect("the dump loads"))
-}
 
 fn id(catalog: &Catalog, name: &str) -> TypeId {
     catalog
@@ -72,7 +61,7 @@ fn cargo_only_items_are_listed_like_pyfa() {
     assert!(!roots.contains(&"Trade Goods"), "{roots:?}");
 
     let found = |query: &str| {
-        efa::market::search(&catalog, query, 50)
+        efa::market::search(catalog, query, 50)
             .into_iter()
             .map(|t| catalog.name(t))
             .collect::<Vec<_>>()
@@ -82,20 +71,20 @@ fn cargo_only_items_are_listed_like_pyfa() {
     assert_eq!(found("tritanium"), Vec::<String>::new());
 
     let mut fit = Fit::new("test");
-    assert!(fit.add(&catalog, id(&catalog, "Mobile Depot")));
+    assert!(fit.add(catalog, id(catalog, "Mobile Depot")));
     assert_eq!(fit.cargo.len(), 1);
 }
 
 #[test]
 fn charges_fill_by_capacity() {
     let Some(catalog) = catalog() else { return };
-    let void = id(&catalog, "Void M");
+    let void = id(catalog, "Void M");
     assert_eq!(
-        charges_per_module(&catalog, id(&catalog, "Heavy Neutron Blaster II"), void),
+        charges_per_module(catalog, id(catalog, "Heavy Neutron Blaster II"), void),
         80
     );
     assert_eq!(
-        charges_per_module(&catalog, id(&catalog, "Damage Control II"), void),
+        charges_per_module(catalog, id(catalog, "Damage Control II"), void),
         0
     );
 }
@@ -104,17 +93,17 @@ fn charges_fill_by_capacity() {
 fn modules_go_to_cargo_with_their_charges() {
     let Some(catalog) = catalog() else { return };
     let (neutron, void) = (
-        id(&catalog, "Heavy Neutron Blaster II"),
-        id(&catalog, "Void M"),
+        id(catalog, "Heavy Neutron Blaster II"),
+        id(catalog, "Void M"),
     );
 
     let mut fit = armed(neutron, void);
-    assert!(fit.module_to_cargo(&catalog, (Slot::High, 0), None, Transfer::Duplicate));
+    assert!(fit.module_to_cargo(catalog, (Slot::High, 0), None, Transfer::Duplicate));
     assert_eq!(fit.high.len(), 1);
     assert_eq!((count(&fit, neutron), count(&fit, void)), (1, 80));
 
     let mut fit = armed(neutron, void);
-    assert!(fit.module_to_cargo(&catalog, (Slot::High, 0), None, Transfer::Move));
+    assert!(fit.module_to_cargo(catalog, (Slot::High, 0), None, Transfer::Move));
     assert!(fit.high.is_empty());
     assert_eq!((count(&fit, neutron), count(&fit, void)), (1, 80));
 }
@@ -123,14 +112,14 @@ fn modules_go_to_cargo_with_their_charges() {
 fn a_module_dropped_on_a_cargo_module_trades_places() {
     let Some(catalog) = catalog() else { return };
     let (neutron, ion, void) = (
-        id(&catalog, "Heavy Neutron Blaster II"),
-        id(&catalog, "Heavy Ion Blaster II"),
-        id(&catalog, "Void M"),
+        id(catalog, "Heavy Neutron Blaster II"),
+        id(catalog, "Heavy Ion Blaster II"),
+        id(catalog, "Void M"),
     );
     let mut fit = armed(neutron, void);
     fit.add_cargo(ion, 1);
     fit.add_cargo(void, 100);
-    assert!(fit.module_to_cargo(&catalog, (Slot::High, 0), Some(ion), Transfer::Move));
+    assert!(fit.module_to_cargo(catalog, (Slot::High, 0), Some(ion), Transfer::Move));
     let m = fit.high[0].as_ref().expect("still fitted");
     assert_eq!((m.type_id, m.charge), (ion, Some(void)));
     // The ion blaster holds 120 against the neutron's 80; the rest comes out of cargo.
@@ -140,10 +129,10 @@ fn a_module_dropped_on_a_cargo_module_trades_places() {
     );
 
     // A cargo module for another rack does not swap; the dragged one just goes into cargo.
-    let dc = id(&catalog, "Damage Control II");
+    let dc = id(catalog, "Damage Control II");
     let mut fit = armed(neutron, void);
     fit.add_cargo(dc, 1);
-    assert!(fit.module_to_cargo(&catalog, (Slot::High, 0), Some(dc), Transfer::Move));
+    assert!(fit.module_to_cargo(catalog, (Slot::High, 0), Some(dc), Transfer::Move));
     assert!(fit.high.is_empty());
     assert_eq!((count(&fit, dc), count(&fit, neutron)), (1, 1));
 }
@@ -152,39 +141,39 @@ fn a_module_dropped_on_a_cargo_module_trades_places() {
 fn cargo_charges_load_into_modules() {
     let Some(catalog) = catalog() else { return };
     let (neutron, void, null) = (
-        id(&catalog, "Heavy Neutron Blaster II"),
-        id(&catalog, "Void M"),
-        id(&catalog, "Null M"),
+        id(catalog, "Heavy Neutron Blaster II"),
+        id(catalog, "Void M"),
+        id(catalog, "Null M"),
     );
     let mut fit = armed(neutron, void);
     fit.add_cargo(null, 100);
-    assert!(fit.cargo_to_module(&catalog, null, (Slot::High, 0), Transfer::Move));
+    assert!(fit.cargo_to_module(catalog, null, (Slot::High, 0), Transfer::Move));
     assert_eq!(fit.high[0].as_ref().and_then(|m| m.charge), Some(null));
     assert_eq!((count(&fit, null), count(&fit, void)), (20, 80));
     // Loading the same charge again changes nothing.
-    assert!(!fit.cargo_to_module(&catalog, null, (Slot::High, 0), Transfer::Move));
+    assert!(!fit.cargo_to_module(catalog, null, (Slot::High, 0), Transfer::Move));
 }
 
 #[test]
 fn cargo_modules_replace_fitted_ones_of_their_rack() {
     let Some(catalog) = catalog() else { return };
     let (neutron, electron, void, dc) = (
-        id(&catalog, "Heavy Neutron Blaster II"),
-        id(&catalog, "Heavy Electron Blaster II"),
-        id(&catalog, "Void M"),
-        id(&catalog, "Damage Control II"),
+        id(catalog, "Heavy Neutron Blaster II"),
+        id(catalog, "Heavy Electron Blaster II"),
+        id(catalog, "Void M"),
+        id(catalog, "Damage Control II"),
     );
     let mut fit = armed(neutron, void);
     fit.add_cargo(electron, 2);
     fit.add_cargo(dc, 1);
-    assert!(!fit.cargo_to_module(&catalog, dc, (Slot::High, 0), Transfer::Move));
-    assert!(fit.cargo_to_module(&catalog, electron, (Slot::High, 0), Transfer::Duplicate));
+    assert!(!fit.cargo_to_module(catalog, dc, (Slot::High, 0), Transfer::Move));
+    assert!(fit.cargo_to_module(catalog, electron, (Slot::High, 0), Transfer::Duplicate));
     let m = fit.high[0].as_ref().expect("fitted");
     assert_eq!((m.type_id, m.charge), (electron, Some(void)));
     assert_eq!((count(&fit, electron), count(&fit, neutron)), (2, 1));
 
     // Onto an empty position of the right rack, the module just moves in.
-    assert!(fit.cargo_to_module(&catalog, dc, (Slot::Low, 0), Transfer::Move));
+    assert!(fit.cargo_to_module(catalog, dc, (Slot::Low, 0), Transfer::Move));
     assert_eq!(fit.low[0].as_ref().map(|m| m.type_id), Some(dc));
     assert_eq!(count(&fit, dc), 0);
 }
@@ -199,11 +188,11 @@ fn implants_and_boosters_can_count_against_the_hold() {
         .find("Standard Blue Pill Booster")
         .expect("a booster");
     let mut fit = Fit::new("hold");
-    fit.add(&catalog, implant.id);
-    fit.add(&catalog, booster.id);
-    let cargo_only = fit.hold_volume(&catalog, false);
-    let with_character = fit.hold_volume(&catalog, true);
-    assert!((cargo_only - fit.cargo_volume(&catalog)).abs() < 1e-9);
+    fit.add(catalog, implant.id);
+    fit.add(catalog, booster.id);
+    let cargo_only = fit.hold_volume(catalog, false);
+    let with_character = fit.hold_volume(catalog, true);
+    assert!((cargo_only - fit.cargo_volume(catalog)).abs() < 1e-9);
     assert!(
         (with_character - cargo_only - implant.volume - booster.volume).abs() < 1e-9,
         "{with_character} vs {cargo_only}"
