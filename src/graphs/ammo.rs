@@ -146,15 +146,25 @@ pub fn segments(
     }
     let base = plot::engagement(req, &src.ship, tgt);
     let volley = req.y.param == Param::Volley;
-    let value = |o: &AmmoOption, distance: f64| -> f64 {
-        let values: Vec<Dmg> = o
-            .weapons
-            .iter()
-            .map(|w| if volley { w.volley } else { w.dps })
-            .collect();
+    // What each option's weapons deal before application, per group.
+    let values: Vec<Vec<Vec<Dmg>>> = groups
+        .iter()
+        .map(|g| {
+            g.options
+                .iter()
+                .map(|o| {
+                    o.weapons
+                        .iter()
+                        .map(|w| if volley { w.volley } else { w.dps })
+                        .collect()
+                })
+                .collect()
+        })
+        .collect();
+    let value = |o: &AmmoOption, values: &[Dmg], distance: f64| -> f64 {
         let mut e = base;
         e.distance = Some(distance);
-        plot::applied_damage(req, src, tgt, &o.weapons, &values, e)
+        plot::applied_damage(req, src, tgt, &o.weapons, values, e)
     };
     let (low, high) = (req.range.0.max(0.0), req.range.1.max(0.0));
     let mut out: Vec<Segment> = Vec::new();
@@ -163,11 +173,12 @@ pub fn segments(
         let meters = km * 1000.0;
         let mut total = 0.0;
         let mut first_best: Option<&str> = None;
-        for (n, group) in groups.iter().enumerate() {
+        for (n, (group, values)) in groups.iter().zip(&values).enumerate() {
             let best = group
                 .options
                 .iter()
-                .map(|o| (o, value(o, meters)))
+                .zip(values)
+                .map(|(o, values)| (o, value(o, values, meters)))
                 .max_by(|a, b| a.1.total_cmp(&b.1));
             if let Some((option, v)) = best {
                 total += v;

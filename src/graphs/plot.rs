@@ -289,34 +289,69 @@ fn damage_values(weapons: &[Weapon], y: Param, time: Option<f64>) -> Option<Vec<
         .map(|w| match (y, time) {
             (Param::Dps, None) => Some(w.dps),
             (Param::Volley, None) => Some(w.volley),
-            (_, Some(t)) => Some(timeline_value(&w.cycle, &w.cycle.cycles(t), y, t)),
+            (_, Some(t)) => Some(Timeline::new(&w.cycle, t).value(y, t)),
             // Damage inflicted means nothing without a time.
             _ => None,
         })
         .collect()
 }
 
-/// DPS, volley, or damage done so far at `time`, from a weapon's cycles.
-fn timeline_value<T>(cycle: &Cycle<T>, cycles: &[(f64, f64, T)], y: Param, time: f64) -> T
-where
-    T: Copy + Default + Accumulate,
-{
-    if matches!(y, Param::Damage | Param::Total) {
-        return cycles
+/// A cycling item's cycles up to some time, laid out so the value at any moment is a binary
+/// search away.
+struct Timeline<T> {
+    duration: f64,
+    /// Cycle starts and ends, in order.
+    starts: Vec<f64>,
+    ends: Vec<f64>,
+    amounts: Vec<T>,
+    /// When each cycle's amount lands, in order.
+    landings: Vec<f64>,
+    /// What has landed by the end of each cycle, summed in cycle order.
+    landed: Vec<T>,
+}
+
+impl<T: Copy + Default + Accumulate> Timeline<T> {
+    /// Every cycle of `cycle` until `until` seconds.
+    fn new(cycle: &Cycle<T>, until: f64) -> Self {
+        let cycles = cycle.cycles(until);
+        let mut total = T::default();
+        let landed = cycles
             .iter()
-            .filter(|c| c.0 + cycle.delay <= time)
-            .fold(T::default(), |acc, c| acc.plus(c.2));
-    }
-    match cycles.iter().rev().find(|c| c.0 <= time) {
-        // Past the end of the last cycle that started: reloading, nothing is dealt.
-        Some(c) if time < c.1 => {
-            if matches!(y, Param::Dps | Param::Rps) {
-                c.2.scaled(1.0 / cycle.duration)
-            } else {
-                c.2
-            }
+            .map(|c| {
+                total = total.plus(c.2);
+                total
+            })
+            .collect();
+        Self {
+            duration: cycle.duration,
+            starts: cycles.iter().map(|c| c.0).collect(),
+            ends: cycles.iter().map(|c| c.1).collect(),
+            amounts: cycles.iter().map(|c| c.2).collect(),
+            landings: cycles.iter().map(|c| c.0 + cycle.delay).collect(),
+            landed,
         }
-        _ => T::default(),
+    }
+
+    /// DPS, volley, or what has been done so far at `time`.
+    fn value(&self, y: Param, time: f64) -> T {
+        if matches!(y, Param::Damage | Param::Total) {
+            let done = self.landings.partition_point(|&at| at <= time);
+            return done
+                .checked_sub(1)
+                .map_or_else(T::default, |last| self.landed[last]);
+        }
+        let started = self.starts.partition_point(|&at| at <= time);
+        match started.checked_sub(1) {
+            // Past the end of the last cycle that started: reloading, nothing is dealt.
+            Some(c) if time < self.ends[c] => {
+                if matches!(y, Param::Dps | Param::Rps) {
+                    self.amounts[c].scaled(1.0 / self.duration)
+                } else {
+                    self.amounts[c]
+                }
+            }
+            _ => T::default(),
+        }
     }
 }
 
@@ -394,23 +429,54 @@ pub(super) fn applied_damage(
     values: &[Dmg],
     e: Engagement,
 ) -> f64 {
+    let mults = applications(req, src, tgt, weapons, e);
+    applied_with(req, tgt, weapons, values, &mults)
+}
+
+/// How much of each weapon's damage lands on the target under `e`, the attacker's webs and
+/// target painters counted when asked to.
+fn applications(
+    req: &Request,
+    src: &FitSnapshot,
+    tgt: &TargetData,
+    weapons: &[Weapon],
+    e: Engagement,
+) -> Vec<f64> {
     let e = if req.options.apply_projected {
         tackle(req, src, tgt, e)
     } else {
         e
     };
+    weapons
+        .iter()
+        .map(|w| application(req, &src.ship, tgt, w, e))
+        .collect()
+}
+
+/// What `weapons` dealing `values` apply to the target, each landing its share in `mults`,
+/// after resists.
+fn applied_with(
+    req: &Request,
+    tgt: &TargetData,
+    weapons: &[Weapon],
+    values: &[Dmg],
+    mults: &[f64],
+) -> f64 {
     let mut breach = 0.0;
-    let applied = values.iter().zip(weapons).fold([0.0; 4], |acc, (v, w)| {
-        let mult = application(req, &src.ship, tgt, w, e);
-        if matches!(w.kind, WeaponKind::Breacher { .. }) {
-            // A share of the target's HP up to a cap, past resists.
-            let hp = tgt.hp.unwrap_or(f64::INFINITY);
-            breach += v[0].min(v[1] * hp) * mult;
-            acc
-        } else {
-            add(acc, v.map(|d| d * mult))
-        }
-    });
+    let applied = values
+        .iter()
+        .zip(weapons)
+        .zip(mults)
+        .fold([0.0; 4], |acc, ((v, w), &mult)| {
+            if matches!(w.kind, WeaponKind::Breacher { .. }) {
+                // A share of the target's HP up to a cap, past resists.
+                let hp = tgt.hp.unwrap_or(f64::INFINITY);
+                breach += v[0].min(v[1] * hp) * mult;
+                acc
+            } else {
+                add(acc, v.map(|d| d * mult))
+            }
+        });
     let resists = if req.options.ignore_resists {
         [0.0; 4]
     } else {
@@ -446,14 +512,12 @@ fn damage(req: &Request, src: &FitSnapshot, tgt: &TargetData) -> Option<Series> 
             let (low, high) = (low.clamp(0.0, MAX_TIME), high.clamp(0.0, MAX_TIME));
             let cycles: Vec<&Cycle<Dmg>> = src.weapons.iter().map(|w| &w.cycle).collect();
             let times = change_times(&cycles, high, y == Param::Damage);
-            let timelines: Vec<_> = cycles.iter().map(|c| c.cycles(high)).collect();
+            let timelines: Vec<_> = cycles.iter().map(|c| Timeline::new(c, high)).collect();
+            // The engagement stays put over time, so each weapon lands the same share throughout.
+            let mults = applications(req, src, tgt, &src.weapons, base);
             Series::new(math::steps((low, high), &times, |t| {
-                let values: Vec<Dmg> = cycles
-                    .iter()
-                    .zip(&timelines)
-                    .map(|(c, timeline)| timeline_value(c, timeline, y, t))
-                    .collect();
-                value(&values, base)
+                let values: Vec<Dmg> = timelines.iter().map(|tl| tl.value(y, t)).collect();
+                applied_with(req, tgt, &src.weapons, &values, &mults)
             }))
         }
         Param::TgtSpeed => {
@@ -803,33 +867,35 @@ fn remote_reps(req: &Request, src: &FitSnapshot) -> Option<Series> {
             .map(|c| match time {
                 None if total => None,
                 None => Some(average_rate(c)),
-                Some(t) => Some(timeline_value(c, &c.cycles(t), y, t).iter().sum()),
+                Some(t) => Some(Timeline::new(c, t).value(y, t).iter().sum()),
             })
             .collect()
     };
-    let applied = |values: &[f64], distance: Option<f64>| -> f64 {
+    // How much of each repairer's output lands at `distance`.
+    let mults = |distance: Option<f64>| -> Vec<f64> {
         let in_lock = in_range(ship.lock_range, distance, opts.ignore_lock_range);
         let in_dcr = in_range(ship.drone_control_range, distance, opts.ignore_dcr);
-        values
+        src.reps
             .iter()
-            .zip(&src.reps)
-            .map(|(v, r)| {
-                let mult = if !in_lock {
+            .map(|r| {
+                if !in_lock {
                     0.0
                 } else if r.drone {
                     if in_dcr { 1.0 } else { 0.0 }
                 } else {
                     math::range_factor(r.optimal, r.falloff, distance, true)
-                };
-                v * mult
+                }
             })
-            .sum()
+            .collect()
+    };
+    let applied = |values: &[f64], mults: &[f64]| -> f64 {
+        values.iter().zip(mults).map(|(v, m)| v * m).sum()
     };
     let series = if req.x.param == Param::Distance {
         let time = req.value(Param::Time).map(|t| t.clamp(0.0, MAX_TIME));
         let values = values(time)?;
         Series::new(math::smooth(main_range(req, 1000.0), 50, 2, |d| {
-            applied(&values, Some(d))
+            applied(&values, &mults(Some(d)))
         }))
         .map_x(|m| m / 1000.0)
     } else {
@@ -839,14 +905,14 @@ fn remote_reps(req: &Request, src: &FitSnapshot) -> Option<Series> {
             req.range.1.clamp(0.0, MAX_TIME),
         );
         let times = change_times(&cycles, high, total);
-        let timelines: Vec<_> = cycles.iter().map(|c| c.cycles(high)).collect();
+        let timelines: Vec<_> = cycles.iter().map(|c| Timeline::new(c, high)).collect();
+        let mults = mults(distance);
         Series::new(math::steps((low, high), &times, |t| {
-            let values: Vec<f64> = cycles
+            let values: Vec<f64> = timelines
                 .iter()
-                .zip(&timelines)
-                .map(|(c, timeline)| timeline_value(c, timeline, y, t).iter().sum())
+                .map(|tl| tl.value(y, t).iter().sum())
                 .collect();
-            applied(&values, distance)
+            applied(&values, &mults)
         }))
     };
     Some(series)
