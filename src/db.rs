@@ -27,6 +27,7 @@ mod sync;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
+    rc::Rc,
     time::Duration,
 };
 
@@ -35,7 +36,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value};
 
 use self::sync::{Item, Row};
-use crate::{character::Characters, esi::accounts::Accounts, store::Saved};
+use crate::{character::Characters, esi::accounts::Accounts, fit::Fit, store::Saved};
 
 pub const FILE: &str = "efa.db";
 
@@ -73,15 +74,10 @@ impl Doc {
     }
 }
 
+/// The settings part of [`Saved`]; its lists are tables.
 const SAVED: Doc = Doc {
     prefix: "",
-    lists: &[
-        "fits",
-        "implant_sets",
-        "damage_patterns",
-        "target_profiles",
-        "cargo_presets",
-    ],
+    lists: &[],
     nested: &[("overrides", "values")],
 };
 
@@ -115,6 +111,10 @@ pub struct Store {
     overrides: crate::overrides::Values,
     /// This start's backup, while it is being written.
     backup: Option<std::thread::JoinHandle<()>>,
+    /// The fits last written with their fingerprints. A fit still shared with this list is
+    /// unchanged, so its fingerprint is not worked out again; holding on to the fits keeps
+    /// their addresses from being reused.
+    fit_prints: Vec<(Rc<Fit>, u64)>,
 }
 
 impl Drop for Store {
@@ -311,6 +311,7 @@ impl Store {
             settings: HashMap::new(),
             overrides: crate::overrides::Values::new(),
             backup: None,
+            fit_prints: Vec::new(),
         };
         let contents = store.load().map_err(OpenError::Other)?;
         Ok((store, contents))
@@ -321,14 +322,18 @@ impl Store {
         let settings = self
             .read_settings(&mut problems)
             .map_err(|e| e.to_string())?;
-        let mut saved: Saved = self.load_doc(&SAVED, &settings, &mut problems)?;
-        saved.fits = self.load_list(&mut problems)?;
+        let mut saved = Saved {
+            settings: self.load_doc(&SAVED, &settings, &mut problems)?,
+            ..Saved::default()
+        };
+        let fits: Vec<Fit> = self.load_list(&mut problems)?;
+        saved.fits = fits.into_iter().map(Rc::new).collect();
         saved.implant_sets = self.load_list(&mut problems)?;
         saved.damage_patterns = self.load_list(&mut problems)?;
         saved.target_profiles = self.load_list(&mut problems)?;
         saved.cargo_presets = self.load_list(&mut problems)?;
         self.overrides = overrides::read(&self.conn).map_err(|e| e.to_string())?;
-        saved.overrides.values.clone_from(&self.overrides);
+        saved.settings.overrides.values.clone_from(&self.overrides);
         saved.tidy();
         let mut characters: Characters = self.load_doc(&CHARACTERS, &settings, &mut problems)?;
         characters.characters = self.load_list(&mut problems)?;
@@ -426,6 +431,25 @@ impl Store {
         Ok(items)
     }
 
+    /// The fingerprints of `fits`, taken from the last write for fits still shared with it.
+    fn fit_prints(&self, fits: &[Rc<Fit>]) -> Vec<(Rc<Fit>, u64)> {
+        let known: HashMap<*const Fit, u64> = self
+            .fit_prints
+            .iter()
+            .map(|(fit, print)| (Rc::as_ptr(fit), *print))
+            .collect();
+        fits.iter()
+            .map(|fit| {
+                let print = known
+                    .get(&Rc::as_ptr(fit))
+                    .copied()
+                    .or_else(|| sync::fingerprint(&**fit).ok())
+                    .unwrap_or_default();
+                (Rc::clone(fit), print)
+            })
+            .collect()
+    }
+
     /// Write the fits and settings, touching only what changed since the last save.
     pub fn save_saved(&mut self, saved: &Saved) -> Result<(), String> {
         self.write(Some(saved), None, None)
@@ -461,7 +485,7 @@ impl Store {
     ) -> Result<(), String> {
         let mut docs = Vec::new();
         if let Some(saved) = saved {
-            docs.push((&SAVED, SAVED.settings(saved)?));
+            docs.push((&SAVED, SAVED.settings(&saved.settings)?));
         }
         if let Some(characters) = characters {
             docs.push((&CHARACTERS, CHARACTERS.settings(characters)?));
@@ -469,23 +493,27 @@ impl Store {
         if let Some(accounts) = accounts {
             docs.push((&ESI, ESI.settings(accounts)?));
         }
+        let fit_prints = saved.map(|saved| self.fit_prints(&saved.fits));
         let e = |e: rusqlite::Error| e.to_string();
         let tx = self.conn.transaction().map_err(e)?;
         let old = &self.rows;
         let mut rows = Vec::new();
         if let Some(saved) = saved {
-            rows.push(sync_list(&tx, old, &saved.fits).map_err(e)?);
-            rows.push(sync_list(&tx, old, &saved.implant_sets).map_err(e)?);
-            rows.push(sync_list(&tx, old, &saved.damage_patterns).map_err(e)?);
-            rows.push(sync_list(&tx, old, &saved.target_profiles).map_err(e)?);
-            rows.push(sync_list(&tx, old, &saved.cargo_presets).map_err(e)?);
-            overrides::sync(&tx, &self.overrides, &saved.overrides.values).map_err(e)?;
+            let prints = fit_prints
+                .as_ref()
+                .map(|p| p.iter().map(|(_, p)| *p).collect());
+            rows.push(sync_list::<Fit>(&tx, old, &saved.fits, prints).map_err(e)?);
+            rows.push(sync_list(&tx, old, &saved.implant_sets, None).map_err(e)?);
+            rows.push(sync_list(&tx, old, &saved.damage_patterns, None).map_err(e)?);
+            rows.push(sync_list(&tx, old, &saved.target_profiles, None).map_err(e)?);
+            rows.push(sync_list(&tx, old, &saved.cargo_presets, None).map_err(e)?);
+            overrides::sync(&tx, &self.overrides, &saved.settings.overrides.values).map_err(e)?;
         }
         if let Some(characters) = characters {
-            rows.push(sync_list(&tx, old, &characters.characters).map_err(e)?);
+            rows.push(sync_list(&tx, old, &characters.characters, None).map_err(e)?);
         }
         if let Some(accounts) = accounts {
-            rows.push(sync_list(&tx, old, &accounts.accounts).map_err(e)?);
+            rows.push(sync_list(&tx, old, &accounts.accounts, None).map_err(e)?);
         }
         let mut settings = Vec::new();
         for (doc, object) in docs {
@@ -493,8 +521,11 @@ impl Store {
         }
         tx.commit().map_err(e)?;
         self.rows.extend(rows);
+        if let Some(prints) = fit_prints {
+            self.fit_prints = prints;
+        }
         if let Some(saved) = saved {
-            self.overrides.clone_from(&saved.overrides.values);
+            self.overrides.clone_from(&saved.settings.overrides.values);
         }
         for (key, value) in settings {
             match value {
@@ -529,14 +560,23 @@ fn backup(path: &Path) -> Result<(), String> {
     std::fs::rename(&tmp, &backup).map_err(|e| format!("{}: {e}", backup.display()))
 }
 
-/// Bring an item's table in line with `items`, given the rows last written.
+/// Bring an item's table in line with `items`, given the rows last written. `prints` are the
+/// items' fingerprints when the caller has them already.
 fn sync_list<T: Item>(
     tx: &Transaction<'_>,
     rows: &HashMap<&'static str, Vec<Row>>,
-    items: &[T],
+    items: &[impl std::borrow::Borrow<T>],
+    prints: Option<Vec<u64>>,
 ) -> rusqlite::Result<(&'static str, Vec<Row>)> {
     let old = rows.get(T::TABLE).map_or(&[][..], Vec::as_slice);
-    Ok((T::TABLE, sync::sync(tx, old, items)?))
+    let prints = match prints {
+        Some(prints) => prints,
+        None => items
+            .iter()
+            .map(|item| sync::fingerprint(item.borrow()))
+            .collect::<rusqlite::Result<_>>()?,
+    };
+    Ok((T::TABLE, sync::sync(tx, old, items, prints)?))
 }
 
 /// Write the settings that changed and drop those no longer there, noting each change.

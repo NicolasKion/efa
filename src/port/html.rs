@@ -2,7 +2,7 @@
 //! opens it in a browser fitting tool, by ship. The full page adds the EFT text under each fit;
 //! pyfa's full page pulls in jQuery Mobile for that, this one uses plain details elements.
 
-use std::fmt::Write;
+use std::{borrow::Borrow, fmt::Write};
 
 use super::{dna, eft, escape_markup};
 use crate::{data::Catalog, fit::Fit};
@@ -10,10 +10,11 @@ use crate::{data::Catalog, fit::Fit};
 /// Where pyfa's links send a fit's DNA.
 const DNA_URL: &str = "https://o.smium.org/loadout/dna/";
 
-pub fn export(fits: &[Fit], catalog: &Catalog, minimal: bool) -> String {
+pub fn export(fits: &[impl Borrow<Fit>], catalog: &Catalog, minimal: bool) -> String {
     // pyfa groups by ship group and ship, both by name.
     let mut rows: Vec<(String, String, &Fit)> = fits
         .iter()
+        .map(Borrow::borrow)
         .filter_map(|fit| {
             let ship = catalog.get(fit.ship?)?;
             let group = catalog

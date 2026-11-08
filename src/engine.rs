@@ -17,6 +17,7 @@ mod stats;
 mod surroundings;
 mod validate;
 
+use std::borrow::Borrow;
 use std::{path::Path, sync::RwLock};
 
 use rc::{ItemId, SolOwned, Src};
@@ -136,7 +137,7 @@ impl Engine {
 
     /// The fit's stats flown by `pilot`, alone in space.
     pub fn compute_for(&self, fit: &Fit, pilot: &Pilot, options: CalcOptions) -> Stats {
-        self.compute_among(fit, &[], pilot, options)
+        self.compute_among(fit, &[] as &[Fit], pilot, options)
     }
 
     /// The fit's stats flown by `pilot`, with what surrounds it: `fits` are the saved fits its
@@ -144,13 +145,13 @@ impl Engine {
     pub fn compute_among(
         &self,
         fit: &Fit,
-        fits: &[Fit],
+        fits: &[impl Borrow<Fit>],
         pilot: &Pilot,
         options: CalcOptions,
     ) -> Stats {
         let build = BuildOptions {
-            surroundings: Some(fits),
             default_spool: options.default_spool,
+            ..BuildOptions::among(fits)
         };
         self.build(fit, pilot, build)
             .map_or_default(|mut built| stats_of(&mut built, fit, options))

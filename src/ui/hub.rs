@@ -10,8 +10,8 @@ use gpui_kit::{App, AppContext, Context, Entity, Global, SharedString, Task, Wea
 
 use super::{Loaded, load};
 use crate::{
-    character::Characters, engine::Overridden, overrides::Overrides, preferences::Preferences,
-    prices::Prices, store::Saved,
+    character::Characters, engine::Overridden, fit::Fit, overrides::Overrides,
+    preferences::Preferences, prices::Prices, store::Saved,
 };
 
 /// The current preferences for code that has no window to ask, such as menu builders. The hub
@@ -52,6 +52,31 @@ pub struct MutationEdit {
     pub values: Vec<(i32, f64)>,
 }
 
+/// What other windows hand the main window to do, which it takes as one batch.
+#[derive(Default)]
+pub struct HubInbox {
+    /// EFT text from the command line, to import once data is loaded.
+    pub import: Option<String>,
+    /// Fits other windows (Browse ESI Fittings) want added as new tabs.
+    pub fit_imports: Vec<crate::port::Imported>,
+    /// Rolls the stats window set on mutated items, to apply with undo.
+    pub mutation_edits: Vec<MutationEdit>,
+    /// Changes the fitting wizard window applies, to make with undo.
+    pub wizard_edits: Vec<WizardEdit>,
+    /// Fits other windows (the graphs) asked to open as tabs.
+    pub open_requests: Vec<usize>,
+}
+
+impl HubInbox {
+    pub fn is_empty(&self) -> bool {
+        self.import.is_none()
+            && self.fit_imports.is_empty()
+            && self.mutation_edits.is_empty()
+            && self.wizard_edits.is_empty()
+            && self.open_requests.is_empty()
+    }
+}
+
 pub enum HubLoading {
     Pending,
     Ready(Rc<Loaded>),
@@ -64,18 +89,20 @@ pub struct Hub {
     pub saved: Saved,
     /// Bumped on every publish, so windows can tell they are behind.
     pub generation: u64,
+    /// Bumped when the engine's data changes under the fits, such as for attribute overrides,
+    /// so windows recalculate though no fit changed.
+    pub engine_generation: u64,
+    /// A revision per fit, in step with `saved.fits`, bumped whenever that fit changes, so a
+    /// window can tell a fit it shows changed without comparing it.
+    revisions: Vec<u64>,
+    /// The last revision handed out.
+    last_revision: u64,
     /// Fits deleted so far, with the generation each happened in, so windows that were behind
     /// can shift their tabs before taking the new fits.
     pub deletions: Vec<(u64, usize)>,
     pub prices: Rc<Prices>,
-    /// EFT text from the command line, for the main window to import once data is loaded.
-    pub import: Option<String>,
-    /// Fits other windows (the graphs) asked the main window to open as tabs.
-    pub open_requests: Vec<usize>,
-    /// Rolls the stats window set on mutated items, for the main window to apply with undo.
-    pub mutation_edits: Vec<MutationEdit>,
-    /// Changes the fitting wizard window applies, for the main window to make with undo.
-    pub wizard_edits: Vec<WizardEdit>,
+    /// Work other windows leave for the main window.
+    pub inbox: HubInbox,
     /// The main window's stats pane shows raw HP rather than EHP; the graphs follow it.
     pub raw_hp: bool,
     /// The characters. Replaced, never changed in place, so a window can tell it has the
@@ -83,8 +110,6 @@ pub struct Hub {
     pub characters: Rc<Characters>,
     /// Characters logged in with EVE SSO, and a login under way.
     pub esi: super::esi::EsiState,
-    /// Fits other windows (Browse ESI Fittings) want the main window to add as new tabs.
-    pub fit_imports: Vec<crate::port::Imported>,
     /// The engine data being rebuilt for changed attribute overrides.
     overrides_task: Option<Task<()>>,
     /// Update checks and installs, shown by the main window and the preferences.
@@ -98,8 +123,8 @@ impl Hub {
     pub fn new(import: Option<String>, cx: &mut Context<Self>) -> Self {
         let (store, contents) = crate::db::Store::open_default();
         let mut saved = contents.saved;
-        let overrides = saved.overrides.active();
-        let proxy = saved.preferences.network.proxy.clone();
+        let overrides = saved.settings.overrides.active();
+        let proxy = saved.settings.preferences.network.proxy.clone();
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let result = cx
                 .background_spawn(async move { load(&overrides, &proxy) })
@@ -119,25 +144,28 @@ impl Hub {
             });
         })
         .detach();
-        if !saved.preferences.general.reopen_fits {
-            saved.open.clear();
-            saved.current = None;
+        if !saved.settings.preferences.general.reopen_fits {
+            saved.settings.open.clear();
+            saved.settings.current = None;
         }
-        cx.set_global(CurrentPreferences(saved.preferences.clone()));
+        let revisions: Vec<u64> = (1..=saved.fits.len() as u64).collect();
+        cx.set_global(CurrentPreferences(saved.settings.preferences.clone()));
         Self {
             loading: HubLoading::Pending,
             saved,
             generation: 0,
+            engine_generation: 0,
+            last_revision: revisions.len() as u64,
+            revisions,
             deletions: Vec::new(),
             prices: Rc::new(Prices::default()),
-            import,
-            open_requests: Vec::new(),
-            mutation_edits: Vec::new(),
-            wizard_edits: Vec::new(),
+            inbox: HubInbox {
+                import,
+                ..HubInbox::default()
+            },
             raw_hp: false,
             characters: Rc::new(contents.characters),
             esi: super::esi::EsiState::new(contents.accounts),
-            fit_imports: Vec::new(),
             overrides_task: None,
             updates: cx.new(super::updates::Updates::new),
             store,
@@ -196,10 +224,10 @@ impl Hub {
         self.deletions
             .extend(deleted.iter().map(|&index| (self.generation, index)));
         let (open, current) = if main {
-            (saved.open.clone(), saved.current)
+            (saved.settings.open.clone(), saved.settings.current)
         } else {
-            let mut open = std::mem::take(&mut self.saved.open);
-            let mut current = self.saved.current;
+            let mut open = std::mem::take(&mut self.saved.settings.open);
+            let mut current = self.saved.settings.current;
             for &index in deleted {
                 shift_tabs(&mut open, &mut current, index);
             }
@@ -207,12 +235,12 @@ impl Hub {
         };
         // Only the overrides window changes overrides, through the hub, so a window's copy may
         // be behind.
-        self.saved = Saved {
-            open,
-            current,
-            overrides: std::mem::take(&mut self.saved.overrides),
-            ..saved.clone()
-        };
+        let overrides = std::mem::take(&mut self.saved.settings.overrides);
+        let before = std::mem::replace(&mut self.saved, saved.clone());
+        self.saved.settings.open = open;
+        self.saved.settings.current = current;
+        self.saved.settings.overrides = overrides;
+        self.note_revisions(&before.fits, deleted);
         if let Err(e) = self.write_saved() {
             crate::errors::report("Saving fits failed", e);
         }
@@ -223,7 +251,9 @@ impl Hub {
     /// Change settings from outside a fit window, such as the preferences window, and pass them
     /// on to every window.
     pub fn update_saved(&mut self, edit: impl FnOnce(&mut Saved), cx: &mut Context<Self>) {
+        let before = self.saved.fits.clone();
         edit(&mut self.saved);
+        self.note_revisions(&before, &[]);
         self.generation += 1;
         if let Err(e) = self.write_saved() {
             crate::errors::report("Saving settings failed", e);
@@ -235,9 +265,9 @@ impl Hub {
     /// Change the attribute overrides or switch them, save, and recalculate every window with
     /// them once the engine's data is rebuilt.
     pub fn edit_overrides(&mut self, edit: impl FnOnce(&mut Overrides), cx: &mut Context<Self>) {
-        let before = self.saved.overrides.clone();
-        edit(&mut self.saved.overrides);
-        if self.saved.overrides == before {
+        let before = self.saved.settings.overrides.clone();
+        edit(&mut self.saved.settings.overrides);
+        if self.saved.settings.overrides == before {
             return;
         }
         self.update_saved(|_| {}, cx);
@@ -250,7 +280,7 @@ impl Hub {
         let HubLoading::Ready(loaded) = &self.loading else {
             return;
         };
-        let values = self.saved.overrides.active();
+        let values = self.saved.settings.overrides.active();
         if loaded.engine.overrides() == values {
             self.overrides_task = None;
             return;
@@ -271,9 +301,10 @@ impl Hub {
                     return;
                 };
                 match data {
-                    Ok(data) if values == hub.saved.overrides.active() => {
+                    Ok(data) if values == hub.saved.settings.overrides.active() => {
                         loaded.engine.set_overrides(data);
                         hub.generation += 1;
+                        hub.engine_generation += 1;
                         cx.notify();
                     }
                     Ok(_) => hub.refresh_overrides(cx),
@@ -286,10 +317,50 @@ impl Hub {
     fn sync_preferences(&self, cx: &mut Context<Self>) {
         let changed = cx
             .try_global::<CurrentPreferences>()
-            .is_none_or(|p| p.0 != self.saved.preferences);
+            .is_none_or(|p| p.0 != self.saved.settings.preferences);
         if changed {
-            cx.set_global(CurrentPreferences(self.saved.preferences.clone()));
+            cx.set_global(CurrentPreferences(self.saved.settings.preferences.clone()));
         }
+    }
+
+    /// Fit `index`'s revision, which changes whenever the fit does. Zero for no such fit.
+    pub fn fit_revision(&self, index: usize) -> u64 {
+        self.revisions.get(index).copied().unwrap_or(0)
+    }
+
+    /// Everything other windows left for the main window, leaving the inbox empty.
+    pub fn take_inbox(&mut self) -> HubInbox {
+        std::mem::take(&mut self.inbox)
+    }
+
+    /// Bring the revisions in line with the fits after they changed from `before`, with
+    /// `deleted` taken out of it in order: a fit that is still the same shared fit keeps its
+    /// revision, any other gets a new one.
+    fn note_revisions(&mut self, before: &[Rc<Fit>], deleted: &[usize]) {
+        let mut before = before.to_vec();
+        let mut revisions = std::mem::take(&mut self.revisions);
+        revisions.resize(before.len(), 0);
+        for &index in deleted {
+            if index < before.len() {
+                before.remove(index);
+                revisions.remove(index);
+            }
+        }
+        let mut last = self.last_revision;
+        self.revisions = self
+            .saved
+            .fits
+            .iter()
+            .enumerate()
+            .map(|(i, fit)| match before.get(i) {
+                Some(old) if Rc::ptr_eq(old, fit) => revisions[i],
+                _ => {
+                    last += 1;
+                    last
+                }
+            })
+            .collect();
+        self.last_revision = last;
     }
 
     pub fn set_prices(&mut self, prices: Rc<Prices>, cx: &mut Context<Self>) {

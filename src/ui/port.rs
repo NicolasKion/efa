@@ -24,12 +24,13 @@ impl Efa {
     /// by default" applies to fits that bring none of their own.
     pub(super) fn new_fit_defaults(&self, fit: &mut Fit) {
         fit.character = self.last_character;
-        fit.implant_source =
-            if fit.implants.is_empty() && self.saved.preferences.general.character_implants {
-                ImplantSource::Character
-            } else {
-                ImplantSource::Fit
-            };
+        fit.implant_source = if fit.implants.is_empty()
+            && self.saved.settings.preferences.general.character_implants
+        {
+            ImplantSource::Character
+        } else {
+            ImplantSource::Fit
+        };
     }
 
     /// Import fits from text in any format, opening them. Returns how many came in; a failure
@@ -56,11 +57,11 @@ impl Efa {
         for (n, mut fit) in imported.fits.into_iter().enumerate() {
             self.new_fit_defaults(&mut fit);
             fit.modified = crate::fit::now();
-            self.saved.fits.push(fit);
+            self.saved.push_fit(fit);
             let index = self.saved.fits.len() - 1;
             if n < OPEN_AFTER_IMPORT {
-                self.saved.open.push(index);
-                self.saved.current = Some(index);
+                self.saved.settings.open.push(index);
+                self.saved.settings.current = Some(index);
             }
         }
         let mut status = match count {
@@ -94,13 +95,13 @@ impl Efa {
                 // pyfa fits a pasted mutated item, as its muta text, into the current fit.
                 let mutant = port::muta::parse_single(&loaded.catalog, &text)
                     .and_then(|p| p.mutation(&loaded.catalog))
-                    .filter(|_| self.saved.current.is_some());
+                    .filter(|_| self.saved.settings.current.is_some());
                 if let Some((type_id, mutation)) = mutant {
                     self.apply(Action::AddMutated(type_id, mutation), cx);
                     return;
                 }
                 let items = port::parse_items(&loaded.catalog, &text)
-                    .filter(|_| self.saved.current.is_some());
+                    .filter(|_| self.saved.settings.current.is_some());
                 if let Some(items) = items {
                     self.paste_items(&loaded.catalog, &text, items, cx);
                 } else {
@@ -226,7 +227,7 @@ impl Efa {
         let fits = self.saved.fits.clone();
         let suggested = format!("efa-fits-{}.xml", timestamp());
         Self::save_text_dialog(&suggested, cx, move |_| {
-            let refs: Vec<&Fit> = fits.iter().collect();
+            let refs: Vec<&Fit> = fits.iter().map(|f| &**f).collect();
             Ok(xml::export(&refs, &loaded.catalog))
         });
     }
@@ -261,7 +262,7 @@ impl Efa {
     /// pyfa's "Export All Fittings to HTML", to the path set in the preferences.
     pub(super) fn export_html(&mut self, cx: &mut Context<Self>) {
         let Some(loaded) = self.loaded() else { return };
-        let settings = &self.saved.preferences.html;
+        let settings = &self.saved.settings.preferences.html;
         let path = html_path(&settings.path);
         let page = html::export(&self.saved.fits, &loaded.catalog, settings.minimal);
         let written = path
@@ -296,7 +297,7 @@ impl Efa {
 
     /// Search the market once typing pauses for the delay set in the preferences.
     pub(super) fn search_after_delay(&mut self, text: String, cx: &mut Context<Self>) {
-        let delay = self.saved.preferences.market.search_delay_ms;
+        let delay = self.saved.settings.preferences.market.search_delay_ms;
         if delay == 0 || text.is_empty() {
             self.search_debounce = None;
             self.search_text = text;
@@ -319,11 +320,11 @@ impl Efa {
     /// Open a fit from the fittings browser: in a tab of its own, or in place of the current
     /// one, as pyfa's "Open fittings in a new page by default" says.
     pub(super) fn open_from_browser(&mut self, index: usize, cx: &mut Context<Self>) {
-        let replace = !self.saved.preferences.general.open_fit_in_new_tab
-            && !self.saved.open.contains(&index);
+        let replace = !self.saved.settings.preferences.general.open_fit_in_new_tab
+            && !self.saved.settings.open.contains(&index);
         if replace
-            && let Some(current) = self.saved.current
-            && let Some(tab) = self.saved.open.iter_mut().find(|t| **t == current)
+            && let Some(current) = self.saved.settings.current
+            && let Some(tab) = self.saved.settings.open.iter_mut().find(|t| **t == current)
         {
             *tab = index;
         }

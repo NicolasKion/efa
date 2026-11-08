@@ -13,7 +13,7 @@ publish = false
 rc = { package = "refine-core", git = "https://github.com/DarkFenX/refine", rev = "2f816366c1ef2a33cef7d18ecb142f5f2eb30530" }
 redh = { package = "refine-edh", git = "https://github.com/DarkFenX/refine", rev = "2f816366c1ef2a33cef7d18ecb142f5f2eb30530", features = ["phb-fs"] }
 radc = { package = "refine-adc", git = "https://github.com/DarkFenX/refine", rev = "2f816366c1ef2a33cef7d18ecb142f5f2eb30530", features = ["postcard-zfs"] }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "gzip", "rustls"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }

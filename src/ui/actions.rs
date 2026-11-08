@@ -205,7 +205,7 @@ impl Efa {
     }
 
     pub fn apply(&mut self, action: Action, cx: &mut Context<Self>) {
-        let Some(current) = self.saved.current else {
+        let Some(current) = self.saved.settings.current else {
             return;
         };
         // Actions that put modules on are checked against the fitting rules afterwards; filling
@@ -247,17 +247,20 @@ impl Efa {
         }
         let pilot = self.pilot(&loaded);
         let prices = Rc::clone(&self.prices);
-        let before = self.saved.fits[index].clone();
+        let before = Rc::clone(&self.saved.fits[index]);
         let env = EditEnv {
             loaded: &loaded,
             pilot: &pilot,
             stats: self.stats.as_ref(),
             prices: &prices,
-            implants_in_cargo: self.saved.preferences.general.implants_in_cargo,
+            implants_in_cargo: self.saved.settings.preferences.general.implants_in_cargo,
         };
-        let mut outcome = edit(&mut self.saved.fits[index], &env);
+        let mut outcome = edit(self.saved.fit_mut(index), &env);
+        if outcome.skipped || *self.saved.fits[index] == *before {
+            // Unchanged, it stays the very fit the other windows share.
+            self.saved.fits[index] = Rc::clone(&before);
+        }
         if outcome.skipped {
-            self.saved.fits[index] = before;
             return false;
         }
         if checked {

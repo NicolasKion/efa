@@ -279,16 +279,16 @@ impl Efa {
             additions_tab: self.additions_tab,
             prices: &self.prices,
             prices_updating: self.prices_fetch.is_some(),
-            price_totals: self.saved.price_totals,
-            factor_reload: self.saved.factor_reload,
+            price_totals: self.saved.settings.price_totals,
+            factor_reload: self.saved.settings.factor_reload,
             damage_patterns: Rc::new(self.saved.damage_patterns.clone()),
             target_profiles: Rc::new(self.saved.target_profiles.clone()),
             character_implants: self.character_implants(),
-            implants_in_cargo: self.saved.preferences.general.implants_in_cargo,
+            implants_in_cargo: self.saved.settings.preferences.general.implants_in_cargo,
         };
         let which: Vec<SectionKind> = SectionKind::ALL
             .into_iter()
-            .filter(|s| self.saved.preferences.stats.shows(s.key()))
+            .filter(|s| self.saved.settings.preferences.stats.shows(s.key()))
             .collect();
         let controls = Controls {
             efa: cx.weak_entity(),

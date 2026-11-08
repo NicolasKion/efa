@@ -40,7 +40,7 @@ impl ModuleState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Module {
     pub type_id: TypeId,
     pub state: ModuleState,
@@ -98,7 +98,7 @@ pub enum RahPattern {
     Pattern(DamageProfile),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DroneStack {
     pub type_id: TypeId,
     pub count: u32,
@@ -231,7 +231,7 @@ pub enum ImplantSource {
     Character,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Fit {
     pub name: String,
     pub ship: Option<TypeId>,
@@ -656,12 +656,18 @@ impl Fit {
 
     /// Put the implants in slot order, which older saves did not keep. Returns whether any moved.
     pub fn sort_implants(&mut self, catalog: &Catalog) -> bool {
-        let slot = |&t: &TypeId| implant_slot(catalog, t);
-        if self.implants.is_sorted_by_key(slot) {
+        if self.implants_in_slot_order(catalog) {
             return false;
         }
+        let slot = |&t: &TypeId| implant_slot(catalog, t);
         self.implants.sort_by_key(slot);
         true
+    }
+
+    /// Whether the implants are in slot order, as the Implants tab lists them.
+    pub fn implants_in_slot_order(&self, catalog: &Catalog) -> bool {
+        self.implants
+            .is_sorted_by_key(|&t: &TypeId| implant_slot(catalog, t))
     }
 
     /// Implants the fit is calculated with, as (type, switched on): its own, or `character`'s

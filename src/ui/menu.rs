@@ -226,7 +226,7 @@ impl Efa {
             }))
             .on_action(cx.listener(|g, _: &DuplicateFit, _, cx| g.duplicate_fit(cx)))
             .on_action(cx.listener(|g, _: &DeleteFit, window, cx| {
-                if let Some(current) = g.saved.current {
+                if let Some(current) = g.saved.settings.current {
                     let shift = window.modifiers().shift;
                     g.confirm_delete_fit(current, shift, window, cx);
                 }
@@ -254,12 +254,16 @@ impl Efa {
 
     /// Ctrl+Tab and friends: the next or previous open fit.
     fn cycle_tab(&mut self, forward: bool, cx: &mut Context<Self>) {
-        let Some(next) = cycle_tab(&self.saved.open, self.saved.current, forward) else {
+        let Some(next) = cycle_tab(
+            &self.saved.settings.open,
+            self.saved.settings.current,
+            forward,
+        ) else {
             return;
         };
-        if self.saved.current != Some(next) {
+        if self.saved.settings.current != Some(next) {
             self.renaming = false;
-            self.saved.current = Some(next);
+            self.saved.settings.current = Some(next);
             self.clear_selection();
             self.changed(cx);
         }
@@ -317,7 +321,7 @@ impl Efa {
     /// cheaper ones as one undo step. The status line says what it saved.
     fn optimize_fit_price(&mut self, cx: &mut Context<Self>) {
         let (Some(loaded), Some(current), Some(fit)) =
-            (self.loaded(), self.saved.current, self.fit())
+            (self.loaded(), self.saved.settings.current, self.fit())
         else {
             return;
         };
@@ -325,33 +329,33 @@ impl Efa {
         let types = optimize::types_to_price(&loaded.catalog, items);
         self.with_prices_for(types, cx, move |g, cx| {
             // The fetch may have taken long enough to switch fits.
-            if g.saved.current == Some(current) {
+            if g.saved.settings.current == Some(current) {
                 g.apply(Action::OptimizePrice, cx);
             }
         });
     }
 
     fn close_current_tab(&mut self, cx: &mut Context<Self>) {
-        if let Some(current) = self.saved.current {
+        if let Some(current) = self.saved.settings.current {
             self.close_fit(current, cx);
         }
     }
 
     fn close_all_tabs(&mut self, cx: &mut Context<Self>) {
         self.clear_selection();
-        self.saved.open.clear();
-        self.saved.current = None;
+        self.saved.settings.open.clear();
+        self.saved.settings.current = None;
         self.changed(cx);
     }
 
     pub(super) fn menu_bar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let this = cx.weak_entity();
-        let has_fit = self.saved.current.is_some();
+        let has_fit = self.saved.settings.current.is_some();
         let has_ship = self.fit().is_some_and(|f| f.ship.is_some());
         let has_fits = !self.saved.fits.is_empty();
         let unrestricted = self.fit().is_some_and(|f| f.ignore_restrictions);
         let (can_undo, can_redo) = (self.can_undo(), self.can_redo());
-        let overrides_on = self.saved.overrides.enabled;
+        let overrides_on = self.saved.settings.overrides.enabled;
         let root = self.root_focus.clone();
         let menu =
             |id: &'static str, label: &'static str, build: fn(PopupMenu, Flags) -> PopupMenu| {

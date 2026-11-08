@@ -84,7 +84,7 @@ impl Efa {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let Some(current) = self.saved.current else {
+        let Some(current) = self.saved.settings.current else {
             return div().into_any_element();
         };
         let Some(ship) = self.saved.fits[current].ship else {
@@ -200,7 +200,7 @@ impl Efa {
             Row::Item(RowRef::Subsystem(_)) => Some(Slot::Subsystem),
             Row::Header { .. } | Row::Separator | Row::ModeHeader | Row::Mode(_) => None,
         }
-        .filter(|_| self.saved.preferences.general.color_by_slot)
+        .filter(|_| self.saved.settings.preferences.general.color_by_slot)
         .and_then(|slot| {
             let tint = match slot {
                 Slot::High => theme.danger,
@@ -424,7 +424,12 @@ impl Efa {
         };
         let layout = self.column_layout;
         let prices = &self.prices;
-        let expanded = self.saved.preferences.general.expanded_mutant_names;
+        let expanded = self
+            .saved
+            .settings
+            .preferences
+            .general
+            .expanded_mutant_names;
         let misc_text = misc.map(|(text, _)| text.as_str());
         let text = |col: Col| col.text(catalog, prices, m, &info, expanded, misc_text);
 
@@ -1173,7 +1178,7 @@ fn ammo_scoped(
     action: impl Fn(Vec<RowRef>) -> Action + 'static,
 ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
     on_efa(this, move |g, event, _, cx| {
-        let default = if g.saved.preferences.general.ammo_change_all {
+        let default = if g.saved.settings.preferences.general.ammo_change_all {
             Scope::Similar
         } else {
             Scope::Selection
@@ -1548,7 +1553,7 @@ pub(super) enum RackStyle {
 
 impl Efa {
     fn rack_style(&self) -> RackStyle {
-        let general = &self.saved.preferences.general;
+        let general = &self.saved.settings.preferences.general;
         match (general.rack_slots, general.rack_labels) {
             (false, _) => RackStyle::Plain,
             (true, false) => RackStyle::Separators,

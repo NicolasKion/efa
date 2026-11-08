@@ -163,7 +163,7 @@ pub(super) fn section(p: &Pane<'_>, controls: Option<&Controls<'_>>, cx: &App) -
                     .checked(on)
                     .on_click(move |_, _, cx| {
                         Efa::app_update(&this, cx, |g, cx| {
-                            flip(&mut g.saved.price_totals);
+                            flip(&mut g.saved.settings.price_totals);
                             g.save();
                             cx.notify();
                         });

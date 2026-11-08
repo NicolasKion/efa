@@ -8,6 +8,8 @@ use rc::{
     SolOwned,
 };
 
+use std::borrow::Borrow;
+
 use super::{Engine, FitItem, Pilot, pane, surroundings, surroundings::Projections};
 use crate::{
     data::{Slot, TypeId},
@@ -15,21 +17,21 @@ use crate::{
 };
 
 /// Settings for [`Engine::build`].
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub(super) struct BuildOptions<'a> {
     /// What surrounds the fit: the saved fits its command and projected fits are looked up in.
     /// Projected items and the environment come in even when that list is empty. None builds
     /// the fit alone in space.
-    pub surroundings: Option<&'a [Fit]>,
+    pub surroundings: Option<Vec<&'a Fit>>,
     /// Spool-up for modules without their own setting, as a fraction of full spool.
     pub default_spool: Option<f64>,
 }
 
 impl<'a> BuildOptions<'a> {
-    /// The fit with what surrounds it, `fits` being the saved fits.
-    pub fn among(fits: &'a [Fit]) -> Self {
+    /// The fit with what surrounds it, `fits` being the saved fits, as they are kept or shared.
+    pub fn among(fits: &'a [impl Borrow<Fit>]) -> Self {
         Self {
-            surroundings: Some(fits),
+            surroundings: Some(fits.iter().map(Borrow::borrow).collect()),
             default_spool: None,
         }
     }
@@ -101,7 +103,7 @@ impl Engine {
         }
         let placed = add_fit(&mut sol, fit, pilot)?;
         let projections = options.surroundings.map_or_default(|fits| {
-            self.add_surroundings(&mut sol, placed.fit_id, placed.ship, fit, fits)
+            self.add_surroundings(&mut sol, placed.fit_id, placed.ship, fit, &fits)
         });
         let mut f = sol.get_fit(&placed.fit_id).ok()?;
         let incoming = pane::incoming_mix(&mut f, &fit.damage_profile);

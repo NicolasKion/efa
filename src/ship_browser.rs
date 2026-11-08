@@ -3,6 +3,7 @@
 //! hide what has no fits.
 
 use std::{
+    borrow::Borrow,
     collections::{HashMap, HashSet},
     hash::BuildHasher,
 };
@@ -230,7 +231,8 @@ impl Browser {
 }
 
 /// How many fits each ship has.
-pub fn fit_counts(fits: &[Fit]) -> HashMap<TypeId, usize> {
+pub fn fit_counts(fits: &[impl Borrow<Fit>]) -> HashMap<TypeId, usize> {
+    let fits: Vec<&Fit> = fits.iter().map(Borrow::borrow).collect();
     let mut counts = HashMap::new();
     for ship in fits.iter().filter_map(|f| f.ship) {
         *counts.entry(ship).or_default() += 1;
@@ -252,7 +254,8 @@ pub fn group_fit_count<S: BuildHasher>(
 }
 
 /// A ship's fits by name.
-pub fn fits_of(fits: &[Fit], ship: TypeId) -> Vec<usize> {
+pub fn fits_of(fits: &[impl Borrow<Fit>], ship: TypeId) -> Vec<usize> {
+    let fits: Vec<&Fit> = fits.iter().map(Borrow::borrow).collect();
     let mut found: Vec<usize> = (0..fits.len())
         .filter(|&i| fits[i].ship == Some(ship))
         .collect();
@@ -261,7 +264,8 @@ pub fn fits_of(fits: &[Fit], ship: TypeId) -> Vec<usize> {
 }
 
 /// Fits whose name holds the query, not minding case, by name.
-pub fn search_fits(fits: &[Fit], query: &str) -> Vec<usize> {
+pub fn search_fits(fits: &[impl Borrow<Fit>], query: &str) -> Vec<usize> {
+    let fits: Vec<&Fit> = fits.iter().map(Borrow::borrow).collect();
     let query = query.trim().to_lowercase();
     if query.is_empty() {
         return Vec::new();
@@ -292,7 +296,8 @@ pub fn search_ships(catalog: &Catalog, query: &str) -> Vec<TypeId> {
 
 /// The fits changed last, newest first. Fits from before efa dated them come last, newest
 /// added first.
-pub fn recent_fits(fits: &[Fit]) -> Vec<usize> {
+pub fn recent_fits(fits: &[impl Borrow<Fit>]) -> Vec<usize> {
+    let fits: Vec<&Fit> = fits.iter().map(Borrow::borrow).collect();
     let mut found: Vec<usize> = (0..fits.len())
         .filter(|&i| fits[i].ship.is_some())
         .collect();

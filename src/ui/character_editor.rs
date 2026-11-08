@@ -171,6 +171,7 @@ impl CharacterEditor {
             .hub
             .read(cx)
             .saved
+            .settings
             .preferences
             .engine
             .strict_skill_levels;

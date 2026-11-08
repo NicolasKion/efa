@@ -92,9 +92,11 @@ impl Efa {
 
     /// Fly the current fit with another character. New fits get it too, as in pyfa.
     fn set_fit_character(&mut self, id: CharacterId, cx: &mut Context<Self>) {
-        let Some(i) = self.saved.current else { return };
+        let Some(i) = self.saved.settings.current else {
+            return;
+        };
         self.last_character = id;
-        self.saved.fits[i].character = id;
+        self.saved.fit_mut(i).character = id;
         self.changed(cx);
     }
 
@@ -102,7 +104,7 @@ impl Efa {
     /// Change Skills menus do.
     fn change_skill_level(&mut self, skill: TypeId, level: Option<u8>, cx: &mut Context<Self>) {
         let id = self.fit_character();
-        let strict = self.saved.preferences.engine.strict_skill_levels;
+        let strict = self.saved.settings.preferences.engine.strict_skill_levels;
         self.edit_characters(cx, |c, loaded| {
             c.change_level_with(
                 id,
@@ -260,7 +262,7 @@ impl Efa {
         let missing = self.missing_skills(loaded);
         let needs_skills = has_fit && !missing.is_empty();
         let tip: SharedString = if has_fit {
-            let style = if self.saved.preferences.general.compact_skills {
+            let style = if self.saved.settings.preferences.general.compact_skills {
                 TooltipStyle::Condensed
             } else {
                 TooltipStyle::Full

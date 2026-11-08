@@ -354,7 +354,8 @@ impl TankSection {
         let types = problem.types();
         // The next fit starts from what was searched with.
         let choices = self.choices;
-        self.shared.remember(cx, move |s| s.wizard.tank = choices);
+        self.shared
+            .remember(cx, move |s| s.settings.wizard.tank = choices);
         self.note = None;
         // The window the wizard came from fetches prices; without it, search with what there is.
         if self.shared.efa.upgrade().is_none() {
@@ -529,7 +530,8 @@ impl TankSection {
         };
         self.search = None;
         let choices = self.choices;
-        self.shared.remember(cx, move |s| s.wizard.tank = choices);
+        self.shared
+            .remember(cx, move |s| s.settings.wizard.tank = choices);
         self.shared.apply(change, window, cx);
     }
 

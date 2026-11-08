@@ -56,7 +56,7 @@ struct Setup {
 impl Hub {
     /// The settings an ESI request needs, or what to do first.
     fn esi_setup(&self) -> Result<Setup, String> {
-        let prefs = &self.saved.preferences;
+        let prefs = &self.saved.settings.preferences;
         if !prefs.network.enabled {
             return Err("The network is switched off in Preferences > Network.".to_owned());
         }
@@ -197,7 +197,7 @@ impl Hub {
 
     /// Fits for the main window to add as new tabs, as if pasted.
     pub fn import_fits(&mut self, imported: crate::port::Imported, cx: &mut Context<Self>) {
-        self.fit_imports.push(imported);
+        self.inbox.fit_imports.push(imported);
         cx.notify();
     }
 }

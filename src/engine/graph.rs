@@ -10,6 +10,7 @@ mod reps;
 mod tests;
 mod weapons;
 
+use std::borrow::Borrow;
 use std::collections::HashSet;
 
 use rc::{
@@ -76,7 +77,7 @@ impl Engine {
     pub fn graph_snapshot(
         &self,
         fit: &Fit,
-        fits: &[Fit],
+        fits: &[impl Borrow<Fit>],
         pilot: &Pilot,
         catalog: &Catalog,
     ) -> FitSnapshot {
@@ -231,7 +232,7 @@ impl Engine {
     pub fn graph_ammo(
         &self,
         fit: &Fit,
-        fits: &[Fit],
+        fits: &[impl Borrow<Fit>],
         pilot: &Pilot,
         catalog: &Catalog,
         quality: AmmoQuality,

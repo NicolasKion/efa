@@ -31,9 +31,15 @@ impl Efa {
     /// fits loses nothing, but the file is written by the poll rather than on every keystroke,
     /// the way pyfa holds its database write back while typing goes on.
     pub(in crate::ui) fn edit_notes(&mut self, text: String, cx: &mut Context<Self>) {
-        let Some(i) = self.saved.current else { return };
-        self.saved.fits[i].notes = text;
-        self.saved.fits[i].modified = crate::fit::now();
+        let Some(i) = self.saved.settings.current else {
+            return;
+        };
+        if self.saved.fits[i].notes == text {
+            return;
+        }
+        let fit = self.saved.fit_mut(i);
+        fit.notes = text;
+        fit.modified = crate::fit::now();
         self.unsaved = true;
         // The tab title counts characters.
         cx.notify();

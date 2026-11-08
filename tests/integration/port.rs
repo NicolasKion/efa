@@ -423,7 +423,7 @@ fn fighters_survive_every_format() {
     let firbolg = catalog.find("Firbolg I").expect("the fighter exists").id;
     assert_eq!(original.fighters.len(), 3, "the fighter bay section");
     assert_eq!(original.cargo.len(), 2, "the spare squadron stays in cargo");
-    assert!(original.drones.is_empty());
+    assert_eq!(original.drones, [] as [efa::fit::DroneStack; 0]);
     assert!(
         original
             .fighters

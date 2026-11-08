@@ -57,11 +57,12 @@ impl Efa {
         loaded: &Rc<Loaded>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(current) = self.saved.current else {
+        let Some(current) = self.saved.settings.current else {
             return div().into_any_element();
         };
         // Older saves kept implants in the order they were added; pyfa lists them by slot.
-        if self.saved.fits[current].sort_implants(&loaded.catalog) {
+        if !self.saved.fits[current].implants_in_slot_order(&loaded.catalog) {
+            self.saved.fit_mut(current).sort_implants(&loaded.catalog);
             self.additions_selection.clear();
             self.unsaved = true;
         }

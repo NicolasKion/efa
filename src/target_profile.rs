@@ -208,9 +208,10 @@ pub fn export(user: &[TargetProfile]) -> String {
 }
 
 /// Point fits that use the user profile `old` at what it became, or at none once it is deleted.
-pub fn retarget(fits: &mut [Fit], old: &str, new: Option<&TargetProfile>) {
+pub fn retarget(fits: &mut [std::rc::Rc<Fit>], old: &str, new: Option<&TargetProfile>) {
     for fit in fits {
         if fit.target_profile.as_ref().is_some_and(|p| p.name == old) {
+            let fit = std::rc::Rc::make_mut(fit);
             fit.target_profile = new.cloned();
         }
     }

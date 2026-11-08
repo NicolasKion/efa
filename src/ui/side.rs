@@ -173,7 +173,7 @@ impl Efa {
 
     /// Remember an item taken from the market, for pyfa's Recently Used Items.
     pub(super) fn used_from_market(&mut self, id: TypeId) {
-        crate::market::remember(&mut self.saved.recent_items, id);
+        crate::market::remember(&mut self.saved.settings.recent_items, id);
         self.save();
     }
 
@@ -212,6 +212,7 @@ impl Efa {
             }
             ResultsKey::Listing(Listing::Recent) => vec![Section::untitled(
                 self.saved
+                    .settings
                     .recent_items
                     .iter()
                     .copied()
@@ -269,7 +270,11 @@ impl Efa {
         let jump = std::mem::take(&mut self.market_scroll_pending);
         let results = self.results_pane(loaded, jump, cx);
         let tree = self.market_tree(loaded, jump, cx);
-        let results_height = self.saved.market_results.unwrap_or(DEFAULT_RESULTS);
+        let results_height = self
+            .saved
+            .settings
+            .market_results
+            .unwrap_or(DEFAULT_RESULTS);
         let weak = cx.weak_entity();
         v_flex()
             .flex_1()
@@ -288,7 +293,7 @@ impl Efa {
                                     return;
                                 };
                                 let _ = weak.update(cx, |g, _| {
-                                    g.saved.market_results = Some(f32::from(height));
+                                    g.saved.settings.market_results = Some(f32::from(height));
                                     g.save();
                                 });
                             })
@@ -641,7 +646,7 @@ impl Efa {
     /// The Omega marker, when the preference shows it and the type needs Omega.
     fn omega_marker(&self, loaded: &Loaded, id: TypeId, size: f32) -> Option<AnyElement> {
         let omega = loaded.catalog.get(id).is_some_and(|t| t.omega);
-        (omega && self.saved.preferences.general.omega_icons).then(|| {
+        (omega && self.saved.settings.preferences.general.omega_icons).then(|| {
             icon_box(&loaded.catalog, &loaded.icons, Icon::Id(OMEGA_ICON), size).into_any_element()
         })
     }
@@ -1091,7 +1096,12 @@ impl Efa {
         count: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let tooltips = self.saved.preferences.general.ship_browser_tooltips;
+        let tooltips = self
+            .saved
+            .settings
+            .preferences
+            .general
+            .ship_browser_tooltips;
         list_row(SharedString::from(format!("ship-{ship}")), false, cx)
             .h_auto()
             .gap_2()
@@ -1143,12 +1153,17 @@ impl Efa {
             .ship
             .map_or_else(String::new, |s| loaded.catalog.name(s));
         let notes = Self::fitting_tooltip(fit, &ship_name).map(|n| n.to_string());
-        let tooltips = self.saved.preferences.general.ship_browser_tooltips;
+        let tooltips = self
+            .saved
+            .settings
+            .preferences
+            .general
+            .ship_browser_tooltips;
         let subtitle = match ship_browser::fit_date(fit.modified) {
             Some(date) => format!("{ship_name}  {date}"),
             None => ship_name.clone(),
         };
-        let open = self.saved.current == Some(i);
+        let open = self.saved.settings.current == Some(i);
         list_row(SharedString::from(format!("fitting-{i}")), open, cx)
             .h_auto()
             .gap_2()
@@ -1204,7 +1219,7 @@ impl Efa {
             )
             .context_menu({
                 let this = cx.weak_entity();
-                let has_fit = self.saved.current.is_some();
+                let has_fit = self.saved.settings.current.is_some();
                 move |menu, _, _| fit_menu(menu, &this, i, has_fit)
             })
             .into_any_element()
@@ -1232,7 +1247,7 @@ impl Efa {
         let volume = loaded.catalog.get(item).map_or(0.0, |t| t.volume);
         let used = fit.hold_volume(
             &loaded.catalog,
-            self.saved.preferences.general.implants_in_cargo,
+            self.saved.settings.preferences.general.implants_in_cargo,
         );
         let free = stats.cargo_capacity.unwrap_or(0.0) - used;
         if volume <= 0.0 || free <= 0.0 {

@@ -226,7 +226,7 @@ const SHIP_SIZES: &[(&str, &[&str])] = &[
 pub struct EfsContext<'a> {
     pub catalog: &'a Catalog,
     /// Saved fits, where projected and command fits are looked up.
-    pub fits: &'a [Fit],
+    pub fits: &'a [std::rc::Rc<Fit>],
     pub pilot: &'a Pilot,
     /// The character's name; All 5 is left out, as pyfa does.
     pub character: Option<&'a str>,
@@ -301,8 +301,8 @@ impl Engine {
             default_spool: Some(1.0),
         };
         let settings = BuildOptions {
-            surroundings: Some(cx.fits),
             default_spool: options.default_spool,
+            ..BuildOptions::among(cx.fits)
         };
         let mut whole = self.build(fit, cx.pilot, settings)?;
         let stats = super::stats_of(&mut whole, fit, options);

@@ -262,7 +262,7 @@ pub(super) fn firepower(p: &Pane<'_>, controls: Option<&Controls<'_>>, cx: &App)
                     .checked(factor_reload)
                     .on_click(move |_, _, cx| {
                         Efa::app_update(&this, cx, |g, cx| {
-                            g.saved.factor_reload = !g.saved.factor_reload;
+                            g.saved.settings.factor_reload = !g.saved.settings.factor_reload;
                             g.changed(cx);
                         });
                     }),

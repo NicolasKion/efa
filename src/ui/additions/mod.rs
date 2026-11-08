@@ -173,7 +173,7 @@ impl Efa {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let Some(current) = self.saved.current else {
+        let Some(current) = self.saved.settings.current else {
             return div().into_any_element();
         };
         let fit = &self.saved.fits[current];
@@ -194,12 +194,12 @@ impl Efa {
             .is_some_and(|capacity| {
                 let used = fit.hold_volume(
                     &loaded.catalog,
-                    self.saved.preferences.general.implants_in_cargo,
+                    self.saved.settings.preferences.general.implants_in_cargo,
                 );
                 used > capacity + 1e-6
             });
         let theme = cx.theme();
-        let labels = self.saved.preferences.general.additions_labels;
+        let labels = self.saved.settings.preferences.general.additions_labels;
         let tabs = AdditionsTab::ORDER.map(|tab| {
             (
                 tab,

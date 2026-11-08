@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn old_saves_without_overrides_load() {
         let saved: crate::store::Saved = serde_json::from_str("{}").expect("empty save loads");
-        assert_eq!(saved.overrides, Overrides::default());
+        assert_eq!(saved.settings.overrides, Overrides::default());
         let mut o = Overrides {
             enabled: true,
             ..Overrides::default()

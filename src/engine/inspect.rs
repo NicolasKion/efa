@@ -4,6 +4,7 @@
 //! The fit is built the way [`Engine::compute_among`] builds it, and every item's ID is kept, so a
 //! modification can be traced back to the module, drone or skill it came from.
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
 
 use rc::{AttrId, Item, ItemCommon, ItemId, Op, SolOwned};
@@ -142,7 +143,7 @@ impl Engine {
     /// The item at `item` in `fit`, after all bonuses, alone in space but for its projected
     /// items and environment. None when nothing is there.
     pub fn inspect(&self, fit: &Fit, pilot: &Pilot, item: FitItem) -> Option<Inspection> {
-        self.inspect_among(fit, &[], pilot, item)
+        self.inspect_among(fit, &[] as &[Fit], pilot, item)
     }
 
     /// The item at `item` in `fit`, after all bonuses, with what surrounds the fit: `fits` are
@@ -151,7 +152,7 @@ impl Engine {
     pub fn inspect_among(
         &self,
         fit: &Fit,
-        fits: &[Fit],
+        fits: &[impl Borrow<Fit>],
         pilot: &Pilot,
         item: FitItem,
     ) -> Option<Inspection> {

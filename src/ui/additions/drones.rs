@@ -512,7 +512,7 @@ impl Efa {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(current) = self.saved.current else {
+        let Some(current) = self.saved.settings.current else {
             return div().into_any_element();
         };
         let catalog = &loaded.catalog;
@@ -522,7 +522,12 @@ impl Efa {
         let order = display_order(catalog, &fit.drones);
         let no_info = DroneInfo::default();
         let info = |i: usize| stats.drones.get(i).unwrap_or(&no_info);
-        let expanded = self.saved.preferences.general.expanded_mutant_names;
+        let expanded = self
+            .saved
+            .settings
+            .preferences
+            .general
+            .expanded_mutant_names;
         let cells: Vec<[Option<String>; Col::ALL.len()]> = order
             .iter()
             .map(|&i| {
@@ -530,7 +535,7 @@ impl Efa {
                     .map(|col| col.text(catalog, &self.prices, &fit.drones[i], info(i), expanded))
             })
             .collect();
-        let layout = Layout::measure(&self.saved.columns, &cells, window);
+        let layout = Layout::measure(&self.saved.settings.columns, &cells, window);
 
         let mut rows: Vec<AnyElement> = Vec::with_capacity(order.len() + 1);
         if order.is_empty() {
@@ -722,7 +727,7 @@ impl Efa {
                     .on_click(cx.listener(move |g, event: &ClickEvent, _, cx| {
                         cx.stop_propagation();
                         if event.click_count() >= 2 {
-                            g.saved.columns.remove(col.key());
+                            g.saved.settings.columns.remove(col.key());
                             g.save();
                             cx.notify();
                         }
@@ -744,7 +749,7 @@ impl Efa {
                             }
                             let width = f32::from(event.event.position.x - event.bounds.left())
                                 .max(MIN_WIDTH);
-                            g.saved.columns.insert(col.key().to_owned(), width);
+                            g.saved.settings.columns.insert(col.key().to_owned(), width);
                             g.unsaved = true;
                             cx.notify();
                         },

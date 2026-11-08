@@ -264,7 +264,7 @@ fn command_fit_menu(
 ) -> PopupMenu {
     let is_current = this
         .upgrade()
-        .is_some_and(|g| g.read(cx).saved.current == Some(fit_index));
+        .is_some_and(|g| g.read(cx).saved.settings.current == Some(fit_index));
     let mut menu = menu;
     if !is_current {
         let this = this.clone();

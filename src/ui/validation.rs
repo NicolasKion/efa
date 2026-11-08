@@ -70,7 +70,7 @@ impl Efa {
     /// Switch the current fit's restrictions. Turning them back on takes off whatever the ship
     /// cannot take, last first, as pyfa does; one undo step brings it all back.
     pub(super) fn toggle_restrictions(&mut self, cx: &mut Context<Self>) {
-        let Some(current) = self.saved.current else {
+        let Some(current) = self.saved.settings.current else {
             return;
         };
         self.edit_fit(

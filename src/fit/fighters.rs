@@ -115,10 +115,10 @@ impl Fit {
     /// Move fighters that older versions kept as drone stacks into the fighter list. Returns
     /// whether anything moved.
     pub fn move_fighters_out_of_drones(&mut self, catalog: &Catalog) -> bool {
-        let is_fighter = |t: TypeId| catalog.get(t).is_some_and(|t| t.kind == Kind::Fighter);
-        if !self.drones.iter().any(|d| is_fighter(d.type_id)) {
+        if !self.has_fighter_stacks(catalog) {
             return false;
         }
+        let is_fighter = |t: TypeId| catalog.get(t).is_some_and(|t| t.kind == Kind::Fighter);
         let (fighters, drones): (Vec<DroneStack>, Vec<DroneStack>) =
             std::mem::take(&mut self.drones)
                 .into_iter()
@@ -130,6 +130,15 @@ impl Fit {
             }
         }
         true
+    }
+
+    /// Whether older saves left fighters among the drone stacks.
+    pub fn has_fighter_stacks(&self, catalog: &Catalog) -> bool {
+        self.drones.iter().any(|d| {
+            catalog
+                .get(d.type_id)
+                .is_some_and(|t| t.kind == Kind::Fighter)
+        })
     }
 
     /// Squadrons with every fighter of the same type, for Alt clicks: pyfa's similar fighters.

@@ -94,7 +94,7 @@ pub trait Kind: 'static {
     fn import(text: &str, user: &mut Vec<Self::Item>) -> String;
     fn export(user: &[Self::Item]) -> String;
     /// Make fits that use user entry `old` follow it to `new`, or drop it.
-    fn retarget(fits: &mut [Fit], old: &str, new: Option<&Self::Item>);
+    fn retarget(fits: &mut [Rc<Fit>], old: &str, new: Option<&Self::Item>);
 }
 
 const DAMAGE_FIELDS: [Field; 4] = [
@@ -279,7 +279,7 @@ impl Kind for DamagePatterns {
     fn export(user: &[DamagePattern]) -> String {
         damage_pattern::export(user)
     }
-    fn retarget(fits: &mut [Fit], old: &str, new: Option<&DamagePattern>) {
+    fn retarget(fits: &mut [Rc<Fit>], old: &str, new: Option<&DamagePattern>) {
         damage_pattern::retarget(fits, old, new);
     }
 }
@@ -362,7 +362,7 @@ impl Kind for TargetProfiles {
     fn export(user: &[TargetProfile]) -> String {
         target_profile::export(user)
     }
-    fn retarget(fits: &mut [Fit], old: &str, new: Option<&TargetProfile>) {
+    fn retarget(fits: &mut [Rc<Fit>], old: &str, new: Option<&TargetProfile>) {
         target_profile::retarget(fits, old, new);
     }
 }

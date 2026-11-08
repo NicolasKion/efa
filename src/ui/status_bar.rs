@@ -209,7 +209,7 @@ impl Efa {
         if !self.prices_online() && self.prices.is_empty() {
             return None;
         }
-        let market = &self.saved.preferences.market;
+        let market = &self.saved.settings.preferences.market;
         let source = market.price_source;
         let label = if source.uses_system() {
             format!("{}, {}", source.label(), market.price_system.label())

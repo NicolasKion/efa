@@ -2,6 +2,7 @@
 //! only what changed, and surviving a broken file.
 
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use efa::{
     cargo_preset::{CargoPolicy, CargoPreset},
@@ -19,7 +20,7 @@ use efa::{
         },
     },
     implant_set::ImplantSet,
-    store::Saved,
+    store::{Saved, Settings},
     target_profile::TargetProfile,
 };
 use rusqlite::Connection;
@@ -48,11 +49,11 @@ fn json(saved: &Saved) -> serde_json::Value {
 
 fn fits(names: &[&str]) -> Saved {
     let mut saved = Saved {
-        fits: names.iter().map(|n| Fit::new(*n)).collect(),
+        fits: names.iter().map(|n| Rc::new(Fit::new(*n))).collect(),
         ..Saved::default()
     };
     for (ship, fit) in (587..).zip(&mut saved.fits) {
-        fit.ship = Some(ship);
+        Rc::make_mut(fit).ship = Some(ship);
     }
     saved
 }
@@ -73,7 +74,7 @@ fn json_files_are_imported_once_and_kept() {
     let characters: Characters = serde_json::from_str(&read("characters.json")).expect("parses");
     let accounts: Accounts = serde_json::from_str(&read("esi.json")).expect("parses");
     assert_eq!(
-        expected.open,
+        expected.settings.open,
         vec![0, 2],
         "a tab of a missing fit is dropped"
     );
@@ -111,15 +112,15 @@ fn json_files_are_imported_once_and_kept() {
 fn everything_saved_loads_back_the_same() {
     let dir = temp_dir("round-trip");
     let (mut store, contents) = open(&dir);
-    assert!(contents.saved.fits.is_empty());
+    assert_eq!(contents.saved.fits, [] as [std::rc::Rc<efa::fit::Fit>; 0]);
 
     let mut saved = fits(&["a", "b", "c"]);
-    saved.fits[1].notes = "notes".into();
-    saved.open = vec![2, 0];
-    saved.current = Some(0);
-    saved.factor_reload = true;
-    saved.columns.insert("name".into(), 123.5);
-    saved.market_results = Some(200.0);
+    saved.fit_mut(1).notes = "notes".into();
+    saved.settings.open = vec![2, 0];
+    saved.settings.current = Some(0);
+    saved.settings.factor_reload = true;
+    saved.settings.columns.insert("name".into(), 123.5);
+    saved.settings.market_results = Some(200.0);
     saved.implant_sets = vec![efa::implant_set::ImplantSet::new("set")];
     saved.cargo_presets = vec![efa::cargo_preset::CargoPreset::new("preset")];
     let characters = Characters {
@@ -180,15 +181,15 @@ fn changing_one_fit_writes_one_row() {
         "nothing changed, nothing written"
     );
 
-    saved.fits[2].notes = "changed".into();
+    saved.fit_mut(2).notes = "changed".into();
     store.save_saved(&saved).expect("save one change");
     assert_eq!(store.total_changes(), before + 1);
 
-    saved.factor_reload = true;
+    saved.settings.factor_reload = true;
     store.save_saved(&saved).expect("save a setting");
     assert_eq!(store.total_changes(), before + 2);
 
-    saved.fits.push(Fit::new("f"));
+    saved.push_fit(Fit::new("f"));
     store.save_saved(&saved).expect("save a new fit");
     assert_eq!(store.total_changes(), before + 3);
     drop(store);
@@ -216,8 +217,8 @@ fn fits_are_deleted_and_reordered() {
 
     saved.fits.swap(0, 3);
     store.save_saved(&saved).expect("save a reorder");
-    saved.fits.insert(0, Fit::new("first"));
-    saved.fits[2].notes = "moved and changed".into();
+    saved.fits.insert(0, Rc::new(Fit::new("first")));
+    saved.fit_mut(2).notes = "moved and changed".into();
     store.save_saved(&saved).expect("save an insert");
     drop(store);
 
@@ -482,8 +483,13 @@ fn a_full_fit_and_the_other_lists_load_back_the_same() {
     overrides.set(587, 37, 400.0);
     overrides.set(2873, 54, 9_000.0);
     let mut saved = Saved {
-        overrides,
-        fits: vec![full_fit("full"), Fit::new("empty"), full_fit("again")],
+        settings: Settings {
+            overrides,
+            ..Settings::default()
+        },
+        fits: [full_fit("full"), Fit::new("empty"), full_fit("again")]
+            .map(Rc::new)
+            .into(),
         implant_sets: vec![set, ImplantSet::new("none")],
         damage_patterns: vec![DamagePattern::new("[NPC]Guristas", [0.0, 0.0, 1.5, 0.25])],
         target_profiles: vec![
@@ -491,7 +497,6 @@ fn a_full_fit_and_the_other_lists_load_back_the_same() {
             full_fit("x").target_profile.expect("set"),
         ],
         cargo_presets: vec![preset, CargoPreset::new("empty")],
-        ..Saved::default()
     };
     store.save_saved(&saved).expect("save");
     drop(store);
@@ -506,8 +511,8 @@ fn a_full_fit_and_the_other_lists_load_back_the_same() {
         before,
         "nothing changed, nothing written"
     );
-    saved.overrides.set(587, 263, 1_000.0);
-    saved.overrides.remove(2873, 54);
+    saved.settings.overrides.set(587, 263, 1_000.0);
+    saved.settings.overrides.remove(2873, 54);
     store.save_saved(&saved).expect("save overrides");
     assert_eq!(store.total_changes(), before + 2, "one changed, one gone");
     drop(store);
@@ -542,7 +547,10 @@ fn a_changed_fit_rewrites_only_its_own_rows() {
     let dir = temp_dir("one-fit");
     let (mut store, _) = open(&dir);
     let mut saved = Saved {
-        fits: ["a", "b", "c", "d"].into_iter().map(full_fit).collect(),
+        fits: ["a", "b", "c", "d"]
+            .into_iter()
+            .map(|n| Rc::new(full_fit(n)))
+            .collect(),
         ..Saved::default()
     };
     store.save_saved(&saved).expect("save");
@@ -564,7 +572,7 @@ fn a_changed_fit_rewrites_only_its_own_rows() {
     let per_fit: i64 = before_counts.iter().sum::<i64>() / 4;
 
     let before = store.total_changes();
-    saved.fits[2].notes = "changed".into();
+    saved.fit_mut(2).notes = "changed".into();
     store.save_saved(&saved).expect("save one change");
     let written = store.total_changes() - before;
     assert_eq!(others(&conn), untouched, "the other fits' rows stay");
@@ -588,7 +596,7 @@ fn deleting_a_fit_takes_all_its_parts() {
     let dir = temp_dir("cascade");
     let (mut store, _) = open(&dir);
     let mut saved = Saved {
-        fits: vec![full_fit("gone"), full_fit("kept")],
+        fits: vec![Rc::new(full_fit("gone")), Rc::new(full_fit("kept"))],
         ..Saved::default()
     };
     store.save_saved(&saved).expect("save");
@@ -620,7 +628,9 @@ fn fits_using_a_type_are_a_query() {
     let mut other = Fit::new("other");
     other.mid = vec![Some(module(3242, ModuleState::Active))];
     let saved = Saved {
-        fits: vec![full_fit("full"), Fit::new("empty"), other],
+        fits: [full_fit("full"), Fit::new("empty"), other]
+            .map(Rc::new)
+            .into(),
         ..Saved::default()
     };
     store.save_saved(&saved).expect("save");
@@ -718,7 +728,7 @@ fn a_fit_that_does_not_read_is_left_alone() {
     let (mut store, loaded) = open(&dir);
     assert_eq!(names(&loaded.saved), ["fine"]);
     let mut saved = loaded.saved;
-    saved.fits.push(Fit::new("new"));
+    saved.push_fit(Fit::new("new"));
     store.save_saved(&saved).expect("save");
     drop(store);
     assert_eq!(count(&sql(&dir), "fits"), 3, "the broken fit is kept");

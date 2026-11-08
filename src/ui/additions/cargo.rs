@@ -167,7 +167,10 @@ impl Efa {
             return div().into_any_element();
         };
         let catalog = &loaded.catalog;
-        let used = fit.hold_volume(catalog, self.saved.preferences.general.implants_in_cargo);
+        let used = fit.hold_volume(
+            catalog,
+            self.saved.settings.preferences.general.implants_in_cargo,
+        );
         let capacity = self
             .stats
             .as_ref()

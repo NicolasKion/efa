@@ -53,8 +53,10 @@ impl Efa {
         edit: impl FnOnce(&mut Fit, &Catalog) -> bool,
     ) {
         let Some(loaded) = self.loaded() else { return };
-        let Some(i) = self.saved.current else { return };
-        if edit(&mut self.saved.fits[i], &loaded.catalog) {
+        let Some(i) = self.saved.settings.current else {
+            return;
+        };
+        if edit(self.saved.fit_mut(i), &loaded.catalog) {
             self.clear_selection();
         }
         self.changed(cx);
@@ -324,6 +326,7 @@ pub(super) fn add_fit_entries(
     let existing = link.existing(fit);
     let open: Vec<(usize, String)> = g
         .saved
+        .settings
         .open
         .iter()
         .filter_map(|&i| Some((i, fit_label(&loaded.catalog, g.saved.fits.get(i)?))))

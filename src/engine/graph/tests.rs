@@ -118,8 +118,8 @@ fn refine_applied(engine: &Engine, attacker: &Fit, target: &Fit, distance: f64) 
 }
 
 fn graph_dps(engine: &Engine, catalog: &Catalog, attacker: &Fit, target: &Fit) -> plot::Series {
-    let src = engine.graph_snapshot(attacker, &[], engine.all5(), catalog);
-    let tgt = engine.graph_snapshot(target, &[], engine.all5(), catalog);
+    let src = engine.graph_snapshot(attacker, &[] as &[Fit], engine.all5(), catalog);
+    let tgt = engine.graph_snapshot(target, &[] as &[Fit], engine.all5(), catalog);
     let target = TargetData::profile(
         tgt.ship.max_velocity,
         tgt.ship.sig_radius,
@@ -183,7 +183,7 @@ fn damage_over_time_matches_refine_simulation() {
         return;
     };
     let attacker = fit(&catalog, RUPTURE);
-    let snap = engine.graph_snapshot(&attacker, &[], engine.all5(), &catalog);
+    let snap = engine.graph_snapshot(&attacker, &[] as &[Fit], engine.all5(), &catalog);
     let mut built = engine
         .build(&attacker, engine.all5(), BuildOptions::default())
         .expect("places");
@@ -220,7 +220,7 @@ fn fighters_become_weapons() {
     };
     let carrier = fit(&catalog, "[Thanatos, Fighters]\n\nTemplar II x9\n");
     assert_eq!(carrier.fighters.len(), 1, "the squadron parsed");
-    let snap = engine.graph_snapshot(&carrier, &[], engine.all5(), &catalog);
+    let snap = engine.graph_snapshot(&carrier, &[] as &[Fit], engine.all5(), &catalog);
     let fighter = snap
         .weapons
         .iter()
@@ -239,7 +239,7 @@ fn breacher_pods_cap_by_target_hp() {
         &catalog,
         "[Kestrel, Breacher]\n\nSmall Breacher Pod Launcher, SCARAB Breacher Pod S\n",
     );
-    let snap = engine.graph_snapshot(&kestrel, &[], engine.all5(), &catalog);
+    let snap = engine.graph_snapshot(&kestrel, &[] as &[Fit], engine.all5(), &catalog);
     let pod = snap
         .weapons
         .iter()
@@ -276,8 +276,8 @@ fn scrams_turn_off_microwarpdrives() {
     };
     let tackle = fit(&catalog, "[Rifter, Tackle]\n\nWarp Scrambler II\n");
     let runner = fit(&catalog, "[Rifter, Runner]\n\n5MN Microwarpdrive II\n");
-    let tackle = engine.graph_snapshot(&tackle, &[], engine.all5(), &catalog);
-    let runner = engine.graph_snapshot(&runner, &[], engine.all5(), &catalog);
+    let tackle = engine.graph_snapshot(&tackle, &[] as &[Fit], engine.all5(), &catalog);
+    let runner = engine.graph_snapshot(&runner, &[] as &[Fit], engine.all5(), &catalog);
     assert!(tackle.scram_range.is_some_and(|r| r > 5_000.0));
     let (speed, sig) = runner.ship.scrammed.expect("the MWD can be scrammed");
     assert!(speed < runner.ship.max_velocity / 2.0, "{speed}");
@@ -291,7 +291,7 @@ fn ammo_groups_load_every_charge() {
     };
     let groups = engine.graph_ammo(
         &fit(&catalog, RUPTURE),
-        &[],
+        &[] as &[Fit],
         engine.all5(),
         &catalog,
         AmmoQuality::Navy,
@@ -327,7 +327,12 @@ fn snapshot_reads_weapons_ewar_and_cycles() {
     let Some((catalog, engine)) = setup() else {
         return;
     };
-    let snap = engine.graph_snapshot(&fit(&catalog, RUPTURE), &[], engine.all5(), &catalog);
+    let snap = engine.graph_snapshot(
+        &fit(&catalog, RUPTURE),
+        &[] as &[Fit],
+        engine.all5(),
+        &catalog,
+    );
     assert_eq!(snap.weapons.len(), 4);
     let gun = &snap.weapons[0];
     assert!(matches!(gun.kind, WeaponKind::Turret(g) if g.optimal > 0.0 && g.falloff > 0.0));

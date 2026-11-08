@@ -338,7 +338,7 @@ impl ItemStats {
         if commit {
             let edit = crate::ui::hub::MutationEdit { fit, item, values };
             self.hub.update(cx, |hub, cx| {
-                hub.mutation_edits.push(edit);
+                hub.inbox.mutation_edits.push(edit);
                 cx.notify();
             });
         }

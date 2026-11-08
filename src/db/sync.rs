@@ -1,7 +1,7 @@
 //! Lists kept as tables: reading an item back from its row and parts, and bringing a table in
 //! line with a list while writing only the items that changed.
 
-use std::collections::HashMap;
+use std::{borrow::Borrow, collections::HashMap};
 
 use rusqlite::{
     Connection, Transaction, params_from_iter,
@@ -34,13 +34,13 @@ pub trait Item: Serialize + Sized {
     fn read(conn: &Connection) -> rusqlite::Result<Loaded<Self>>;
 }
 
-/// What was last written for a row, in list order. The fingerprint is the item serialized,
-/// kept in memory only to tell whether it changed.
+/// What was last written for a row, in list order. The fingerprint is a hash of the item
+/// serialized, kept in memory only to tell whether it changed.
 #[derive(Debug, Clone)]
 pub struct Row {
     pub id: i64,
     pub position: i64,
-    pub fingerprint: String,
+    pub fingerprint: u64,
 }
 
 /// A row read back, or why it could not be.
@@ -168,23 +168,44 @@ pub fn big_or_null(v: u64) -> rusqlite::Result<Value> {
     if v == 0 { Ok(Value::Null) } else { big(v) }
 }
 
-/// What tells a changed item from an unchanged one.
-pub fn fingerprint(item: &impl Serialize) -> rusqlite::Result<String> {
-    serde_json::to_string(item).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+/// What tells a changed item from an unchanged one: a hash of its serialized form, made
+/// without building the text.
+pub fn fingerprint(item: &impl Serialize) -> rusqlite::Result<u64> {
+    let mut hasher = HashWriter(std::hash::DefaultHasher::new());
+    serde_json::to_writer(&mut hasher, item)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    Ok(std::hash::Hasher::finish(&hasher.0))
 }
 
-/// Bring a table in line with `new`. An unchanged item keeps its row; a changed one is written
-/// to the row at its old place or any row left over, its parts replaced. Items with ids of their
-/// own keep the row of that id. Positions only have to increase, so items keep theirs while they
-/// stay in order; deleting a fit moves no others. Returns the rows as now written, in order.
-pub fn sync<T: Item>(tx: &Transaction<'_>, old: &[Row], new: &[T]) -> rusqlite::Result<Vec<Row>> {
-    let prints = new
-        .iter()
-        .map(fingerprint)
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+/// Feeds what is written into a hasher.
+struct HashWriter(std::hash::DefaultHasher);
+
+impl std::io::Write for HashWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        std::hash::Hasher::write(&mut self.0, bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Bring a table in line with `new`, whose fingerprints are `prints`. An unchanged item keeps
+/// its row; a changed one is written to the row at its old place or any row left over, its parts
+/// replaced. Items with ids of their own keep the row of that id. Positions only have to
+/// increase, so items keep theirs while they stay in order; deleting a fit moves no others.
+/// Returns the rows as now written, in order.
+pub fn sync<T: Item>(
+    tx: &Transaction<'_>,
+    old: &[Row],
+    new: &[impl Borrow<T>],
+    prints: Vec<u64>,
+) -> rusqlite::Result<Vec<Row>> {
+    let new: Vec<&T> = new.iter().map(Borrow::borrow).collect();
     let own = new
         .iter()
-        .map(Item::own_id)
+        .map(|item| item.own_id())
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
     let mut used = vec![false; old.len()];
@@ -202,19 +223,16 @@ pub fn sync<T: Item>(tx: &Transaction<'_>, old: &[Row], new: &[T]) -> rusqlite::
             *slot = Some(i);
         }
     }
-    let mut by_print: HashMap<&str, Vec<usize>> = HashMap::new();
+    let mut by_print: HashMap<u64, Vec<usize>> = HashMap::new();
     for (i, row) in old.iter().enumerate().rev() {
         if !used[i] {
-            by_print
-                .entry(row.fingerprint.as_str())
-                .or_default()
-                .push(i);
+            by_print.entry(row.fingerprint).or_default().push(i);
         }
     }
     let free = |own: &Option<i64>, slot: &Option<usize>| own.is_none() && slot.is_none();
     for ((slot, print), id) in assigned.iter_mut().zip(&prints).zip(&own) {
         if free(id, slot)
-            && let Some(i) = by_print.get_mut(print.as_str()).and_then(Vec::pop)
+            && let Some(i) = by_print.get_mut(print).and_then(Vec::pop)
         {
             used[i] = true;
             *slot = Some(i);

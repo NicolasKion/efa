@@ -791,7 +791,7 @@ fn projected_item_menu(
             Row::Fighter(i) => stats.and_then(|s| s.projected_fighters.get(i).cloned()),
             _ => None,
         };
-        Some((fit.projected.clone(), g.saved.current, spool, info))
+        Some((fit.projected.clone(), g.saved.settings.current, spool, info))
     }) else {
         return menu;
     };

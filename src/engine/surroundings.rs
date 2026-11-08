@@ -11,6 +11,7 @@ use rc::{
     AbilityId, CountNz, ItemCommon, ItemId, ItemTypeId, Lender, MinionState, ModRack, SolOwned,
     stats::StatSlot,
 };
+use std::borrow::Borrow;
 
 use super::{
     DroneInfo, Engine, Pilot, Slots,
@@ -167,7 +168,10 @@ pub(super) fn fighter_classes(sol: &mut SolOwned, fit_id: rc::FitId) -> FighterC
 }
 
 /// The saved fits `fit` is boosted or projected by, which its numbers depend on.
-pub fn surrounding_fits<'a>(fit: &'a Fit, fits: &'a [Fit]) -> impl Iterator<Item = &'a Fit> + 'a {
+pub fn surrounding_fits<'a, F: Borrow<Fit>>(
+    fit: &'a Fit,
+    fits: &'a [F],
+) -> impl Iterator<Item = &'a F> + 'a {
     let uids = fit
         .command
         .iter()
@@ -179,7 +183,7 @@ pub fn surrounding_fits<'a>(fit: &'a Fit, fits: &'a [Fit]) -> impl Iterator<Item
         seen.push(uid);
         new
     })
-    .filter_map(|uid| fits.iter().find(|f| f.uid == uid))
+    .filter_map(|uid| fits.iter().find(|f| Borrow::<Fit>::borrow(*f).uid == uid))
 }
 
 /// The hidden fits holding loose projected items, one per distance from the target: a capsule
@@ -220,9 +224,9 @@ impl Engine {
         fit_id: rc::FitId,
         ship_id: ItemId,
         fit: &Fit,
-        others: &[Fit],
+        others: &[&Fit],
     ) -> Projections {
-        let find = |uid: u64| others.iter().find(|f| uid != 0 && f.uid == uid);
+        let find = |uid: u64| others.iter().copied().find(|f| uid != 0 && f.uid == uid);
         let target_radius = read::attr_or_zero(sol, ship_id, attr::RADIUS);
 
         let boosters: Vec<&Fit> = fit

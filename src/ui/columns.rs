@@ -299,7 +299,12 @@ impl Efa {
         stats: &Stats,
         window: &Window,
     ) -> Layout {
-        let expanded = self.saved.preferences.general.expanded_mutant_names;
+        let expanded = self
+            .saved
+            .settings
+            .preferences
+            .general
+            .expanded_mutant_names;
         let mut layout = Layout::default();
         let modules: Vec<(&Module, ModuleInfo, Option<String>)> =
             [Slot::High, Slot::Mid, Slot::Low, Slot::Service]
@@ -320,7 +325,7 @@ impl Efa {
             .map(|(text, _)| text)
             .collect();
         for col in Col::ALL {
-            if let Some(&width) = self.saved.columns.get(col.key()) {
+            if let Some(&width) = self.saved.settings.columns.get(col.key()) {
                 layout.widths[col.index()] = width;
                 if col == Col::Name {
                     layout.name_fixed = true;
@@ -405,7 +410,7 @@ impl Efa {
                     .on_click(cx.listener(move |g, event: &ClickEvent, _, cx| {
                         cx.stop_propagation();
                         if event.click_count() >= 2 {
-                            g.saved.columns.remove(col.key());
+                            g.saved.settings.columns.remove(col.key());
                             g.save();
                             cx.notify();
                         }
@@ -427,7 +432,7 @@ impl Efa {
                             }
                             let width = f32::from(event.event.position.x - event.bounds.left())
                                 .max(MIN_WIDTH);
-                            g.saved.columns.insert(col.key().to_owned(), width);
+                            g.saved.settings.columns.insert(col.key().to_owned(), width);
                             g.unsaved = true;
                             cx.notify();
                         },

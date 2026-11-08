@@ -104,7 +104,7 @@ fn modules_go_to_cargo_with_their_charges() {
 
     let mut fit = armed(neutron, void);
     assert!(fit.module_to_cargo(catalog, (Slot::High, 0), None, Transfer::Move));
-    assert!(fit.high.is_empty());
+    assert_eq!(fit.high, [] as [std::option::Option<efa::fit::Module>; 0]);
     assert_eq!((count(&fit, neutron), count(&fit, void)), (1, 80));
 }
 
@@ -133,7 +133,7 @@ fn a_module_dropped_on_a_cargo_module_trades_places() {
     let mut fit = armed(neutron, void);
     fit.add_cargo(dc, 1);
     assert!(fit.module_to_cargo(catalog, (Slot::High, 0), Some(dc), Transfer::Move));
-    assert!(fit.high.is_empty());
+    assert_eq!(fit.high, [] as [std::option::Option<efa::fit::Module>; 0]);
     assert_eq!((count(&fit, dc), count(&fit, neutron)), (1, 1));
 }
 

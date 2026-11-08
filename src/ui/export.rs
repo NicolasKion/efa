@@ -61,7 +61,7 @@ impl Efa {
             fit,
             stats: self.stats.clone(),
             sizes: self.rack_sizes(),
-            settings: self.saved.export,
+            settings: self.saved.settings.export,
             error: None,
         };
         // Open already, it takes this fit instead.
@@ -125,8 +125,9 @@ impl ExportWindow {
             Ok(text) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
                 let settings = self.settings;
-                self.hub
-                    .update(cx, |hub, cx| hub.update_saved(|s| s.export = settings, cx));
+                self.hub.update(cx, |hub, cx| {
+                    hub.update_saved(|s| s.settings.export = settings, cx);
+                });
                 let what = format!("fit as {}", settings.format.label());
                 let _ = self.efa.update(cx, |g, cx| {
                     g.set_status(format!("Copied {what} to clipboard"));
@@ -145,8 +146,9 @@ impl ExportWindow {
     /// replacements, fetching what it lacks, then copies the list.
     fn copy_cheaper_multibuy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let settings = self.settings;
-        self.hub
-            .update(cx, |hub, cx| hub.update_saved(|s| s.export = settings, cx));
+        self.hub.update(cx, |hub, cx| {
+            hub.update_saved(|s| s.settings.export = settings, cx);
+        });
         let loaded = Rc::clone(&self.loaded);
         let fit = self.fit.clone();
         let amounts = multibuy::amounts(&fit, &loaded.catalog, &settings.multibuy);

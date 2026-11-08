@@ -304,7 +304,7 @@ pub struct ItemStats {
     /// The fit the item is part of, as last seen.
     fit: Option<Fit>,
     /// The saved fits boosting or projecting onto it, as last seen.
-    surroundings: Vec<Fit>,
+    surroundings: Vec<Rc<Fit>>,
     /// The characters the pilot was built from; a new list means the pilot is out of date.
     characters: Option<Rc<crate::character::Characters>>,
     /// Who flies the fit, for skill-dependent values.
@@ -443,7 +443,7 @@ impl ItemStats {
                 self.surroundings = crate::engine::surrounding_fits(f, &hub.saved.fits)
                     .cloned()
                     .collect();
-                self.fit = Some(f.clone());
+                self.fit = Some((**f).clone());
             }
         }
         self.synced = hub.generation;

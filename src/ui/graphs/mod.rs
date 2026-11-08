@@ -69,13 +69,13 @@ pub fn open(
 impl super::Efa {
     /// pyfa's Fit > Graphs (Ctrl+G), starting with the current fit.
     pub(super) fn open_graphs(&mut self, cx: &mut Context<Self>) {
-        let opening = open(self.hub.clone(), self.saved.current, false, cx);
+        let opening = open(self.hub.clone(), self.saved.settings.current, false, cx);
         Self::report_open(opening, cx);
     }
 
     /// pyfa's Ctrl+Alt+G: the graph window with its hidden graphs listed too.
     pub(super) fn open_hidden_graphs(&mut self, cx: &mut Context<Self>) {
-        let opening = open(self.hub.clone(), self.saved.current, true, cx);
+        let opening = open(self.hub.clone(), self.saved.settings.current, true, cx);
         Self::report_open(opening, cx);
     }
 }
@@ -89,7 +89,7 @@ struct Field {
 pub struct GraphsWindow {
     hub: Entity<Hub>,
     loaded: Option<Rc<Loaded>>,
-    fits: Vec<Fit>,
+    fits: Vec<Rc<Fit>>,
     /// The main window's tabs, for "Add Currently Open Fit".
     open_tabs: Vec<usize>,
     synced: u64,
@@ -147,7 +147,7 @@ impl GraphsWindow {
         let subscriptions = vec![cx.observe(&hub, |this, _, cx| this.pull(cx))];
         let (settings, effective_hp) = {
             let hub = hub.read(cx);
-            (hub.saved.graphs, !hub.raw_hp)
+            (hub.saved.settings.graphs, !hub.raw_hp)
         };
         let mut this = Self {
             hub,
@@ -248,7 +248,7 @@ impl GraphsWindow {
             },
             _ => true,
         });
-        self.open_tabs = hub.saved.open.clone();
+        self.open_tabs = hub.saved.settings.open.clone();
         self.synced = hub.generation;
         for index in deleted {
             self.forget_fit(index);
@@ -287,7 +287,7 @@ impl GraphsWindow {
     /// The fit with `ammo` loaded into every module of its type, as "Plot with Different Ammo"
     /// asks for.
     fn fit_with(&self, fit: usize, ammo: Option<AmmoChoice>) -> Option<Fit> {
-        let mut f = self.fits.get(fit)?.clone();
+        let mut f = (**self.fits.get(fit)?).clone();
         if let Some(choice) = ammo {
             for m in f.modules_mut().filter(|m| m.type_id == choice.module) {
                 m.charge = Some(choice.charge);
@@ -363,8 +363,9 @@ impl GraphsWindow {
         self.recompute(cx);
         cx.notify();
         let settings = self.settings;
-        self.hub
-            .update(cx, |hub, cx| hub.update_saved(|s| s.graphs = settings, cx));
+        self.hub.update(cx, |hub, cx| {
+            hub.update_saved(|s| s.settings.graphs = settings, cx);
+        });
     }
 
     fn x_defs(&self) -> Vec<XDef> {
@@ -794,7 +795,7 @@ impl GraphsWindow {
     /// Ask the main window to open a fit as a tab, pyfa's "Open Fit in New Tab".
     pub(super) fn open_in_main(hub: &Entity<Hub>, fit: usize, cx: &mut App) {
         hub.update(cx, |hub, cx| {
-            hub.open_requests.push(fit);
+            hub.inbox.open_requests.push(fit);
             cx.notify();
         });
     }

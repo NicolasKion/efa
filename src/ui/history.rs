@@ -1,8 +1,8 @@
 //! Undo and redo for fit edits, one history per fit like pyfa's per-fit command processors
-//! (gui/fitCommands). Each step keeps the whole fit as it was, which for a fit is small and
-//! makes every action undoable without writing an inverse for it.
+//! (gui/fitCommands). Each step keeps the whole fit as it was, shared with whoever else still
+//! holds that version, which makes every action undoable without writing an inverse for it.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
 use gpui_kit::Context;
 
@@ -19,16 +19,16 @@ pub struct History {
 
 #[derive(Debug, Default)]
 struct Steps {
-    undo: Vec<Fit>,
-    redo: Vec<Fit>,
+    undo: Vec<Rc<Fit>>,
+    redo: Vec<Rc<Fit>>,
 }
 
 impl History {
     /// Remember `before` as the state to go back to from fit `index`'s current one, when the
     /// edit changed anything, which it returns. A new edit drops what could be redone, as in
     /// pyfa.
-    pub fn record(&mut self, index: usize, before: Fit, after: &Fit) -> bool {
-        if same(&before, after) {
+    pub fn record(&mut self, index: usize, before: Rc<Fit>, after: &Fit) -> bool {
+        if *before == *after {
             return false;
         }
         let steps = self.fits.entry(index).or_default();
@@ -49,7 +49,7 @@ impl History {
     }
 
     /// The fit as it was before the last edit, with `current` kept for redo.
-    pub fn undo(&mut self, index: usize, current: Fit) -> Option<Fit> {
+    pub fn undo(&mut self, index: usize, current: Rc<Fit>) -> Option<Rc<Fit>> {
         let steps = self.fits.get_mut(&index)?;
         let previous = steps.undo.pop()?;
         steps.redo.push(current);
@@ -57,7 +57,7 @@ impl History {
     }
 
     /// The fit as it was before the last undo, with `current` kept for undo.
-    pub fn redo(&mut self, index: usize, current: Fit) -> Option<Fit> {
+    pub fn redo(&mut self, index: usize, current: Rc<Fit>) -> Option<Rc<Fit>> {
         let steps = self.fits.get_mut(&index)?;
         let next = steps.redo.pop()?;
         steps.undo.push(current);
@@ -76,16 +76,24 @@ impl History {
 
 impl Efa {
     pub(super) fn can_undo(&self) -> bool {
-        self.saved.current.is_some_and(|i| self.history.can_undo(i))
+        self.saved
+            .settings
+            .current
+            .is_some_and(|i| self.history.can_undo(i))
     }
 
     pub(super) fn can_redo(&self) -> bool {
-        self.saved.current.is_some_and(|i| self.history.can_redo(i))
+        self.saved
+            .settings
+            .current
+            .is_some_and(|i| self.history.can_redo(i))
     }
 
     pub(super) fn undo(&mut self, cx: &mut Context<Self>) {
-        let Some(i) = self.saved.current else { return };
-        let current = self.saved.fits[i].clone();
+        let Some(i) = self.saved.settings.current else {
+            return;
+        };
+        let current = Rc::clone(&self.saved.fits[i]);
         if let Some(previous) = self.history.undo(i, current) {
             self.restore(i, previous, cx);
         } else {
@@ -95,8 +103,10 @@ impl Efa {
     }
 
     pub(super) fn redo(&mut self, cx: &mut Context<Self>) {
-        let Some(i) = self.saved.current else { return };
-        let current = self.saved.fits[i].clone();
+        let Some(i) = self.saved.settings.current else {
+            return;
+        };
+        let current = Rc::clone(&self.saved.fits[i]);
         if let Some(next) = self.history.redo(i, current) {
             self.restore(i, next, cx);
         } else {
@@ -105,7 +115,7 @@ impl Efa {
         }
     }
 
-    fn restore(&mut self, i: usize, fit: Fit, cx: &mut Context<Self>) {
+    fn restore(&mut self, i: usize, fit: Rc<Fit>, cx: &mut Context<Self>) {
         self.saved.fits[i] = fit;
         self.clear_selection();
         self.inputs_show = None;
@@ -114,17 +124,12 @@ impl Efa {
     }
 }
 
-/// Fits have no equality of their own; their saved form is what matters anyway.
-fn same(a: &Fit, b: &Fit) -> bool {
-    serde_json::to_string(a).ok() == serde_json::to_string(b).ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn named(name: &str) -> Fit {
-        Fit::new(name)
+    fn named(name: &str) -> Rc<Fit> {
+        Rc::new(Fit::new(name))
     }
 
     #[test]

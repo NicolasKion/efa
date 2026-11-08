@@ -33,7 +33,7 @@ impl Efa {
                 fit: None,
             },
             StatsOf::Fitted(item) => {
-                let Some(fit) = self.saved.current else {
+                let Some(fit) = self.saved.settings.current else {
                     return;
                 };
                 // Handed over rather than read later: the new window is built while this one
@@ -49,7 +49,7 @@ impl Efa {
                 };
                 Request {
                     target: Target::Fitted { fit, item },
-                    fit: Some(other.clone()),
+                    fit: Some((**other).clone()),
                 }
             }
         };

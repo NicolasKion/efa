@@ -114,6 +114,18 @@ use crate::{
     theme::{self, Palette},
 };
 
+/// The settings the stats are calculated with, besides the fits and characters: when these
+/// stay the same, a change from another window needs no recalculation.
+fn calc_settings(saved: &Saved) -> (bool, f64, bool, bool) {
+    let preferences = &saved.settings.preferences;
+    (
+        saved.settings.factor_reload,
+        preferences.engine.default_spool,
+        preferences.general.global_character,
+        preferences.general.global_damage_pattern,
+    )
+}
+
 /// How long to wait before asking ESI again after a failed price fetch.
 const PRICE_RETRY: Duration = Duration::from_secs(600);
 
@@ -206,6 +218,8 @@ pub struct Efa {
     role: Role,
     /// The hub generation this window's fits match.
     synced: u64,
+    /// The hub's engine generation the stats were calculated with.
+    engine_synced: u64,
     /// Fits this window deleted since it last published, for the other windows' tabs.
     pending_deletions: Vec<usize>,
     /// The active tab shows the name field instead of the name.
@@ -342,10 +356,14 @@ impl Efa {
             }),
             cx.subscribe(&name_input, |this, input, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change)
-                    && let Some(i) = this.saved.current
+                    && let Some(i) = this.saved.settings.current
                 {
-                    let fit = &mut this.saved.fits[i];
-                    fit.name = input.read(cx).value().to_string();
+                    let name = input.read(cx).value().to_string();
+                    if this.saved.fits[i].name == name {
+                        return;
+                    }
+                    let fit = this.saved.fit_mut(i);
+                    fit.name = name;
                     fit.modified = crate::fit::now();
                     this.save();
                     cx.notify();
@@ -382,13 +400,14 @@ impl Efa {
             )
         };
         if let Role::Detached(fit) = role {
-            saved.open = vec![fit];
-            saved.current = Some(fit);
+            saved.settings.open = vec![fit];
+            saved.settings.current = Some(fit);
         }
         let mut this = Self {
             hub,
             role,
             synced,
+            engine_synced: 0,
             pending_deletions: Vec::new(),
             renaming: false,
             tab_dragging: false,
@@ -454,98 +473,109 @@ impl Efa {
     /// windows changed.
     fn pull(&mut self, cx: &mut Context<Self>) {
         let hub = self.hub.read(cx);
-        let mut changed = false;
+        // What changed: anything at all redraws, what the stats come from recalculates too.
+        let (mut redraw, mut recalculate) = (false, false);
         if matches!(self.loading, Loading::Pending) {
             match &hub.loading {
                 hub::HubLoading::Ready(loaded) => {
                     self.loading = Loading::Ready(Rc::clone(loaded));
-                    changed = true;
+                    recalculate = true;
                 }
                 hub::HubLoading::Failed(e) => {
                     self.loading = Loading::Failed(e.clone());
-                    changed = true;
+                    redraw = true;
                 }
                 hub::HubLoading::Pending => {}
             }
         }
         if !Rc::ptr_eq(&self.prices, &hub.prices) {
             self.prices = Rc::clone(&hub.prices);
-            changed = true;
+            redraw = true;
         }
         if !Rc::ptr_eq(&self.characters, &hub.characters) {
             self.characters = Rc::clone(&hub.characters);
-            changed = true;
+            recalculate = true;
+        }
+        if hub.engine_generation != self.engine_synced {
+            self.engine_synced = hub.engine_generation;
+            recalculate = true;
         }
         if hub.generation != self.synced {
+            let calc_before = calc_settings(&self.saved);
+            let fits_before = self.saved.fits.clone();
             let deleted: Vec<usize> = hub
                 .deletions
                 .iter()
                 .filter(|(generation, _)| *generation > self.synced)
                 .map(|&(_, index)| index)
                 .collect();
-            let (open, current) = (self.saved.open.clone(), self.saved.current);
+            let (open, current) = (
+                self.saved.settings.open.clone(),
+                self.saved.settings.current,
+            );
             // Edits not published yet survive a settings change from the preferences window.
             let unpublished =
                 (self.unsaved && deleted.is_empty()).then(|| std::mem::take(&mut self.saved.fits));
             self.saved = hub.saved.clone();
-            self.saved.open = open;
-            self.saved.current = current;
+            self.saved.settings.open = open;
+            self.saved.settings.current = current;
             if let Some(fits) = unpublished {
                 self.saved.fits = fits;
             }
             for index in deleted {
-                hub::shift_tabs(&mut self.saved.open, &mut self.saved.current, index);
+                hub::shift_tabs(
+                    &mut self.saved.settings.open,
+                    &mut self.saved.settings.current,
+                    index,
+                );
                 self.history.forget(index);
             }
             self.synced = hub.generation;
             self.inputs_show = None;
-            changed = true;
+            redraw = true;
+            // A preferences change leaves every fit shared as it was.
+            let same_fits = fits_before.len() == self.saved.fits.len()
+                && fits_before
+                    .iter()
+                    .zip(&self.saved.fits)
+                    .all(|(a, b)| Rc::ptr_eq(a, b));
+            recalculate |= !same_fits || calc_settings(&self.saved) != calc_before;
         }
-        let import = (self.role == Role::Main && self.loaded().is_some())
-            .then(|| self.hub.update(cx, |hub, _| hub.import.take()))
-            .flatten();
-        if let Some(text) = import {
-            self.import(&text);
-            self.save();
-        }
-        // Fits imported from the ESI fittings window land here.
-        if self.role == Role::Main && !self.hub.read(cx).fit_imports.is_empty() {
-            let imports = self
-                .hub
-                .update(cx, |hub, _| std::mem::take(&mut hub.fit_imports));
-            for imported in imports {
-                self.add_imported(imported);
-            }
-            self.save();
-            changed = true;
-        }
-        if changed {
+        let inbox = (self.role == Role::Main && self.loaded().is_some() && !hub.inbox.is_empty())
+            .then(|| self.hub.update(cx, |hub, _| hub.take_inbox()));
+        if recalculate {
             self.recompute();
+        }
+        if redraw || recalculate {
             cx.notify();
         }
-        // Rolls set in a stats window's Mutations tab land here, to be undoable like any edit.
-        if self.role == Role::Main && !self.hub.read(cx).mutation_edits.is_empty() {
-            let edits = self
-                .hub
-                .update(cx, |hub, _| std::mem::take(&mut hub.mutation_edits));
-            self.apply_mutation_edits(edits, cx);
+        if let Some(inbox) = inbox {
+            self.take_inbox(inbox, cx);
         }
-        // Tanks the fitting wizard window fits land here, to be undoable like any edit.
-        if self.role == Role::Main && !self.hub.read(cx).wizard_edits.is_empty() {
-            let edits = self
-                .hub
-                .update(cx, |hub, _| std::mem::take(&mut hub.wizard_edits));
-            self.apply_wizard_edits(edits, cx);
+    }
+
+    /// Do what other windows left in the hub's inbox: imports become tabs, edits are made with
+    /// undo like any other, and requested fits open.
+    fn take_inbox(&mut self, inbox: hub::HubInbox, cx: &mut Context<Self>) {
+        let hub::HubInbox {
+            import,
+            fit_imports,
+            mutation_edits,
+            wizard_edits,
+            open_requests,
+        } = inbox;
+        if let Some(text) = import {
+            self.import(&text);
         }
-        // The graph window's "Open Fit in New Tab" lands here.
-        if self.role == Role::Main && !self.hub.read(cx).open_requests.is_empty() {
-            let requests = self
-                .hub
-                .update(cx, |hub, _| std::mem::take(&mut hub.open_requests));
-            let count = self.saved.fits.len();
-            for index in requests.into_iter().filter(|&i| i < count) {
-                self.open_fit(index, cx);
-            }
+        for imported in fit_imports {
+            self.add_imported(imported);
+        }
+        self.changed(cx);
+        self.apply_mutation_edits(mutation_edits, cx);
+        self.apply_wizard_edits(wizard_edits, cx);
+        let count = self.saved.fits.len();
+        for index in open_requests.into_iter().filter(|&i| i < count) {
+            self.open_fit(index, cx);
         }
     }
 
@@ -595,7 +625,7 @@ impl Efa {
 
     /// Move a tab to where another one is.
     fn move_tab(&mut self, from: usize, onto: usize, cx: &mut Context<Self>) {
-        let open = &mut self.saved.open;
+        let open = &mut self.saved.settings.open;
         let (Some(a), Some(b)) = (
             open.iter().position(|&i| i == from),
             open.iter().position(|&i| i == onto),
@@ -617,7 +647,7 @@ impl Efa {
 
     /// The source and hub the preferences ask prices from.
     fn price_origin(&self) -> crate::prices::Origin {
-        let market = &self.saved.preferences.market;
+        let market = &self.saved.settings.preferences.market;
         crate::prices::Origin {
             source: market.price_source,
             system: market.price_system,
@@ -625,7 +655,7 @@ impl Efa {
     }
 
     fn prices_online(&self) -> bool {
-        let network = &self.saved.preferences.network;
+        let network = &self.saved.settings.preferences.network;
         network.enabled && network.prices
     }
 
@@ -634,7 +664,7 @@ impl Efa {
         self.saved
             .fits
             .iter()
-            .flat_map(crate::port::fit_types)
+            .flat_map(|fit| crate::port::fit_types(fit))
             .collect()
     }
 
@@ -680,7 +710,7 @@ impl Efa {
         let origin = self.price_origin();
         let prices = (*self.prices).clone();
         let cache_dir = loaded.cache_dir.clone();
-        let proxy = self.saved.preferences.network.proxy.clone();
+        let proxy = self.saved.settings.preferences.network.proxy.clone();
         self.prices_fetch = Some(cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -748,22 +778,27 @@ impl Efa {
     }
 
     fn fit(&self) -> Option<&Fit> {
-        self.saved.current.map(|i| &self.saved.fits[i])
+        self.saved.settings.current.map(|i| &*self.saved.fits[i])
     }
 
     fn recompute(&mut self) {
         let Some(loaded) = self.loaded() else { return };
         self.follow_globals();
         let options = crate::engine::CalcOptions {
-            factor_reload: self.saved.factor_reload,
-            default_spool: Some(self.saved.preferences.engine.default_spool),
+            factor_reload: self.saved.settings.factor_reload,
+            default_spool: Some(self.saved.settings.preferences.engine.default_spool),
         };
         // Older saves kept fighters as drone stacks; links can point at fits deleted since.
-        if let Some(i) = self.saved.current
-            && (self.saved.fits[i].move_fighters_out_of_drones(&loaded.catalog)
-                | self.saved.tidy_links(i))
-        {
-            self.unsaved = true;
+        if let Some(i) = self.saved.settings.current {
+            let fighters = self.saved.fits[i].has_fighter_stacks(&loaded.catalog);
+            if fighters {
+                self.saved
+                    .fit_mut(i)
+                    .move_fighters_out_of_drones(&loaded.catalog);
+            }
+            if fighters | self.saved.tidy_links(i) {
+                self.unsaved = true;
+            }
         }
         let pilot = self.pilot(&loaded);
         self.stats = self.fit().map(|fit| {
@@ -776,16 +811,19 @@ impl Efa {
     /// With pyfa's "Use global character" and "Use global damage pattern", the current fit
     /// takes the character and damage pattern picked last, as pyfa's `switchFit` does.
     fn follow_globals(&mut self) {
-        let general = &self.saved.preferences.general;
+        let general = &self.saved.settings.preferences.general;
         let (character, pattern) = (general.global_character, general.global_damage_pattern);
-        let Some(i) = self.saved.current else { return };
-        let fit = &mut self.saved.fits[i];
+        let Some(i) = self.saved.settings.current else {
+            return;
+        };
+        let fit = &self.saved.fits[i];
         if character && fit.character != self.last_character {
-            fit.character = self.last_character;
+            self.saved.fit_mut(i).character = self.last_character;
             self.unsaved = true;
         }
+        let fit = &self.saved.fits[i];
         if pattern && fit.damage_profile != self.last_damage_profile {
-            fit.damage_profile = self.last_damage_profile.clone();
+            self.saved.fit_mut(i).damage_profile = self.last_damage_profile.clone();
             self.unsaved = true;
         }
     }
@@ -867,10 +905,10 @@ impl Efa {
 
     fn open_fit(&mut self, index: usize, cx: &mut Context<Self>) {
         self.clear_selection();
-        if !self.saved.open.contains(&index) {
-            self.saved.open.push(index);
+        if !self.saved.settings.open.contains(&index) {
+            self.saved.settings.open.push(index);
         }
-        self.saved.current = Some(index);
+        self.saved.settings.current = Some(index);
         self.changed(cx);
     }
 
@@ -887,23 +925,23 @@ impl Efa {
 
     fn add_fit(&mut self, mut fit: Fit, cx: &mut Context<Self>) {
         fit.modified = crate::fit::now();
-        self.saved.fits.push(fit);
+        self.saved.push_fit(fit);
         self.open_fit(self.saved.fits.len() - 1, cx);
     }
 
     fn close_fit(&mut self, index: usize, cx: &mut Context<Self>) {
         self.clear_selection();
-        self.saved.open.retain(|&i| i != index);
-        if self.saved.current == Some(index) {
-            self.saved.current = self.saved.open.last().copied();
+        self.saved.settings.open.retain(|&i| i != index);
+        if self.saved.settings.current == Some(index) {
+            self.saved.settings.current = self.saved.settings.open.last().copied();
         }
         self.changed(cx);
     }
 
     fn close_other_fits(&mut self, keep: usize, cx: &mut Context<Self>) {
         self.clear_selection();
-        self.saved.open.retain(|&i| i == keep);
-        self.saved.current = Some(keep);
+        self.saved.settings.open.retain(|&i| i == keep);
+        self.saved.settings.current = Some(keep);
         self.changed(cx);
     }
 
@@ -913,7 +951,11 @@ impl Efa {
         }
         self.clear_selection();
         self.saved.fits.remove(index);
-        hub::shift_tabs(&mut self.saved.open, &mut self.saved.current, index);
+        hub::shift_tabs(
+            &mut self.saved.settings.open,
+            &mut self.saved.settings.current,
+            index,
+        );
         self.history.forget(index);
         self.pending_deletions.push(index);
         self.inputs_show = None;
@@ -949,9 +991,9 @@ impl Efa {
     }
 
     /// Keep `before` for undo and date the fit, when the edit changed it.
-    fn record_edit(&mut self, index: usize, before: Fit) {
+    fn record_edit(&mut self, index: usize, before: Rc<Fit>) {
         if self.history.record(index, before, &self.saved.fits[index]) {
-            self.saved.fits[index].modified = crate::fit::now();
+            self.saved.fit_mut(index).modified = crate::fit::now();
         }
     }
 
@@ -973,7 +1015,7 @@ impl Efa {
             self.add_fit(fit, cx);
             return;
         }
-        let Some(i) = self.saved.current else {
+        let Some(i) = self.saved.settings.current else {
             self.set_status("Pick a ship first");
             cx.notify();
             return;
@@ -1075,10 +1117,10 @@ impl Efa {
 
     /// Point the name and notes inputs at the current fit when it changes.
     fn sync_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.inputs_show == self.saved.current {
+        if self.inputs_show == self.saved.settings.current {
             return;
         }
-        self.inputs_show = self.saved.current;
+        self.inputs_show = self.saved.settings.current;
         let (name, notes) = self
             .fit()
             .map_or_default(|f| (f.name.clone(), f.notes.clone()));
@@ -1089,7 +1131,7 @@ impl Efa {
     }
 
     fn duplicate_fit(&mut self, cx: &mut Context<Self>) {
-        if let Some(i) = self.saved.current {
+        if let Some(i) = self.saved.settings.current {
             self.copy_fit(i, cx);
         }
     }
@@ -1103,7 +1145,7 @@ impl Efa {
             name: format!("{} copy", original.name),
             // A fresh identity, so links to the original stay with it.
             uid: 0,
-            ..original.clone()
+            ..(**original).clone()
         };
         self.add_fit(copy, cx);
     }
@@ -1112,6 +1154,7 @@ impl Efa {
     fn fit_tabs(&self, loaded: &Loaded, cx: &mut Context<Self>) -> AnyElement {
         let tabs: Vec<AnyElement> = self
             .saved
+            .settings
             .open
             .iter()
             .map(|&i| self.fit_tab(loaded, i, cx))
@@ -1143,7 +1186,7 @@ impl Efa {
     fn fit_tab(&self, loaded: &Loaded, i: usize, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let fit = &self.saved.fits[i];
-        let selected = self.saved.current == Some(i);
+        let selected = self.saved.settings.current == Some(i);
         let renaming = selected && self.renaming;
         let ship_name = fit.ship.map(|s| loaded.catalog.name(s));
         let label = match &ship_name {
@@ -1177,10 +1220,13 @@ impl Efa {
         h_flex()
             .id(group.clone())
             .group(group.clone())
-            .when(self.saved.preferences.general.tab_tooltips, |tab| {
-                let tip: SharedString = label.clone().into();
-                tab.tip(tip)
-            })
+            .when(
+                self.saved.settings.preferences.general.tab_tooltips,
+                |tab| {
+                    let tip: SharedString = label.clone().into();
+                    tab.tip(tip)
+                },
+            )
             .flex_none()
             .max_w(px(TAB_MAX_W))
             .h(px(TAB_H))
@@ -1230,13 +1276,13 @@ impl Efa {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &gpui_kit::MouseDownEvent, window, cx| {
-                    if this.saved.current == Some(i) && event.click_count >= 2 {
+                    if this.saved.settings.current == Some(i) && event.click_count >= 2 {
                         this.start_rename(window, cx);
                         return;
                     }
-                    if this.saved.current != Some(i) {
+                    if this.saved.settings.current != Some(i) {
                         this.renaming = false;
-                        this.saved.current = Some(i);
+                        this.saved.settings.current = Some(i);
                         this.clear_selection();
                         this.changed(cx);
                     }
@@ -1282,7 +1328,7 @@ impl Efa {
                     let menu = menu
                         .item(widgets::entry(IconName::Replace, "Rename").on_click(
                             widgets::on_efa(&this, move |g, _, window, cx| {
-                                g.saved.current = Some(i);
+                                g.saved.settings.current = Some(i);
                                 g.changed(cx);
                                 g.start_rename(window, cx);
                             }),

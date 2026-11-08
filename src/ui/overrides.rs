@@ -112,7 +112,7 @@ impl OverridesWindow {
     }
 
     fn overrides<'a>(&self, cx: &'a gpui_kit::App) -> &'a Overrides {
-        &self.hub.read(cx).saved.overrides
+        &self.hub.read(cx).saved.settings.overrides
     }
 
     fn edit(&self, cx: &mut Context<Self>, edit: impl FnOnce(&mut Overrides)) {

@@ -60,12 +60,12 @@ impl ExportToEveWindow {
     }
 
     fn options(&self, cx: &Context<Self>) -> UploadOptions {
-        self.hub.read(cx).saved.preferences.esi.upload
+        self.hub.read(cx).saved.settings.preferences.esi.upload
     }
 
     fn set_option(&self, cx: &mut Context<Self>, apply: impl FnOnce(&mut UploadOptions)) {
         self.hub.update(cx, |hub, cx| {
-            hub.update_saved(|s| apply(&mut s.preferences.esi.upload), cx);
+            hub.update_saved(|s| apply(&mut s.settings.preferences.esi.upload), cx);
         });
     }
 

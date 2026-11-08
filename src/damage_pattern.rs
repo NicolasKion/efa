@@ -335,9 +335,10 @@ pub fn export(user: &[DamagePattern]) -> String {
 
 /// Point fits that use the user pattern `old` at what it became: its new name and amounts, or
 /// uniform damage once it is deleted. pyfa's fits hold the pattern itself, so they follow it.
-pub fn retarget(fits: &mut [Fit], old: &str, new: Option<&DamagePattern>) {
+pub fn retarget(fits: &mut [std::rc::Rc<Fit>], old: &str, new: Option<&DamagePattern>) {
     for fit in fits {
         if matches!(&fit.damage_profile, DamageProfile::Pattern { name, .. } if name == old) {
+            let fit = std::rc::Rc::make_mut(fit);
             fit.damage_profile = new.map_or(DamageProfile::Uniform, DamagePattern::to_profile);
         }
     }
@@ -452,8 +453,12 @@ mod tests {
 
     #[test]
     fn deleting_a_used_pattern_falls_back_to_uniform() {
-        let mut fits = vec![Fit::new("a"), Fit::new("b")];
-        fits[0].damage_profile = DamagePattern::new("Mine", [1.0; 4]).to_profile();
+        let mut fits = vec![
+            std::rc::Rc::new(Fit::new("a")),
+            std::rc::Rc::new(Fit::new("b")),
+        ];
+        std::rc::Rc::make_mut(&mut fits[0]).damage_profile =
+            DamagePattern::new("Mine", [1.0; 4]).to_profile();
         let renamed = DamagePattern::new("Ours", [2.0; 4]);
         retarget(&mut fits, "Mine", Some(&renamed));
         assert_eq!(fits[0].damage_profile, renamed.to_profile());

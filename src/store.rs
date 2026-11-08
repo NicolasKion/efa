@@ -1,5 +1,7 @@
 //! Saved fits and which of them are open, and the settings kept with them in [`crate::db`].
 
+use std::rc::Rc;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -8,10 +10,31 @@ use crate::{
     target_profile::TargetProfile,
 };
 
+/// The user's fits and lists, and the settings kept with them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Saved {
-    pub fits: Vec<Fit>,
+    /// Shared with every window's copy: an edit copies only the fit it changes, through
+    /// [`Saved::fit_mut`], so passing the fits on costs a pointer each.
+    pub fits: Vec<Rc<Fit>>,
+    /// The user's implant sets, by name.
+    pub implant_sets: Vec<ImplantSet>,
+    /// The user's damage patterns, pyfa's Damage Pattern Editor.
+    pub damage_patterns: Vec<DamagePattern>,
+    /// The user's target profiles, pyfa's Target Profile Editor.
+    pub target_profiles: Vec<TargetProfile>,
+    /// The user's cargo presets, by name.
+    pub cargo_presets: Vec<crate::cargo_preset::CargoPreset>,
+    /// Everything that is not a list. Stored as settings rather than tables, so writing them
+    /// never looks at the fits.
+    #[serde(flatten)]
+    pub settings: Settings,
+}
+
+/// Window state and preferences: the settings part of [`Saved`].
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
     /// Fits open as tabs, by index into `fits`.
     pub open: Vec<usize>,
     pub current: Option<usize>,
@@ -19,17 +42,8 @@ pub struct Saved {
     pub columns: std::collections::BTreeMap<String, f32>,
     /// Count reload time into DPS and the capacitor simulation, pyfa's global "Factor in Reload Time".
     pub factor_reload: bool,
-    /// The user's implant sets, by name.
-    #[serde(default)]
-    pub implant_sets: Vec<ImplantSet>,
     /// Which groups the price total counts, pyfa's price view menu.
     pub price_totals: PriceTotals,
-    /// The user's damage patterns, pyfa's Damage Pattern Editor.
-    #[serde(default)]
-    pub damage_patterns: Vec<DamagePattern>,
-    /// The user's target profiles, pyfa's Target Profile Editor.
-    #[serde(default)]
-    pub target_profiles: Vec<TargetProfile>,
     /// The preferences window's settings.
     #[serde(default)]
     pub preferences: Preferences,
@@ -55,9 +69,6 @@ pub struct Saved {
     /// pyfa's attribute overrides and whether they are on.
     #[serde(default)]
     pub overrides: crate::overrides::Overrides,
-    /// The user's cargo presets, by name.
-    #[serde(default)]
-    pub cargo_presets: Vec<crate::cargo_preset::CargoPreset>,
 }
 
 /// What besides ship and fittings the price total includes, with pyfa's defaults.
@@ -81,10 +92,22 @@ impl Default for PriceTotals {
 }
 
 impl Saved {
+    /// Fit `index` to change, copied first if another window's copy shares it.
+    pub fn fit_mut(&mut self, index: usize) -> &mut Fit {
+        Rc::make_mut(&mut self.fits[index])
+    }
+
+    /// Add a fit at the end.
+    pub fn push_fit(&mut self, fit: Fit) {
+        self.fits.push(Rc::new(fit));
+    }
+
     /// Drop tabs of fits that are gone and split shared identities, after loading.
     pub fn tidy(&mut self) {
-        self.open.retain(|&i| i < self.fits.len());
-        self.current = self.current.filter(|c| self.open.contains(c));
+        let count = self.fits.len();
+        let settings = &mut self.settings;
+        settings.open.retain(|&i| i < count);
+        settings.current = settings.current.filter(|c| settings.open.contains(c));
         self.dedupe_uids();
     }
 
@@ -97,7 +120,7 @@ impl Saved {
             return Some(uid);
         }
         let fresh = self.highest_uid() + 1;
-        self.fits[index].uid = fresh;
+        self.fit_mut(index).uid = fresh;
         Some(fresh)
     }
 
@@ -125,14 +148,26 @@ impl Saved {
     /// Drop the fit's links to fits that were deleted. Returns whether any went.
     pub fn tidy_links(&mut self, index: usize) -> bool {
         let uids: std::collections::HashSet<u64> = self.fits.iter().map(|f| f.uid).collect();
-        let Some(fit) = self.fits.get_mut(index) else {
+        let Some(fit) = self.fits.get(index) else {
             return false;
         };
-        let before = fit.projected.fits.len() + fit.command.len();
+        let dangling = fit
+            .projected
+            .fits
+            .iter()
+            .any(|p| p.fit == 0 || !uids.contains(&p.fit))
+            || fit
+                .command
+                .iter()
+                .any(|c| c.fit == 0 || !uids.contains(&c.fit));
+        if !dangling {
+            return false;
+        }
+        let fit = self.fit_mut(index);
         fit.projected
             .retain_fits(|uid| uid != 0 && uids.contains(&uid));
         fit.command.retain(|c| c.fit != 0 && uids.contains(&c.fit));
-        before != fit.projected.fits.len() + fit.command.len()
+        true
     }
 
     /// Give fits that share an identity their own, keeping it with the first of them, so a
@@ -143,7 +178,7 @@ impl Saved {
         for fit in &mut self.fits {
             if fit.uid != 0 && !seen.insert(fit.uid) {
                 next += 1;
-                fit.uid = next;
+                Rc::make_mut(fit).uid = next;
             }
         }
     }
@@ -156,7 +191,7 @@ mod tests {
     #[test]
     fn uids_are_handed_out_once_and_kept() {
         let mut saved = Saved {
-            fits: vec![Fit::new("a"), Fit::new("b")],
+            fits: vec![Rc::new(Fit::new("a")), Rc::new(Fit::new("b"))],
             ..Saved::default()
         };
         let a = saved.ensure_uid(0).expect("fit exists");
@@ -167,7 +202,7 @@ mod tests {
         assert_eq!(saved.fit_index(0), None);
 
         // A copy of a fit gets its own identity; the original keeps its.
-        saved.fits.push(saved.fits[0].clone());
+        saved.push_fit((*saved.fits[0]).clone());
         let copy = saved.ensure_uid(2).expect("fit exists");
         assert_ne!(copy, a);
         assert_eq!(saved.fit_index(a), Some(0));
@@ -176,13 +211,13 @@ mod tests {
     #[test]
     fn identities_of_deleted_fits_are_not_handed_out_again() {
         let mut saved = Saved {
-            fits: vec![Fit::new("a"), Fit::new("b")],
+            fits: vec![Rc::new(Fit::new("a")), Rc::new(Fit::new("b"))],
             ..Saved::default()
         };
         let b = saved.ensure_uid(1).expect("fit exists");
-        saved.fits[0].projected.add_fit(b);
+        saved.fit_mut(0).projected.add_fit(b);
         saved.fits.remove(1);
-        saved.fits.push(Fit::new("c"));
+        saved.push_fit(Fit::new("c"));
         let c = saved.ensure_uid(1).expect("fit exists");
         assert_ne!(c, b, "the new fit would inherit the old projection");
     }
@@ -190,11 +225,11 @@ mod tests {
     #[test]
     fn duplicate_uids_are_split_on_load() {
         let mut saved = Saved {
-            fits: vec![Fit::new("a"), Fit::new("b")],
+            fits: vec![Rc::new(Fit::new("a")), Rc::new(Fit::new("b"))],
             ..Saved::default()
         };
-        saved.fits[0].uid = 4;
-        saved.fits[1].uid = 4;
+        saved.fit_mut(0).uid = 4;
+        saved.fit_mut(1).uid = 4;
         saved.dedupe_uids();
         assert_eq!(saved.fits[0].uid, 4);
         assert_eq!(saved.fits[1].uid, 5);

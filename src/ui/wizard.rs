@@ -93,7 +93,7 @@ impl Shared {
             change,
         };
         self.hub.update(cx, |hub, cx| {
-            hub.wizard_edits.push(edit);
+            hub.inbox.wizard_edits.push(edit);
             cx.notify();
         });
         window.remove_window();
@@ -136,7 +136,7 @@ impl Panel {
         match section {
             Section::Tank => {
                 let hub = shared.hub.read(cx);
-                let mut choices = hub.saved.wizard.tank;
+                let mut choices = hub.saved.settings.wizard.tank;
                 choices.layer = shared.facts.layer();
                 let prices = Rc::clone(&hub.prices);
                 let shared = Rc::clone(shared);
@@ -240,14 +240,14 @@ impl Efa {
             .detach();
             return;
         };
-        let Some(current) = self.saved.current else {
+        let Some(current) = self.saved.settings.current else {
             return;
         };
         let Some(uid) = self.saved.ensure_uid(current) else {
             return;
         };
         self.save();
-        let fit = self.saved.fits[current].clone();
+        let fit = (*self.saved.fits[current]).clone();
         let pilot = self.pilot(&loaded);
         let Some(shared) = Shared::new(
             self.hub.clone(),
@@ -309,7 +309,7 @@ fn fit_text(fit: &Fit) -> String {
 
 impl WizardDialog {
     fn new(shared: Rc<Shared>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let section = shared.hub.read(cx).saved.wizard_tab;
+        let section = shared.hub.read(cx).saved.settings.wizard_tab;
         let hub = shared.hub.clone();
         let mut dialog = Self {
             panels: Vec::new(),
@@ -351,7 +351,7 @@ impl WizardDialog {
             .fits
             .iter()
             .find(|f| f.uid == s.uid)
-            .cloned()
+            .map(|f| (**f).clone())
         else {
             return;
         };
@@ -379,7 +379,7 @@ impl WizardDialog {
             None if !self.seen => Target::Same,
             None => Target::Gone,
             Some(i) if fit_text(&hub.saved.fits[i]) != self.shared.saved => Target::Changed,
-            Some(i) if !hub.saved.open.contains(&i) => Target::Closed,
+            Some(i) if !hub.saved.settings.open.contains(&i) => Target::Closed,
             Some(_) => Target::Same,
         };
         if target != self.target {
@@ -401,7 +401,8 @@ impl WizardDialog {
     fn set_section(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         if section != self.section {
             self.section = section;
-            self.shared.remember(cx, move |s| s.wizard_tab = section);
+            self.shared
+                .remember(cx, move |s| s.settings.wizard_tab = section);
         }
         if let Some(focus) = self.panel().map(|p| p.focus(cx)) {
             window.focus(&focus, cx);
