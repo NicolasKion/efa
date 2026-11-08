@@ -1,0 +1,2056 @@
+//! The tank section: what to aim for (max EHP, max resist multiplier or max repair in EHP/s),
+//! the layer and what the search may use on the left; the best tanks it found as cards in the
+//! middle, each with its goal number, the change against the fit and the modules it fits; and
+//! the picked one in detail on the right, against the fit as it is. The search runs off the UI
+//! thread, after the prices of everything it may try are in.
+
+use std::{rc::Rc, sync::Arc, time::Duration};
+
+use gpui_kit::assets::IconName as AssetIcon;
+use gpui_kit::component::{
+    ActiveTheme, Disableable, Icon as UiIcon, IconName, Sizable,
+    button::{Button, ButtonVariants},
+    h_flex,
+    input::{Input, InputEvent, InputState},
+    tooltip::Tooltip,
+    v_flex,
+};
+use gpui_kit::{
+    AnyElement, App, AppContext, ClickEvent, Context, Div, Entity, FocusHandle, FontWeight, Hsla,
+    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement, Render,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window, div,
+    prelude::FluentBuilder, px,
+};
+
+use super::{
+    Efa, Layout, Segment, Shared, Stat, Target, bar, chip, divider, join_and, label, muted, notice,
+    plural, segmented,
+};
+use crate::{
+    data::{Slot, TypeId},
+    engine::Resource,
+    fit::DamageProfile,
+    icons::Icon,
+    prices::Prices,
+    ui::{side, widgets},
+    wizard::{
+        self, Budget, Change, Layer, SearchGroup,
+        tank::{Choices, Found, Goal, Limit, Numbers, Outcome, Problem, Progress},
+    },
+};
+
+/// Tanks the search lists.
+const RESULTS: usize = 6;
+/// The controls column, and the picked tank's, in a wide window.
+const CONTROLS_W: f32 = 300.;
+const DETAIL_W: f32 = 360.;
+const ICON: f32 = 18.;
+/// Icons in a result row.
+const STRIP_ICON: f32 = 20.;
+/// The most repairers the stepper goes to.
+const MAX_REPAIRERS: u8 = 6;
+
+/// How the results are ordered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Sort {
+    Goal,
+    Price,
+    Ehp,
+}
+
+/// A running search. Dropping it calls the search off.
+struct Search {
+    progress: Arc<Progress>,
+    _task: Task<()>,
+}
+
+impl Drop for Search {
+    fn drop(&mut self) {
+        self.progress.cancel();
+    }
+}
+
+/// The last search: what it was for and what it found.
+struct Searched {
+    choices: Choices,
+    problem: Problem,
+    found: Found,
+}
+
+/// The section's room on the fit: how many tank modules and rigs come off, and how many
+/// positions the search fills.
+#[derive(Debug, Clone, Copy, Default)]
+struct RoomCounts {
+    modules_off: usize,
+    rigs_off: usize,
+    slots: usize,
+    rigs: usize,
+}
+
+/// What a module line in a preview is to the fit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mark {
+    Added,
+    Kept,
+    Removed,
+}
+
+pub(in crate::ui) struct TankSection {
+    shared: Rc<Shared>,
+    pub(super) focus: FocusHandle,
+    prices: Rc<Prices>,
+    choices: Choices,
+    room: RoomCounts,
+    /// The fit's numbers now, on the chosen layer.
+    now: Numbers,
+    search: Option<Search>,
+    /// Prices are being fetched ahead of the search of this generation.
+    fetching: Option<u64>,
+    /// Tells a finished search from one that was called off or replaced.
+    generation: u64,
+    searched: Option<Searched>,
+    /// Index into the found tanks.
+    selected: Option<usize>,
+    /// The picked tank's change and the numbers the fit gets with it.
+    after: Option<(Change, Numbers)>,
+    /// Why the last search found nothing, or what it is waiting for.
+    note: Option<SharedString>,
+    sort: Sort,
+    /// How the fit stands against the copy the section works on.
+    target: Target,
+    /// Budgets, typed as "75m" or "1.5b", with presets under them.
+    budget_each: Entity<InputState>,
+    budget_total: Entity<InputState>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl TankSection {
+    pub(super) fn new(
+        shared: Rc<Shared>,
+        choices: Choices,
+        prices: Rc<Prices>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let input = |amount: Option<u64>, window: &mut Window, cx: &mut Context<Self>| {
+            cx.new(|cx| {
+                let mut state = InputState::new(window, cx).placeholder("Any");
+                if let Some(isk) = amount {
+                    state.set_value(Budget::label(Some(isk)), window, cx);
+                }
+                state
+            })
+        };
+        let budget_each = input(choices.budget.each, window, cx);
+        let budget_total = input(choices.budget.total, window, cx);
+        // Typing a budget sets it; text that is not an amount leaves it as it was.
+        let on_type = |cx: &mut Context<Self>,
+                       field: &Entity<InputState>,
+                       set: fn(&mut Choices, Option<u64>)| {
+            cx.subscribe(
+                field,
+                move |this: &mut Self, input, event: &InputEvent, cx| {
+                    if !matches!(event, InputEvent::Change) {
+                        return;
+                    }
+                    let text = input.read(cx).value().to_string();
+                    let amount = if text.trim().is_empty() {
+                        None
+                    } else {
+                        match Budget::parse(&text) {
+                            Some(isk) => Some(isk),
+                            None => return,
+                        }
+                    };
+                    this.change(cx, |c| set(c, amount));
+                },
+            )
+        };
+        let subscriptions = vec![
+            on_type(cx, &budget_each, |c, v| c.budget.each = v),
+            on_type(cx, &budget_total, |c, v| c.budget.total = v),
+        ];
+        let mut section = Self {
+            shared,
+            focus: cx.focus_handle(),
+            prices,
+            choices,
+            room: RoomCounts::default(),
+            now: Numbers::default(),
+            search: None,
+            fetching: None,
+            generation: 0,
+            searched: None,
+            selected: None,
+            after: None,
+            note: None,
+            sort: Sort::Goal,
+            target: Target::Same,
+            budget_each,
+            budget_total,
+            _subscriptions: subscriptions,
+        };
+        section.measure();
+        section
+    }
+
+    /// Where the section stands, for the section list.
+    pub(super) fn summary(&self) -> SharedString {
+        let goal = self.choices.goal.label().to_lowercase();
+        let layer = self.choices.layer.label();
+        match self.selected {
+            Some(i) => format!("{layer}, {goal}, #{} picked", i + 1).into(),
+            None => format!("{layer}, {goal}").into(),
+        }
+    }
+
+    /// The fit's tank now, for the header.
+    pub(super) fn stats(&self) -> Vec<Stat> {
+        let n = &self.now;
+        let layer = self.choices.layer.label();
+        vec![
+            Stat {
+                label: "EHP".into(),
+                value: widgets::short(n.ehp).into(),
+                tip: "Effective HP of all layers against the damage pattern, now".into(),
+            },
+            Stat {
+                label: format!("{layer} resists").into(),
+                value: format!("{:.2}x", n.multiplier).into(),
+                tip: format!("The {layer} layer's EHP per raw HP, now").into(),
+            },
+            Stat {
+                label: format!("{layer} repair").into(),
+                value: format!("{:.0} EHP/s", n.repair_ehp).into(),
+                tip: "Effective HP repaired a second that the capacitor keeps up, guns idle".into(),
+            },
+        ]
+    }
+
+    /// Work out the room the choices leave and the fit's numbers on the layer.
+    fn measure(&mut self) {
+        let shared = &self.shared;
+        let room = shared.setup().tank_room(&shared.fit, &self.choices);
+        let rigs_off = room.removed.iter().filter(|r| r.0 == Slot::Rig).count();
+        self.room = RoomCounts {
+            modules_off: room.removed.len() - rigs_off,
+            rigs_off,
+            slots: room.positions.len(),
+            rigs: room.rig_positions.len(),
+        };
+        self.now = Numbers::after(
+            &shared.loaded.engine,
+            &shared.pilot,
+            &shared.fit,
+            &Change::default(),
+            self.choices.layer,
+        );
+    }
+
+    fn change(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Choices)) {
+        let before = self.choices;
+        f(&mut self.choices);
+        if self.choices == before {
+            return;
+        }
+        // Another layer makes the found tanks moot.
+        if self.choices.layer != before.layer {
+            self.searched = None;
+            self.selected = None;
+            self.after = None;
+            self.note = None;
+            self.search = None;
+            self.stop_fetching();
+        }
+        if self.choices.layer != before.layer || self.choices.refit != before.refit {
+            self.measure();
+        }
+        cx.notify();
+    }
+
+    /// The choices changed since the results were found.
+    fn stale(&self) -> bool {
+        self.searched
+            .as_ref()
+            .is_some_and(|s| s.choices != self.choices)
+    }
+
+    fn busy(&self) -> bool {
+        self.search.is_some() || self.fetching.is_some()
+    }
+
+    fn outcomes(&self) -> &[Outcome] {
+        self.searched
+            .as_ref()
+            .map_or(&[], |s| s.found.outcomes.as_slice())
+    }
+
+    /// The found tanks' indices in the order the sort asks for.
+    fn order(&self) -> Vec<usize> {
+        let outcomes = self.outcomes();
+        let mut order: Vec<usize> = (0..outcomes.len()).collect();
+        match self.sort {
+            Sort::Goal => {}
+            Sort::Price => order.sort_by(|&a, &b| outcomes[a].price.total_cmp(&outcomes[b].price)),
+            Sort::Ehp => {
+                order.sort_by(|&a, &b| outcomes[b].numbers.ehp.total_cmp(&outcomes[a].numbers.ehp));
+            }
+        }
+        order
+    }
+
+    fn problem(&self) -> Problem {
+        let shared = &self.shared;
+        shared.setup().tank_problem(
+            &shared.loaded.engine,
+            &shared.pilot,
+            &shared.fit,
+            &self.choices,
+            &self.prices,
+        )
+    }
+
+    fn find_best(&mut self, cx: &mut Context<Self>) {
+        if self.busy() {
+            return;
+        }
+        let problem = self.problem();
+        if problem.is_empty() {
+            self.note = Some(
+                format!(
+                    "No free {} slots or rigs. Set Slots to Refit tank to redo the fitted one.",
+                    slot_word(self.choices.layer.slot())
+                )
+                .into(),
+            );
+            cx.notify();
+            return;
+        }
+        // Prices first, for every module and rig the search may try, so budgets and prices go
+        // by real numbers rather than whatever happened to be fetched already.
+        let types = problem.types();
+        // The next fit starts from what was searched with.
+        let choices = self.choices;
+        self.shared.remember(cx, move |s| s.wizard.tank = choices);
+        self.note = None;
+        // The window the wizard came from fetches prices; without it, search with what there is.
+        if self.shared.efa.upgrade().is_none() {
+            self.run_search(cx);
+            return;
+        }
+        self.generation += 1;
+        let generation = self.generation;
+        self.fetching = Some(generation);
+        cx.notify();
+        let section = cx.entity().downgrade();
+        Efa::app_update(&self.shared.efa, cx, move |g, cx| {
+            g.with_prices_for(types, cx, move |g, cx| {
+                let prices = Rc::clone(&g.prices);
+                // The section may be the one asking, so it is updated once this is over.
+                cx.defer(move |cx| {
+                    let _ = section.update(cx, |s, cx| {
+                        if s.fetching == Some(generation) {
+                            s.fetching = None;
+                            s.prices = prices;
+                            s.run_search(cx);
+                        }
+                    });
+                });
+            });
+        });
+    }
+
+    /// The search itself, once prices are in.
+    fn run_search(&mut self, cx: &mut Context<Self>) {
+        if self.search.is_some() {
+            return;
+        }
+        let problem = self.problem();
+        let choices = self.choices;
+        self.generation += 1;
+        let generation = self.generation;
+        let engine = Arc::clone(&self.shared.loaded.engine);
+        let progress = Arc::new(Progress::default());
+        let shared = Arc::clone(&progress);
+        let task = cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let work = cx.background_spawn(async move {
+                let found = wizard::tank::optimise(&engine, &problem, &shared, RESULTS);
+                (problem, found)
+            });
+            // Redraw the progress bar while the search runs.
+            let ticker = {
+                let this = this.clone();
+                cx.spawn(async move |cx| {
+                    loop {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(100))
+                            .await;
+                        let running = this.update(cx, |s, cx| {
+                            cx.notify();
+                            s.search.is_some() && s.generation == generation
+                        });
+                        if !matches!(running, Ok(true)) {
+                            break;
+                        }
+                    }
+                })
+            };
+            let (problem, found) = work.await;
+            drop(ticker);
+            let _ = this.update(cx, |s, cx| {
+                s.finish(generation, choices, problem, found, cx);
+            });
+        });
+        self.search = Some(Search {
+            progress,
+            _task: task,
+        });
+        cx.notify();
+    }
+
+    /// Stop waiting for prices: the answer, when it comes, starts no search.
+    fn stop_fetching(&mut self) {
+        if self.fetching.take().is_some() {
+            self.generation += 1;
+        }
+    }
+
+    fn cancel_search(&mut self, cx: &mut Context<Self>) {
+        let fetching = self.fetching.is_some();
+        self.stop_fetching();
+        if self.search.take().is_some() || fetching {
+            cx.notify();
+        }
+    }
+
+    fn finish(
+        &mut self,
+        generation: u64,
+        choices: Choices,
+        problem: Problem,
+        found: Found,
+        cx: &mut Context<Self>,
+    ) {
+        if generation != self.generation || self.search.is_none() {
+            return;
+        }
+        self.search = None;
+        if found.outcomes.is_empty() {
+            self.note = Some(
+                "No tank fits in the CPU, powergrid and calibration. Try other kinds of module, \
+                 or a looser budget."
+                    .into(),
+            );
+            cx.notify();
+            return;
+        }
+        self.note = None;
+        self.searched = Some(Searched {
+            choices,
+            problem,
+            found,
+        });
+        self.select(0, cx);
+    }
+
+    fn select(&mut self, i: usize, cx: &mut Context<Self>) {
+        let Some(searched) = &self.searched else {
+            return;
+        };
+        let Some(outcome) = searched.found.outcomes.get(i) else {
+            return;
+        };
+        let shared = &self.shared;
+        let change = outcome.change(&searched.problem, &shared.loaded.catalog);
+        let numbers = Numbers::after(
+            &shared.loaded.engine,
+            &shared.pilot,
+            &shared.fit,
+            &change,
+            searched.choices.layer,
+        );
+        self.selected = Some(i);
+        self.after = Some((change, numbers));
+        cx.notify();
+    }
+
+    /// Pick the result before or after the picked one, in the order shown.
+    fn step_selection(&mut self, back: bool, cx: &mut Context<Self>) {
+        let order = self.order();
+        if order.is_empty() {
+            return;
+        }
+        let at = self
+            .selected
+            .and_then(|s| order.iter().position(|&i| i == s));
+        let next = match (at, back) {
+            (None, _) => 0,
+            (Some(at), true) => at.saturating_sub(1),
+            (Some(at), false) => (at + 1).min(order.len() - 1),
+        };
+        self.select(order[next], cx);
+    }
+
+    /// Whether a picked tank can go on: there is one, and the fit is still there.
+    fn can_apply(&self) -> bool {
+        self.after.is_some() && self.target != Target::Gone
+    }
+
+    fn apply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.can_apply() {
+            return;
+        }
+        let Some((change, _)) = self.after.take() else {
+            return;
+        };
+        self.search = None;
+        let choices = self.choices;
+        self.shared.remember(cx, move |s| s.wizard.tank = choices);
+        self.shared.apply(change, window, cx);
+    }
+
+    /// How the fit stands, from the window.
+    pub(super) fn set_target(&mut self, target: Target, cx: &mut Context<Self>) {
+        self.target = target;
+        cx.notify();
+    }
+
+    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // Keys typed into a text field are the field's, not the section's shortcuts.
+        if !self.focus.is_focused(window) {
+            return;
+        }
+        let keystroke = &event.keystroke;
+        if keystroke.modifiers.alt || keystroke.modifiers.control {
+            return;
+        }
+        match keystroke.key.as_str() {
+            "enter" if self.can_apply() => self.apply(window, cx),
+            "up" => self.step_selection(true, cx),
+            "down" => self.step_selection(false, cx),
+            "f" => self.find_best(cx),
+            "escape" if self.busy() => self.cancel_search(cx),
+            key => match key.parse::<usize>() {
+                Ok(n) if n >= 1 => {
+                    if let Some(&i) = self.order().get(n - 1) {
+                        self.select(i, cx);
+                    }
+                }
+                _ => return,
+            },
+        }
+        cx.stop_propagation();
+    }
+
+    /// Give the keyboard back to the section after a click on a control.
+    fn refocus(&self, window: &mut Window, cx: &mut App) {
+        window.focus(&self.focus, cx);
+    }
+
+    // The controls.
+
+    fn controls(&self, across: bool, cx: &mut Context<Self>) -> Div {
+        let c = self.choices;
+        let mut out = v_flex()
+            .gap_4()
+            .child(group("Goal", self.goals(across, cx), cx))
+            .child(group("Layer", self.layers(cx), cx));
+        if c.goal == Goal::Repair {
+            out = out.child(group("Repairers", self.repairers(cx), cx));
+        }
+        out.child(group(
+            "Slots",
+            segmented(
+                "wizard-slots",
+                vec![
+                    Segment::new("Refit tank", c.refit).tip(
+                        "Take off the tank modules and rigs fitted on the layer, and search \
+                         their slots too",
+                    ),
+                    Segment::new("Free slots only", !c.refit)
+                        .tip("Keep what is fitted and search only the free slots"),
+                ],
+                cx,
+                |this: &mut Self, i, window, cx| {
+                    this.change(cx, |c| c.refit = i == 0);
+                    this.refocus(window, cx);
+                },
+            ),
+            cx,
+        ))
+        .child(group("Module kinds", self.kinds(cx), cx))
+        .child(group(
+            "Budget",
+            v_flex()
+                .gap_2()
+                .child(self.budget(false, cx))
+                .child(self.budget(true, cx))
+                .into_any_element(),
+            cx,
+        ))
+    }
+
+    /// The goals as a short list: icon, name and what it aims for, the picked one lit in the
+    /// accent.
+    fn goals(&self, across: bool, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let tiles: Vec<AnyElement> = Goal::ALL
+            .into_iter()
+            .map(|goal| {
+                let on = goal == self.choices.goal;
+                let (icon, sub) = match goal {
+                    Goal::Ehp => (AssetIcon::Shield, "Most buffer over all layers"),
+                    Goal::Resists => (AssetIcon::ShieldCheck, "Highest resist multiplier"),
+                    Goal::Repair => (AssetIcon::HeartPulse, "Most EHP repaired a second"),
+                };
+                h_flex()
+                    .id(SharedString::from(format!("wizard-goal-{goal:?}")))
+                    .gap_2p5()
+                    .px_2()
+                    .py_1p5()
+                    .rounded(px(6.))
+                    .cursor_pointer()
+                    .when(on, |d| d.bg(theme.primary.opacity(0.12)))
+                    .when(!on, |d| d.hover(|h| h.bg(theme.secondary.opacity(0.6))))
+                    .child(UiIcon::new(icon).small().flex_none().text_color(if on {
+                        theme.primary
+                    } else {
+                        theme.muted_foreground
+                    }))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .when(on, |d| d.text_color(theme.primary))
+                                    .child(goal.label()),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child(sub),
+                            ),
+                    )
+                    .when(on, |d| {
+                        d.child(
+                            UiIcon::new(IconName::Check)
+                                .small()
+                                .text_color(theme.primary),
+                        )
+                    })
+                    .tooltip(move |window, cx| Tooltip::new(goal_text(goal)).build(window, cx))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _: &gpui_kit::MouseDownEvent, window, cx| {
+                            this.change(cx, |c| c.goal = goal);
+                            this.refocus(window, cx);
+                        }),
+                    )
+                    .into_any_element()
+            })
+            .collect();
+        if across {
+            h_flex()
+                .gap_1()
+                .children(tiles.into_iter().map(|t| div().flex_1().min_w_0().child(t)))
+                .into_any_element()
+        } else {
+            v_flex().gap_0p5().children(tiles).into_any_element()
+        }
+    }
+
+    fn layers(&self, cx: &mut Context<Self>) -> AnyElement {
+        let loaded = &self.shared.loaded;
+        let facts = &self.shared.facts;
+        let segments = Layer::ALL
+            .iter()
+            .map(|&l| {
+                let icon = match l {
+                    Layer::Shield => widgets::icon::SHIELD,
+                    Layer::Armor => widgets::icon::ARMOR,
+                };
+                let slots = facts.total(l.slot());
+                Segment::new(l.label(), l == self.choices.layer)
+                    .icon(widgets::icon_box(
+                        &loaded.catalog,
+                        &loaded.icons,
+                        Icon::Id(icon),
+                        14.,
+                    ))
+                    .tip(format!(
+                        "{} {} slots on this hull",
+                        slots,
+                        slot_word(l.slot())
+                    ))
+            })
+            .collect();
+        segmented(
+            "wizard-layer",
+            segments,
+            cx,
+            |this: &mut Self, i, window, cx| {
+                if this.shared.facts.total(Layer::ALL[i].slot()) > 0 {
+                    this.change(cx, |c| c.layer = Layer::ALL[i]);
+                }
+                this.refocus(window, cx);
+            },
+        )
+    }
+
+    /// The number of repairers as a stepper: Auto, then 1 up.
+    fn repairers(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let n = self.choices.repairers;
+        let step = |id: &'static str, icon: IconName, back: bool, disabled: bool| {
+            Button::new(id)
+                .ghost()
+                .xsmall()
+                .tab_stop(false)
+                .icon(icon)
+                .disabled(disabled)
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.change(cx, |c| {
+                        c.repairers = match (c.repairers, back) {
+                            (None, false) => Some(1),
+                            (Some(1) | None, true) => None,
+                            (Some(n), true) => Some(n - 1),
+                            (Some(n), false) => Some((n + 1).min(MAX_REPAIRERS)),
+                        };
+                    });
+                    this.refocus(window, cx);
+                }))
+        };
+        h_flex()
+            .gap_3()
+            .child(
+                h_flex()
+                    .flex_none()
+                    .p_0p5()
+                    .gap_0p5()
+                    .rounded(px(7.))
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(step("wizard-rep-less", IconName::Minus, true, n.is_none()))
+                    .child(
+                        div()
+                            .w(px(44.))
+                            .text_center()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(n.map_or_else(|| "Auto".to_owned(), |n| n.to_string())),
+                    )
+                    .child(step(
+                        "wizard-rep-more",
+                        IconName::Plus,
+                        false,
+                        n == Some(MAX_REPAIRERS),
+                    )),
+            )
+            .child(muted(
+                if self.choices.refit {
+                    "How many the tank ends up with; Auto lets the search decide."
+                } else {
+                    "Repairers already fitted count."
+                },
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn kinds(&self, cx: &mut Context<Self>) -> AnyElement {
+        let chips: Vec<AnyElement> = SearchGroup::ALL
+            .into_iter()
+            .zip(KIND_TIPS)
+            .map(|(g, tip)| {
+                chip(
+                    SharedString::from(format!("wizard-kind-{g:?}")),
+                    g.label(),
+                    self.choices.search_tiers.has(g),
+                    Some(tip),
+                    cx,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _: &gpui_kit::MouseDownEvent, window, cx| {
+                        this.change(cx, |c| c.search_tiers.toggle(g));
+                        this.refocus(window, cx);
+                    }),
+                )
+                .into_any_element()
+            })
+            .collect();
+        h_flex()
+            .flex_wrap()
+            .gap_1p5()
+            .children(chips)
+            .into_any_element()
+    }
+
+    /// One budget: a field in ISK, and presets under it.
+    fn budget(&self, total: bool, cx: &mut Context<Self>) -> Div {
+        let (field, presets, current, title) = if total {
+            (
+                &self.budget_total,
+                Budget::TOTAL,
+                self.choices.budget.total,
+                "Whole tank",
+            )
+        } else {
+            (
+                &self.budget_each,
+                Budget::EACH,
+                self.choices.budget.each,
+                "Per module",
+            )
+        };
+        let theme = cx.theme();
+        let chips: Vec<AnyElement> = presets
+            .into_iter()
+            .enumerate()
+            .map(|(i, preset)| {
+                let field = field.clone();
+                chip(
+                    SharedString::from(format!("wizard-budget-{total}-{i}")),
+                    Budget::label(preset),
+                    preset == current,
+                    None,
+                    cx,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _: &gpui_kit::MouseDownEvent, window, cx| {
+                        let text = preset.map_or_else(String::new, |p| Budget::label(Some(p)));
+                        field.update(cx, |f, cx| f.set_value(text, window, cx));
+                        this.change(cx, |c| {
+                            if total {
+                                c.budget.total = preset;
+                            } else {
+                                c.budget.each = preset;
+                            }
+                        });
+                    }),
+                )
+                .into_any_element()
+            })
+            .collect();
+        v_flex()
+            .gap_1()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        div()
+                            .w(px(72.))
+                            .flex_none()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(Input::new(field).small().suffix(muted("ISK", cx).pr_1())),
+                    ),
+            )
+            .child(h_flex().flex_wrap().gap_1().children(chips))
+    }
+
+    /// The search button, or its progress while it runs, and what it covers.
+    fn search_block(&self, cx: &mut Context<Self>) -> Div {
+        let palette = self.shared.palette;
+        let cancel = Self::cancel_button(cx);
+        let theme = cx.theme();
+        let mut block = v_flex().gap_2();
+        if let Some(search) = &self.search {
+            let fraction = search.progress.fraction();
+            block = block.child(
+                v_flex()
+                    .gap_1p5()
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(
+                                UiIcon::new(AssetIcon::LoaderCircle)
+                                    .small()
+                                    .text_color(theme.primary),
+                            )
+                            .child(div().flex_1().child("Searching tanks"))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child(format!("{:.0}%", fraction * 100.0)),
+                            )
+                            .child(cancel),
+                    )
+                    .child(bar(f64::from(fraction), theme.primary, cx)),
+            );
+        } else {
+            let fetching = self.fetching.is_some();
+            block = block
+                .child(
+                    Button::new("wizard-find")
+                        .primary()
+                        .w_full()
+                        .tab_stop(false)
+                        .loading(fetching)
+                        .icon(AssetIcon::Search)
+                        .label(if fetching {
+                            "Fetching prices"
+                        } else if self.searched.is_some() {
+                            "Search again"
+                        } else {
+                            "Find best tanks"
+                        })
+                        .tooltip("F")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.find_best(cx);
+                            this.refocus(window, cx);
+                        })),
+                )
+                .when(fetching, |d| d.child(cancel));
+        }
+        let text = self
+            .note
+            .clone()
+            .unwrap_or_else(|| self.search_text().into());
+        let warn = self.note.is_some();
+        block.child(if warn {
+            notice(AssetIcon::TriangleAlert, palette.yellow, text, cx)
+        } else {
+            muted(text, cx)
+        })
+    }
+
+    fn cancel_button(cx: &mut Context<Self>) -> Button {
+        Button::new("wizard-cancel")
+            .xsmall()
+            .ghost()
+            .tab_stop(false)
+            .icon(AssetIcon::X)
+            .label("Cancel")
+            .tooltip("Escape")
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.cancel_search(cx);
+                this.refocus(window, cx);
+            }))
+    }
+
+    /// What the search covers, in a sentence.
+    fn search_text(&self) -> String {
+        let r = self.room;
+        let rack = slot_word(self.choices.layer.slot());
+        let pattern = match &self.shared.fit.damage_profile {
+            DamageProfile::Uniform => "uniform damage".to_owned(),
+            DamageProfile::SelectedAmmo => "the selected ammo's damage".to_owned(),
+            DamageProfile::Pattern { name, .. } => format!("the {name} pattern"),
+        };
+        let mut room = Vec::new();
+        if r.slots > 0 {
+            room.push(plural(r.slots, &format!("{rack} slot")));
+        }
+        if r.rigs > 0 {
+            room.push(plural(r.rigs, "rig slot"));
+        }
+        if room.is_empty() {
+            return format!("No free {rack} slots or rigs.");
+        }
+        let mut off = Vec::new();
+        if r.modules_off > 0 {
+            off.push(plural(r.modules_off, "tank module"));
+        }
+        if r.rigs_off > 0 {
+            off.push(plural(r.rigs_off, "rig"));
+        }
+        let off = if off.is_empty() {
+            String::new()
+        } else {
+            format!(" after taking off {}", join_and(&off))
+        };
+        format!(
+            "Searches {}{off}, against {pattern} with the guns idle.",
+            join_and(&room)
+        )
+    }
+
+    // The results.
+
+    fn results(&self, cx: &mut Context<Self>) -> Div {
+        let palette = self.shared.palette;
+        let Some(searched) = &self.searched else {
+            return v_flex().px_3().child(self.empty_results(cx));
+        };
+        let busy = self.busy();
+        let goal = searched.choices.goal;
+        let rows: Vec<AnyElement> = self
+            .order()
+            .into_iter()
+            .enumerate()
+            .map(|(rank, i)| self.result_row(rank, i, &searched.found.outcomes[i], goal, cx))
+            .collect();
+        let found = &searched.found;
+        let notes: Vec<SharedString> = [
+            found.repairers_short.map(|got| {
+                SharedString::from(match got {
+                    0 => "No repairer fits with the rest of the fit; these tank without one."
+                        .to_owned(),
+                    1 => "Only 1 more repairer fits with the rest of the fit.".to_owned(),
+                    n => format!("Only {n} more repairers fit with the rest of the fit."),
+                })
+            }),
+            found.rejected.limit().map(limit_text),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        v_flex()
+            .gap_2()
+            .when(self.stale() && !busy, |d| {
+                d.child(div().px_3().child(notice(
+                    AssetIcon::RotateCcw,
+                    palette.yellow,
+                    "The choices changed since these were found; search again for fresh ones.",
+                    cx,
+                )))
+            })
+            .child(
+                v_flex()
+                    // While a new search runs the old results stay, dimmed.
+                    .when(busy, |d| d.opacity(0.45))
+                    .child(self.results_head(goal, cx))
+                    .children(rows),
+            )
+            .children(notes.into_iter().map(|n| {
+                div()
+                    .px_3()
+                    .child(notice(AssetIcon::Info, palette.blue, n, cx))
+            }))
+    }
+
+    /// The column titles; those the list sorts by are buttons.
+    fn results_head(&self, goal: Goal, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme();
+        let goal_name = match goal {
+            Goal::Ehp => "EHP",
+            Goal::Resists => "Resists",
+            Goal::Repair => "Repair",
+        };
+        let right = |text: &'static str| {
+            div()
+                .w(px(56.))
+                .flex_none()
+                .text_right()
+                .child(text)
+                .into_any_element()
+        };
+        let sort_head = |sort: Sort, text: &'static str, width: Option<f32>, right: bool| {
+            let on = self.sort == sort;
+            h_flex()
+                .id(SharedString::from(format!("wizard-sort-{sort:?}")))
+                .when_some(width, |d, w| d.w(px(w)).flex_none())
+                .when(right, gpui_kit::Styled::justify_end)
+                .gap_0p5()
+                .cursor_pointer()
+                .when(on, |d| d.text_color(theme.foreground))
+                .hover(|h| h.text_color(theme.foreground))
+                .child(text)
+                .when(on, |d| d.child(UiIcon::new(AssetIcon::ArrowDown).xsmall()))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _: &gpui_kit::MouseDownEvent, window, cx| {
+                        this.sort = sort;
+                        cx.notify();
+                        this.refocus(window, cx);
+                    }),
+                )
+        };
+        let others: Vec<AnyElement> = Goal::ALL
+            .into_iter()
+            .filter(|&g| g != goal)
+            .map(|g| match g {
+                Goal::Ehp => sort_head(Sort::Ehp, "EHP", Some(56.), true).into_any_element(),
+                Goal::Resists => right("Resists"),
+                Goal::Repair => right("EHP/s"),
+            })
+            .collect();
+        h_flex()
+            .h(px(28.))
+            .gap_2()
+            .px_3()
+            .border_b_1()
+            .border_color(theme.border)
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .child(div().w(px(16.)).flex_none().child("#"))
+            .child(sort_head(Sort::Goal, goal_name, Some(108.), false))
+            .children(others)
+            .child(div().w(px(56.)).flex_none().text_right().child("Fitting"))
+            .child(sort_head(Sort::Price, "Price", Some(64.), true))
+    }
+
+    fn empty_results(&self, cx: &App) -> Div {
+        let theme = cx.theme();
+        let (icon, title, text) = if self.busy() {
+            (
+                AssetIcon::LoaderCircle,
+                "Searching",
+                "The best tanks show up here.",
+            )
+        } else {
+            (
+                AssetIcon::Sparkles,
+                "No tanks yet",
+                "Pick a goal and what the search may use, then Find best tanks.",
+            )
+        };
+        v_flex()
+            .items_center()
+            .gap_1p5()
+            .py_16()
+            .px_4()
+            .child(
+                UiIcon::new(icon)
+                    .size(px(22.))
+                    .text_color(theme.muted_foreground.opacity(0.7)),
+            )
+            .child(
+                div()
+                    .pt_1()
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(title),
+            )
+            .child(muted(text, cx).text_center())
+    }
+
+    /// One found tank as a row: its goal number with the change against now, the other two
+    /// numbers, how full the fitting gets, the price, and what it puts on.
+    fn result_row(
+        &self,
+        rank: usize,
+        i: usize,
+        o: &Outcome,
+        goal: Goal,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let palette = self.shared.palette;
+        let selected = self.selected == Some(i);
+        let n = &o.numbers;
+        let value = n.value(goal);
+        let delta = value - self.now.value(goal);
+        let (big, unit) = goal_value(goal, value);
+        let up = delta > 1e-6 * value.abs().max(1.0);
+        let down = delta < -1e-6 * value.abs().max(1.0);
+        let delta_text = match goal {
+            _ if !up && !down => "same".to_owned(),
+            Goal::Resists => format!("{delta:+.2}x"),
+            Goal::Ehp => format!(
+                "{}{}",
+                if delta >= 0.0 { "+" } else { "-" },
+                widgets::short(delta.abs())
+            ),
+            Goal::Repair => format!("{delta:+.0}"),
+        };
+        let delta_color = if up {
+            widgets::color(palette.green)
+        } else if down {
+            widgets::color(palette.red)
+        } else {
+            theme.muted_foreground
+        };
+        let others: Vec<String> = Goal::ALL
+            .into_iter()
+            .filter(|&g| g != goal)
+            .map(|g| goal_value(g, n.value(g)).0)
+            .collect();
+        // The fuller of CPU and powergrid, as a share of the ship's output.
+        let share = |r: &Resource| r.output.filter(|&o| o > 0.0).map_or(0.0, |o| r.used / o);
+        let (cpu, pg) = (share(&n.cpu), share(&n.powergrid));
+        let fitting_tip = SharedString::from(format!(
+            "CPU {:.0} / {:.0}, powergrid {:.0} / {:.0}",
+            n.cpu.used,
+            n.cpu.output.unwrap_or(0.0),
+            n.powergrid.used,
+            n.powergrid.output.unwrap_or(0.0)
+        ));
+        let full = cpu.max(pg);
+        let price = if o.price > 0.0 {
+            format!(
+                "{}{}",
+                if o.priced { "" } else { "~" },
+                widgets::short(o.price)
+            )
+        } else {
+            "?".to_owned()
+        };
+        let strip = self.module_strip(i, o, cx);
+        v_flex()
+            .id(SharedString::from(format!("wizard-row-{i}")))
+            .gap_1()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(theme.border.opacity(0.5))
+            .relative()
+            .cursor_pointer()
+            .text_xs()
+            .when(selected, |d| {
+                d.bg(theme.primary.opacity(0.1)).child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .bottom_0()
+                        .w(px(2.))
+                        .bg(theme.primary),
+                )
+            })
+            .when(!selected, |d| {
+                d.hover(|h| h.bg(theme.secondary.opacity(0.4)))
+            })
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        div()
+                            .w(px(16.))
+                            .flex_none()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(if selected {
+                                theme.primary
+                            } else {
+                                theme.muted_foreground
+                            })
+                            .child(format!("{}", rank + 1)),
+                    )
+                    .child(
+                        h_flex()
+                            .w(px(108.))
+                            .flex_none()
+                            .items_baseline()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_base()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(big),
+                            )
+                            .child(div().text_color(theme.muted_foreground).child(unit))
+                            .child(div().text_color(delta_color).child(delta_text)),
+                    )
+                    .children(others.into_iter().map(|v| {
+                        div()
+                            .w(px(56.))
+                            .flex_none()
+                            .text_right()
+                            .text_color(theme.muted_foreground)
+                            .child(v)
+                    }))
+                    .child(
+                        v_flex()
+                            .id(SharedString::from(format!("wizard-row-{i}-fit")))
+                            .w(px(56.))
+                            .flex_none()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_right()
+                                    .when(full > 0.99, |d| {
+                                        d.text_color(widgets::color(palette.yellow))
+                                    })
+                                    .when(full <= 0.99, |d| d.text_color(theme.muted_foreground))
+                                    .child(format!("{:.0}%", full * 100.0)),
+                            )
+                            .child(bar(
+                                full,
+                                if full > 0.99 {
+                                    widgets::color(palette.yellow)
+                                } else {
+                                    theme.primary.opacity(0.7)
+                                },
+                                cx,
+                            ))
+                            .tooltip(move |window, cx| {
+                                Tooltip::new(fitting_tip.clone()).build(window, cx)
+                            }),
+                    )
+                    .child(
+                        div()
+                            .w(px(64.))
+                            .flex_none()
+                            .text_right()
+                            .font_weight(FontWeight::MEDIUM)
+                            .when(!o.priced, |d| d.text_color(theme.muted_foreground))
+                            .child(price),
+                    ),
+            )
+            .child(strip)
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.select(i, cx);
+                this.refocus(window, cx);
+            }))
+            .into_any_element()
+    }
+
+    /// What a found tank puts on, as icons with their counts, rigs after the modules;
+    /// hovering one shows the item.
+    fn module_strip(&self, i: usize, o: &Outcome, cx: &App) -> Div {
+        let theme = cx.theme();
+        let loaded = &self.shared.loaded;
+        let mut lines: Vec<(TypeId, usize)> = Vec::new();
+        for &id in o.types.iter().chain(&o.rig_types) {
+            match lines.iter_mut().find(|(t, _)| *t == id) {
+                Some((_, n)) => *n += 1,
+                None => lines.push((id, 1)),
+            }
+        }
+        h_flex()
+            .min_w_0()
+            .pl(px(28.))
+            .flex_wrap()
+            .gap_x_2()
+            .gap_y_0p5()
+            .children(lines.into_iter().map(|(id, n)| {
+                let tip = Rc::clone(loaded);
+                let price = self.prices.get(id);
+                h_flex()
+                    .id(SharedString::from(format!("wizard-row-{i}-{id}")))
+                    .gap_0p5()
+                    .child(widgets::icon_box(
+                        &loaded.catalog,
+                        &loaded.icons,
+                        Icon::Type(id),
+                        STRIP_ICON,
+                    ))
+                    .when(n > 1, |d| {
+                        d.child(
+                            div()
+                                .text_color(theme.muted_foreground)
+                                .child(format!("{n}")),
+                        )
+                    })
+                    .tooltip(move |window, cx| side::item_tooltip(&tip, id, price, window, cx))
+            }))
+    }
+
+    // The picked tank.
+
+    fn detail(&self, cx: &App) -> Div {
+        let theme = cx.theme();
+        let (Some((change, after)), Some(i)) = (&self.after, self.selected) else {
+            return v_flex()
+                .items_center()
+                .gap_2()
+                .py_10()
+                .child(
+                    UiIcon::new(AssetIcon::MousePointerClick)
+                        .text_color(theme.muted_foreground.opacity(0.6)),
+                )
+                .child(
+                    muted("Pick a result to compare it with the fit as it is.", cx).text_center(),
+                );
+        };
+        let palette = self.shared.palette;
+        let layer = self
+            .searched
+            .as_ref()
+            .map_or(self.choices.layer, |s| s.choices.layer);
+        let now = &self.now;
+        let rank = self.order().iter().position(|&o| o == i).unwrap_or(i) + 1;
+        let name = layer.label();
+        let rows = v_flex()
+            .gap_1()
+            .child(
+                h_flex()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(div().flex_1())
+                    .child(div().w(px(64.)).text_right().child("Now"))
+                    .child(div().w(px(70.)).text_right().child("After")),
+            )
+            .child(compare(
+                palette,
+                "Effective HP",
+                (now.ehp, after.ehp),
+                widgets::short,
+                cx,
+            ))
+            .child(compare(
+                palette,
+                &format!("{name} resists"),
+                (now.multiplier, after.multiplier),
+                |v| format!("{v:.2}x"),
+                cx,
+            ))
+            .child(compare(
+                palette,
+                &format!("{name} repair"),
+                (now.repair_ehp, after.repair_ehp),
+                |v| format!("{v:.0}/s"),
+                cx,
+            ))
+            .child(
+                h_flex()
+                    .text_xs()
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_color(theme.muted_foreground)
+                            .child("Capacitor"),
+                    )
+                    .child(
+                        div()
+                            .w(px(64.))
+                            .text_right()
+                            .child(cap_word(now.cap_stable)),
+                    )
+                    .child(
+                        div()
+                            .w(px(70.))
+                            .text_right()
+                            .font_weight(FontWeight::MEDIUM)
+                            .when(!after.cap_stable, |d| {
+                                d.text_color(widgets::color(palette.yellow))
+                            })
+                            .child(cap_word(after.cap_stable)),
+                    ),
+            );
+        let resists = v_flex().gap_1p5().children(
+            [
+                (widgets::icon::SHIELD, 0, "Shield"),
+                (widgets::icon::ARMOR, 1, "Armor"),
+                (widgets::icon::HULL, 2, "Hull"),
+            ]
+            .into_iter()
+            .map(|(icon, at, title)| {
+                let before = now.layers[at].resists;
+                let r = after.layers[at].resists;
+                let tanked =
+                    (at == 0 && layer == Layer::Shield) || (at == 1 && layer == Layer::Armor);
+                h_flex()
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .w(px(64.))
+                            .flex_none()
+                            .gap_1()
+                            .child(widgets::icon_box(
+                                &self.shared.loaded.catalog,
+                                &self.shared.loaded.icons,
+                                Icon::Id(icon),
+                                14.,
+                            ))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .when(!tanked, |d| d.text_color(theme.muted_foreground))
+                                    .when(tanked, |d| d.font_weight(FontWeight::SEMIBOLD))
+                                    .child(title),
+                            ),
+                    )
+                    .children((0..4).map(|k| {
+                        let fill = widgets::color(widgets::DAMAGE_COLORS[k]);
+                        let changed = (r[k] - before[k]).abs() > 0.0005;
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(bar(r[k], fill, cx))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .when(!changed, |d| d.text_color(theme.muted_foreground))
+                                    .when(changed && r[k] > before[k], |d| {
+                                        d.text_color(widgets::color(palette.green))
+                                    })
+                                    .when(changed && r[k] < before[k], |d| {
+                                        d.text_color(widgets::color(palette.red))
+                                    })
+                                    .child(format!("{:.0}%", r[k] * 100.0)),
+                            )
+                    }))
+            }),
+        );
+        let fitting = v_flex()
+            .gap_2()
+            .child(resource_bar(
+                palette, "CPU", &now.cpu, &after.cpu, " tf", cx,
+            ))
+            .child(resource_bar(
+                palette,
+                "Powergrid",
+                &now.powergrid,
+                &after.powergrid,
+                " MW",
+                cx,
+            ))
+            .child(resource_bar(
+                palette,
+                "Calibration",
+                &now.calibration,
+                &after.calibration,
+                "",
+                cx,
+            ));
+        let price = self
+            .outcomes()
+            .get(i)
+            .map_or_default(|o| (o.price, o.priced));
+        v_flex()
+            .gap_4()
+            .child(
+                h_flex()
+                    .items_end()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_base()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(format!("Tank {rank}")),
+                    )
+                    .child(muted(goal_text_short(self.choices.goal), cx).pb(px(2.)))
+                    .child(div().flex_1())
+                    .when(price.0 > 0.0, |d| {
+                        d.child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(format!(
+                                    "{}{} ISK",
+                                    if price.1 { "" } else { "~" },
+                                    widgets::short(price.0)
+                                )),
+                        )
+                    }),
+            )
+            .child(panel("Before and after", rows, cx))
+            .child(divider(cx))
+            .child(panel("Resists", resists, cx))
+            .child(divider(cx))
+            .child(panel("Fitting", fitting, cx))
+            .child(divider(cx))
+            .child(panel("Modules", self.module_list(change, cx), cx))
+    }
+
+    /// The racks the change touches, line by line: what goes on, what stays and what comes
+    /// off, with the price of what goes on.
+    fn module_list(&self, change: &Change, cx: &App) -> Div {
+        let shared = &self.shared;
+        let fit = &shared.fit;
+        let slot = self.choices.layer.slot();
+        let removed = |s: Slot, at: usize| change.removed.contains(&(s, at));
+        let placed = |s: Slot| change.placements.iter().filter(move |p| p.0 == s);
+        let mut out = v_flex().gap_3();
+        for (rack, title) in [(slot, rack_title(slot)), (Slot::Rig, "Rigs")] {
+            let fitted: Vec<(TypeId, bool)> = if rack == Slot::Rig {
+                fit.rigs
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(at, r)| Some(((*r)?, removed(rack, at))))
+                    .collect()
+            } else {
+                fit.rack(rack)
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(at, m)| Some((m.as_ref()?.type_id, removed(rack, at))))
+                    .collect()
+            };
+            let mut lines: Vec<(TypeId, Mark, usize)> = Vec::new();
+            let mut add = |id: TypeId, mark: Mark| match lines
+                .iter_mut()
+                .find(|l| l.0 == id && l.1 == mark)
+            {
+                Some(l) => l.2 += 1,
+                None => lines.push((id, mark, 1)),
+            };
+            for p in placed(rack) {
+                add(p.2.type_id, Mark::Added);
+            }
+            for &(id, off) in &fitted {
+                add(id, if off { Mark::Removed } else { Mark::Kept });
+            }
+            // A module that comes off and goes back on stays.
+            let mut net: Vec<(TypeId, Mark, usize)> = Vec::new();
+            for &(id, mark, n) in &lines {
+                let opposite = match mark {
+                    Mark::Added => Mark::Removed,
+                    Mark::Removed => Mark::Added,
+                    Mark::Kept => Mark::Kept,
+                };
+                let other = if mark == Mark::Kept {
+                    0
+                } else {
+                    lines
+                        .iter()
+                        .find(|l| l.0 == id && l.1 == opposite)
+                        .map_or(0, |l| l.2)
+                };
+                let same = n.min(other);
+                if n > same {
+                    net.push((id, mark, n - same));
+                }
+                if mark == Mark::Added && same > 0 {
+                    net.push((id, Mark::Kept, same));
+                }
+            }
+            if net.is_empty() {
+                continue;
+            }
+            out = out.child(
+                v_flex()
+                    .gap_0p5()
+                    .child(muted(title, cx).pb_0p5())
+                    .children(
+                        net.into_iter()
+                            .enumerate()
+                            .map(|(k, (id, mark, n))| self.module_line(rack, k, id, mark, n, cx)),
+                    ),
+            );
+        }
+        let added: f64 = change
+            .placements
+            .iter()
+            .filter_map(|p| self.prices.get(p.2.type_id))
+            .sum();
+        out.when(added > 0.0, |d| {
+            d.child(
+                h_flex()
+                    .text_xs()
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("What goes on costs"),
+                    )
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(format!("{} ISK", widgets::short(added))),
+                    ),
+            )
+        })
+    }
+
+    fn module_line(
+        &self,
+        rack: Slot,
+        k: usize,
+        id: TypeId,
+        mark: Mark,
+        n: usize,
+        cx: &App,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let palette = self.shared.palette;
+        let loaded = &self.shared.loaded;
+        let price = self.prices.get(id);
+        let (icon, color, tag) = match mark {
+            Mark::Added => (IconName::Plus, widgets::color(palette.green), "on"),
+            Mark::Kept => (IconName::Check, theme.muted_foreground, "kept"),
+            Mark::Removed => (IconName::Minus, widgets::color(palette.red), "off"),
+        };
+        let tip = Rc::clone(loaded);
+        h_flex()
+            .id(SharedString::from(format!("wizard-line-{rack:?}-{k}")))
+            .gap_2()
+            .h(px(26.))
+            .px_1p5()
+            .rounded(px(5.))
+            .text_xs()
+            .when(mark == Mark::Added, |d| d.bg(color.opacity(0.08)))
+            .hover(|h| h.bg(theme.secondary.opacity(0.6)))
+            .child(UiIcon::new(icon).xsmall().flex_none().text_color(color))
+            .child(
+                widgets::icon_box(&loaded.catalog, &loaded.icons, Icon::Type(id), ICON)
+                    .when(mark != Mark::Added, |d| d.opacity(0.6)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .when(mark == Mark::Removed, |d| {
+                        d.line_through().text_color(theme.muted_foreground)
+                    })
+                    .when(mark == Mark::Kept, |d| d.text_color(theme.muted_foreground))
+                    .child(if n > 1 {
+                        format!("{n}x {}", loaded.catalog.name(id))
+                    } else {
+                        loaded.catalog.name(id)
+                    }),
+            )
+            .child(div().flex_none().text_color(theme.muted_foreground).child(
+                match (mark, price) {
+                    (Mark::Added, Some(p)) => widgets::short(p * n as f64),
+                    _ => tag.to_owned(),
+                },
+            ))
+            .tooltip(move |window, cx| side::item_tooltip(&tip, id, price, window, cx))
+            .into_any_element()
+    }
+
+    fn footer(&self, narrow: bool, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme();
+        let keys: [(&str, &str); 5] = [
+            ("F", "find"),
+            ("Up Down", "pick"),
+            ("1-6", "pick"),
+            ("Esc", "cancel search"),
+            ("Enter", "fit"),
+        ];
+        let hints = h_flex()
+            .flex_1()
+            .min_w_0()
+            .overflow_hidden()
+            .gap_3()
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .children(keys.into_iter().map(|(key, what)| {
+                h_flex()
+                    .flex_none()
+                    .gap_1()
+                    .child(
+                        div()
+                            .px_1()
+                            .rounded(px(3.))
+                            .border_1()
+                            .border_color(theme.border)
+                            .bg(theme.secondary.opacity(0.5))
+                            .child(key),
+                    )
+                    .child(what)
+            }));
+        let rank = self
+            .selected
+            .and_then(|s| self.order().iter().position(|&o| o == s));
+        let label = match rank {
+            Some(r) if self.after.is_some() => format!("Fit tank {}", r + 1),
+            _ => "Fit tank".to_owned(),
+        };
+        h_flex()
+            .flex_none()
+            .justify_end()
+            .gap_3()
+            .px_4()
+            .py_2()
+            .border_t_1()
+            .border_color(theme.border)
+            .when(!narrow, |d| d.child(hints))
+            .child(
+                Button::new("wizard-apply")
+                    .primary()
+                    .tab_stop(false)
+                    .icon(IconName::Check)
+                    .label(label)
+                    .tooltip(if self.target == Target::Gone {
+                        "The fit was deleted"
+                    } else if self.after.is_some() {
+                        "Enter: fit this tank on the fit, as one undo step"
+                    } else {
+                        "Find tanks and pick one first"
+                    })
+                    .disabled(!self.can_apply())
+                    .on_click(cx.listener(|this, _, window, cx| this.apply(window, cx))),
+            )
+    }
+}
+
+impl Render for TankSection {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let layout = Layout::of(window);
+        let across = layout == Layout::Narrow && window.viewport_size().width >= px(600.);
+        let controls = self.controls(across, cx);
+        let search = self.search_block(cx);
+        let results = self.results(cx);
+        let detail = self.detail(cx);
+        let theme = cx.theme();
+        let scroll = |id: &'static str| v_flex().id(id).h_full().min_h_0().overflow_y_scroll();
+        let side = theme.sidebar.opacity(0.6);
+        let body: AnyElement = match layout {
+            Layout::Wide => h_flex()
+                .size_full()
+                .items_start()
+                .child(controls_column(controls, search, CONTROLS_W, side, cx))
+                .child(
+                    scroll("wizard-results")
+                        .flex_1()
+                        .min_w_0()
+                        .py_3()
+                        .child(results),
+                )
+                .child(
+                    scroll("wizard-detail")
+                        .w(px(DETAIL_W))
+                        .flex_none()
+                        .p_4()
+                        .bg(side)
+                        .border_l_1()
+                        .border_color(theme.border)
+                        .child(detail),
+                )
+                .into_any_element(),
+            Layout::Split => h_flex()
+                .size_full()
+                .items_start()
+                .child(controls_column(
+                    controls,
+                    search,
+                    CONTROLS_W - 20.,
+                    side,
+                    cx,
+                ))
+                .child(
+                    scroll("wizard-results")
+                        .flex_1()
+                        .min_w_0()
+                        .py_3()
+                        .gap_4()
+                        .child(results)
+                        .child(divider(cx))
+                        .child(div().px_3().child(detail)),
+                )
+                .into_any_element(),
+            Layout::Narrow => scroll("wizard-all")
+                .size_full()
+                .py_3()
+                .gap_4()
+                .child(div().px_3().child(controls.child(search)))
+                .child(divider(cx))
+                .child(results)
+                .child(divider(cx))
+                .child(div().px_3().child(detail))
+                .into_any_element(),
+        };
+        v_flex()
+            .track_focus(&self.focus)
+            .key_context("FittingWizard")
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                this.key(event, window, cx);
+            }))
+            .size_full()
+            .child(div().flex_1().min_h_0().child(body))
+            .child(self.footer(layout == Layout::Narrow, cx))
+    }
+}
+
+/// The controls in a column that scrolls, the search pinned at its foot.
+fn controls_column(controls: Div, search: Div, width: f32, side: Hsla, cx: &App) -> Div {
+    let theme = cx.theme();
+    v_flex()
+        .w(px(width))
+        .flex_none()
+        .h_full()
+        .bg(side)
+        .border_r_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .id("wizard-controls")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .p_4()
+                .child(controls),
+        )
+        .child(
+            div()
+                .flex_none()
+                .px_4()
+                .py_3()
+                .border_t_1()
+                .border_color(theme.border)
+                .child(search),
+        )
+}
+
+/// A titled group of controls.
+fn group(title: &str, body: AnyElement, cx: &App) -> Div {
+    v_flex().gap_1p5().child(label(title, cx)).child(body)
+}
+
+/// A titled block of the picked tank's detail.
+fn panel(title: &str, body: impl IntoElement, cx: &App) -> Div {
+    v_flex().gap_2().child(label(title, cx)).child(body)
+}
+
+/// A number now and after, the after green when better and red when worse, with the change.
+fn compare(
+    palette: crate::theme::Palette,
+    title: &str,
+    (now, after): (f64, f64),
+    format: fn(f64) -> String,
+    cx: &App,
+) -> Div {
+    let theme = cx.theme();
+    let changed = (after - now).abs() > 1e-6 * now.abs().max(1.0);
+    let color: Hsla = if !changed {
+        theme.foreground
+    } else if after > now {
+        widgets::color(palette.green)
+    } else {
+        widgets::color(palette.red)
+    };
+    h_flex()
+        .text_xs()
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_color(theme.muted_foreground)
+                .child(title.to_owned()),
+        )
+        .child(
+            div()
+                .w(px(64.))
+                .text_right()
+                .text_color(theme.muted_foreground)
+                .child(format(now)),
+        )
+        .child(
+            div()
+                .w(px(70.))
+                .text_right()
+                .text_sm()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(color)
+                .child(format(after)),
+        )
+}
+
+/// A fitting resource after the change, as used of output with a bar, and what it was.
+fn resource_bar(
+    palette: crate::theme::Palette,
+    title: &str,
+    now: &Resource,
+    after: &Resource,
+    unit: &str,
+    cx: &App,
+) -> Div {
+    let theme = cx.theme();
+    let out = after.output.unwrap_or(0.0);
+    let fraction = if out > 0.0 { after.used / out } else { 0.0 };
+    let over = after.used > out + 1e-6;
+    let fill = if over {
+        widgets::color(palette.red)
+    } else if fraction > 0.95 {
+        widgets::color(palette.yellow)
+    } else {
+        theme.primary
+    };
+    let changed = (after.used - now.used).abs() > 1e-6;
+    v_flex()
+        .gap_1()
+        .child(
+            h_flex()
+                .gap_1()
+                .text_xs()
+                .child(
+                    div()
+                        .flex_1()
+                        .text_color(theme.muted_foreground)
+                        .child(title.to_owned()),
+                )
+                .when(changed, |d| {
+                    d.child(
+                        div()
+                            .text_color(theme.muted_foreground)
+                            .child(format!("was {:.0}", now.used)),
+                    )
+                })
+                .child(
+                    div()
+                        .font_weight(FontWeight::MEDIUM)
+                        .when(over, |d| d.text_color(widgets::color(palette.red)))
+                        .child(format!("{:.0} / {out:.0}{unit}", after.used)),
+                ),
+        )
+        .child(bar(fraction, fill, cx))
+}
+
+/// A goal's number as shown big, and its unit.
+fn goal_value(goal: Goal, value: f64) -> (String, &'static str) {
+    match goal {
+        Goal::Ehp => (widgets::short(value), "EHP"),
+        Goal::Resists => (format!("{value:.2}x"), "resists"),
+        Goal::Repair => (format!("{value:.0}"), "EHP/s"),
+    }
+}
+
+fn cap_word(stable: bool) -> &'static str {
+    if stable { "Stable" } else { "Runs out" }
+}
+
+/// What a goal aims for, in a sentence.
+fn goal_text(goal: Goal) -> &'static str {
+    match goal {
+        Goal::Ehp => "The most effective HP over all layers, however it gets there.",
+        Goal::Resists => {
+            "The highest resist multiplier on the layer, so every repair lands hardest; EHP \
+             decides between equals."
+        }
+        Goal::Repair => {
+            "The most effective HP repaired a second: the repair the capacitor keeps up, times \
+             the resists."
+        }
+    }
+}
+
+fn goal_text_short(goal: Goal) -> &'static str {
+    match goal {
+        Goal::Ehp => "for max EHP",
+        Goal::Resists => "for max resists",
+        Goal::Repair => "for max repair",
+    }
+}
+
+/// What each kind of module is, in the order of [`SearchGroup::ALL`].
+const KIND_TIPS: [&str; 8] = [
+    "Tech 1 modules",
+    "Meta and compact variations of the Tech 1 module",
+    "Tech 2 modules",
+    "Navy and pirate modules",
+    "Storyline modules",
+    "Deadspace modules, which get expensive",
+    "Officer modules, which get very expensive",
+    "Tech 2 rigs; Tech 1 rigs are always tried",
+];
+
+/// A slot as a word in a sentence: "mid", "low".
+fn slot_word(slot: Slot) -> &'static str {
+    match slot {
+        Slot::High => "high",
+        Slot::Mid => "mid",
+        Slot::Low => "low",
+        _ => "rig",
+    }
+}
+
+fn rack_title(slot: Slot) -> &'static str {
+    match slot {
+        Slot::Mid => "Mid slots",
+        Slot::Low => "Low slots",
+        _ => "Rigs",
+    }
+}
+
+/// Why the search's better tanks did not make it.
+fn limit_text(limit: Limit) -> SharedString {
+    let rest = match limit {
+        Limit::Cpu | Limit::Powergrid => "better modules did not fit.",
+        Limit::Calibration => "better rigs did not fit.",
+        Limit::Budget => {
+            return "The budget is the limit: better tanks cost more. Raise it to see them.".into();
+        }
+    };
+    format!("{} is the limit: {rest}", limit.label()).into()
+}

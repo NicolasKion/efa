@@ -133,12 +133,6 @@ pub enum Action {
     SetTargetProfile(Option<crate::target_profile::TargetProfile>),
     /// Group a rack's modules by type, or stop grouping them.
     ToggleGrouped(Slot),
-    /// The fitting wizard's modules at their positions, the `clear` racks emptied first.
-    /// Modules the fitting rules refuse are left out.
-    ApplyWizard {
-        placements: Vec<crate::wizard::Placement>,
-        clear: crate::wizard::Cleared,
-    },
     /// pyfa's Optimize Fit Price: swap items for their cheapest replacement at the current
     /// prices, leaving out swaps the fitting rules refuse.
     OptimizePrice,
@@ -524,28 +518,6 @@ impl Efa {
                     *fit = next;
                     base = after;
                 }
-            }
-            Action::ApplyWizard { placements, clear } => {
-                if clear.any() {
-                    crate::wizard::apply(fit, &[], clear);
-                }
-                let mut base = loaded.engine.validate(fit, &pilot);
-                for placement in placements {
-                    let mut next = fit.clone();
-                    crate::wizard::apply(
-                        &mut next,
-                        std::slice::from_ref(&placement),
-                        crate::wizard::Cleared::NONE,
-                    );
-                    let after = loaded.engine.validate(&next, &pilot);
-                    if let Some(problem) = base.refusal(&after, next.ignore_restrictions) {
-                        refused = Some(problem.describe(|t| loaded.catalog.name(t)));
-                        continue;
-                    }
-                    *fit = next;
-                    base = after;
-                }
-                structural = true;
             }
             Action::OptimizePrice => {
                 let catalog = &loaded.catalog;

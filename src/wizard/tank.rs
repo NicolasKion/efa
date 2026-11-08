@@ -1,9 +1,10 @@
-//! The tank optimiser: tries tanks for the free slots of the tanking layer and the rigs, scores
-//! each with the engine against the fit's damage pattern, and keeps the best.
+//! The tank section: searches tanks for one layer of the current fit and its rigs, scores each
+//! with the engine against the fit's damage pattern for one goal, and keeps the best. The rest
+//! of the fit stays as it is.
 //!
 //! Trying every combination is out of reach on a battleship, so it searches in stages: each
 //! stage adds one module to the best few tanks of the stage before, and the rigs are tried on the
-//! best tanks last. Tanks that do not fit the CPU, powergrid or calibration left are dropped.
+//! best tanks last. Tanks that do not fit the CPU, powergrid or calibration are dropped.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -11,84 +12,107 @@ use std::{
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
-use super::{Category, Choices, Layer, Setup, TankFit, TankStyle, Utility, apply, attr, group};
+use serde::{Deserialize, Serialize};
+
+use super::{Budget, Change, HullSize, Layer, SearchTiers, Setup, attr, group};
 use crate::{
-    data::{Catalog, Kind, Slot, TypeId},
-    engine::{Engine, Pilot, Resource, TankProbe},
-    fit::{Fit, ModuleState},
+    data::{Catalog, Slot, TypeId},
+    engine::{Engine, Layer as EngineLayer, Pilot, Resource, TankProbe},
+    fit::{Fit, Module, ModuleState},
+    prices::Prices,
 };
 
 /// Tanks kept from one stage to grow in the next.
 const BEAM: usize = 20;
 /// Tanks the rigs are tried on.
 const RIG_SEEDS: usize = 8;
-/// How many of the strongest variations of each faction, deadspace or officer group the wider
-/// search tiers try per module.
-const STRONGEST_PER_GROUP: usize = 3;
-/// Repairers or boosters of one kind a tank takes at most.
+/// Repairers or boosters of one kind a tank takes at most, unless more are asked for.
 const MAX_REPAIRERS: usize = 3;
 /// Damage-type specific modules of one kind a tank takes at most.
 const MAX_SPECIFIC: usize = 2;
 
 const DAMAGE_TYPES: [&str; 4] = ["EM", "Thermal", "Kinetic", "Explosive"];
 
-/// Plates, extenders, repairers and the rest, by group.
+/// Repairers and boosters, by group.
 mod groups {
     pub const ARMOR_REPAIRER: i32 = 62;
     pub const SHIELD_BOOSTER: i32 = 40;
-    pub const SHIELD_EXTENDER: i32 = 38;
-    pub const ARMOR_PLATE: i32 = 329;
-    pub const SHIELD_BOOST_AMPLIFIER: i32 = 338;
 }
 
-/// The kind of module a tank item is, for its bling.
-pub fn category_of(catalog: &Catalog, id: TypeId) -> Category {
-    let Some(t) = catalog.get(id) else {
-        return Category::Hardener;
-    };
-    match t.group_id {
-        _ if t.kind == Kind::Module(Slot::Rig) => Category::Rig,
-        groups::ARMOR_PLATE | groups::SHIELD_EXTENDER => Category::Buffer,
-        groups::ARMOR_REPAIRER
-        | groups::SHIELD_BOOSTER
-        | groups::SHIELD_BOOST_AMPLIFIER
-        | group::ANCILLARY_ARMOR_REPAIRER
-        | group::ANCILLARY_SHIELD_BOOSTER => Category::Repairer,
-        group::CAP_BOOSTER => Category::Electronics,
-        _ => Category::Hardener,
+/// Whether a module repairs its layer: a repairer or booster, ancillary or not.
+fn is_repairer(catalog: &Catalog, id: TypeId) -> bool {
+    catalog.get(id).is_some_and(|t| {
+        matches!(
+            t.group_id,
+            groups::ARMOR_REPAIRER
+                | groups::SHIELD_BOOSTER
+                | group::ANCILLARY_ARMOR_REPAIRER
+                | group::ANCILLARY_SHIELD_BOOSTER
+        )
+    })
+}
+
+/// What a tank is tuned for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Goal {
+    /// The most effective HP of all layers.
+    #[default]
+    Ehp,
+    /// The highest resist multiplier on the layer: EHP per raw HP, so repairs land hardest.
+    Resists,
+    /// The most effective HP the layer's repairers bring back a second.
+    Repair,
+}
+
+impl Goal {
+    pub const ALL: [Self; 3] = [Self::Ehp, Self::Resists, Self::Repair];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ehp => "Max EHP",
+            Self::Resists => "Max resists",
+            Self::Repair => "Max repair",
+        }
     }
 }
 
-/// What a tank is scored by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Aim {
-    /// Effective HP of all layers.
-    Ehp,
-    /// The tanked layer's resists against the fit's damage pattern.
-    Resists,
-    /// The tanked layer's sustained repair, times its resists.
-    Repair,
-    /// Repair and buffer of the tanked layer together.
-    Balanced,
-    /// Effective HP, weighted by how well the tanked layer resists: of two tanks with about
-    /// the same EHP, the one that resists more takes logistics better and carries less plate.
-    BufferBalanced,
+/// What the user picks on the tank section. All but the layer is remembered for the next fit;
+/// the layer goes by the hull.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Choices {
+    #[serde(skip)]
+    pub layer: Layer,
+    pub goal: Goal,
+    /// Which variations of each module and rig the search tries.
+    pub search_tiers: SearchTiers,
+    /// How many repairers or boosters a repair tank ends up with; None leaves it to the search.
+    pub repairers: Option<u8>,
+    pub budget: Budget,
+    /// Take off the tank modules and rigs fitted on the layer and search their slots too,
+    /// rather than only the free ones.
+    pub refit: bool,
 }
 
-impl Aim {
-    pub fn of(choices: &Choices) -> Self {
-        match choices.tank {
-            TankStyle::Active => match choices.goal {
-                super::Goal::Resists => Self::Resists,
-                super::Goal::Repair => Self::Repair,
-                super::Goal::Balanced | super::Goal::Ehp => Self::Balanced,
-            },
-            _ => match choices.goal {
-                super::Goal::Ehp => Self::Ehp,
-                super::Goal::Resists => Self::Resists,
-                _ => Self::BufferBalanced,
-            },
+impl Default for Choices {
+    fn default() -> Self {
+        Self {
+            layer: Layer::Shield,
+            goal: Goal::default(),
+            search_tiers: SearchTiers::default(),
+            repairers: None,
+            budget: Budget::default(),
+            refit: true,
         }
+    }
+}
+
+impl Choices {
+    /// The repairer count that applies: only a repair tank takes one.
+    fn repairers(&self) -> Option<usize> {
+        self.repairers
+            .filter(|_| self.goal == Goal::Repair)
+            .map(usize::from)
     }
 }
 
@@ -98,7 +122,7 @@ pub enum Role {
     Repair,
     Buffer,
     Resist,
-    /// Capacitor for the repairers.
+    /// Capacitor or boost amplification for the repairers.
     Support,
 }
 
@@ -106,7 +130,7 @@ pub enum Role {
 #[derive(Debug, Clone)]
 pub struct Candidate {
     pub base: TypeId,
-    pub module: crate::fit::Module,
+    pub module: Module,
     pub role: Role,
     /// How many one tank takes at most.
     pub max: usize,
@@ -123,15 +147,17 @@ pub struct RigCandidate {
 /// One search, with everything it needs, so it can run off the UI thread.
 #[derive(Debug, Clone)]
 pub struct Problem {
-    /// Everything but the tank, weapons idle so the capacitor goes to the tank.
+    /// The fit without the tank being redone, weapons idle so the capacitor goes to the tank.
     pub fit: Fit,
     pub pilot: Pilot,
     pub layer: Layer,
-    pub aim: Aim,
-    /// Free positions in the layer's rack.
+    pub goal: Goal,
+    /// Free positions in the layer's rack, once the fitted tank is off.
     pub positions: Vec<usize>,
-    /// Free rig positions, when the tank takes the rigs.
+    /// Free rig positions, the same way.
     pub rig_positions: Vec<usize>,
+    /// The fitted tank modules and rigs the search takes off.
+    pub removed: Vec<(Slot, usize)>,
     pub candidates: Vec<Candidate>,
     pub rigs: Vec<RigCandidate>,
     /// Only tanks with a repairer or booster count.
@@ -144,31 +170,150 @@ pub struct Problem {
     pub max_total: Option<f64>,
 }
 
-/// A tank the optimiser found, with its numbers.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Outcome {
-    /// The T1 items of the modules, repairers first.
-    pub modules: Vec<TypeId>,
-    /// The variations fitted, in the same order.
-    pub types: Vec<TypeId>,
-    pub rigs: Vec<TypeId>,
-    pub rig_types: Vec<TypeId>,
-    pub score: f64,
+impl Problem {
+    /// Every module and rig the search may try, for fetching their prices first.
+    pub fn types(&self) -> HashSet<TypeId> {
+        self.candidates
+            .iter()
+            .map(|c| c.module.type_id)
+            .chain(self.rigs.iter().map(|r| r.type_id))
+            .collect()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.positions.is_empty() && self.rig_positions.is_empty()
+    }
+}
+
+/// What a tank has to work with on the fit.
+#[derive(Debug, Clone)]
+pub struct Room {
+    /// The fit with the tank being redone taken off.
+    pub fit: Fit,
+    /// The positions of what was taken off.
+    pub removed: Vec<(Slot, usize)>,
+    /// Free positions in the layer's rack and the rigs.
+    pub positions: Vec<usize>,
+    pub rig_positions: Vec<usize>,
+}
+
+/// A tank's numbers on its layer, judged with the guns idle so the capacitor goes to the tank.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Numbers {
     /// Effective HP of all layers.
     pub ehp: f64,
-    /// The tanked layer's resists: EM, thermal, kinetic, explosive.
-    pub resists: [f64; 4],
     /// The tanked layer's resist against the damage pattern.
     pub resist: f64,
-    /// The tanked layer's sustained repair, HP/s.
+    /// The tanked layer's EHP per raw HP.
+    pub multiplier: f64,
+    /// The tanked layer's sustained repair, raw HP/s.
     pub repair: f64,
+    /// That repair in effective HP/s: times the multiplier.
+    pub repair_ehp: f64,
+    /// Shield, armor and hull.
+    pub layers: [EngineLayer; 3],
     pub cap_stable: bool,
     pub cpu: Resource,
     pub powergrid: Resource,
+    pub calibration: Resource,
+}
+
+impl Numbers {
+    pub fn of(probe: &TankProbe, layer: Layer) -> Self {
+        let (stats, repair) = match layer {
+            Layer::Shield => (probe.shield, probe.sustained.shield),
+            Layer::Armor => (probe.armor, probe.sustained.armor),
+        };
+        let multiplier = stats.mult.unwrap_or(1.0).max(1.0);
+        let layers = [probe.shield, probe.armor, probe.hull];
+        Self {
+            ehp: layers.iter().map(|l| l.ehp.unwrap_or(l.hp)).sum(),
+            resist: 1.0 - 1.0 / multiplier,
+            multiplier,
+            repair,
+            repair_ehp: repair * multiplier,
+            layers,
+            cap_stable: probe.cap_stable,
+            cpu: probe.cpu,
+            powergrid: probe.powergrid,
+            calibration: probe.calibration,
+        }
+    }
+
+    /// The numbers of `fit` with `change` made.
+    pub fn after(engine: &Engine, pilot: &Pilot, fit: &Fit, change: &Change, layer: Layer) -> Self {
+        let mut next = fit.clone();
+        super::apply(&mut next, change);
+        idle_guns(&mut next);
+        Self::of(&engine.probe_tank(&next, pilot), layer)
+    }
+
+    /// The tanked layer's stats.
+    pub fn layer(&self, layer: Layer) -> EngineLayer {
+        match layer {
+            Layer::Shield => self.layers[0],
+            Layer::Armor => self.layers[1],
+        }
+    }
+
+    /// The number a goal ranks tanks by.
+    pub fn value(&self, goal: Goal) -> f64 {
+        match goal {
+            Goal::Ehp => self.ehp,
+            Goal::Resists => self.multiplier,
+            Goal::Repair => self.repair_ehp,
+        }
+    }
+}
+
+/// Turn active guns off, so the capacitor goes to the tank.
+fn idle_guns(fit: &mut Fit) {
+    for module in fit.high.iter_mut().flatten() {
+        if matches!(module.state, ModuleState::Active | ModuleState::Overload) {
+            module.state = ModuleState::Online;
+        }
+    }
+}
+
+/// A tank the optimiser found, with its numbers.
+#[derive(Debug, Clone)]
+pub struct Outcome {
+    /// The modules, repairers first, and what each is loaded with.
+    pub types: Vec<TypeId>,
+    pub charges: Vec<Option<TypeId>>,
+    pub rig_types: Vec<TypeId>,
+    pub score: f64,
+    pub numbers: Numbers,
     /// What the tank's modules and rigs cost, as far as their prices are known.
     pub price: f64,
     /// Whether every module and rig had a price.
     pub priced: bool,
+}
+
+impl Outcome {
+    /// What fitting this tank does to the fit the problem was made from.
+    pub fn change(&self, problem: &Problem, catalog: &Catalog) -> Change {
+        let slot = problem.layer.slot();
+        let modules = self
+            .types
+            .iter()
+            .zip(&self.charges)
+            .zip(&problem.positions)
+            .map(|((&id, &charge), &at)| {
+                let mut module = Module::new(catalog, id);
+                module.charge = charge;
+                (slot, at, module)
+            });
+        let rigs = self
+            .rig_types
+            .iter()
+            .zip(&problem.rig_positions)
+            .map(|(&id, &at)| (Slot::Rig, at, Module::new(catalog, id)));
+        Change {
+            removed: problem.removed.clone(),
+            placements: modules.chain(rigs).collect(),
+        }
+    }
 }
 
 /// A fitting resource a tank can run out of.
@@ -246,23 +391,12 @@ impl AddAssign for Rejected {
 }
 
 /// What a search found: the best tanks, best first, and what it dropped for not fitting.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default)]
 pub struct Found {
     pub outcomes: Vec<Outcome>,
     pub rejected: Rejected,
     /// With a number of repairers chosen, how many the results have when fewer fit.
     pub repairers_short: Option<usize>,
-}
-
-impl Outcome {
-    pub fn tank_fit(&self) -> TankFit {
-        TankFit {
-            modules: self.modules.clone(),
-            rigs: self.rigs.clone(),
-            types: self.types.clone(),
-            rig_types: self.rig_types.clone(),
-        }
-    }
 }
 
 /// How far a search is, shared with the UI, which can also call it off.
@@ -307,7 +441,6 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
         Ordering::Relaxed,
     );
     let mut seen: HashSet<State> = HashSet::new();
-    let mut all: Vec<Outcome> = Vec::new();
     let mut states: Vec<(State, Outcome)> = Vec::new();
     let mut rejected = Rejected::default();
 
@@ -325,9 +458,10 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
         }
     }
     seen.extend(starts.iter().cloned());
-    let (mut beam, dropped) = evaluate_all(engine, problem, &starts, progress);
+    let (beam, dropped) = evaluate_all(engine, problem, &starts, progress);
     rejected += dropped;
     states.extend(beam.iter().cloned());
+    let mut beam = beam;
     for _ in 0..depth {
         let mut next = Vec::new();
         for (state, _) in &beam {
@@ -431,14 +565,13 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
             .unwrap_or(0);
         n.min(most)
     });
-    all.extend(
-        states
-            .into_iter()
-            .filter(|(s, _)| exact.is_none_or(|n| repair_count(problem, &s.modules) == n))
-            .filter(|(s, _)| !problem.need_repair || !any_repair || repairs(s))
-            .filter(|(s, _)| !s.modules.is_empty() || !s.rigs.is_empty())
-            .map(|(_, o)| o),
-    );
+    let mut all: Vec<Outcome> = states
+        .into_iter()
+        .filter(|(s, _)| exact.is_none_or(|n| repair_count(problem, &s.modules) == n))
+        .filter(|(s, _)| !problem.need_repair || !any_repair || repairs(s))
+        .filter(|(s, _)| !s.modules.is_empty() || !s.rigs.is_empty())
+        .map(|(_, o)| o)
+        .collect();
     all.sort_by(|a, b| b.score.total_cmp(&a.score));
     all.truncate(keep);
     Found {
@@ -546,11 +679,7 @@ fn try_score(
     let mut fit = problem.fit.clone();
     let slot = problem.layer.slot();
     for (candidate, &at) in modules.iter().zip(&problem.positions) {
-        let rack = fit.rack_mut(slot);
-        if rack.len() <= at {
-            rack.resize_with(at + 1, || None);
-        }
-        rack[at] = Some(candidate.module.clone());
+        super::place(&mut fit, &(slot, at, candidate.module.clone()));
     }
     for (rig, &at) in rigs.iter().zip(&problem.rig_positions) {
         if fit.rigs.len() <= at {
@@ -596,89 +725,122 @@ fn outcome(
     rigs: &[RigCandidate],
     probe: &TankProbe,
 ) -> Outcome {
-    let (layer, repair) = match problem.layer {
-        Layer::Shield => (probe.shield, probe.sustained.shield),
-        Layer::Armor => (probe.armor, probe.sustained.armor),
-    };
-    let mult = layer.mult.unwrap_or(1.0).max(1.0);
-    let resist = 1.0 - 1.0 / mult;
-    let effective = repair * mult;
+    let numbers = Numbers::of(probe, problem.layer);
+    let Numbers {
+        ehp,
+        multiplier,
+        repair_ehp,
+        ..
+    } = numbers;
+    let layer = numbers.layer(problem.layer);
     let layer_ehp = layer.ehp.unwrap_or(layer.hp);
-    let ehp: f64 = [probe.shield, probe.armor, probe.hull]
-        .iter()
-        .map(|l| l.ehp.unwrap_or(l.hp))
-        .sum();
-    let mut score = match problem.aim {
-        Aim::Ehp => ehp,
-        // The resist multiplier, nudged towards more repair, then more EHP, among tanks that
-        // resist the same.
-        Aim::Resists => {
-            resist + 0.01 * effective / (effective + 100.0) + 0.001 * ehp / (ehp + 100_000.0)
+    let mut score = match problem.goal {
+        Goal::Ehp => ehp,
+        // The multiplier, nudged towards more repair, then more EHP, among tanks that resist
+        // the same.
+        Goal::Resists => {
+            multiplier + 0.01 * repair_ehp / (repair_ehp + 100.0) + 0.001 * ehp / (ehp + 100_000.0)
         }
-        Aim::Repair => effective + layer_ehp * 1e-6,
-        Aim::Balanced => effective * layer_ehp,
-        Aim::BufferBalanced => ehp * (1.0 + resist),
+        Goal::Repair => repair_ehp + layer_ehp * 1e-6,
     };
     if problem.need_repair && !modules.iter().any(|c| c.role == Role::Repair) {
         score *= 0.5;
     }
     let (price, priced) = price_of(problem, modules, rigs);
+    let modules = &modules[..modules.len().min(problem.positions.len())];
+    let rigs = &rigs[..rigs.len().min(problem.rig_positions.len())];
     Outcome {
-        modules: modules.iter().map(|c| c.base).collect(),
         types: modules.iter().map(|c| c.module.type_id).collect(),
-        rigs: rigs.iter().map(|r| r.base).collect(),
+        charges: modules.iter().map(|c| c.module.charge).collect(),
         rig_types: rigs.iter().map(|r| r.type_id).collect(),
         score,
-        ehp,
-        resists: layer.resists,
-        resist,
-        repair,
-        cap_stable: probe.cap_stable,
-        cpu: probe.cpu,
-        powergrid: probe.powergrid,
+        numbers,
         price,
         priced,
     }
 }
 
 impl Setup<'_> {
-    /// The search for the choices' tank on `fit`, with everything else planned first. None when
-    /// the choices fit no tank.
+    /// The room the choices' tank has on `fit`: the fit with the tank being redone taken off,
+    /// and the positions it leaves free. No engine needed, so it is cheap to work out often.
+    pub fn tank_room(&self, fit: &Fit, choices: &Choices) -> Room {
+        let slot = choices.layer.slot();
+        // What counts as the fitted tank: anything of a group the search fits, repairers
+        // included whatever the goal, but not a cap booster, which may be there for anything.
+        let module_groups: HashSet<i32> = self
+            .tank_candidates(choices, true, &[0, 1, 2, 3])
+            .iter()
+            .filter_map(|c| self.catalog.get(c.module.type_id))
+            .map(|t| t.group_id)
+            .filter(|&g| g != group::CAP_BOOSTER)
+            .collect();
+        let rig_groups: HashSet<i32> = self
+            .rig_candidates(choices, true, &[0, 1, 2, 3])
+            .iter()
+            .filter(|r| !r.fitting)
+            .filter_map(|r| self.catalog.get(r.type_id))
+            .map(|t| t.group_id)
+            .collect();
+        let tank = |id: TypeId, groups: &HashSet<i32>| {
+            self.catalog
+                .get(id)
+                .is_some_and(|t| groups.contains(&t.group_id))
+        };
+        let mut next = fit.clone();
+        let mut removed = Vec::new();
+        if choices.refit {
+            for (i, at) in next.rack_mut(slot).iter_mut().enumerate() {
+                if at.as_ref().is_some_and(|m| tank(m.type_id, &module_groups)) {
+                    *at = None;
+                    removed.push((slot, i));
+                }
+            }
+            for (i, at) in next.rigs.iter_mut().enumerate() {
+                if at.is_some_and(|r| tank(r, &rig_groups)) {
+                    *at = None;
+                    removed.push((Slot::Rig, i));
+                }
+            }
+        }
+        let positions = (0..self.facts.total(slot))
+            .filter(|&i| next.rack(slot).get(i).is_none_or(Option::is_none))
+            .collect();
+        let rig_positions = (0..self.facts.total(Slot::Rig))
+            .filter(|&i| next.rigs.get(i).is_none_or(Option::is_none))
+            .collect();
+        Room {
+            fit: next,
+            removed,
+            positions,
+            rig_positions,
+        }
+    }
+
+    /// The search for the choices' tank on `fit`. Its positions are empty when the layer and
+    /// the rigs have no room.
     pub fn tank_problem(
         &self,
         engine: &Engine,
         pilot: &Pilot,
         fit: &Fit,
         choices: &Choices,
-        prices: &crate::prices::Prices,
-    ) -> Option<Problem> {
-        if choices.tank == TankStyle::None {
-            return None;
-        }
-        let (base, room) = self.plan_base(fit, choices);
-        let mut next = fit.clone();
-        let cleared = choices.cleared();
-        apply(&mut next, &self.placements(fit, &base, cleared), cleared);
-        // Repair is judged with the guns idle, so the capacitor goes to the tank.
-        for module in next.high.iter_mut().flatten() {
-            if matches!(module.state, ModuleState::Active | ModuleState::Overload) {
-                module.state = ModuleState::Online;
-            }
-        }
-        let slot = choices.layer.slot();
-        let positions: Vec<usize> = (0..self.facts.total(slot))
-            .filter(|&i| next.rack(slot).get(i).is_none_or(Option::is_none))
-            .take(room.slots)
-            .collect();
-        let rig_positions: Vec<usize> = (0..self.facts.total(Slot::Rig))
-            .filter(|&i| next.rigs.get(i).is_none_or(Option::is_none))
-            .take(room.rigs)
-            .collect();
+        prices: &Prices,
+    ) -> Problem {
+        let layer = choices.layer;
+        let slot = layer.slot();
+        let repair = choices.goal == Goal::Repair;
+        let Room {
+            fit: mut next,
+            removed,
+            positions,
+            rig_positions,
+        } = self.tank_room(fit, choices);
+        idle_guns(&mut next);
         // Damage-specific modules for every damage type the pattern brings, the most exposed
         // first; the score against the pattern decides whether a kinetic or thermal hardener
         // beats an omni one.
         let empty = engine.probe_tank(&next, pilot);
-        let resists = match choices.layer {
+        let resists = match layer {
             Layer::Shield => empty.shield.resists,
             Layer::Armor => empty.armor.resists,
         };
@@ -691,33 +853,24 @@ impl Setup<'_> {
             .into_iter()
             .filter(|&i| empty.incoming[i] > 0.0)
             .collect();
-        let weakest = exposed.as_slice();
-        // Repairers already fitted count: the search need not add one, though it may, and a
-        // chosen number of them counts the fitted ones too.
+        // Repairers left on count: the search need not add one, though it may, and a chosen
+        // number of them counts these too.
         let fitted_repairers = next
             .rack(slot)
             .iter()
             .flatten()
-            .filter(|m| category_of(self.catalog, m.type_id) == Category::Repairer)
+            .filter(|m| is_repairer(self.catalog, m.type_id))
             .count();
-        let repairing = fitted_repairers > 0;
         let repairers = choices
-            .repairers
-            .filter(|_| choices.tank == TankStyle::Active)
-            .map(|n| usize::from(n).saturating_sub(fitted_repairers));
-        // Anything over the per-module budget is left out. With a budget set, so is anything
-        // without a price: the market has none of it, and it could cost anything.
-        let budgeted = choices.budget.each.is_some() || choices.budget.total.is_some();
-        let affordable = |id: TypeId| match prices.get(id) {
-            Some(price) => choices.budget.each.is_none_or(|max| price <= max as f64),
-            None => !budgeted,
-        };
-        let mut candidates = self.tank_candidates(choices, weakest);
+            .repairers()
+            .map(|n| n.saturating_sub(fitted_repairers));
+        let affordable = |id: TypeId| choices.budget.allows(prices.get(id));
+        let mut candidates = self.tank_candidates(choices, repair, &exposed);
         candidates.retain(|c| affordable(c.module.type_id));
         let mut rigs = if rig_positions.is_empty() {
             Vec::new()
         } else {
-            self.rig_candidates(choices, weakest)
+            self.rig_candidates(choices, repair, &exposed)
         };
         rigs.retain(|r| affordable(r.type_id));
         let known = candidates
@@ -726,97 +879,92 @@ impl Setup<'_> {
             .chain(rigs.iter().map(|r| r.type_id))
             .filter_map(|id| Some((id, prices.get(id)?)))
             .collect();
-        Some(Problem {
+        Problem {
             candidates,
             rigs,
             prices: known,
             max_total: choices.budget.total.map(|max| max as f64),
             fit: next,
             pilot: pilot.clone(),
-            layer: choices.layer,
-            aim: Aim::of(choices),
+            layer,
+            goal: choices.goal,
             positions,
             rig_positions,
-            need_repair: choices.tank == TankStyle::Active
-                && !repairing
-                && repairers.is_none_or(|n| n > 0),
+            removed,
+            need_repair: repair && fitted_repairers == 0 && repairers.is_none_or(|n| n > 0),
             repairers,
-        })
+        }
     }
 
-    /// The modules worth trying for the style and layer, repairers first.
-    fn tank_candidates(&self, choices: &Choices, weakest: &[usize]) -> Vec<Candidate> {
-        let style = choices.tank;
-        let active = style == TankStyle::Active;
-        let max_repairers = MAX_REPAIRERS.max(choices.repairers.map_or(0, usize::from));
+    /// The modules worth trying for the layer, repairers first when `repair`; `exposed` are
+    /// the damage types to try specific resist modules for.
+    fn tank_candidates(
+        &self,
+        choices: &Choices,
+        repair: bool,
+        exposed: &[usize],
+    ) -> Vec<Candidate> {
+        let max_repairers = MAX_REPAIRERS.max(choices.repairers().unwrap_or(0));
         let all = usize::MAX;
         let mut wanted: Vec<(String, Role, usize)> = Vec::new();
         let mut want = |name: String, role: Role, max: usize| wanted.push((name, role, max));
         match choices.layer {
             Layer::Armor => {
-                if active {
+                if repair {
                     want(self.repairer_name(), Role::Repair, max_repairers);
                     want(self.ancillary_name(Layer::Armor), Role::Repair, 1);
                 }
                 want(self.plate_name().into(), Role::Buffer, all);
-                {
+                want(
+                    "Multispectrum Energized Membrane I".into(),
+                    Role::Resist,
+                    all,
+                );
+                want("Multispectrum Coating I".into(), Role::Resist, all);
+                for &i in exposed {
+                    let kind = DAMAGE_TYPES[i];
                     want(
-                        "Multispectrum Energized Membrane I".into(),
+                        format!("{kind} Energized Membrane I"),
                         Role::Resist,
-                        all,
+                        MAX_SPECIFIC,
                     );
-                    want("Multispectrum Coating I".into(), Role::Resist, all);
-                    for &i in weakest {
-                        let kind = DAMAGE_TYPES[i];
-                        want(
-                            format!("{kind} Energized Membrane I"),
-                            Role::Resist,
-                            MAX_SPECIFIC,
-                        );
-                        want(format!("{kind} Coating I"), Role::Resist, MAX_SPECIFIC);
-                        want(
-                            format!("{kind} Armor Hardener I"),
-                            Role::Resist,
-                            MAX_SPECIFIC,
-                        );
-                    }
-                    want("Reactive Armor Hardener".into(), Role::Resist, 1);
-                    want("Damage Control I".into(), Role::Resist, 1);
+                    want(format!("{kind} Coating I"), Role::Resist, MAX_SPECIFIC);
+                    want(
+                        format!("{kind} Armor Hardener I"),
+                        Role::Resist,
+                        MAX_SPECIFIC,
+                    );
                 }
+                want("Reactive Armor Hardener".into(), Role::Resist, 1);
+                want("Damage Control I".into(), Role::Resist, 1);
             }
             Layer::Shield => {
-                if active {
+                if repair {
                     want(self.booster_name().into(), Role::Repair, max_repairers);
                     want(self.ancillary_name(Layer::Shield), Role::Repair, 1);
                     want(
                         "Shield Boost Amplifier I".into(),
-                        Role::Repair,
+                        Role::Support,
                         MAX_SPECIFIC,
                     );
                 }
                 want(self.extender_name().into(), Role::Buffer, all);
-                {
-                    want("Multispectrum Shield Hardener I".into(), Role::Resist, all);
-                    for &i in weakest {
-                        let kind = DAMAGE_TYPES[i];
-                        want(
-                            format!("{kind} Shield Hardener I"),
-                            Role::Resist,
-                            MAX_SPECIFIC,
-                        );
-                        want(
-                            format!("{kind} Shield Amplifier I"),
-                            Role::Resist,
-                            MAX_SPECIFIC,
-                        );
-                    }
-                }
-                if active && !choices.has(Utility::CapBooster) {
+                want("Multispectrum Shield Hardener I".into(), Role::Resist, all);
+                for &i in exposed {
+                    let kind = DAMAGE_TYPES[i];
                     want(
-                        self.utility_name(Utility::CapBooster, None),
-                        Role::Support,
-                        1,
+                        format!("{kind} Shield Hardener I"),
+                        Role::Resist,
+                        MAX_SPECIFIC,
                     );
+                    want(
+                        format!("{kind} Shield Amplifier I"),
+                        Role::Resist,
+                        MAX_SPECIFIC,
+                    );
+                }
+                if repair {
+                    want(self.cap_booster_name(), Role::Support, 1);
                 }
             }
         }
@@ -824,13 +972,12 @@ impl Setup<'_> {
             .into_iter()
             .filter_map(|(name, role, max)| Some((self.base(&name)?, role, max)))
             .flat_map(|(base, role, max)| {
-                let category = category_of(self.catalog, base);
-                self.search_variations(base, category, choices)
+                self.search_variations(base, false, choices.search_tiers)
                     .into_iter()
                     .map(move |type_id| (base, type_id, role, max))
             })
             .map(|(base, type_id, role, max)| {
-                let mut module = crate::fit::Module::new(self.catalog, type_id);
+                let mut module = Module::new(self.catalog, type_id);
                 module.charge = self.charge_for(type_id);
                 Candidate {
                     base,
@@ -842,111 +989,32 @@ impl Setup<'_> {
             .collect()
     }
 
-    /// The variations of `base` the search tries: the exact pick if the user made one,
-    /// otherwise one per tier the search tiers allow, each only once.
-    fn search_variations(
+    /// The rigs worth trying for the layer, repair rigs when `repair`.
+    fn rig_candidates(
         &self,
-        base: TypeId,
-        category: Category,
         choices: &Choices,
-    ) -> Vec<TypeId> {
-        use super::SearchGroup;
-        let tiers = choices.search_tiers;
-        let mut found: Vec<TypeId> = Vec::new();
-        let mut add = |id: TypeId| {
-            if !found.contains(&id) {
-                found.push(id);
-            }
-        };
-        // A variation the user picked by hand is always in.
-        if let Some(exact) = choices.bling.exact(category, base) {
-            add(exact);
-        }
-        let variations: Vec<&crate::data::ItemType> = self
-            .catalog
-            .variations_of(base)
-            .iter()
-            .filter_map(|&v| self.catalog.get(v))
-            .filter(|t| t.published && t.market_group.is_some())
-            .collect();
-        // The strongest few of a group: its weakest member is rarely the one worth fitting.
-        let strongest = |keep: &dyn Fn(&crate::data::ItemType) -> bool| {
-            let mut members: Vec<&crate::data::ItemType> =
-                variations.iter().copied().filter(|t| keep(t)).collect();
-            members.sort_by(|a, b| b.meta_level.cmp(&a.meta_level).then(a.id.cmp(&b.id)));
-            members
-                .into_iter()
-                .take(STRONGEST_PER_GROUP)
-                .map(|t| t.id)
-                .collect::<Vec<_>>()
-        };
-        if category == Category::Rig {
-            add(self.resolve(base, choices.bling.tier_for(Category::Rig)));
-            add(base);
-            if tiers.has(SearchGroup::T2Rigs) {
-                add(self.resolve(base, super::Tier::T2));
-            }
-            return found;
-        }
-        for group in SearchGroup::ALL {
-            if !tiers.has(group) {
-                continue;
-            }
-            match group {
-                SearchGroup::T1 => add(base),
-                SearchGroup::Meta => {
-                    for id in
-                        strongest(&|t| t.meta_group == Some(super::meta::TECH1) && t.id != base)
-                    {
-                        add(id);
-                    }
-                }
-                SearchGroup::T2Rigs => {}
-                _ => {
-                    let wanted = group.meta_group();
-                    for id in strongest(&|t| t.meta_group.is_some() && t.meta_group == wanted) {
-                        add(id);
-                    }
-                }
-            }
-        }
-        // A module none of the switched-on groups has still comes at the bling tier, so
-        // switching on only Officer does not leave the plates out.
-        let fallback = self.resolve(base, choices.bling.tier_for(category));
-        add(fallback);
-        if found.len() > 1 {
-            // It was only wanted when nothing else came up.
-            found.retain(|&id| id != fallback || tiers_cover(choices, self, fallback));
-        }
-        found
-    }
-
-    /// The rigs worth trying for the style and layer.
-    fn rig_candidates(&self, choices: &Choices, weakest: &[usize]) -> Vec<RigCandidate> {
-        let style = choices.tank;
+        repair: bool,
+        exposed: &[usize],
+    ) -> Vec<RigCandidate> {
         let mut names: Vec<String> = Vec::new();
         match choices.layer {
             Layer::Armor => {
                 names.push("Trimark Armor Pump I".into());
-                if style == TankStyle::Active {
+                if repair {
                     names.push("Auxiliary Nano Pump I".into());
                     names.push("Nanobot Accelerator I".into());
                 }
-                {
-                    for &i in weakest {
-                        names.push(format!("{} Armor Reinforcer I", DAMAGE_TYPES[i]));
-                    }
+                for &i in exposed {
+                    names.push(format!("{} Armor Reinforcer I", DAMAGE_TYPES[i]));
                 }
             }
             Layer::Shield => {
                 names.push("Core Defense Field Extender I".into());
-                if style == TankStyle::Active {
+                if repair {
                     names.push("Core Defense Operational Solidifier I".into());
                 }
-                {
-                    for &i in weakest {
-                        names.push(format!("{} Shield Reinforcer I", DAMAGE_TYPES[i]));
-                    }
+                for &i in exposed {
+                    names.push(format!("{} Shield Reinforcer I", DAMAGE_TYPES[i]));
                 }
             }
         }
@@ -964,7 +1032,7 @@ impl Setup<'_> {
                 Some((base, fitting.contains(&name.as_str())))
             })
             .flat_map(|(base, fitting)| {
-                self.search_variations(base, Category::Rig, choices)
+                self.search_variations(base, true, choices.search_tiers)
                     .into_iter()
                     .map(move |type_id| (base, type_id, fitting))
             })
@@ -978,26 +1046,65 @@ impl Setup<'_> {
             })
             .collect()
     }
-}
 
-/// Whether a switched-on search group covers `id`.
-fn tiers_cover(choices: &Choices, setup: &Setup<'_>, id: TypeId) -> bool {
-    use super::SearchGroup;
-    let Some(t) = setup.catalog.get(id) else {
-        return false;
-    };
-    let tiers = choices.search_tiers;
-    SearchGroup::ALL
-        .into_iter()
-        .filter(|&g| tiers.has(g))
-        .any(|g| match g {
-            SearchGroup::T1 => t.variation_parent.is_none(),
-            SearchGroup::Meta => {
-                t.meta_group == Some(super::meta::TECH1) && t.variation_parent.is_some()
+    /// The plate a hull this size takes.
+    fn plate_name(&self) -> &'static str {
+        match self.facts.size {
+            HullSize::Small => "400mm Steel Plates I",
+            HullSize::Medium if !self.facts.large() => "800mm Steel Plates I",
+            HullSize::Medium | HullSize::Large => "1600mm Steel Plates I",
+            HullSize::Capital => "25000mm Steel Plates I",
+        }
+    }
+
+    fn extender_name(&self) -> &'static str {
+        match self.facts.size {
+            HullSize::Small => "Medium Shield Extender I",
+            HullSize::Medium | HullSize::Large => "Large Shield Extender I",
+            HullSize::Capital => "Capital Shield Extender I",
+        }
+    }
+
+    fn repairer_name(&self) -> String {
+        format!("{} Armor Repairer I", self.facts.size.label())
+    }
+
+    fn booster_name(&self) -> &'static str {
+        match self.facts.size {
+            HullSize::Small => "Small Shield Booster I",
+            HullSize::Medium if !self.facts.large() => "Medium Shield Booster I",
+            HullSize::Medium => "Large Shield Booster I",
+            HullSize::Large => "X-Large Shield Booster I",
+            HullSize::Capital => "Capital Shield Booster I",
+        }
+    }
+
+    fn cap_booster_name(&self) -> String {
+        let size = match self.facts.size {
+            HullSize::Small => "Small",
+            HullSize::Medium => "Medium",
+            HullSize::Large => "Heavy",
+            HullSize::Capital => "Capital",
+        };
+        format!("{size} Capacitor Booster I")
+    }
+
+    /// The ancillary repairer or booster for the layer.
+    fn ancillary_name(&self, layer: Layer) -> String {
+        match layer {
+            Layer::Armor => format!("{} Ancillary Armor Repairer", self.facts.size.label()),
+            Layer::Shield => {
+                let size = match self.facts.size {
+                    HullSize::Small => "Small",
+                    HullSize::Medium if !self.facts.large() => "Medium",
+                    HullSize::Medium => "Large",
+                    HullSize::Large => "X-Large",
+                    HullSize::Capital => "Capital",
+                };
+                format!("{size} Ancillary Shield Booster")
             }
-            SearchGroup::T2Rigs => false,
-            _ => t.meta_group.is_some() && t.meta_group == g.meta_group(),
-        })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1046,5 +1153,37 @@ mod tests {
         };
         // A tie goes to the first.
         assert_eq!(rejected.limit(), Some(Limit::Cpu));
+    }
+
+    #[test]
+    fn choices_survive_a_round_trip_without_the_layer() {
+        let choices = Choices {
+            layer: Layer::Armor,
+            goal: Goal::Repair,
+            repairers: Some(2),
+            refit: false,
+            ..Choices::default()
+        };
+        let json = serde_json::to_string(&choices).expect("serializes");
+        let back: Choices = serde_json::from_str(&json).expect("deserializes");
+        assert_eq!(
+            back,
+            Choices {
+                layer: Layer::Shield,
+                ..choices
+            }
+        );
+    }
+
+    #[test]
+    fn older_saves_read_as_the_defaults() {
+        // The guided wizard saved its bling choices and its last step in the same places.
+        let old = r#"{"tier":"Faction","categories":{"Rig":"T2"},"exact":{}}"#;
+        let remembered: super::super::Remembered = serde_json::from_str(old).expect("reads");
+        assert_eq!(remembered, super::super::Remembered::default());
+        for step in ["\"Loadout\"", "\"Tank\"", "\"Rigs\""] {
+            let section: super::super::Section = serde_json::from_str(step).expect("reads");
+            assert_eq!(section, super::super::Section::Tank);
+        }
     }
 }

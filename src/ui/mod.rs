@@ -528,6 +528,13 @@ impl Efa {
                 .update(cx, |hub, _| std::mem::take(&mut hub.mutation_edits));
             self.apply_mutation_edits(edits, cx);
         }
+        // Tanks the fitting wizard window fits land here, to be undoable like any edit.
+        if self.role == Role::Main && !self.hub.read(cx).wizard_edits.is_empty() {
+            let edits = self
+                .hub
+                .update(cx, |hub, _| std::mem::take(&mut hub.wizard_edits));
+            self.apply_wizard_edits(edits, cx);
+        }
         // The graph window's "Open Fit in New Tab" lands here.
         if self.role == Role::Main && !self.hub.read(cx).open_requests.is_empty() {
             let requests = self
@@ -802,6 +809,42 @@ impl Efa {
             self.history
                 .record(edit.fit, before, &self.saved.fits[edit.fit]);
         }
+        self.changed(cx);
+    }
+
+    /// Make the fitting wizard's changes on the fits they belong to, one undo step each.
+    /// Modules the fitting rules refuse are left out.
+    fn apply_wizard_edits(&mut self, edits: Vec<hub::WizardEdit>, cx: &mut Context<Self>) {
+        let Some(loaded) = self.loaded() else { return };
+        let pilot = self.pilot(&loaded);
+        for edit in edits {
+            let Some(index) = self.saved.fits.iter().position(|f| f.uid == edit.uid) else {
+                continue;
+            };
+            let before = self.saved.fits[index].clone();
+            let fit = &mut self.saved.fits[index];
+            crate::wizard::apply(
+                fit,
+                &crate::wizard::Change {
+                    removed: edit.change.removed,
+                    placements: Vec::new(),
+                },
+            );
+            let mut base = loaded.engine.validate(fit, &pilot);
+            for placement in edit.change.placements {
+                let mut next = fit.clone();
+                crate::wizard::place(&mut next, &placement);
+                let after = loaded.engine.validate(&next, &pilot);
+                if let Some(problem) = base.refusal(&after, next.ignore_restrictions) {
+                    self.status = Some(problem.describe(|t| loaded.catalog.name(t)).into());
+                    continue;
+                }
+                *fit = next;
+                base = after;
+            }
+            self.record_edit(index, before);
+        }
+        self.clear_selection();
         self.changed(cx);
     }
 

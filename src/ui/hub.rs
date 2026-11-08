@@ -11,7 +11,7 @@ use gpui_kit::{
     Window,
 };
 
-use super::{Loaded, character_editor::CharacterEditor, load};
+use super::{Loaded, character_editor::CharacterEditor, load, wizard::WizardDialog};
 use crate::{
     character::Characters, engine::Overridden, overrides::Overrides, preferences::Preferences,
     prices::Prices, store::Saved,
@@ -37,6 +37,13 @@ pub fn shown_menus(window: &Window, cx: &App) -> crate::preferences::ContextMenu
     } else {
         preferences(cx).context_menus
     }
+}
+
+/// A fitting wizard change for a saved fit, by the fit's identity.
+#[derive(Debug, Clone)]
+pub struct WizardEdit {
+    pub uid: u64,
+    pub change: crate::wizard::Change,
 }
 
 /// New rolled values for a mutated module or drone stack of a saved fit.
@@ -70,6 +77,10 @@ pub struct Hub {
     pub open_requests: Vec<usize>,
     /// Rolls the stats window set on mutated items, for the main window to apply with undo.
     pub mutation_edits: Vec<MutationEdit>,
+    /// Changes the fitting wizard window applies, for the main window to make with undo.
+    pub wizard_edits: Vec<WizardEdit>,
+    /// The open fitting wizard, which is brought forward instead of opening a second one.
+    pub(super) wizard: Option<(AnyWindowHandle, WeakEntity<WizardDialog>)>,
     /// The main window's stats pane shows raw HP rather than EHP; the graphs follow it.
     pub raw_hp: bool,
     /// The characters. Replaced, never changed in place, so a window can tell it has the
@@ -126,6 +137,8 @@ impl Hub {
             import,
             open_requests: Vec::new(),
             mutation_edits: Vec::new(),
+            wizard_edits: Vec::new(),
+            wizard: None,
             raw_hp: false,
             characters: Rc::new(contents.characters),
             character_editor: None,
