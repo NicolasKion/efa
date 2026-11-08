@@ -11,8 +11,10 @@ use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
     ActiveTheme, Disableable, Icon as UiIcon, IconName, Sizable,
     button::{Button, ButtonVariants},
+    checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState},
+    menu::{DropdownMenu, PopupMenuItem},
     tooltip::Tooltip,
     v_flex,
 };
@@ -24,7 +26,7 @@ use gpui_kit::{
 };
 
 use super::{
-    Efa, Layout, Segment, Shared, Stat, Target, chip, divider, join_and, label, muted, notice,
+    Efa, Layout, Segment, Shared, Stat, Target, divider, field, fieldset, join_and, muted, notice,
     plural, segmented,
 };
 use crate::{
@@ -579,60 +581,58 @@ impl TankSection {
     // The controls.
 
     fn controls(&self, across: bool, cx: &mut Context<Self>) -> Div {
-        let c = self.choices;
         let _ = across;
-        let mut out = v_flex()
-            .gap_2p5()
-            .child(group("Goal", self.goals(cx), cx))
-            .child(group("Layer", self.layers(cx), cx));
+        let c = self.choices;
+        let mut search = vec![
+            field("Goal", self.goals(cx), cx).into_any_element(),
+            field("Layer", self.layers(cx), cx).into_any_element(),
+        ];
         if c.goal == Goal::Repair {
-            out = out.child(group("Repairers", self.repairers(cx), cx));
+            search.push(field("Repairers", self.repairers(cx), cx).into_any_element());
         }
-        out.child(group(
-            "Slots",
-            segmented(
-                "wizard-slots",
+        search.push(
+            field(
+                "Slots",
+                segmented(
+                    "wizard-slots",
+                    vec![
+                        Segment::new("Refit", c.refit).tip(
+                            "Take off the tank modules and rigs fitted on the layer, and \
+                             search their slots too",
+                        ),
+                        Segment::new("Free only", !c.refit)
+                            .tip("Keep what is fitted and search only the free slots"),
+                    ],
+                    cx,
+                    |this: &mut Self, i, window, cx| {
+                        this.change(cx, |c| c.refit = i == 0);
+                        this.refocus(window, cx);
+                    },
+                ),
+                cx,
+            )
+            .into_any_element(),
+        );
+        v_flex()
+            .gap_4()
+            .child(fieldset("Search", search, cx))
+            .child(fieldset("Module kinds", vec![self.kinds(cx)], cx))
+            .child(fieldset(
+                "Budget",
                 vec![
-                    Segment::new("Refit tank", c.refit).tip(
-                        "Take off the tank modules and rigs fitted on the layer, and search \
-                         their slots too",
-                    ),
-                    Segment::new("Free slots only", !c.refit)
-                        .tip("Keep what is fitted and search only the free slots"),
+                    self.budget(false, cx).into_any_element(),
+                    self.budget(true, cx).into_any_element(),
                 ],
                 cx,
-                |this: &mut Self, i, window, cx| {
-                    this.change(cx, |c| c.refit = i == 0);
-                    this.refocus(window, cx);
-                },
-            ),
-            cx,
-        ))
-        .child(group("Module kinds", self.kinds(cx), cx))
-        .child(group(
-            "Budget",
-            v_flex()
-                .gap_1p5()
-                .child(self.budget(false, cx))
-                .child(self.budget(true, cx))
-                .into_any_element(),
-            cx,
-        ))
+            ))
     }
 
-    /// The goals as a segmented control; what each aims for is in its tooltip.
+    /// The goals side by side; what each aims for is in its tooltip.
     fn goals(&self, cx: &mut Context<Self>) -> AnyElement {
         let segments = Goal::ALL
             .into_iter()
             .map(|goal| {
-                let icon = match goal {
-                    Goal::Ehp => AssetIcon::Shield,
-                    Goal::Resists => AssetIcon::ShieldCheck,
-                    Goal::Repair => AssetIcon::HeartPulse,
-                };
-                Segment::new(goal.short_label(), goal == self.choices.goal)
-                    .icon(UiIcon::new(icon).xsmall())
-                    .tip(goal_text(goal))
+                Segment::new(goal.short_label(), goal == self.choices.goal).tip(goal_text(goal))
             })
             .collect();
         segmented(
@@ -647,28 +647,16 @@ impl TankSection {
     }
 
     fn layers(&self, cx: &mut Context<Self>) -> AnyElement {
-        let loaded = &self.shared.loaded;
         let facts = &self.shared.facts;
         let segments = Layer::ALL
             .iter()
             .map(|&l| {
-                let icon = match l {
-                    Layer::Shield => widgets::icon::SHIELD,
-                    Layer::Armor => widgets::icon::ARMOR,
-                };
                 let slots = facts.total(l.slot());
-                Segment::new(l.label(), l == self.choices.layer)
-                    .icon(widgets::icon_box(
-                        &loaded.catalog,
-                        &loaded.icons,
-                        Icon::Id(icon),
-                        14.,
-                    ))
-                    .tip(format!(
-                        "{} {} slots on this hull",
-                        slots,
-                        slot_word(l.slot())
-                    ))
+                Segment::new(l.label(), l == self.choices.layer).tip(format!(
+                    "{} {} slots on this hull",
+                    slots,
+                    slot_word(l.slot())
+                ))
             })
             .collect();
         segmented(
@@ -738,103 +726,103 @@ impl TankSection {
             .into_any_element()
     }
 
+    /// What the search may use, as checkboxes in two columns.
     fn kinds(&self, cx: &mut Context<Self>) -> AnyElement {
-        let chips: Vec<AnyElement> = SearchGroup::ALL
-            .into_iter()
-            .zip(KIND_TIPS)
-            .map(|(g, tip)| {
-                chip(
-                    SharedString::from(format!("wizard-kind-{g:?}")),
-                    g.label(),
-                    self.choices.search_tiers.has(g),
-                    Some(tip),
-                    cx,
+        let this = cx.entity().downgrade();
+        let boxes = SearchGroup::ALL.into_iter().zip(KIND_TIPS).map(|(g, tip)| {
+            let this = this.clone();
+            div()
+                .id(SharedString::from(format!("wizard-kind-tip-{g:?}")))
+                .child(
+                    Checkbox::new(SharedString::from(format!("wizard-kind-{g:?}")))
+                        .small()
+                        .label(g.label())
+                        .checked(self.choices.search_tiers.has(g))
+                        .on_click(move |_, window, cx| {
+                            let _ = this.update(cx, |this, cx| {
+                                this.change(cx, |c| c.search_tiers.toggle(g));
+                                this.refocus(window, cx);
+                            });
+                        }),
                 )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _: &gpui_kit::MouseDownEvent, window, cx| {
-                        this.change(cx, |c| c.search_tiers.toggle(g));
-                        this.refocus(window, cx);
-                    }),
-                )
-                .into_any_element()
-            })
-            .collect();
-        h_flex()
-            .flex_wrap()
-            .gap_1()
-            .children(chips)
+                .tooltip(move |window, cx| Tooltip::new(tip).build(window, cx))
+        });
+        div()
+            .grid()
+            .grid_cols(2)
+            .gap_x_2()
+            .gap_y_1()
+            .pt_0p5()
+            .children(boxes)
             .into_any_element()
     }
 
-    /// One budget: a field in ISK, and presets under it.
+    /// One budget on one line: a field in ISK, with the presets in a menu beside it.
     fn budget(&self, total: bool, cx: &mut Context<Self>) -> Div {
-        let (field, presets, current, title) = if total {
+        let (field_state, presets, current, title) = if total {
             (
-                &self.budget_total,
+                self.budget_total.clone(),
                 Budget::TOTAL,
                 self.choices.budget.total,
                 "Whole tank",
             )
         } else {
             (
-                &self.budget_each,
+                self.budget_each.clone(),
                 Budget::EACH,
                 self.choices.budget.each,
                 "Per module",
             )
         };
-        let theme = cx.theme();
-        let chips: Vec<AnyElement> = presets
-            .into_iter()
-            .enumerate()
-            .map(|(i, preset)| {
-                let field = field.clone();
-                chip(
-                    SharedString::from(format!("wizard-budget-{total}-{i}")),
-                    Budget::label(preset),
-                    preset == current,
-                    None,
-                    cx,
+        let this = cx.entity().downgrade();
+        let menu = Button::new(SharedString::from(format!("wizard-budget-presets-{total}")))
+            .ghost()
+            .xsmall()
+            .tab_stop(false)
+            .icon(IconName::ChevronDown)
+            .tooltip("Presets")
+            .dropdown_menu(move |mut menu, _, _| {
+                for preset in presets {
+                    let (this, field_state) = (this.clone(), field_state.clone());
+                    menu = menu.item(
+                        PopupMenuItem::new(Budget::label(preset))
+                            .checked(preset == current)
+                            .on_click(move |_, window, cx| {
+                                let text =
+                                    preset.map_or_else(String::new, |p| Budget::label(Some(p)));
+                                field_state.update(cx, |f, cx| f.set_value(text, window, cx));
+                                let _ = this.update(cx, |this, cx| {
+                                    this.change(cx, |c| {
+                                        if total {
+                                            c.budget.total = preset;
+                                        } else {
+                                            c.budget.each = preset;
+                                        }
+                                    });
+                                });
+                            }),
+                    );
+                }
+                menu
+            });
+        let input = if total {
+            &self.budget_total
+        } else {
+            &self.budget_each
+        };
+        field(
+            title,
+            h_flex()
+                .gap_0p5()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(Input::new(input).xsmall().suffix(muted("ISK", cx).pr_1())),
                 )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _: &gpui_kit::MouseDownEvent, window, cx| {
-                        let text = preset.map_or_else(String::new, |p| Budget::label(Some(p)));
-                        field.update(cx, |f, cx| f.set_value(text, window, cx));
-                        this.change(cx, |c| {
-                            if total {
-                                c.budget.total = preset;
-                            } else {
-                                c.budget.each = preset;
-                            }
-                        });
-                    }),
-                )
-                .into_any_element()
-            })
-            .collect();
-        v_flex()
-            .gap_1()
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(
-                        div()
-                            .w(px(64.))
-                            .flex_none()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(title),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(Input::new(field).xsmall().suffix(muted("ISK", cx).pr_1())),
-                    ),
-            )
-            .child(h_flex().flex_wrap().gap_1().children(chips))
+                .child(menu),
+            cx,
+        )
     }
 
     /// The search button, or its progress while it runs, and what it covers.
@@ -1632,11 +1620,6 @@ fn controls_column(controls: Div, search: Div, width: f32, side: Hsla, cx: &App)
                 .border_color(theme.border)
                 .child(search),
         )
-}
-
-/// A titled group of controls.
-fn group(title: &str, body: AnyElement, cx: &App) -> Div {
-    v_flex().gap_1().child(label(title, cx)).child(body)
 }
 
 /// A goal's number in a results column.
