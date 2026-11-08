@@ -11,6 +11,7 @@ mod overrides;
 mod pane;
 mod pilot;
 mod probe;
+mod read;
 mod source;
 mod stats;
 mod surroundings;
@@ -18,7 +19,7 @@ mod validate;
 
 use std::{path::Path, sync::RwLock};
 
-use rc::{AttrId, EveAttrId, ItemCommon, ItemId, SolOwned, Src};
+use rc::{ItemId, SolOwned, Src};
 
 use crate::{
     data::TypeId,
@@ -28,7 +29,7 @@ use crate::{
 
 use build::{BuildOptions, Built, Placed};
 use items::{booster_info, drone_info};
-use stats::{damage, fit_stats, resource, slots};
+use stats::{fit_stats, resource, slots};
 
 pub use column::{ModuleMisc, RackHeat, ShipHeat};
 pub use efs::EfsContext;
@@ -187,11 +188,7 @@ fn stats_of(built: &mut Built, fit: &Fit, options: CalcOptions) -> Stats {
     stats.validation = validate::validate(&mut f, items);
     stats.firepower = pane::firepower_detail(&mut f, options.time());
 
-    stats.cargo_capacity = sol.get_item(&ship_id).ok().and_then(|mut ship| {
-        ship.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr::CAPACITY)))
-            .ok()
-            .map(|v| v.modified.into_f64())
-    });
+    stats.cargo_capacity = read::attr(sol, ship_id, attr::CAPACITY);
 
     stats.boosters = boosters.iter().map(|&id| booster_info(sol, id)).collect();
     stats.drones = built
@@ -232,26 +229,15 @@ fn stats_of(built: &mut Built, fit: &Fit, options: CalcOptions) -> Stats {
                     m.get_charged_cycle_count().map(rc::Count::into_u32),
                 )
             });
-        let Ok(mut item) = sol.get_item(&id) else {
+        if sol.get_item(&id).is_err() {
             continue;
-        };
-        let mut get = |attr: i32| {
-            item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr)))
-                .ok()
-                .map(|v| v.modified.into_f64())
-        };
-        let cap_need = get(attr::CAPACITOR_NEED).filter(|&c| c > 0.0);
-        // Missing attributes read as 0, so filter before falling back: turrets and launchers
-        // cycle on their rate of fire, everything else on its duration.
-        let cycle = get(attr::DURATION)
-            .filter(|&d| d > 0.0)
-            .or_else(|| get(attr::RATE_OF_FIRE).filter(|&d| d > 0.0));
+        }
         let info = ModuleInfo {
-            cpu: get(attr::CPU).filter(|&v| v > 0.0),
-            powergrid: get(attr::POWER).filter(|&v| v > 0.0),
-            cap_per_sec: cap_need.zip(cycle).map(|(need, ms)| need / (ms / 1000.0)),
-            optimal: get(attr::MAX_RANGE).filter(|&v| v > 0.0),
-            falloff: get(attr::FALLOFF).filter(|&v| v > 0.0),
+            cpu: read::positive_attr(sol, id, attr::CPU),
+            powergrid: read::positive_attr(sol, id, attr::POWER),
+            cap_per_sec: read::cap_per_sec(sol, id),
+            optimal: read::positive_attr(sol, id, attr::MAX_RANGE),
+            falloff: read::positive_attr(sol, id, attr::FALLOFF),
             spool_max,
             burnout: None,
             burnout_from_neighbours: false,

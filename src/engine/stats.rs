@@ -52,6 +52,26 @@ impl Damage {
     pub fn total(&self) -> f64 {
         self.em + self.thermal + self.kinetic + self.explosive
     }
+
+    /// EM, thermal, kinetic, explosive.
+    pub fn as_array(&self) -> [f64; 4] {
+        [self.em, self.thermal, self.kinetic, self.explosive]
+    }
+}
+
+impl From<&StatDmgEntry> for Damage {
+    fn from(d: &StatDmgEntry) -> Self {
+        Self {
+            em: d.em.into_f64(),
+            thermal: d.thermal.into_f64(),
+            kinetic: d.kinetic.into_f64(),
+            explosive: d.explosive.into_f64(),
+            breacher: Breacher {
+                absolute: d.breacher.absolute_max.into_f64(),
+                relative: d.breacher.relative_max.into_f64(),
+            },
+        }
+    }
 }
 
 /// Breacher pod damage before a target is known: at most `absolute`, and at most `relative`
@@ -210,11 +230,11 @@ pub(super) fn fit_stats(
         options.time(),
         StatCritOptions::default(),
     );
-    stats.dps = damage(&dmg.dps);
-    stats.volley = damage(&dmg.volley);
+    stats.dps = Damage::from(&dmg.dps);
+    stats.volley = Damage::from(&dmg.volley);
     // Sentries are static minions; they count as drones too.
     let drones = s.get_stat_dmg(pane::minions(), options.time(), StatCritOptions::default());
-    stats.drone_dps = damage(&drones.dps).total();
+    stats.drone_dps = Damage::from(&drones.dps).total();
     stats.weapon_dps = stats.dps.total() - stats.drone_dps;
 
     [stats.shield, stats.armor, stats.hull] = layers(&mut s, incoming);
@@ -287,18 +307,5 @@ pub(super) fn resource(r: StatResource) -> Resource {
     Resource {
         used: r.used.into_f64(),
         output: r.output.map(rc::Value::into_f64),
-    }
-}
-
-pub(super) fn damage(d: &StatDmgEntry) -> Damage {
-    Damage {
-        em: d.em.into_f64(),
-        thermal: d.thermal.into_f64(),
-        kinetic: d.kinetic.into_f64(),
-        explosive: d.explosive.into_f64(),
-        breacher: Breacher {
-            absolute: d.breacher.absolute_max.into_f64(),
-            relative: d.breacher.relative_max.into_f64(),
-        },
     }
 }

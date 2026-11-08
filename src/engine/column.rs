@@ -3,19 +3,19 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{FitItem, Stats};
+use rc::{
+    ItemCommon, ItemId, SolOwned,
+    stats::{
+        ItemStatsCommon, StatCritOptions, StatItemChargeOptions, StatMiningResourceKind,
+        StatTimeOptions,
+    },
+};
+
+use super::{Damage, FitItem, Stats, pane, read};
 use crate::{
     data::Slot,
     dogma::attr,
     fit::{Fit, ModuleState},
-};
-
-use rc::{
-    AttrId, EveAttrId, ItemCommon, ItemId, SolOwned, Spool, UnitInterval,
-    stats::{
-        ItemStatsCommon, StatCritOptions, StatItemChargeOptions, StatMiningResourceKind,
-        StatTimeOptions, StatTimeOptionsBurst,
-    },
 };
 
 /// Attributes the Miscellanea column reads off a module or subsystem.
@@ -132,44 +132,14 @@ impl ModuleMisc {
     }
 }
 
-fn attrs_of(sol: &mut SolOwned, id: ItemId, wanted: &[i32]) -> HashMap<i32, f64> {
-    let Ok(mut item) = sol.get_item(&id) else {
-        return HashMap::new();
-    };
-    wanted
-        .iter()
-        .filter_map(|&attr| {
-            let value = item
-                .get_attr(&AttrId::Eve(EveAttrId::from_i32(attr)))
-                .ok()?;
-            Some((attr, value.modified.into_f64()))
-        })
-        .collect()
-}
-
-fn burst_at(spool: f64) -> StatTimeOptions {
-    StatTimeOptions::Burst(StatTimeOptionsBurst {
-        spool: Some(Spool::SpoolScale(UnitInterval::from_f64_clamped(spool))),
-    })
-}
-
 /// Everything [`ModuleMisc`] holds for one module or subsystem. pyfa shows what a module does
 /// whatever its state, so the numbers come from the item switched on.
 pub(super) fn module_misc(sol: &mut SolOwned, id: ItemId) -> ModuleMisc {
     let mut misc = ModuleMisc {
-        attrs: attrs_of(sol, id, &MODULE_ATTRS),
+        attrs: read::attrs(sol, id, &MODULE_ATTRS),
         ..ModuleMisc::default()
     };
-    if let Ok(item) = sol.get_item(&id)
-        && let Ok(effects) = item.iter_effects()
-    {
-        misc.effects = effects
-            .filter_map(|(effect, _)| match effect {
-                rc::EffectId::Dogma(id) => Some(id.into_i32()),
-                _ => None,
-            })
-            .collect();
-    }
+    misc.effects = read::effects(sol, id);
     let cycle = misc
         .attr(attr::DURATION)
         .filter(|&d| d > 0.0)
@@ -178,7 +148,7 @@ pub(super) fn module_misc(sol: &mut SolOwned, id: ItemId) -> ModuleMisc {
     if let Ok(mut module) = sol.get_module(&id) {
         if let Some(charge) = module.get_charge() {
             let charge = charge.get_item_id();
-            misc.charge_attrs = attrs_of(sol, charge, &CHARGE_ATTRS);
+            misc.charge_attrs = read::attrs(sol, charge, &CHARGE_ATTRS);
         }
         if let Ok(mut module) = sol.get_module(&id) {
             misc.charged_cycles = module.get_charged_cycle_count().map(rc::Count::into_u32);
@@ -209,29 +179,22 @@ pub(super) fn module_misc(sol: &mut SolOwned, id: ItemId) -> ModuleMisc {
     }
     if spools {
         let armor = |on: &mut rc::stats::SwitchedItemStats<'_>, spool: f64| {
-            on.get_stat_outgoing_rps(burst_at(spool))
+            on.get_stat_outgoing_rps(pane::burst_at(spool))
                 .map_or(0.0, |r| r.armor.into_f64())
         };
         misc.reps_spool = Some((armor(&mut on, 0.0), armor(&mut on, 1.0)));
     }
     if let Ok(mining) = on.get_stat_mps(StatTimeOptions::default(), StatMiningResourceKind::Regular)
     {
-        let entries = [mining.ore, mining.ice, mining.gas];
-        misc.mining = (
-            entries.iter().map(|e| e.yield_.into_f64()).sum(),
-            entries.iter().map(|e| e.drain.into_f64()).sum(),
-        );
+        let rate = read::mining_rate(&mining);
+        misc.mining = (rate.yield_, rate.drain);
     }
     if let Ok(dmg) = on.get_stat_dmg(
         StatTimeOptions::default(),
         StatCritOptions::default(),
         StatItemChargeOptions::Include,
     ) {
-        let v = dmg.volley;
-        misc.volley = [v.em, v.thermal, v.kinetic, v.explosive]
-            .into_iter()
-            .map(rc::PValue::into_f64)
-            .sum();
+        misc.volley = Damage::from(&dmg.volley).as_array().into_iter().sum();
     }
     misc
 }
@@ -339,7 +302,7 @@ impl ShipHeat {
 
 /// The ship's heat attributes: generation, and attenuation of the high, mid and low racks.
 pub(super) fn ship_heat(sol: &mut SolOwned, ship: ItemId) -> (f64, [f64; 3]) {
-    let attrs = attrs_of(
+    let attrs = read::attrs(
         sol,
         ship,
         &[
@@ -366,7 +329,7 @@ pub(super) fn ship_heat(sol: &mut SolOwned, ship: ItemId) -> (f64, [f64; 3]) {
 
 /// A module's heat attributes: absorption rate, hit points and damage taken per heat hit.
 pub(super) fn module_heat(sol: &mut SolOwned, id: ItemId) -> (f64, f64, f64) {
-    let attrs = attrs_of(
+    let attrs = read::attrs(
         sol,
         id,
         &[

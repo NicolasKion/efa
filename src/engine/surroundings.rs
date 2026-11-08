@@ -8,14 +8,14 @@
 //! per copy, since refine has no multiplier for projections.
 
 use rc::{
-    AbilityId, AttrId, CountNz, EveAttrId, ItemCommon, ItemId, ItemTypeId, Lender, MinionState,
-    ModRack, SolOwned, stats::StatSlot,
+    AbilityId, CountNz, ItemCommon, ItemId, ItemTypeId, Lender, MinionState, ModRack, SolOwned,
+    stats::StatSlot,
 };
 
 use super::{
     DroneInfo, Engine, Pilot, Slots,
     build::{add_fit, add_fit_module},
-    drone_info,
+    drone_info, read,
 };
 use crate::{
     data::Slot,
@@ -223,7 +223,7 @@ impl Engine {
         others: &[Fit],
     ) -> Projections {
         let find = |uid: u64| others.iter().find(|f| uid != 0 && f.uid == uid);
-        let target_radius = radius(sol, ship_id);
+        let target_radius = read::attr_or_zero(sol, ship_id, attr::RADIUS);
 
         let boosters: Vec<&Fit> = fit
             .command
@@ -399,17 +399,6 @@ fn add_env(sol: &mut SolOwned, fit_id: rc::FitId, ship_id: ItemId, env: &EnvEffe
     let _ = effect.add_proj(&ship_id);
 }
 
-fn radius(sol: &mut SolOwned, id: ItemId) -> f64 {
-    sol.get_item(&id)
-        .ok()
-        .and_then(|mut item| {
-            item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr::RADIUS)))
-                .ok()
-                .map(|v| v.modified.into_f64())
-        })
-        .unwrap_or(0.0)
-}
-
 /// Where a projector `range` metres from the target's surface has its centre: refine measures
 /// range surface to surface, and the target sits at the origin.
 fn centre_distance(range: f64, own_radius: f64, target_radius: f64) -> rc::Coordinates {
@@ -424,7 +413,7 @@ fn centre_distance(range: f64, own_radius: f64, target_radius: f64) -> rc::Coord
 /// Without a range everything overlaps at the origin, which refine treats as point blank.
 fn place_ship(sol: &mut SolOwned, ship: ItemId, range: Option<f64>, target_radius: f64) {
     let Some(range) = range else { return };
-    let own = radius(sol, ship);
+    let own = read::attr_or_zero(sol, ship, attr::RADIUS);
     if let Ok(mut ship) = sol.get_ship(&ship) {
         ship.set_coordinates(centre_distance(range, own, target_radius));
     }
@@ -432,7 +421,7 @@ fn place_ship(sol: &mut SolOwned, ship: ItemId, range: Option<f64>, target_radiu
 
 fn place_minion(sol: &mut SolOwned, id: ItemId, range: Option<f64>, target_radius: f64) {
     let Some(range) = range else { return };
-    let own = radius(sol, id);
+    let own = read::attr_or_zero(sol, id, attr::RADIUS);
     let at = centre_distance(range, own, target_radius);
     if let Ok(mut drone) = sol.get_drone(&id) {
         drone.set_coordinates(at);

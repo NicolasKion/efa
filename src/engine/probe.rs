@@ -5,16 +5,15 @@
 
 use std::collections::HashSet;
 
-use rc::{AttrId, EveAttrId, ItemCommon, ItemId, ItemTypeId, ModRack, Sol};
+use rc::{ItemCommon, ItemId, ItemTypeId, ModRack};
 
 use super::{
     BuildOptions, Built, CalcOptions, Cap, CapDetail, Engine, Layer, Pilot, Resource, Tank,
     build::{add_fit_module, at},
-    pane, resource, stats,
+    pane, read, resource, stats,
 };
 use crate::{
     data::{Slot, TypeId},
-    dogma::attr,
     fit::{Fit, Module},
 };
 
@@ -140,7 +139,9 @@ impl TankBench {
             let tried: Vec<(ItemId, f64, TypeId)> = running
                 .iter()
                 .filter(|&&(.., type_id)| !self.idle.contains(&type_id))
-                .filter_map(|&(_, _, id, type_id)| Some((id, cap_per_sec(&mut tx, id)?, type_id)))
+                .filter_map(|&(_, _, id, type_id)| {
+                    Some((id, read::cap_per_sec(&mut tx, id)?, type_id))
+                })
                 .collect();
             let pairs: Vec<(ItemId, f64)> = tried.iter().map(|&(id, cap, _)| (id, cap)).collect();
             let shares = pane::repair_shares(&mut tx, fit_id, &pairs, time);
@@ -167,18 +168,4 @@ fn rack(slot: Slot) -> Option<ModRack> {
         Slot::Low => Some(ModRack::Low),
         Slot::Rig | Slot::Subsystem | Slot::Service => None,
     }
-}
-
-/// Capacitor a module uses per second while it cycles, None when it uses none.
-fn cap_per_sec(sol: &mut Sol, id: ItemId) -> Option<f64> {
-    let mut item = sol.get_item(&id).ok()?;
-    let mut get = |a: i32| {
-        item.get_attr(&AttrId::Eve(EveAttrId::from_i32(a)))
-            .ok()
-            .map(|v| v.modified.into_f64())
-            .filter(|&v| v > 0.0)
-    };
-    let need = get(attr::CAPACITOR_NEED)?;
-    let cycle = get(attr::DURATION).or_else(|| get(attr::RATE_OF_FIRE))?;
-    Some(need / (cycle / 1000.0))
 }

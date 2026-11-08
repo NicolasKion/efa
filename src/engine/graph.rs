@@ -7,14 +7,14 @@
 use std::collections::HashSet;
 
 use rc::{
-    AttrId, Count, EveAttrId, FitId, ItemCommon, ItemId, ItemTypeId, SolOwned, Spool,
+    Count, FitId, ItemCommon, ItemId, ItemTypeId, SolOwned, Spool,
     stats::{
         ItemStatsCommon, StatCritOptions, StatDmg, StatItemChargeOptions, StatTimeOptions,
         StatTimeOptionsBurst,
     },
 };
 
-use super::{BuildOptions, CalcOptions, Engine, Pilot, build::Placed};
+use super::{BuildOptions, CalcOptions, Damage, Engine, Pilot, build::Placed, read};
 use crate::{
     data::{Catalog, Hardpoint, Slot},
     dogma::{attr, effect, group},
@@ -138,7 +138,7 @@ impl Engine {
             None => {}
         }
         {
-            let mut get = |a| attr_of(sol, ship_id, a);
+            let mut get = |a| read::attr_or_zero(sol, ship_id, a);
             ship.radius = get(attr::RADIUS);
             ship.cap_capacity = get(attr::CAPACITOR_CAPACITY);
             ship.cap_recharge = get(attr::RECHARGE_RATE) / 1000.0;
@@ -146,7 +146,7 @@ impl Engine {
             ship.shield_recharge = get(attr::SHIELD_RECHARGE_RATE) / 1000.0;
         }
         // Ships without the attribute take breacher damage in full.
-        ship.breacher_resist = attr_opt(sol, ship_id, attr::BREACHER_RESIST).unwrap_or(1.0);
+        ship.breacher_resist = read::attr(sol, ship_id, attr::BREACHER_RESIST).unwrap_or(1.0);
         // Warps start from the speed without the modules that cannot run in warp.
         ship.subwarp_speed = grounded(sol, fit_id, &modules, |p| {
             catalog
@@ -164,13 +164,13 @@ impl Engine {
                 continue;
             }
             let group = item_type.group_id;
-            let effects = effects_of(sol, placed.id);
+            let effects = read::effects(sol, placed.id);
             let charge = charge_of(sol, placed.id);
             if effect::SCRAMMABLE.iter().any(|e| effects.contains(e)) {
                 scrammable.push(placed.id);
             }
             let scrams = effect::SCRAM.iter().any(|e| effects.contains(e))
-                && attr_of(sol, placed.id, attr::ACTIVATION_BLOCKED_STRENGTH) != 0.0
+                && read::attr_or_zero(sol, placed.id, attr::ACTIVATION_BLOCKED_STRENGTH) != 0.0
                 || effects.contains(&effect::DISRUPT_SPHERE)
                     && charge
                         .as_ref()
@@ -208,7 +208,7 @@ impl Engine {
             if stack.active == 0 {
                 continue;
             }
-            let effects = effects_of(sol, stack.id);
+            let effects = read::effects(sol, stack.id);
             if let Some(weapon) = drone_weapon(sol, stack) {
                 snap.weapons.push(weapon);
             }
@@ -243,7 +243,7 @@ impl Engine {
         };
         let placement = placement(fit, &built.fit);
         let sol = &mut built.sol;
-        let ship_radius = attr_of(sol, placement.ship, attr::RADIUS);
+        let ship_radius = read::attr_or_zero(sol, placement.ship, attr::RADIUS);
         let running = |p: &&PlacedModule| p.state.is_running();
         let weapon_of = |p: &PlacedModule| {
             catalog
@@ -291,7 +291,7 @@ impl Engine {
                 let weapons: Vec<Weapon> = members
                     .iter()
                     .filter_map(|p| {
-                        let effects = effects_of(sol, p.id);
+                        let effects = read::effects(sol, p.id);
                         let loaded = charge_of(sol, p.id);
                         module_weapon(
                             sol,
@@ -382,47 +382,6 @@ fn placement(fit: &Fit, placed: &Placed) -> Placement {
     }
 }
 
-/// An attribute after bonuses, 0 when the item lacks it.
-fn attr_of(sol: &mut SolOwned, id: ItemId, attr: i32) -> f64 {
-    sol.get_item(&id)
-        .ok()
-        .and_then(|mut item| item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr))).ok())
-        .map_or(0.0, |v| v.modified.into_f64())
-}
-
-/// An attribute after bonuses, None when the item lacks it.
-fn attr_opt(sol: &mut SolOwned, id: ItemId, attr: i32) -> Option<f64> {
-    sol.get_item(&id)
-        .ok()
-        .and_then(|mut item| item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr))).ok())
-        .map(|v| v.modified.into_f64())
-}
-
-/// The first of `attrs` the item has a nonzero value for.
-fn first_attr(sol: &mut SolOwned, id: ItemId, attrs: &[i32]) -> f64 {
-    attrs
-        .iter()
-        .map(|&a| attr_of(sol, id, a))
-        .find(|&v| v != 0.0)
-        .unwrap_or(0.0)
-}
-
-fn effects_of(sol: &mut SolOwned, id: ItemId) -> HashSet<i32> {
-    sol.get_item(&id)
-        .ok()
-        .and_then(|item| {
-            item.iter_effects().ok().map(|effects| {
-                effects
-                    .filter_map(|(effect, _)| match effect {
-                        rc::EffectId::Dogma(id) => Some(id.into_i32()),
-                        _ => None,
-                    })
-                    .collect()
-            })
-        })
-        .unwrap_or_default()
-}
-
 /// The loaded charge and its effects.
 struct Charge {
     id: ItemId,
@@ -431,13 +390,13 @@ struct Charge {
 
 fn charge_of(sol: &mut SolOwned, module: ItemId) -> Option<Charge> {
     let id = sol.get_module(&module).ok()?.get_charge()?.get_item_id();
-    let effects = effects_of(sol, id);
+    let effects = read::effects(sol, id);
     Some(Charge { id, effects })
 }
 
 /// pyfa's `maxRange`: the first range attribute a module has.
 fn max_range(sol: &mut SolOwned, id: ItemId) -> f64 {
-    first_attr(
+    read::first_attr(
         sol,
         id,
         &[
@@ -455,7 +414,7 @@ fn max_range(sol: &mut SolOwned, id: ItemId) -> f64 {
 }
 
 fn falloff(sol: &mut SolOwned, id: ItemId) -> f64 {
-    first_attr(
+    read::first_attr(
         sol,
         id,
         &[
@@ -464,10 +423,6 @@ fn falloff(sol: &mut SolOwned, id: ItemId) -> f64 {
             attr::SHIP_SCAN_FALLOFF,
         ],
     )
-}
-
-fn dmg(entry: &rc::stats::StatDmgEntry) -> Dmg {
-    [entry.em, entry.thermal, entry.kinetic, entry.explosive].map(rc::PValue::into_f64)
 }
 
 fn item_dmg(sol: &mut SolOwned, id: ItemId, time: StatTimeOptions) -> Option<StatDmg> {
@@ -503,7 +458,10 @@ fn reload_of(sol: &mut SolOwned, id: ItemId) -> (Option<u32>, f64) {
         .and_then(|mut m| m.get_charged_cycle_count())
         .map(Count::into_u32)
         .filter(|&n| n > 0);
-    (shots, attr_of(sol, id, attr::RELOAD_TIME) / 1000.0)
+    (
+        shots,
+        read::attr_or_zero(sol, id, attr::RELOAD_TIME) / 1000.0,
+    )
 }
 
 fn module_weapon(
@@ -517,40 +475,43 @@ fn module_weapon(
 ) -> Option<Weapon> {
     let id = placed.id;
     let burst = item_dmg(sol, id, StatTimeOptions::default())?;
-    let (dps, volley) = (dmg(&burst.dps), dmg(&burst.volley));
+    let (dps, volley) = (
+        Damage::from(&burst.dps).as_array(),
+        Damage::from(&burst.volley).as_array(),
+    );
     if dps.iter().sum::<f64>() <= 0.0 {
         return breacher_weapon(sol, id, &burst, charge, ship_radius);
     }
     let kind = if effects.contains(&effect::VORTON) {
         WeaponKind::Vorton {
-            range: attr_of(sol, id, attr::MAX_RANGE),
-            er: attr_of(sol, id, attr::AOE_CLOUD_SIZE),
-            ev: attr_of(sol, id, attr::AOE_VELOCITY),
-            drf: attr_of(sol, id, attr::AOE_DAMAGE_REDUCTION_FACTOR),
+            range: read::attr_or_zero(sol, id, attr::MAX_RANGE),
+            er: read::attr_or_zero(sol, id, attr::AOE_CLOUD_SIZE),
+            ev: read::attr_or_zero(sol, id, attr::AOE_VELOCITY),
+            drf: read::attr_or_zero(sol, id, attr::AOE_DAMAGE_REDUCTION_FACTOR),
         }
     } else if hardpoint == Hardpoint::Turret {
         WeaponKind::Turret(Gun {
             optimal: max_range(sol, id),
             falloff: falloff(sol, id),
-            tracking: attr_of(sol, id, attr::TRACKING_SPEED),
-            optimal_sig: attr_of(sol, id, attr::OPTIMAL_SIG_RADIUS),
+            tracking: read::attr_or_zero(sol, id, attr::TRACKING_SPEED),
+            optimal_sig: read::attr_or_zero(sol, id, attr::OPTIMAL_SIG_RADIUS),
         })
     } else if hardpoint == Hardpoint::Launcher || placed.type_id == CIVILIAN_LAUNCHER {
         let charge = charge?;
         let c = charge.id;
         let fof = charge.effects.contains(&effect::FOF_MISSILE);
         let range = math::missile_range(
-            attr_of(sol, c, attr::MAX_VELOCITY),
-            attr_of(sol, c, attr::EXPLOSION_DELAY),
-            attr_of(sol, c, attr::MASS),
-            attr_of(sol, c, attr::AGILITY),
+            read::attr_or_zero(sol, c, attr::MAX_VELOCITY),
+            read::attr_or_zero(sol, c, attr::EXPLOSION_DELAY),
+            read::attr_or_zero(sol, c, attr::MASS),
+            read::attr_or_zero(sol, c, attr::AGILITY),
             ship_radius,
-            fof.then(|| attr_of(sol, c, attr::MAX_FOF_RANGE)),
+            fof.then(|| read::attr_or_zero(sol, c, attr::MAX_FOF_RANGE)),
         );
         WeaponKind::Launcher {
-            er: attr_of(sol, c, attr::AOE_CLOUD_SIZE),
-            ev: attr_of(sol, c, attr::AOE_VELOCITY),
-            drf: attr_of(sol, c, attr::AOE_DAMAGE_REDUCTION_FACTOR),
+            er: read::attr_or_zero(sol, c, attr::AOE_CLOUD_SIZE),
+            ev: read::attr_or_zero(sol, c, attr::AOE_VELOCITY),
+            drf: read::attr_or_zero(sol, c, attr::AOE_DAMAGE_REDUCTION_FACTOR),
             range,
             fof,
         }
@@ -561,25 +522,27 @@ fn module_weapon(
     } else if group == group::BOMB_LAUNCHER {
         let c = charge?.id;
         // A bomb flies its full flight time before it goes off.
-        let range =
-            attr_of(sol, c, attr::MAX_VELOCITY) * attr_of(sol, c, attr::EXPLOSION_DELAY) / 1000.0;
+        let range = read::attr_or_zero(sol, c, attr::MAX_VELOCITY)
+            * read::attr_or_zero(sol, c, attr::EXPLOSION_DELAY)
+            / 1000.0;
         WeaponKind::Bomb {
             range,
-            blast_radius: attr_of(sol, c, attr::EXPLOSION_RANGE),
-            er: attr_of(sol, c, attr::AOE_CLOUD_SIZE),
+            blast_radius: read::attr_or_zero(sol, c, attr::EXPLOSION_RANGE),
+            er: read::attr_or_zero(sol, c, attr::AOE_CLOUD_SIZE),
         }
     } else if group == group::GUIDED_BOMB_LAUNCHER {
         let c = charge?.id;
-        let range =
-            attr_of(sol, c, attr::MAX_VELOCITY) * attr_of(sol, c, attr::EXPLOSION_DELAY) / 1000.0;
+        let range = read::attr_or_zero(sol, c, attr::MAX_VELOCITY)
+            * read::attr_or_zero(sol, c, attr::EXPLOSION_DELAY)
+            / 1000.0;
         WeaponKind::GuidedBomb {
             range,
-            er: attr_of(sol, c, attr::AOE_CLOUD_SIZE),
+            er: read::attr_or_zero(sol, c, attr::AOE_CLOUD_SIZE),
         }
     } else if matches!(group, group::SUPER_WEAPON | group::STRUCTURE_DOOMSDAY) {
         WeaponKind::Doomsday {
             range: max_range(sol, id),
-            damage_sig: attr_of(sol, id, attr::SIGNATURE_RADIUS),
+            damage_sig: read::attr_or_zero(sol, id, attr::SIGNATURE_RADIUS),
             needs_lock: effect::SUPER_WEAPONS.iter().any(|e| effects.contains(e)),
         }
     } else {
@@ -592,7 +555,10 @@ fn module_weapon(
     let spool = spool_cycles(sol, id);
     let amounts = if spool > 0 {
         (0..=spool)
-            .map(|n| item_dmg(sol, id, spool_at(n)).map_or(volley, |d| dmg(&d.volley)))
+            .map(|n| {
+                item_dmg(sol, id, spool_at(n))
+                    .map_or(volley, |d| Damage::from(&d.volley).as_array())
+            })
             .collect()
     } else {
         vec![volley]
@@ -634,14 +600,14 @@ fn breacher_weapon(
     }
     let c = charge?.id;
     let range = math::missile_range(
-        attr_of(sol, c, attr::MAX_VELOCITY),
-        attr_of(sol, c, attr::EXPLOSION_DELAY),
-        attr_of(sol, c, attr::MASS),
-        attr_of(sol, c, attr::AGILITY),
+        read::attr_or_zero(sol, c, attr::MAX_VELOCITY),
+        read::attr_or_zero(sol, c, attr::EXPLOSION_DELAY),
+        read::attr_or_zero(sol, c, attr::MASS),
+        read::attr_or_zero(sol, c, attr::AGILITY),
         ship_radius,
         None,
     );
-    let duration = first_attr(sol, id, &[attr::RATE_OF_FIRE, attr::DURATION]) / 1000.0;
+    let duration = read::first_attr(sol, id, &[attr::RATE_OF_FIRE, attr::DURATION]) / 1000.0;
     let (shots, reload) = reload_of(sol, id);
     Some(Weapon {
         kind: WeaponKind::Breacher { range },
@@ -662,8 +628,8 @@ fn breacher_weapon(
 /// switching the squadron's other abilities off in turn.
 fn fighter_weapons(sol: &mut SolOwned, id: ItemId) -> Vec<Weapon> {
     let states = abilities(sol, id);
-    let speed = attr_of(sol, id, attr::MAX_VELOCITY);
-    let radius = attr_of(sol, id, attr::RADIUS);
+    let speed = read::attr_or_zero(sol, id, attr::MAX_VELOCITY);
+    let radius = read::attr_or_zero(sol, id, attr::RADIUS);
     let mut out = Vec::new();
     for &(ability_id, on) in &states {
         let attack = ability::ATTACK.contains(&ability_id);
@@ -680,35 +646,44 @@ fn fighter_weapons(sol: &mut SolOwned, id: ItemId) -> Vec<Weapon> {
             set_ability(sol, id, other, other_on);
         }
         let Some(burst) = burst else { continue };
-        let (dps, volley) = (dmg(&burst.dps), dmg(&burst.volley));
+        let (dps, volley) = (
+            Damage::from(&burst.dps).as_array(),
+            Damage::from(&burst.volley).as_array(),
+        );
         let Some(duration) = cycle_of(&volley, &dps) else {
             continue;
         };
         let kind = if attack {
             WeaponKind::Fighter {
-                optimal: attr_of(sol, id, attr::FTR_ATTACK_OPTIMAL),
-                falloff: attr_of(sol, id, attr::FTR_ATTACK_FALLOFF),
-                er: attr_of(sol, id, attr::FTR_ATTACK_ER),
-                ev: attr_of(sol, id, attr::FTR_ATTACK_EV),
-                drf: aggregated_drf(sol, id, attr::FTR_ATTACK_DRF, attr::FTR_ATTACK_DRS),
+                optimal: read::attr_or_zero(sol, id, attr::FTR_ATTACK_OPTIMAL),
+                falloff: read::attr_or_zero(sol, id, attr::FTR_ATTACK_FALLOFF),
+                er: read::attr_or_zero(sol, id, attr::FTR_ATTACK_ER),
+                ev: read::attr_or_zero(sol, id, attr::FTR_ATTACK_EV),
+                drf: read::reduction_exponent(
+                    read::attr_or_zero(sol, id, attr::FTR_ATTACK_DRF),
+                    read::attr_or_zero(sol, id, attr::FTR_ATTACK_DRS),
+                ),
                 speed,
                 radius,
                 plain: false,
             }
         } else if missiles {
             WeaponKind::Fighter {
-                optimal: attr_of(sol, id, attr::FTR_MISSILES_RANGE),
+                optimal: read::attr_or_zero(sol, id, attr::FTR_MISSILES_RANGE),
                 falloff: 0.0,
-                er: attr_of(sol, id, attr::FTR_MISSILES_ER),
-                ev: attr_of(sol, id, attr::FTR_MISSILES_EV),
-                drf: aggregated_drf(sol, id, attr::FTR_MISSILES_DRF, attr::FTR_MISSILES_DRS),
+                er: read::attr_or_zero(sol, id, attr::FTR_MISSILES_ER),
+                ev: read::attr_or_zero(sol, id, attr::FTR_MISSILES_EV),
+                drf: read::reduction_exponent(
+                    read::attr_or_zero(sol, id, attr::FTR_MISSILES_DRF),
+                    read::attr_or_zero(sol, id, attr::FTR_MISSILES_DRS),
+                ),
                 speed,
                 radius,
                 plain: false,
             }
         } else {
             WeaponKind::Fighter {
-                optimal: attr_of(sol, id, attr::FTR_KAMIKAZE_RANGE),
+                optimal: read::attr_or_zero(sol, id, attr::FTR_KAMIKAZE_RANGE),
                 falloff: 0.0,
                 er: 0.0,
                 ev: 0.0,
@@ -733,17 +708,6 @@ fn fighter_weapons(sol: &mut SolOwned, id: ItemId) -> Vec<Weapon> {
         });
     }
     out
-}
-
-/// Fighters give their damage reduction as a factor and a sensitivity; pyfa folds them into
-/// one exponent.
-fn aggregated_drf(sol: &mut SolOwned, id: ItemId, factor: i32, sensitivity: i32) -> f64 {
-    let (f, s) = (attr_of(sol, id, factor), attr_of(sol, id, sensitivity));
-    if f > 0.0 && s > 0.0 && (s - 1.0).abs() > f64::EPSILON {
-        f.ln() / s.ln()
-    } else {
-        0.0
-    }
 }
 
 /// A squadron's abilities and whether each runs.
@@ -784,16 +748,16 @@ fn fighter_ewar(sol: &mut SolOwned, id: ItemId) -> Vec<Ewar> {
         let (kind, strength, optimal, falloff) = match ability_id {
             ability::WEB => (
                 EwarKind::Web,
-                attr_of(sol, id, attr::FTR_WEB_PENALTY) * count,
-                attr_of(sol, id, attr::FTR_WEB_OPTIMAL),
-                attr_of(sol, id, attr::FTR_WEB_FALLOFF),
+                read::attr_or_zero(sol, id, attr::FTR_WEB_PENALTY) * count,
+                read::attr_or_zero(sol, id, attr::FTR_WEB_OPTIMAL),
+                read::attr_or_zero(sol, id, attr::FTR_WEB_FALLOFF),
             ),
             ability::NEUT => (EwarKind::Neut, item_nps(sol, id), f64::INFINITY, 0.0),
             ability::ECM => (
                 EwarKind::Ecm,
                 attr::FTR_ECM_STRENGTH
                     .iter()
-                    .map(|&a| attr_of(sol, id, a))
+                    .map(|&a| read::attr_or_zero(sol, id, a))
                     .fold(0.0, f64::max)
                     * count,
                 f64::INFINITY,
@@ -811,8 +775,8 @@ fn fighter_ewar(sol: &mut SolOwned, id: ItemId) -> Vec<Ewar> {
             needs_dcr: false,
             mobile: (kind == EwarKind::Web).then(|| {
                 (
-                    attr_of(sol, id, attr::MAX_VELOCITY),
-                    attr_of(sol, id, attr::RADIUS),
+                    read::attr_or_zero(sol, id, attr::MAX_VELOCITY),
+                    read::attr_or_zero(sol, id, attr::RADIUS),
                 )
             }),
         });
@@ -831,20 +795,20 @@ fn drone_weapon(sol: &mut SolOwned, stack: &PlacedDrones) -> Option<Weapon> {
     let burst = item_dmg(sol, id, StatTimeOptions::default())?;
     let count = f64::from(stack.active);
     let (dps, volley) = (
-        dmg(&burst.dps).map(|v| v * count),
-        dmg(&burst.volley).map(|v| v * count),
+        Damage::from(&burst.dps).as_array().map(|v| v * count),
+        Damage::from(&burst.volley).as_array().map(|v| v * count),
     );
     let duration = cycle_of(&volley, &dps)?;
     Some(Weapon {
         kind: WeaponKind::Drone {
             gun: Gun {
-                optimal: first_attr(sol, id, &[attr::MAX_RANGE]),
-                falloff: first_attr(sol, id, &[attr::FALLOFF, attr::FALLOFF_EFFECTIVENESS]),
-                tracking: attr_of(sol, id, attr::TRACKING_SPEED),
-                optimal_sig: attr_of(sol, id, attr::OPTIMAL_SIG_RADIUS),
+                optimal: read::first_attr(sol, id, &[attr::MAX_RANGE]),
+                falloff: read::first_attr(sol, id, &[attr::FALLOFF, attr::FALLOFF_EFFECTIVENESS]),
+                tracking: read::attr_or_zero(sol, id, attr::TRACKING_SPEED),
+                optimal_sig: read::attr_or_zero(sol, id, attr::OPTIMAL_SIG_RADIUS),
             },
-            speed: attr_of(sol, id, attr::MAX_VELOCITY),
-            radius: attr_of(sol, id, attr::RADIUS),
+            speed: read::attr_or_zero(sol, id, attr::MAX_VELOCITY),
+            radius: read::attr_or_zero(sol, id, attr::RADIUS),
         },
         dps,
         volley,
@@ -875,7 +839,7 @@ fn module_ewar(sol: &mut SolOwned, id: ItemId, effects: &HashSet<i32>) -> Vec<Ew
     let has = |list: &[i32]| list.iter().any(|e| effects.contains(e));
     let optimal = max_range(sol, id);
     let falloff = falloff(sol, id);
-    let dd_range = (optimal + attr_of(sol, id, attr::DOOMSDAY_AOE_RANGE)).max(0.0);
+    let dd_range = (optimal + read::attr_or_zero(sol, id, attr::DOOMSDAY_AOE_RANGE)).max(0.0);
     let mut out = Vec::new();
     let mut push = |kind, strength, strength2, doomsday: bool| {
         out.push(Ewar {
@@ -889,15 +853,15 @@ fn module_ewar(sol: &mut SolOwned, id: ItemId, effects: &HashSet<i32>) -> Vec<Ew
             mobile: None,
         });
     };
-    let nos_as_neut =
-        effects.contains(&effect::NOSFERATU) && attr_of(sol, id, attr::NOS_OVERRIDE) != 0.0;
+    let nos_as_neut = effects.contains(&effect::NOSFERATU)
+        && read::attr_or_zero(sol, id, attr::NOS_OVERRIDE) != 0.0;
     if has(&effect::NEUTRALIZER) || nos_as_neut {
         push(EwarKind::Neut, item_nps(sol, id), 0.0, false);
     }
     if effects.contains(&effect::DOOMSDAY_NEUT) {
         push(EwarKind::Neut, item_nps(sol, id), 0.0, true);
     }
-    let web = attr_of(sol, id, attr::SPEED_FACTOR);
+    let web = read::attr_or_zero(sol, id, attr::SPEED_FACTOR);
     if has(&effect::WEBIFIER) {
         push(EwarKind::Web, web, 0.0, false);
     }
@@ -906,7 +870,7 @@ fn module_ewar(sol: &mut SolOwned, id: ItemId, effects: &HashSet<i32>) -> Vec<Ew
     }
     let ecm = attr::ECM_STRENGTH
         .iter()
-        .map(|&a| attr_of(sol, id, a))
+        .map(|&a| read::attr_or_zero(sol, id, a))
         .fold(0.0, f64::max);
     if has(&effect::ECM) {
         push(EwarKind::Ecm, ecm, 0.0, false);
@@ -914,21 +878,21 @@ fn module_ewar(sol: &mut SolOwned, id: ItemId, effects: &HashSet<i32>) -> Vec<Ew
     if effects.contains(&effect::DOOMSDAY_ECM) {
         push(EwarKind::Ecm, ecm, 0.0, true);
     }
-    let damp = attr_of(sol, id, attr::MAX_TARGET_RANGE_BONUS);
-    let damp_res = attr_of(sol, id, attr::SCAN_RESOLUTION_BONUS);
+    let damp = read::attr_or_zero(sol, id, attr::MAX_TARGET_RANGE_BONUS);
+    let damp_res = read::attr_or_zero(sol, id, attr::SCAN_RESOLUTION_BONUS);
     if has(&effect::SENSOR_DAMPENER) {
         push(EwarKind::Damp, damp, damp_res, false);
     }
     if effects.contains(&effect::DOOMSDAY_DAMP) {
         push(EwarKind::Damp, damp, damp_res, true);
     }
-    let td = attr_of(sol, id, attr::MAX_RANGE_BONUS);
+    let td = read::attr_or_zero(sol, id, attr::MAX_RANGE_BONUS);
     if has(&effect::TRACKING_DISRUPTOR) {
         push(EwarKind::TrackingDisruptor, td, 0.0, false);
     }
     let (gd_velocity, gd_flight) = (
-        attr_of(sol, id, attr::MISSILE_VELOCITY_BONUS),
-        attr_of(sol, id, attr::EXPLOSION_DELAY_BONUS),
+        read::attr_or_zero(sol, id, attr::MISSILE_VELOCITY_BONUS),
+        read::attr_or_zero(sol, id, attr::EXPLOSION_DELAY_BONUS),
     );
     if has(&effect::GUIDANCE_DISRUPTOR) {
         push(EwarKind::GuidanceDisruptor, gd_velocity, gd_flight, false);
@@ -937,7 +901,7 @@ fn module_ewar(sol: &mut SolOwned, id: ItemId, effects: &HashSet<i32>) -> Vec<Ew
         push(EwarKind::TrackingDisruptor, td, 0.0, true);
         push(EwarKind::GuidanceDisruptor, gd_velocity, gd_flight, true);
     }
-    let tp = attr_of(sol, id, attr::SIGNATURE_RADIUS_BONUS);
+    let tp = read::attr_or_zero(sol, id, attr::SIGNATURE_RADIUS_BONUS);
     if has(&effect::TARGET_PAINTER) {
         push(EwarKind::TargetPainter, tp, 0.0, false);
     }
@@ -949,10 +913,10 @@ fn module_ewar(sol: &mut SolOwned, id: ItemId, effects: &HashSet<i32>) -> Vec<Ew
 
 fn drone_ewar(sol: &mut SolOwned, stack: &PlacedDrones, effects: &HashSet<i32>) -> Vec<Ewar> {
     let id = stack.id;
-    let speed = attr_of(sol, id, attr::MAX_VELOCITY);
-    let radius = attr_of(sol, id, attr::RADIUS);
-    let optimal = first_attr(sol, id, &[attr::MAX_RANGE, attr::ECM_RANGE_OPTIMAL]);
-    let falloff = first_attr(sol, id, &[attr::FALLOFF, attr::FALLOFF_EFFECTIVENESS]);
+    let speed = read::attr_or_zero(sol, id, attr::MAX_VELOCITY);
+    let radius = read::attr_or_zero(sol, id, attr::RADIUS);
+    let optimal = read::first_attr(sol, id, &[attr::MAX_RANGE, attr::ECM_RANGE_OPTIMAL]);
+    let falloff = read::first_attr(sol, id, &[attr::FALLOFF, attr::FALLOFF_EFFECTIVENESS]);
     let mut out = Vec::new();
     let kinds = [
         (effect::ENTITY_NEUTRALIZER, EwarKind::Neut),
@@ -968,19 +932,19 @@ fn drone_ewar(sol: &mut SolOwned, stack: &PlacedDrones, effects: &HashSet<i32>) 
         }
         let strength = match kind {
             EwarKind::Neut => item_nps(sol, id),
-            EwarKind::Web => attr_of(sol, id, attr::SPEED_FACTOR),
+            EwarKind::Web => read::attr_or_zero(sol, id, attr::SPEED_FACTOR),
             EwarKind::Ecm => attr::ECM_STRENGTH
                 .iter()
-                .map(|&a| attr_of(sol, id, a))
+                .map(|&a| read::attr_or_zero(sol, id, a))
                 .fold(0.0, f64::max),
-            EwarKind::Damp => attr_of(sol, id, attr::MAX_TARGET_RANGE_BONUS),
-            EwarKind::TrackingDisruptor => attr_of(sol, id, attr::MAX_RANGE_BONUS),
+            EwarKind::Damp => read::attr_or_zero(sol, id, attr::MAX_TARGET_RANGE_BONUS),
+            EwarKind::TrackingDisruptor => read::attr_or_zero(sol, id, attr::MAX_RANGE_BONUS),
             EwarKind::GuidanceDisruptor | EwarKind::TargetPainter => {
-                attr_of(sol, id, attr::SIGNATURE_RADIUS_BONUS)
+                read::attr_or_zero(sol, id, attr::SIGNATURE_RADIUS_BONUS)
             }
         };
         let strength2 = if kind == EwarKind::Damp {
-            attr_of(sol, id, attr::SCAN_RESOLUTION_BONUS)
+            read::attr_or_zero(sol, id, attr::SCAN_RESOLUTION_BONUS)
         } else {
             0.0
         };
@@ -1028,7 +992,7 @@ fn module_rep(sol: &mut SolOwned, id: ItemId, group: i32) -> Option<RemoteRep> {
     if !shield && !armor_or_hull {
         return None;
     }
-    let duration = attr_of(sol, id, attr::DURATION) / 1000.0;
+    let duration = read::attr_or_zero(sol, id, attr::DURATION) / 1000.0;
     if duration <= 0.0 {
         return None;
     }
@@ -1062,7 +1026,7 @@ fn module_rep(sol: &mut SolOwned, id: ItemId, group: i32) -> Option<RemoteRep> {
         let charged = amounts[0];
         // Out of paste, an ancillary armor repairer keeps going at its plain amount.
         let plain = if group == group::ANCILLARY_REMOTE_ARMOR_REPAIRER {
-            let mult = attr_of(sol, id, attr::CHARGED_ARMOR_DAMAGE_MULTIPLIER);
+            let mult = read::attr_or_zero(sol, id, attr::CHARGED_ARMOR_DAMAGE_MULTIPLIER);
             if mult > 0.0 {
                 charged.map(|v| v / mult)
             } else {
@@ -1096,7 +1060,7 @@ fn drone_rep(sol: &mut SolOwned, stack: &PlacedDrones) -> Option<RemoteRep> {
     if rps.iter().sum::<f64>() <= 0.0 {
         return None;
     }
-    let duration = first_attr(sol, id, &[attr::DURATION, attr::RATE_OF_FIRE]) / 1000.0;
+    let duration = read::first_attr(sol, id, &[attr::DURATION, attr::RATE_OF_FIRE]) / 1000.0;
     let duration = if duration > 0.0 { duration } else { 1.0 };
     let count = f64::from(stack.active);
     Some(RemoteRep {
@@ -1123,15 +1087,15 @@ fn cap_user(
 ) -> Option<CapUser> {
     let injector = group == group::CAPACITOR_BOOSTER;
     let need = if injector {
-        -attr_of(sol, charge?.id, attr::CAPACITOR_BONUS)
+        -read::attr_or_zero(sol, charge?.id, attr::CAPACITOR_BONUS)
     } else {
-        attr_of(sol, id, attr::CAPACITOR_NEED)
+        read::attr_or_zero(sol, id, attr::CAPACITOR_NEED)
     };
     if need == 0.0 {
         return None;
     }
-    let cycle = first_attr(sol, id, &[attr::DURATION, attr::RATE_OF_FIRE]);
-    let cycle_ms = cycle + attr_of(sol, id, attr::REACTIVATION_DELAY);
+    let cycle = read::first_attr(sol, id, &[attr::DURATION, attr::RATE_OF_FIRE]);
+    let cycle_ms = cycle + read::attr_or_zero(sol, id, attr::REACTIVATION_DELAY);
     if cycle_ms <= 0.0 {
         return None;
     }
@@ -1140,7 +1104,7 @@ fn cap_user(
         cycle_ms,
         need,
         clip: shots.unwrap_or(0),
-        reload_ms: attr_of(sol, id, attr::RELOAD_TIME),
+        reload_ms: read::attr_or_zero(sol, id, attr::RELOAD_TIME),
         no_stagger: turret,
         injector,
     })
@@ -1229,8 +1193,8 @@ Damage Control II
             .expect("target places")
             .ship;
         let c2c = distance
-            + attr_of(&mut sol, atk_ship, attr::RADIUS)
-            + attr_of(&mut sol, tgt_ship, attr::RADIUS);
+            + read::attr_or_zero(&mut sol, atk_ship, attr::RADIUS)
+            + read::attr_or_zero(&mut sol, tgt_ship, attr::RADIUS);
         sol.get_ship(&tgt_ship)
             .expect("target ship")
             .set_coordinates(Coordinates::new(
@@ -1346,7 +1310,7 @@ Damage Control II
                 options,
                 StatCritOptions::default(),
             );
-            let theirs = dmg(&sim.dps).iter().sum::<f64>() * time;
+            let theirs = Damage::from(&sim.dps).as_array().iter().sum::<f64>() * time;
             let ours: f64 = snap
                 .weapons
                 .iter()

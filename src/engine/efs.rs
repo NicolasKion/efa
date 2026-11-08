@@ -4,12 +4,12 @@
 use std::collections::BTreeMap;
 
 use rc::{
-    AddMode, AttrId, EveAttrId, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack, SolOwned,
+    AddMode, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack, SolOwned,
     stats::{ItemStatsCommon, StatCritOptions, StatDmg, StatItemChargeOptions},
 };
 use serde_json::{Map, Value, json};
 
-use super::{BuildOptions, CalcOptions, Engine, Pilot, Stats, pane};
+use super::{BuildOptions, CalcOptions, Damage, Engine, Pilot, Stats, pane, read};
 use crate::{
     data::{Catalog, Hardpoint, Kind, Slot, TypeId},
     dogma::attr,
@@ -244,18 +244,12 @@ struct Built {
 
 impl Built {
     fn attr(&mut self, id: ItemId, attr: i32) -> Option<f64> {
-        let mut item = self.sol.get_item(&id).ok()?;
-        item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr)))
-            .ok()
-            .map(|v| v.modified.into_f64())
+        read::attr(&mut self.sol, id, attr)
     }
 
     /// An attribute before anything modifies it.
     fn base_attr(&mut self, id: ItemId, attr: i32) -> Option<f64> {
-        let mut item = self.sol.get_item(&id).ok()?;
-        item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr)))
-            .ok()
-            .map(|v| v.base.into_f64())
+        read::base_attr(&mut self.sol, id, attr)
     }
 
     fn attr0(&mut self, id: ItemId, attr: i32) -> f64 {
@@ -282,10 +276,6 @@ impl Built {
         )
         .ok()
     }
-}
-
-fn total(d: &rc::stats::StatDmgEntry) -> f64 {
-    (d.em + d.thermal + d.kinetic + d.explosive).into_f64()
 }
 
 /// pyfa rounds every number to six places so the output only changes when the fit does.
@@ -334,8 +324,9 @@ impl Engine {
             let mut f = built.sol.get_fit(&built.fit_id).ok()?;
             let mut s = f.stats();
             let at = pane::burst_at(1.0);
-            let mut volley =
-                |kinds| total(&s.get_stat_dmg(kinds, at, StatCritOptions::default()).volley);
+            let mut volley = |kinds| {
+                Damage::from(&s.get_stat_dmg(kinds, at, StatCritOptions::default()).volley).total()
+            };
             (
                 volley(pane::weapons()),
                 volley(pane::minions()),
@@ -481,7 +472,7 @@ impl Engine {
             let Some(Some(module)) = fit.rack(slot).get(i) else {
                 continue;
             };
-            let dps = built.dmg(id).map_or(0.0, |d| total(&d.dps));
+            let dps = built.dmg(id).map_or(0.0, |d| Damage::from(&d.dps).total());
             if dps <= 0.0 {
                 continue;
             }
@@ -543,8 +534,10 @@ impl Engine {
                 optimal
             };
             let dmg = built.dmg(id);
-            let dps = dmg.as_ref().map_or(0.0, |d| total(&d.dps));
-            let volley = dmg.as_ref().map_or(0.0, |d| total(&d.volley));
+            let dps = dmg.as_ref().map_or(0.0, |d| Damage::from(&d.dps).total());
+            let volley = dmg
+                .as_ref()
+                .map_or(0.0, |d| Damage::from(&d.volley).total());
             let spread = dmg.as_ref().map_or_else(
                 || json!({"em": 0, "therm": 0, "kin": 0, "exp": 0, "pure": 0}),
                 |d| {
@@ -600,11 +593,14 @@ impl Engine {
             };
             let active = f64::from(stack.active);
             let dmg = built.dmg(id);
-            let dps = dmg.as_ref().map_or(0.0, |d| total(&d.dps)) * active;
+            let dps = dmg.as_ref().map_or(0.0, |d| Damage::from(&d.dps).total()) * active;
             if dps <= 0.0 {
                 continue;
             }
-            let volley = dmg.as_ref().map_or(0.0, |d| total(&d.volley)) * active;
+            let volley = dmg
+                .as_ref()
+                .map_or(0.0, |d| Damage::from(&d.volley).total())
+                * active;
             let sig = built.attr0(id, attr::OPTIMAL_SIG_RADIUS);
             // Drones use the old tracking formula; pyfa scales it to match turrets.
             let tracking = if sig > 0.0 {
@@ -635,7 +631,7 @@ impl Engine {
                 continue;
             }
             let dmg = built.dmg(id);
-            let dps = dmg.as_ref().map_or(0.0, |d| total(&d.dps));
+            let dps = dmg.as_ref().map_or(0.0, |d| Damage::from(&d.dps).total());
             if dps <= 0.0 {
                 continue;
             }
@@ -650,7 +646,7 @@ impl Engine {
                 "maxSpeed": round6(built.attr0(id, attr::MAX_VELOCITY)),
                 "abilities": abilities,
                 "ehp": round6(built.attr0(id, attr::SHIELD_CAPACITY) / FIGHTER_EHP * f64::from(amount)),
-                "volley": round6(dmg.as_ref().map_or(0.0, |d| total(&d.volley))),
+                "volley": round6(dmg.as_ref().map_or(0.0, |d| Damage::from(&d.volley).total())),
                 "signatureRadius": round6(built.attr0(id, attr::SIGNATURE_RADIUS)),
             }));
         }
@@ -734,12 +730,7 @@ impl Engine {
                 charges.push(None);
             }
         }
-        let mut read = |id: ItemId, attr: i32| {
-            sol.get_item(&id)
-                .ok()
-                .and_then(|mut item| item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr))).ok())
-                .map_or(0.0, |v| v.modified.into_f64())
-        };
+        let mut read = |id: ItemId, attr: i32| read::attr_or_zero(&mut sol, id, attr);
         test.iter()
             .zip(ids)
             .zip(charges)
@@ -820,10 +811,7 @@ fn unloaded_cap_need(built: &mut Built, id: ItemId) -> Option<f64> {
     if let Some(charge) = tx.get_module(&id).ok()?.get_charge() {
         charge.remove();
     }
-    let mut item = tx.get_item(&id).ok()?;
-    item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr::CAPACITOR_NEED)))
-        .ok()
-        .map(|v| v.modified.into_f64())
+    read::attr(&mut tx, id, attr::CAPACITOR_NEED)
 }
 
 /// Local repairers and capacitor boosters, pyfa's `getRepairData`.
@@ -1091,14 +1079,10 @@ fn fighter_ability(
 ) -> Option<Value> {
     // pyfa checks the type has the ability's EM damage at all.
     built.attr(id, ability.damage[0])?;
-    let factor = built.attr0(id, ability.reduction_factor);
-    let sensitivity = built.attr0(id, ability.reduction_sensitivity);
-    let reduction = if factor > 0.0 && sensitivity > 0.0 && (sensitivity - 1.0).abs() > f64::EPSILON
-    {
-        factor.ln() / sensitivity.ln()
-    } else {
-        0.0
-    };
+    let reduction = read::reduction_exponent(
+        built.attr0(id, ability.reduction_factor),
+        built.attr0(id, ability.reduction_sensitivity),
+    );
     let base: f64 = ability.damage.iter().map(|&a| built.attr0(id, a)).sum();
     let damage = base * built.attr0(id, ability.multiplier);
     Some(json!({

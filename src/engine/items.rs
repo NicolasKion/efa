@@ -3,10 +3,11 @@
 use std::collections::{HashMap, HashSet};
 
 use rc::{
-    AttrId, EveAttrId, ItemCommon, ItemId, SolOwned,
+    ItemId, SolOwned,
     stats::{ItemStatsCommon, StatMiningResourceKind, StatTimeOptions},
 };
 
+use super::{pane::PEAK_SHIELD, read};
 use crate::dogma::attr;
 
 /// What the Boosters tab shows for a booster, after skills.
@@ -84,17 +85,10 @@ const DRONE_ATTRS: [i32; 25] = [
     attr::SCAN_RESOLUTION_BONUS,
 ];
 
-/// Shield level at which passive regeneration peaks.
-const PEAK_RECHARGE: f64 = 0.25;
-
 pub(super) fn booster_info(sol: &mut SolOwned, id: ItemId) -> BoosterInfo {
     use rc::Lender;
 
-    let duration = sol.get_item(&id).ok().and_then(|mut item| {
-        item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr::BOOSTER_DURATION)))
-            .ok()
-            .map(|v| v.modified.into_f64() / 1000.0)
-    });
+    let duration = read::attr(sol, id, attr::BOOSTER_DURATION).map(|ms| ms / 1000.0);
     let mut side_effects = Vec::new();
     if let Ok(mut booster) = sol.get_booster(&id) {
         let mut iter = booster.iter_side_effects();
@@ -118,22 +112,11 @@ pub(super) fn booster_info(sol: &mut SolOwned, id: ItemId) -> BoosterInfo {
 }
 
 pub(super) fn drone_info(sol: &mut SolOwned, id: ItemId) -> DroneInfo {
-    let mut info = DroneInfo::default();
-    if let Ok(mut item) = sol.get_item(&id) {
-        for attr in DRONE_ATTRS {
-            if let Ok(v) = item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr))) {
-                info.attrs.insert(attr, v.modified.into_f64());
-            }
-        }
-        if let Ok(effects) = item.iter_effects() {
-            info.effects = effects
-                .filter_map(|(effect, _)| match effect {
-                    rc::EffectId::Dogma(id) => Some(id.into_i32()),
-                    _ => None,
-                })
-                .collect();
-        }
-    }
+    let mut info = DroneInfo {
+        attrs: read::attrs(sol, id, &DRONE_ATTRS),
+        effects: read::effects(sol, id),
+        ..DroneInfo::default()
+    };
     let mut stats = sol.stats();
     let Ok(mut item) = stats.get_item(&id) else {
         return info;
@@ -153,7 +136,7 @@ pub(super) fn drone_info(sol: &mut SolOwned, id: ItemId) -> DroneInfo {
         .get_stat_erps(
             None,
             StatTimeOptions::default(),
-            rc::UnitInterval::from_f64_clamped(PEAK_RECHARGE),
+            rc::UnitInterval::from_f64_clamped(PEAK_SHIELD),
         )
         .ok()
         .and_then(|e| e.shield)
@@ -166,11 +149,8 @@ pub(super) fn drone_info(sol: &mut SolOwned, id: ItemId) -> DroneInfo {
     if let Ok(mining) =
         switched.get_stat_mps(StatTimeOptions::default(), StatMiningResourceKind::Regular)
     {
-        let entries = [mining.ore, mining.ice, mining.gas];
-        info.mining = (
-            entries.iter().map(|e| e.yield_.into_f64()).sum(),
-            entries.iter().map(|e| e.drain.into_f64()).sum(),
-        );
+        let rate = read::mining_rate(&mining);
+        info.mining = (rate.yield_, rate.drain);
     }
     info
 }

@@ -2,16 +2,16 @@
 //! the targeting and misc column, gathered after the core recalculation.
 
 use rc::{
-    AttrId, CtlAffectors, DpsProfile, EveAttrId, FitId, ItemCommon, ItemId, OptionExt,
-    OptionalReload, PValue, Sol, SolOwned, Spool, UnitInterval,
+    CtlAffectors, DpsProfile, FitId, ItemId, OptionExt, OptionalReload, PValue, Sol, SolOwned,
+    Spool, UnitInterval,
     stats::{
-        StatCapBlcSrcKinds, StatCritOptions, StatDmgItemKinds, StatMining, StatMiningItemKinds,
+        StatCapBlcSrcKinds, StatCritOptions, StatDmgItemKinds, StatMiningItemKinds,
         StatMiningResourceKind, StatNeutItemKinds, StatOutRepItemKinds, StatSensorsKind,
         StatTimeOptions, StatTimeOptionsBurst, StatTimeOptionsSim,
     },
 };
 
-use super::{Cap, Damage, Stats};
+use super::{Cap, Damage, Stats, read};
 use crate::{dogma::attr, fit::DamageProfile};
 
 /// Settings that change how numbers are calculated rather than what is fitted.
@@ -152,7 +152,7 @@ const HOLDS: [(i32, &str); 21] = [
 ];
 
 /// Shield regeneration peaks at this fill level.
-const PEAK_SHIELD: f64 = 0.25;
+pub(super) const PEAK_SHIELD: f64 = 0.25;
 
 /// Uniform damage, pyfa's default pattern.
 const UNIFORM: [f64; 4] = [25.0; 4];
@@ -220,7 +220,7 @@ pub(super) fn burst_at(spool: f64) -> StatTimeOptions {
 
 pub(super) fn firepower_detail(f: &mut rc::Fit<'_>, time: StatTimeOptions) -> FirepowerDetail {
     let mut s = f.stats();
-    let drone_dps = super::damage(
+    let drone_dps = Damage::from(
         &s.get_stat_dmg(minions(), time, StatCritOptions::default())
             .dps,
     );
@@ -231,7 +231,11 @@ pub(super) fn firepower_detail(f: &mut rc::Fit<'_>, time: StatTimeOptions) -> Fi
             burst_at(spool),
             StatCritOptions::default(),
         );
-        (total(&weapon.dps), total(&all.volley), total(&all.dps))
+        (
+            Damage::from(&weapon.dps).total(),
+            Damage::from(&all.volley).total(),
+            Damage::from(&all.dps).total(),
+        )
     };
     let (pre, full) = (at(0.0), at(1.0));
     FirepowerDetail {
@@ -249,10 +253,6 @@ pub(super) fn firepower_detail(f: &mut rc::Fit<'_>, time: StatTimeOptions) -> Fi
             full: full.2,
         },
     }
-}
-
-fn total(d: &rc::stats::StatDmgEntry) -> f64 {
-    (d.em + d.thermal + d.kinetic + d.explosive).into_f64()
 }
 
 /// Shield, armor and hull repair the fit does on itself, HP/s.
@@ -339,11 +339,7 @@ pub(super) fn pane_stats(
         };
 
         let mining = |s: &mut rc::stats::FitStats<'_>, kinds| {
-            let m: StatMining = s.get_stat_mps(kinds, time, StatMiningResourceKind::Regular);
-            MiningRate {
-                yield_: (m.ore.yield_ + m.ice.yield_ + m.gas.yield_).into_f64(),
-                drain: (m.ore.drain + m.ice.drain + m.gas.drain).into_f64(),
-            }
+            read::mining_rate(&s.get_stat_mps(kinds, time, StatMiningResourceKind::Regular))
         };
         stats.mining = Mining {
             miner: mining(&mut s, StatMiningItemKinds::new(false).with_module(true)),
@@ -390,14 +386,7 @@ pub(super) fn pane_stats(
         sustained(sol, fit_id, base, cap_users, time, stats.cap_detail)
     };
 
-    let Ok(mut ship) = sol.get_item(&ship_id) else {
-        return;
-    };
-    let mut get = |attr: i32| {
-        ship.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr)))
-            .ok()
-            .map(|v| v.modified.into_f64())
-    };
+    let mut get = |attr: i32| read::attr(sol, ship_id, attr);
     stats.cap_detail.recharge_time = get(attr::RECHARGE_RATE).map(|ms| ms / 1000.0);
     // Stabilizers lower the status; strength is its negation, and 0 should not print as -0.
     stats.misc.warp_core_strength = 0.0 - get(attr::WARP_SCRAMBLE_STATUS).unwrap_or(0.0);
