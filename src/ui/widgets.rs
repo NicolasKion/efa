@@ -407,10 +407,13 @@ pub fn icon_label(
 
 /// A menu entry's click handler that runs `f` on the fit window behind `this`, while it is
 /// still open.
-pub fn on_efa(
+pub fn on_efa<F>(
     this: &WeakEntity<Efa>,
-    f: impl Fn(&mut Efa, &ClickEvent, &mut Window, &mut Context<Efa>) + 'static,
-) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    f: F,
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + use<F>
+where
+    F: Fn(&mut Efa, &ClickEvent, &mut Window, &mut Context<Efa>) + 'static,
+{
     let this = this.clone();
     move |event, window, cx| {
         let _ = this.update(cx, |g, cx| f(g, event, window, cx));
@@ -419,11 +422,14 @@ pub fn on_efa(
 
 /// [`on_efa`] for an entry acting on several things at once, such as the picked market items:
 /// `f` runs for each of `items`, in order, in one update of the window.
-pub fn on_each<T: Copy + 'static>(
+pub fn on_each<T: Copy + 'static, F>(
     this: &WeakEntity<Efa>,
     items: &Rc<[T]>,
-    f: impl Fn(&mut Efa, T, &mut Window, &mut Context<Efa>) + 'static,
-) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    f: F,
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + use<T, F>
+where
+    F: Fn(&mut Efa, T, &mut Window, &mut Context<Efa>) + 'static,
+{
     let items = Rc::clone(items);
     on_efa(this, move |g, _, window, cx| {
         for &item in items.iter() {

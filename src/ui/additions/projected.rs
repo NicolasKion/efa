@@ -35,7 +35,7 @@ use crate::{
         columns::{ICON_W, STATE_W},
         fitting::{ChargeMenu, DragSource, Dragged, compatible_charges, structure_charges},
         item_stats::{StatsOf, stats_entry},
-        widgets::{color, entry, icon, icon_box, icon_label, item_entry},
+        widgets::{color, entry, icon, icon_box, icon_label, item_entry, on_efa},
     },
 };
 
@@ -752,18 +752,15 @@ fn on_targets<F>(
 where
     F: Fn(&mut Efa, Vec<Row>, &mut Context<Efa>) + 'static,
 {
-    let this = this.clone();
-    move |_, window, cx| {
+    on_efa(this, move |g, _, window, cx| {
         let reach = match Reach::from_modifiers(window.modifiers()) {
             Reach::Similar => Reach::Similar,
             Reach::Selection => default,
         };
-        Efa::app_update(&this, cx, |g, cx| {
-            let Some(loaded) = g.loaded() else { return };
-            let targets = g.projected_targets(&loaded, n, reach);
-            edit(g, targets, cx);
-        });
-    }
+        let Some(loaded) = g.loaded() else { return };
+        let targets = g.projected_targets(&loaded, n, reach);
+        edit(g, targets, cx);
+    })
 }
 
 /// pyfa's projectedModule, projectedDrone, projectedFighter and projectedFit entries.
@@ -806,11 +803,9 @@ fn projected_item_menu(
     if let Row::Fit { fit: index, .. } = row
         && current != Some(index)
     {
-        let this = this.clone();
         menu = menu.item(
-            entry(IconName::ExternalLink, "Open Fit in New Tab").on_click(move |_, _, cx| {
-                Efa::app_update(&this, cx, |g, cx| g.open_fit(index, cx));
-            }),
+            entry(IconName::ExternalLink, "Open Fit in New Tab")
+                .on_click(on_efa(this, move |g, _, _, cx| g.open_fit(index, cx))),
         );
     }
     if let Row::Module(i) = row {
@@ -896,13 +891,13 @@ fn projected_item_menu(
             .and_then(|t| t.market_group)
             .is_some_and(|g| catalog.market_groups.contains_key(&g))
     {
-        let this = this.clone();
         menu = menu.item(
-            entry(IconName::Search, "Projected Item Market Group").on_click(
-                move |_, window, cx| {
-                    Efa::app_update(&this, cx, |g, cx| g.jump_to_market(type_id, window, cx));
+            entry(IconName::Search, "Projected Item Market Group").on_click(on_efa(
+                this,
+                move |g, _, window, cx| {
+                    g.jump_to_market(type_id, window, cx);
                 },
-            ),
+            )),
         );
     }
     let remove_label = match row {
@@ -926,7 +921,6 @@ fn projected_item_menu(
         Row::Module(_) | Row::Env(_) => None,
     };
     if let Some(amount) = amount {
-        let this = this.clone();
         let is_fit = matches!(row, Row::Fit { .. });
         let prompt = if is_fit {
             "New Amount (0-20):"
@@ -934,36 +928,34 @@ fn projected_item_menu(
             "New Amount:"
         };
         menu = menu.item(
-            entry(IconName::Settings2, "Change Projected Item Quantity").on_click(
-                move |_, window, cx| {
-                    Efa::app_update(&this, cx, |_, cx| {
-                        Efa::open_input_dialog(
-                            "Change Amount",
-                            prompt,
-                            amount.to_string(),
-                            window,
-                            cx,
-                            move |g, amount: u32, cx| set_amount(g, row, amount, cx),
-                        );
-                    });
+            entry(IconName::Settings2, "Change Projected Item Quantity").on_click(on_efa(
+                this,
+                move |_, _, window, cx| {
+                    Efa::open_input_dialog(
+                        "Change Amount",
+                        prompt,
+                        amount.to_string(),
+                        window,
+                        cx,
+                        move |g, amount: u32, cx| set_amount(g, row, amount, cx),
+                    );
                 },
-            ),
+            )),
         );
     }
     if !matches!(row, Row::Env(_)) {
         let current_km = projected
             .range(row)
             .map_or_default(|m| format_amount(m / 1000.0, 0, false));
-        let this = this.clone();
         menu = menu.item(
-            entry(IconName::Map, "Change Projected Item Range").on_click(move |_, window, cx| {
-                let similar = window.modifiers().alt || window.modifiers().control;
-                let current_km = current_km.clone();
-                Efa::app_update(&this, cx, |_, cx| {
+            entry(IconName::Map, "Change Projected Item Range").on_click(on_efa(
+                this,
+                move |_, _, window, cx| {
+                    let similar = window.modifiers().alt || window.modifiers().control;
                     Efa::open_input_dialog(
                         "Change Projection Range",
                         "New Range, km:",
-                        current_km,
+                        current_km.clone(),
                         window,
                         cx,
                         move |g, range: RangeInput, cx| {
@@ -982,8 +974,8 @@ fn projected_item_menu(
                             });
                         },
                     );
-                });
-            }),
+                },
+            )),
         );
     }
     if let Some(type_id) = type_id.filter(|_| !matches!(row, Row::Env(_))) {
@@ -1038,23 +1030,25 @@ fn projected_item_menu(
             .and_then(|t| t.market_group)
             .is_some_and(|g| catalog.market_groups.contains_key(&g))
     {
-        let this = this.clone();
-        menu = menu.item(entry(IconName::Search, "Charge Market Group").on_click(
-            move |_, window, cx| {
-                Efa::app_update(&this, cx, |g, cx| g.jump_to_market(charge, window, cx));
-            },
-        ));
+        menu = menu.item(
+            entry(IconName::Search, "Charge Market Group").on_click(on_efa(
+                this,
+                move |g, _, window, cx| {
+                    g.jump_to_market(charge, window, cx);
+                },
+            )),
+        );
     }
     if let Row::Module(i) = row {
         let module = projected.modules[i].type_id;
         if !compatible_charges(catalog, module).is_empty() {
-            let this = this.clone();
             menu = menu.item(
-                entry(IconName::BatteryCharging, "Show Compatible Charges").on_click(
-                    move |_, window, cx| {
-                        Efa::app_update(&this, cx, |g, cx| g.show_charges_for(module, window, cx));
+                entry(IconName::BatteryCharging, "Show Compatible Charges").on_click(on_efa(
+                    this,
+                    move |g, _, window, cx| {
+                        g.show_charges_for(module, window, cx);
                     },
-                ),
+                )),
             );
         }
     }
@@ -1305,17 +1299,16 @@ fn env_level(
         });
     }
     for item in &level.items {
-        let (this, type_id) = (this.clone(), item.type_id);
-        menu = menu.item(
-            PopupMenuItem::new(item.label.clone()).on_click(move |_, _, cx| {
-                Efa::app_update(&this, cx, |g, cx| {
-                    g.edit_projected(cx, |projected, _| {
-                        projected.add_env(type_id);
-                        true
-                    });
+        let type_id = item.type_id;
+        menu = menu.item(PopupMenuItem::new(item.label.clone()).on_click(on_efa(
+            this,
+            move |g, _, _, cx| {
+                g.edit_projected(cx, |projected, _| {
+                    projected.add_env(type_id);
+                    true
                 });
-            }),
-        );
+            },
+        )));
     }
     menu
 }

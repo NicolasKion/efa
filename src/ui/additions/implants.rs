@@ -25,7 +25,7 @@ use crate::{
         Action, AddKind, Efa, Loaded,
         fitting::{DragSource, Dragged},
         validation::flag,
-        widgets::{entry, icon_box, icon_label, item_entry, item_label},
+        widgets::{entry, icon_box, icon_label, item_entry, item_label, on_efa},
     },
 };
 
@@ -272,12 +272,14 @@ fn implant_menu(
             super::super::item_stats::StatsOf::Fitted(crate::engine::FitItem::Implant(type_id)),
         ));
         if t.market_group.is_some() {
-            let this = this.clone();
-            menu = menu.item(entry(IconName::Search, "Implant Market Group").on_click(
-                move |_, window, cx| {
-                    Efa::app_update(&this, cx, |g, cx| g.jump_to_market(type_id, window, cx));
-                },
-            ));
+            menu = menu.item(
+                entry(IconName::Search, "Implant Market Group").on_click(on_efa(
+                    this,
+                    move |g, _, window, cx| {
+                        g.jump_to_market(type_id, window, cx);
+                    },
+                )),
+            );
         }
         if own {
             menu = item_entries(menu, this, loaded, i, type_id, window, cx);
@@ -288,15 +290,15 @@ fn implant_menu(
         menu = apply_set_entry(menu, this, loaded, window, cx);
     }
     if !snapshot.rows.is_empty() {
-        let (this, implants) = (this.clone(), snapshot.rows.clone());
-        menu = menu.item(entry(IconName::Star, "Save as New Implant Set").on_click(
-            move |_, window, cx| {
-                let implants = implants.clone();
-                Efa::app_update(&this, cx, |_, cx| {
-                    Efa::save_implant_set_dialog(implants, window, cx);
-                });
-            },
-        ));
+        let implants = snapshot.rows.clone();
+        menu = menu.item(
+            entry(IconName::Star, "Save as New Implant Set").on_click(on_efa(
+                this,
+                move |_, _, window, cx| {
+                    Efa::save_implant_set_dialog(implants.clone(), window, cx);
+                },
+            )),
+        );
     }
     copy_paste_entries(
         menu,
@@ -320,15 +322,11 @@ fn item_entries(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let catalog = &loaded.catalog;
-    let remove = {
-        let this = this.clone();
-        entry(IconName::Delete, "Remove Implant").on_click(move |_, _, cx| {
-            Efa::app_update(&this, cx, |g, cx| {
-                let targets = g.addition_targets(i);
-                g.apply(Action::RemoveAdditions(AddKind::Implants, targets), cx);
-            });
-        })
-    };
+    let remove =
+        entry(IconName::Delete, "Remove Implant").on_click(on_efa(this, move |g, _, _, cx| {
+            let targets = g.addition_targets(i);
+            g.apply(Action::RemoveAdditions(AddKind::Implants, targets), cx);
+        }));
     let mut menu = menu.item(remove);
     let variations = catalog.variations_of(type_id);
     if variations.len() > 1 && crate::ui::hub::shown_menus(window, cx).variations {
@@ -344,19 +342,16 @@ fn item_entries(
                 entries.iter().fold(
                     menu.scrollable(true)
                         .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H)),
-                    |menu, (v, name)| {
-                        let (this, v) = (this.clone(), *v);
+                    |menu, &(v, ref name)| {
                         menu.item(
                             item_entry(&loaded, v, name.clone())
                                 .checked(v == type_id)
-                                .on_click(move |_, _, cx| {
-                                    Efa::app_update(&this, cx, |g, cx| {
-                                        let targets = g.addition_targets(i);
-                                        let action =
-                                            Action::SwapAdditions(AddKind::Implants, targets, v);
-                                        g.apply(action, cx);
-                                    });
-                                }),
+                                .on_click(on_efa(&this, move |g, _, _, cx| {
+                                    let targets = g.addition_targets(i);
+                                    let action =
+                                        Action::SwapAdditions(AddKind::Implants, targets, v);
+                                    g.apply(action, cx);
+                                })),
                         )
                     },
                 )
@@ -433,15 +428,15 @@ fn apply_set_entry(
                     },
                 );
             }
-            let editor = this.clone();
             menu.separator()
-                .item(entry(IconName::Settings2, "Implant Set Editor…").on_click(
-                    move |_, window, cx| {
-                        Efa::app_update(&editor, cx, |g, cx| {
+                .item(
+                    entry(IconName::Settings2, "Implant Set Editor…").on_click(on_efa(
+                        &this,
+                        |g, _, window, cx| {
                             g.open_implant_set_editor(None, window, cx);
-                        });
-                    },
-                ))
+                        },
+                    )),
+                )
         },
     )
 }
@@ -453,18 +448,15 @@ fn set_item(
     label: &str,
     implants: &[TypeId],
 ) -> gpui_kit::component::menu::PopupMenuItem {
-    let (this, implants) = (this.clone(), implants.to_vec());
+    let implants = implants.to_vec();
     let item = match implants.first() {
         Some(&first) => item_entry(loaded, first, label.to_owned()),
         None => entry(IconName::Star, label.to_owned()),
     };
     item.disabled(implants.is_empty())
-        .on_click(move |_, _, cx| {
-            let implants = implants.clone();
-            Efa::app_update(&this, cx, |g, cx| {
-                g.apply(Action::AddImplants(implants), cx);
-            });
-        })
+        .on_click(on_efa(this, move |g, _, _, cx| {
+            g.apply(Action::AddImplants(implants.clone()), cx);
+        }))
 }
 
 /// pyfa's additions copy and paste entries, working on whichever implants the pane shows.
@@ -515,20 +507,19 @@ fn copy_paste_entries(
         .and_then(|item| item.text())
         .is_some_and(|text| !text.trim().is_empty());
     if can_paste {
-        let (this, loaded) = (this.clone(), Rc::clone(loaded));
-        menu = menu.item(
-            entry(IconName::FileText, "Paste Implants").on_click(move |_, _, cx| {
+        let loaded = Rc::clone(loaded);
+        menu = menu.item(entry(IconName::FileText, "Paste Implants").on_click(on_efa(
+            this,
+            move |g, _, _, cx| {
                 let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
                     return;
                 };
                 let items = parse_lines(&loaded.catalog, kind, &text);
                 if !items.is_empty() {
-                    Efa::app_update(&this, cx, |g, cx| {
-                        g.apply(Action::AddAdditions(kind, items), cx);
-                    });
+                    g.apply(Action::AddAdditions(kind, items), cx);
                 }
-            }),
-        );
+            },
+        )));
     }
     menu
 }

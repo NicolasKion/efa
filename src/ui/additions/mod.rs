@@ -18,8 +18,8 @@ use std::rc::Rc;
 
 use gpui_kit::component::{ActiveTheme, IconName, h_flex, menu::PopupMenu, v_flex};
 use gpui_kit::{
-    App, ClickEvent, ClipboardItem, Context, InteractiveElement, IntoElement, KeyDownEvent,
-    Modifiers, ParentElement, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
+    App, ClipboardItem, Context, InteractiveElement, IntoElement, KeyDownEvent, Modifiers,
+    ParentElement, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
     prelude::FluentBuilder, px,
 };
 
@@ -30,7 +30,7 @@ use super::{
     item_stats::{StatsOf, stats_entry},
     selection::{ListKey, list_key},
     stats::format,
-    widgets::{entry, icon_label, item_entry},
+    widgets::{entry, icon_label, item_entry, on_efa},
 };
 use crate::{
     data::{Catalog, ItemType, Kind, TypeId},
@@ -418,13 +418,10 @@ fn addition_menu(
         })
         .flatten();
     let targeted = |make: fn(Vec<usize>) -> Action| {
-        let this = this.clone();
-        move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-            Efa::app_update(&this, cx, |g, cx| {
-                let targets = g.kind_targets(kind, n);
-                g.apply(make(targets), cx);
-            });
-        }
+        on_efa(this, move |g, _, _, cx| {
+            let targets = g.kind_targets(kind, n);
+            g.apply(make(targets), cx);
+        })
     };
 
     let stats_of = match kind {
@@ -441,15 +438,13 @@ fn addition_menu(
         .and_then(|t| t.market_group)
         .is_some_and(|g| catalog.market_groups.contains_key(&g))
     {
-        let this = this.clone();
         menu = menu.item(
-            entry(IconName::Search, format!("{category} Market Group")).on_click(
-                move |_, window, cx| {
-                    Efa::app_update(&this, cx, |g, cx| {
-                        g.jump_to_market(market_type, window, cx);
-                    });
+            entry(IconName::Search, format!("{category} Market Group")).on_click(on_efa(
+                this,
+                move |g, _, window, cx| {
+                    g.jump_to_market(market_type, window, cx);
                 },
-            ),
+            )),
         );
     }
     let remove_label = match kind {
@@ -469,37 +464,29 @@ fn addition_menu(
         } else {
             "Change Selection Quantity"
         };
-        let this = this.clone();
-        menu = menu.item(
-            entry(IconName::Settings2, label).on_click(move |_, window, cx| {
-                Efa::app_update(&this, cx, |g, cx| {
-                    let targets = g.kind_targets(kind, n);
-                    Efa::open_value_dialog(
-                        "New Amount",
-                        amount.to_string(),
-                        window,
-                        cx,
-                        move |n| Action::SetAmount(kind, targets.clone(), n),
-                    );
-                });
-            }),
-        );
-    }
-    if kind == AddKind::Drones && amount > 1 {
-        let this = this.clone();
-        menu = menu.item(entry(IconName::Minus, "Split Drone Stack").on_click(
-            move |_, window, cx| {
-                Efa::app_update(&this, cx, |_, cx| {
-                    Efa::open_value_dialog(
-                        "Split Off",
-                        (amount / 2).to_string(),
-                        window,
-                        cx,
-                        move |n| Action::SplitDrones(i, n),
-                    );
+        menu = menu.item(entry(IconName::Settings2, label).on_click(on_efa(
+            this,
+            move |g, _, window, cx| {
+                let targets = g.kind_targets(kind, n);
+                Efa::open_value_dialog("New Amount", amount.to_string(), window, cx, move |n| {
+                    Action::SetAmount(kind, targets.clone(), n)
                 });
             },
-        ));
+        )));
+    }
+    if kind == AddKind::Drones && amount > 1 {
+        menu = menu.item(entry(IconName::Minus, "Split Drone Stack").on_click(on_efa(
+            this,
+            move |_, _, window, cx| {
+                Efa::open_value_dialog(
+                    "Split Off",
+                    (amount / 2).to_string(),
+                    window,
+                    cx,
+                    move |n| Action::SplitDrones(i, n),
+                );
+            },
+        )));
     }
     let variations = catalog.variations_of(type_id);
     if variations.len() > 1 && super::hub::shown_menus(window, cx).variations {
@@ -515,17 +502,14 @@ fn addition_menu(
                 entries.iter().fold(
                     menu.scrollable(true)
                         .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H)),
-                    |menu, (v, name)| {
-                        let (this, v) = (this.clone(), *v);
+                    |menu, &(v, ref name)| {
                         menu.item(
                             item_entry(&loaded, v, name.clone())
                                 .checked(v == type_id)
-                                .on_click(move |_, _, cx| {
-                                    Efa::app_update(&this, cx, |g, cx| {
-                                        let targets = g.kind_targets(kind, n);
-                                        g.apply(Action::SwapAdditions(kind, targets, v), cx);
-                                    });
-                                }),
+                                .on_click(on_efa(&this, move |g, _, _, cx| {
+                                    let targets = g.kind_targets(kind, n);
+                                    g.apply(Action::SwapAdditions(kind, targets, v), cx);
+                                })),
                         )
                     },
                 )
@@ -551,19 +535,17 @@ fn addition_menu(
         menu = super::characters::skills_submenu(menu, this, loaded, target, window, cx);
     }
     if kind == AddKind::Cargo && super::hub::shown_menus(window, cx).cargo_fill {
-        let this = this.clone();
         menu = menu.item(
-            entry(IconName::Inbox, format!("Fill Cargo With {category}")).on_click(
-                move |_, _, cx| {
-                    Efa::app_update(&this, cx, |g, cx| {
-                        let Some(loaded) = g.loaded() else { return };
-                        let room = g.cargo_room_for(&loaded, type_id);
-                        if room > 0 {
-                            g.apply(Action::AddCargo(type_id, room), cx);
-                        }
-                    });
+            entry(IconName::Inbox, format!("Fill Cargo With {category}")).on_click(on_efa(
+                this,
+                move |g, _, _, cx| {
+                    let Some(loaded) = g.loaded() else { return };
+                    let room = g.cargo_room_for(&loaded, type_id);
+                    if room > 0 {
+                        g.apply(Action::AddCargo(type_id, room), cx);
+                    }
                 },
-            ),
+            )),
         );
     }
     if kind == AddKind::Cargo {
@@ -596,55 +578,56 @@ fn misc_entries(
         .is_some_and(|text| !text.trim().is_empty());
     let mut menu = menu;
     if let Some(n) = clicked {
-        let (this, loaded) = (this.clone(), Rc::clone(loaded));
+        let loaded = Rc::clone(loaded);
         menu = menu.item(
-            entry(IconName::Copy, format!("Copy Selected {noun}")).on_click(move |_, _, cx| {
-                Efa::app_update(&this, cx, |g, cx| {
+            entry(IconName::Copy, format!("Copy Selected {noun}")).on_click(on_efa(
+                this,
+                move |g, _, _, cx| {
                     let picked = g.kind_targets(kind, n);
                     let Some(fit) = g.fit() else { return };
                     let text = copy_text(&loaded.catalog, fit, kind, &picked);
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
-                });
-            }),
+                },
+            )),
         );
     }
     if has_rows {
-        let (this, loaded) = (this.clone(), Rc::clone(loaded));
-        menu = menu.item(entry(IconName::Copy, format!("Copy All {noun}")).on_click(
-            move |_, _, cx| {
-                Efa::app_update(&this, cx, |g, cx| {
+        let loaded = Rc::clone(loaded);
+        menu = menu.item(
+            entry(IconName::Copy, format!("Copy All {noun}")).on_click(on_efa(
+                this,
+                move |g, _, _, cx| {
                     let Some(fit) = g.fit() else { return };
                     let all: Vec<usize> = (0..kind.rows(fit).len()).collect();
                     let text = copy_text(&loaded.catalog, fit, kind, &all);
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
-                });
-            },
-        ));
+                },
+            )),
+        );
     }
     if can_paste {
-        let (this, loaded) = (this.clone(), Rc::clone(loaded));
-        menu = menu.item(entry(IconName::FileText, format!("Paste {noun}")).on_click(
-            move |_, _, cx| {
-                let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
-                    return;
-                };
-                if kind == AddKind::Drones {
-                    let stacks = crate::port::eft::parse_drones(&loaded.catalog, &text);
-                    if !stacks.is_empty() {
-                        Efa::app_update(&this, cx, |g, cx| {
+        let loaded = Rc::clone(loaded);
+        menu = menu.item(
+            entry(IconName::FileText, format!("Paste {noun}")).on_click(on_efa(
+                this,
+                move |g, _, _, cx| {
+                    let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+                        return;
+                    };
+                    if kind == AddKind::Drones {
+                        let stacks = crate::port::eft::parse_drones(&loaded.catalog, &text);
+                        if !stacks.is_empty() {
                             g.apply(Action::AddDroneStacks(stacks), cx);
-                        });
+                        }
+                        return;
                     }
-                    return;
-                }
-                let items = parse_lines(&loaded.catalog, kind, &text);
-                if !items.is_empty() {
-                    Efa::app_update(&this, cx, |g, cx| {
+                    let items = parse_lines(&loaded.catalog, kind, &text);
+                    if !items.is_empty() {
                         g.apply(Action::AddAdditions(kind, items), cx);
-                    });
-                }
-            },
-        ));
+                    }
+                },
+            )),
+        );
     }
     menu
 }

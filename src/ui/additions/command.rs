@@ -28,7 +28,7 @@ use crate::{
     ui::{
         Efa, Loaded,
         columns::{ICON_W, STATE_W},
-        widgets::{color, entry, icon_box, icon_label},
+        widgets::{color, entry, icon_box, icon_label, on_efa},
     },
 };
 
@@ -267,21 +267,16 @@ fn command_fit_menu(
         .is_some_and(|g| g.read(cx).saved.settings.current == Some(fit_index));
     let mut menu = menu;
     if !is_current {
-        let this = this.clone();
         menu = menu.item(
-            entry(IconName::ExternalLink, "Open Fit in New Tab").on_click(move |_, _, cx| {
-                Efa::app_update(&this, cx, |g, cx| g.open_fit(fit_index, cx));
-            }),
+            entry(IconName::ExternalLink, "Open Fit in New Tab")
+                .on_click(on_efa(this, move |g, _, _, cx| g.open_fit(fit_index, cx))),
         );
     }
-    let this = this.clone();
     menu.item(
-        entry(IconName::Delete, "Remove Command Fit").on_click(move |_, _, cx| {
-            Efa::app_update(&this, cx, |g, cx| {
-                let entries = g.command_targets(n);
-                g.remove_command_fits(entries, cx);
-            });
-        }),
+        entry(IconName::Delete, "Remove Command Fit").on_click(on_efa(this, move |g, _, _, cx| {
+            let entries = g.command_targets(n);
+            g.remove_command_fits(entries, cx);
+        })),
     )
 }
 
@@ -318,10 +313,9 @@ fn command_view_menu(
     boosters.sort_by(|a, b| a.2.cmp(&b.2));
     let this = this.clone();
     let pick = move |index: usize| {
-        let this = this.clone();
-        move |_: &ClickEvent, _: &mut Window, cx: &mut gpui_kit::App| {
-            Efa::app_update(&this, cx, |g, cx| g.link(Link::Command, &[index], cx));
-        }
+        on_efa(&this, move |g, _, _, cx| {
+            g.link(Link::Command, &[index], cx);
+        })
     };
     menu.submenu_with_element(
         "Command Fits",

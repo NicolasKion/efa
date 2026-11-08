@@ -25,7 +25,7 @@ use crate::{
         Efa, Loaded,
         actions::Outcome,
         dialogs::{Prompt, prompt_value},
-        widgets::{entry, icon_box, icon_label, redraw_on_change},
+        widgets::{entry, icon_box, icon_label, on_efa, redraw_on_change},
     },
 };
 
@@ -337,24 +337,22 @@ pub(super) fn add_fit_entries(
         .filter_map(|&i| Some((i, fit_label(&loaded.catalog, g.saved.fits.get(i)?))))
         .collect();
     let mut menu = {
-        let (this, loaded) = (this.clone(), Rc::clone(loaded));
-        menu.item(
-            entry(IconName::FolderOpen, "Add Fit...").on_click(move |_, window, cx| {
-                let existing = existing.clone();
-                Efa::app_update(&this, cx, |g, cx| {
-                    g.open_fit_picker(
-                        link.title(),
-                        &loaded,
-                        &existing,
-                        window,
-                        cx,
-                        move |g, picked, cx| {
-                            g.link(link, &picked, cx);
-                        },
-                    );
-                });
-            }),
-        )
+        let loaded = Rc::clone(loaded);
+        menu.item(entry(IconName::FolderOpen, "Add Fit...").on_click(on_efa(
+            this,
+            move |g, _, window, cx| {
+                g.open_fit_picker(
+                    link.title(),
+                    &loaded,
+                    &existing,
+                    window,
+                    cx,
+                    move |g, picked, cx| {
+                        g.link(link, &picked, cx);
+                    },
+                );
+            },
+        )))
     };
     if !open.is_empty() {
         let this = this.clone();
@@ -364,11 +362,11 @@ pub(super) fn add_fit_entries(
             window,
             cx,
             move |menu, _, _| {
-                open.iter().fold(menu, |menu, (index, label)| {
-                    let (this, index) = (this.clone(), *index);
-                    menu.item(PopupMenuItem::new(label.clone()).on_click(move |_, _, cx| {
-                        Efa::app_update(&this, cx, |g, cx| g.link(link, &[index], cx));
-                    }))
+                open.iter().fold(menu, |menu, &(index, ref label)| {
+                    menu.item(
+                        PopupMenuItem::new(label.clone())
+                            .on_click(on_efa(&this, move |g, _, _, cx| g.link(link, &[index], cx))),
+                    )
                 })
             },
         );

@@ -9,9 +9,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Context, InteractiveElement, IntoElement, KeyDownEvent,
-    MouseButton, MouseDownEvent, ParentElement, SharedString, StatefulInteractiveElement, Styled,
-    WeakEntity, Window, div, prelude::FluentBuilder, px,
+    AnyElement, ClickEvent, Context, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
+    MouseDownEvent, ParentElement, SharedString, StatefulInteractiveElement, Styled, WeakEntity,
+    Window, div, prelude::FluentBuilder, px,
 };
 
 use super::{MENU_MAX_H, PRICE_W, ROW_HEIGHT, misc_entries, price_text};
@@ -27,7 +27,7 @@ use crate::{
         fitting::{DragSource, Dragged},
         stats::format::round_to_prec,
         validation::flag,
-        widgets::{color, entry, icon_box, icon_label, item_entry, short},
+        widgets::{color, entry, icon_box, icon_label, item_entry, on_efa, short},
     },
 };
 
@@ -375,15 +375,13 @@ fn booster_menu(
             cx,
             move |menu, _, _| {
                 effects.iter().fold(menu, |menu, se| {
-                    let (this, effect_id) = (this.clone(), se.effect_id);
+                    let effect_id = se.effect_id;
                     menu.item(
                         PopupMenuItem::new(se.label.clone())
                             .checked(se.active)
-                            .on_click(move |_, _, cx| {
-                                Efa::app_update(&this, cx, |g, cx| {
-                                    g.apply(Action::ToggleBoosterSideEffect(i, effect_id), cx);
-                                });
-                            }),
+                            .on_click(on_efa(&this, move |g, _, _, cx| {
+                                g.apply(Action::ToggleBoosterSideEffect(i, effect_id), cx);
+                            })),
                     )
                 })
             },
@@ -395,24 +393,22 @@ fn booster_menu(
         super::super::item_stats::StatsOf::Fitted(crate::engine::FitItem::Booster(i)),
     ));
     if t.market_group.is_some() {
-        let this = this.clone();
-        menu = menu.item(entry(IconName::Search, "Booster Market Group").on_click(
-            move |_, window, cx| {
-                Efa::app_update(&this, cx, |g, cx| g.jump_to_market(type_id, window, cx));
-            },
-        ));
+        menu = menu.item(
+            entry(IconName::Search, "Booster Market Group").on_click(on_efa(
+                this,
+                move |g, _, window, cx| {
+                    g.jump_to_market(type_id, window, cx);
+                },
+            )),
+        );
     }
-    {
-        let this = this.clone();
-        menu = menu.item(entry(IconName::Delete, "Remove Booster").on_click(
-            move |_, _: &mut Window, cx: &mut App| {
-                Efa::app_update(&this, cx, |g, cx| {
-                    let rows = g.addition_targets(i);
-                    g.apply(Action::RemoveAdditions(AddKind::Boosters, rows), cx);
-                });
-            },
-        ));
-    }
+    menu = menu.item(entry(IconName::Delete, "Remove Booster").on_click(on_efa(
+        this,
+        move |g, _, _, cx| {
+            let rows = g.addition_targets(i);
+            g.apply(Action::RemoveAdditions(AddKind::Boosters, rows), cx);
+        },
+    )));
     let variations = booster_variations(catalog, type_id);
     if variations.len() > 1 && crate::ui::hub::shown_menus(window, cx).variations {
         let entries: Vec<(TypeId, String)> =
@@ -427,21 +423,18 @@ fn booster_menu(
                 entries.iter().fold(
                     menu.scrollable(true)
                         .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H)),
-                    |menu, (v, name)| {
-                        let (this, v) = (this.clone(), *v);
+                    |menu, &(v, ref name)| {
                         // pyfa swaps only the clicked booster: one per slot means a selection
                         // could only collapse into a single booster anyway.
                         menu.item(
                             item_entry(&loaded, v, name.clone())
                                 .checked(v == type_id)
-                                .on_click(move |_, _, cx| {
-                                    Efa::app_update(&this, cx, |g, cx| {
-                                        g.apply(
-                                            Action::SwapAdditions(AddKind::Boosters, vec![i], v),
-                                            cx,
-                                        );
-                                    });
-                                }),
+                                .on_click(on_efa(&this, move |g, _, _, cx| {
+                                    g.apply(
+                                        Action::SwapAdditions(AddKind::Boosters, vec![i], v),
+                                        cx,
+                                    );
+                                })),
                         )
                     },
                 )

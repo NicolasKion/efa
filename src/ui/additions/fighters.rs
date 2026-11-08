@@ -32,7 +32,7 @@ use crate::{
         columns::{ICON_W, STATE_W},
         fitting::{DragSource, Dragged},
         validation::flag,
-        widgets::{color, entry, icon, icon_box, icon_label, item_entry},
+        widgets::{color, entry, icon, icon_box, icon_label, item_entry, on_efa},
     },
 };
 
@@ -153,6 +153,20 @@ impl Efa {
             return Vec::new();
         };
         Fit::similar_fighters(&fit.fighters, i)
+    }
+
+    /// What a menu entry on display row `n` acts on: every squadron of its type with Ctrl or
+    /// Alt held, otherwise the clicked or picked ones.
+    fn fighter_rows(&self, n: usize, window: &Window) -> Vec<usize> {
+        let Some(loaded) = self.loaded() else {
+            return Vec::new();
+        };
+        let modifiers = window.modifiers();
+        if modifiers.alt || modifiers.control {
+            self.similar_fighter_targets(&loaded, n)
+        } else {
+            self.fighter_targets(&loaded, n)
+        }
     }
 
     /// Add squadrons the way pyfa does: refused when the ship has no tubes of their class,
@@ -597,23 +611,14 @@ fn fighter_menu(
                     .iter()
                     .zip(&names)
                     .fold(menu, |menu, (ability, name)| {
-                        let (this, id) = (this.clone(), ability.id);
+                        let id = ability.id;
                         menu.item(
                             PopupMenuItem::new(name.clone())
                                 .checked(ability.active)
-                                .on_click(move |_, window, cx| {
-                                    let similar =
-                                        window.modifiers().alt || window.modifiers().control;
-                                    Efa::app_update(&this, cx, |g, cx| {
-                                        let Some(loaded) = g.loaded() else { return };
-                                        let rows = if similar {
-                                            g.similar_fighter_targets(&loaded, n)
-                                        } else {
-                                            g.fighter_targets(&loaded, n)
-                                        };
-                                        g.toggle_fighter_ability(i, rows, id, cx);
-                                    });
-                                }),
+                                .on_click(on_efa(&this, move |g, _, window, cx| {
+                                    let rows = g.fighter_rows(n, window);
+                                    g.toggle_fighter_ability(i, rows, id, cx);
+                                })),
                         )
                     })
             },
@@ -629,39 +634,31 @@ fn fighter_menu(
         .and_then(|t| t.market_group)
         .is_some_and(|g| catalog.market_groups.contains_key(&g))
     {
-        let this = this.clone();
-        menu = menu.item(entry(IconName::Search, "Fighter Market Group").on_click(
-            move |_, window, cx| {
-                Efa::app_update(&this, cx, |g, cx| g.jump_to_market(type_id, window, cx));
-            },
-        ));
+        menu = menu.item(
+            entry(IconName::Search, "Fighter Market Group").on_click(on_efa(
+                this,
+                move |g, _, window, cx| {
+                    g.jump_to_market(type_id, window, cx);
+                },
+            )),
+        );
     }
+    menu = menu.item(entry(IconName::Delete, "Remove Fighter").on_click(on_efa(
+        this,
+        move |g, _, window, cx| {
+            let rows = g.fighter_rows(n, window);
+            g.remove_fighters(rows, cx);
+        },
+    )));
     {
-        let this = this.clone();
-        menu = menu.item(entry(IconName::Delete, "Remove Fighter").on_click(
-            move |_, window, cx| {
-                let similar = window.modifiers().alt || window.modifiers().control;
-                Efa::app_update(&this, cx, |g, cx| {
-                    let Some(loaded) = g.loaded() else { return };
-                    let rows = if similar {
-                        g.similar_fighter_targets(&loaded, n)
-                    } else {
-                        g.fighter_targets(&loaded, n)
-                    };
-                    g.remove_fighters(rows, cx);
-                });
-            },
-        ));
-    }
-    {
-        let this = this.clone();
         let current = fighter
             .amount
             .or_else(|| info.as_ref().and_then(FighterInfo::max_size))
             .unwrap_or(0);
         menu = menu.item(
-            entry(IconName::Settings2, "Change Fighter Quantity").on_click(move |_, window, cx| {
-                Efa::app_update(&this, cx, |_, cx| {
+            entry(IconName::Settings2, "Change Fighter Quantity").on_click(on_efa(
+                this,
+                move |_, _, window, cx| {
                     Efa::open_input_dialog(
                         "Change Amount",
                         "New Amount:",
@@ -674,8 +671,8 @@ fn fighter_menu(
                             g.set_fighter_amount(rows, amount, cx);
                         },
                     );
-                });
-            }),
+                },
+            )),
         );
     }
     let variations = catalog.variations_of(type_id);
@@ -692,24 +689,14 @@ fn fighter_menu(
                 entries.iter().fold(
                     menu.scrollable(true)
                         .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H)),
-                    |menu, (v, name)| {
-                        let (this, v) = (this.clone(), *v);
+                    |menu, &(v, ref name)| {
                         menu.item(
                             item_entry(&loaded, v, name.clone())
                                 .checked(v == type_id)
-                                .on_click(move |_, window, cx| {
-                                    let similar =
-                                        window.modifiers().alt || window.modifiers().control;
-                                    Efa::app_update(&this, cx, |g, cx| {
-                                        let Some(loaded) = g.loaded() else { return };
-                                        let rows = if similar {
-                                            g.similar_fighter_targets(&loaded, n)
-                                        } else {
-                                            g.fighter_targets(&loaded, n)
-                                        };
-                                        g.swap_fighters(rows, v, cx);
-                                    });
-                                }),
+                                .on_click(on_efa(&this, move |g, _, window, cx| {
+                                    let rows = g.fighter_rows(n, window);
+                                    g.swap_fighters(rows, v, cx);
+                                })),
                         )
                     },
                 )
@@ -743,26 +730,24 @@ fn fighter_misc(
         .and_then(|item| item.text())
         .is_some_and(|text| !text.trim().is_empty());
     let copy = |rows: Option<usize>| {
-        let (this, loaded) = (this.clone(), Rc::clone(loaded));
-        move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-            Efa::app_update(&this, cx, |g, cx| {
-                let Some(fit) = g.fit() else { return };
-                let indices: Vec<usize> = match rows {
-                    Some(n) => g.fighter_targets(&loaded, n),
-                    None => (0..fit.fighters.len()).collect(),
-                };
-                let fighters: Vec<&Fighter> = indices
-                    .iter()
-                    .filter_map(|&i| fit.fighters.get(i))
-                    .collect();
-                let infos: Vec<Option<&FighterInfo>> = indices
-                    .iter()
-                    .map(|&i| g.stats.as_ref().and_then(|s| s.fighters.get(i)))
-                    .collect();
-                let text = export_lines(&loaded.catalog, &fighters, &infos);
-                cx.write_to_clipboard(ClipboardItem::new_string(text));
-            });
-        }
+        let loaded = Rc::clone(loaded);
+        on_efa(this, move |g, _, _, cx| {
+            let Some(fit) = g.fit() else { return };
+            let indices: Vec<usize> = match rows {
+                Some(n) => g.fighter_targets(&loaded, n),
+                None => (0..fit.fighters.len()).collect(),
+            };
+            let fighters: Vec<&Fighter> = indices
+                .iter()
+                .filter_map(|&i| fit.fighters.get(i))
+                .collect();
+            let infos: Vec<Option<&FighterInfo>> = indices
+                .iter()
+                .map(|&i| g.stats.as_ref().and_then(|s| s.fighters.get(i)))
+                .collect();
+            let text = export_lines(&loaded.catalog, &fighters, &infos);
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        })
     };
     let mut menu = menu;
     if let Some(n) = clicked {
@@ -772,16 +757,16 @@ fn fighter_misc(
         menu = menu.item(entry(IconName::Copy, "Copy All Fighters").on_click(copy(None)));
     }
     if can_paste {
-        let (this, loaded) = (this.clone(), Rc::clone(loaded));
-        menu = menu.item(
-            entry(IconName::FileText, "Paste Fighters").on_click(move |_, _, cx| {
+        let loaded = Rc::clone(loaded);
+        menu = menu.item(entry(IconName::FileText, "Paste Fighters").on_click(on_efa(
+            this,
+            move |g, _, _, cx| {
                 let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
                     return;
                 };
-                let fighters = parse_lines(&loaded.catalog, &text);
-                Efa::app_update(&this, cx, |g, cx| g.add_fighter_squadrons(fighters, cx));
-            }),
-        );
+                g.add_fighter_squadrons(parse_lines(&loaded.catalog, &text), cx);
+            },
+        )));
     }
     menu
 }
