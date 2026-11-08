@@ -342,7 +342,13 @@ impl ShipHeat {
                 1.0 - rack.attenuation.powi(distance) * self.slot_factor * rack_heat
             })
             .product();
-        let own = self.slot_factor * rack_heat;
+        // A module heats itself only when it is overheated; the others only catch their
+        // neighbours' heat.
+        let own = if rack.overheated.contains(&pos) {
+            self.slot_factor * rack_heat
+        } else {
+            0.0
+        };
         1.0 - others * (1.0 - own)
     }
 
@@ -478,6 +484,25 @@ mod tests {
             overheated: vec![0, 1, 3],
         };
         assert_eq!(partly.burn_cycles(&three, 1, 3.5, 40.0, 0.88), Some(357.0));
+    }
+
+    /// A module next to an overheated one burns too, more slowly than it, and slower still
+    /// further away.
+    #[test]
+    fn neighbours_burn_from_the_overheated_ones() {
+        let ship = ShipHeat {
+            generation: 0.01,
+            slot_factor: 1.0,
+        };
+        let rack = RackHeat {
+            attenuation: 0.25,
+            absorption: 0.01,
+            overheated: vec![1],
+        };
+        let hot = ship.burn_cycles(&rack, 1, 5.0, 40.0, 4.0).expect("burns");
+        let next = ship.burn_cycles(&rack, 0, 5.0, 40.0, 4.0).expect("burns");
+        let far = ship.burn_cycles(&rack, 3, 5.0, 40.0, 4.0).expect("burns");
+        assert!(hot < next && next < far, "{hot} {next} {far}");
     }
 
     #[test]

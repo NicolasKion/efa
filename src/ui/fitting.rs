@@ -517,10 +517,17 @@ impl Efa {
                 .id(SharedString::from(format!("heat-{slot:?}-{i}")))
                 .truncate()
                 .children(text(Col::Heat))
+                .when(info.burnout_from_neighbours, |cell| {
+                    cell.text_color(cx.theme().muted_foreground)
+                })
                 .when(info.burnout.is_some(), |cell| {
-                    cell.tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new("Estimated time til burnout")
-                            .build(window, cx)
+                    let tip = if info.burnout_from_neighbours {
+                        "Estimated time til burnout from the overheated modules in its rack"
+                    } else {
+                        "Estimated time til burnout"
+                    };
+                    cell.tooltip(move |window, cx| {
+                        gpui_kit::component::tooltip::Tooltip::new(tip).build(window, cx)
                     })
                 }),
         )

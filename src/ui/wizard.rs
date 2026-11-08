@@ -657,7 +657,9 @@ fn segmented<T: 'static>(
         Button::new(SharedString::from(format!("{id}-{i}")))
             .label(s.label)
             .when(s.selected, |b| b.custom(picked))
-            .when(!s.selected, |b| b.outline().text_color(theme.muted_foreground))
+            .when(!s.selected, |b| {
+                b.outline().text_color(theme.muted_foreground)
+            })
             .tab_stop(false)
             .flex_1()
             .when_some(s.tip, Button::tooltip)

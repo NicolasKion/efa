@@ -117,8 +117,11 @@ pub struct ModuleInfo {
     pub falloff: Option<f64>,
     /// Cycles to full spool, for modules that spool up.
     pub spool_max: Option<u32>,
-    /// Expected seconds until an overheated module burns out.
+    /// Expected seconds until the module burns out: an overheated one from its own heat and
+    /// its overheated neighbours', any other one in the rack from its neighbours' alone.
     pub burnout: Option<f64>,
+    /// The burnout comes from overheated neighbours, not from overheating this module.
+    pub burnout_from_neighbours: bool,
     /// How many of its loaded charge the module holds.
     pub charges: Option<u32>,
     /// Cycles before the loaded charges run out, for modules that use them up.
@@ -538,6 +541,7 @@ impl Engine {
                 falloff: get(attr::FALLOFF).filter(|&v| v > 0.0),
                 spool_max,
                 burnout: None,
+                burnout_from_neighbours: false,
                 charges,
                 charged_cycles,
             };
@@ -627,11 +631,9 @@ fn burnout(
             absorption: hot.iter().map(|&i| heat[&(slot, i)].0).sum(),
             overheated: hot.clone(),
         };
-        for i in hot {
-            let (_, hp, heat_damage) = heat[&(slot, i)];
-            let Some(info) = stats.modules.get_mut(&(slot, i)) else {
-                continue;
-            };
+        // Each overheated module's step and cycle, in seconds.
+        let mut timings = Vec::new();
+        for &i in &rack.overheated {
             let Some(misc) = stats.module_misc.get(&FitItem::Module(slot, i)) else {
                 continue;
             };
@@ -639,12 +641,50 @@ fn burnout(
             // duration first.
             let seconds = |a: i32| misc.attr(a).filter(|&v| v > 0.0).map(|ms| ms / 1000.0);
             let (speed, duration) = (seconds(attr::RATE_OF_FIRE), seconds(attr::DURATION));
-            let (Some(step), Some(cycle)) = (speed.or(duration), duration.or(speed)) else {
+            if let (Some(step), Some(cycle)) = (speed.or(duration), duration.or(speed)) {
+                timings.push((i, step, cycle));
+            }
+        }
+        for &(i, step, cycle) in &timings {
+            let (_, hp, heat_damage) = heat[&(slot, i)];
+            if let Some(info) = stats.modules.get_mut(&(slot, i)) {
+                info.burnout = ship
+                    .burn_cycles(&rack, i, step, hp, heat_damage)
+                    .map(|cycles| cycles * cycle);
+            }
+        }
+        // The rest of the rack takes damage from its overheated neighbours: at the pace of the
+        // quickest of them, and as much per hit as they take on average.
+        let Some(&(_, step, cycle)) = timings.iter().min_by(|a, b| a.1.total_cmp(&b.1)) else {
+            continue;
+        };
+        let damages: Vec<f64> = timings
+            .iter()
+            .map(|&(i, _, _)| heat[&(slot, i)].2)
+            .collect();
+        let neighbour_damage = damages.iter().sum::<f64>() / damages.len() as f64;
+        let cold: Vec<usize> = heat
+            .keys()
+            .filter(|&&(s, i)| s == slot && !overheated(s, i))
+            .filter(|&&(s, i)| {
+                fit.rack(s)
+                    .get(i)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|m| m.state != ModuleState::Offline)
+            })
+            .map(|&(_, i)| i)
+            .collect();
+        for i in cold {
+            let (_, hp, _) = heat[&(slot, i)];
+            if hp <= 0.0 {
                 continue;
-            };
-            info.burnout = ship
-                .burn_cycles(&rack, i, step, hp, heat_damage)
-                .map(|cycles| cycles * cycle);
+            }
+            if let Some(info) = stats.modules.get_mut(&(slot, i)) {
+                info.burnout = ship
+                    .burn_cycles(&rack, i, step, hp, neighbour_damage)
+                    .map(|cycles| cycles * cycle);
+                info.burnout_from_neighbours = info.burnout.is_some();
+            }
         }
     }
 }

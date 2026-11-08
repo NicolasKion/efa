@@ -109,6 +109,17 @@ fn overheated_modules_get_a_burnout_time() {
     let stats = engine.compute(&fit);
     let burnout = stats.modules[&(Slot::High, 0)].burnout.expect("burns out");
     assert!(burnout > 0.0 && burnout < 3600.0, "{burnout}");
+    assert!(!stats.modules[&(Slot::High, 0)].burnout_from_neighbours);
+    // The modules in the rack that run cold burn too, from their neighbours' heat, and later.
+    let cold: Vec<_> = (2..fit.high.len())
+        .filter(|&i| fit.high[i].is_some())
+        .map(|i| stats.modules[&(Slot::High, i)])
+        .collect();
+    assert!(!cold.is_empty(), "the Vexor has a cold high slot module");
+    for m in cold {
+        assert!(m.burnout_from_neighbours);
+        assert!(m.burnout.expect("burns from its neighbours") > burnout);
+    }
 }
 
 /// The hardener's armor resists, EM to explosive, as fractions resisted.
