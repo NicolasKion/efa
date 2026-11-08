@@ -294,7 +294,8 @@ impl Default for Network {
 }
 
 /// How requests reach the network. The system setting is whatever the environment's
-/// `HTTPS_PROXY` and friends say, which reqwest honours by itself.
+/// `HTTPS_PROXY` and friends say, which reqwest honours by itself. [`crate::net`] builds the
+/// client.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Proxy {
@@ -322,31 +323,6 @@ impl ProxyMode {
             Self::System => "System proxy settings",
             Self::Manual => "Manual proxy settings",
         }
-    }
-}
-
-impl Proxy {
-    /// A blocking client that goes through this proxy.
-    pub fn client(&self, agent: &str) -> Result<reqwest::blocking::Client, String> {
-        let mut builder = reqwest::blocking::Client::builder().user_agent(agent);
-        match self.mode {
-            ProxyMode::System => {}
-            ProxyMode::None => builder = builder.no_proxy(),
-            ProxyMode::Manual => {
-                let address = self.address.trim();
-                let url = if address.contains("://") {
-                    address.to_owned()
-                } else {
-                    format!("http://{address}")
-                };
-                let mut proxy = reqwest::Proxy::all(&url).map_err(|e| format!("proxy: {e}"))?;
-                if !self.username.is_empty() {
-                    proxy = proxy.basic_auth(&self.username, &self.password);
-                }
-                builder = builder.proxy(proxy);
-            }
-        }
-        builder.build().map_err(|e| e.to_string())
     }
 }
 

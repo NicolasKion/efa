@@ -104,7 +104,7 @@ impl Hub {
             } = setup;
             let started = cx
                 .background_spawn(async move {
-                    let http = proxy.client(crate::prices::user_agent())?;
+                    let http = proxy.client()?;
                     let login = Login::start(&http, &client_id, port)?;
                     Ok::<_, String>((http, login))
                 })
@@ -232,7 +232,7 @@ pub fn call<W: 'static, T: Send + 'static>(
             Ok((setup, account)) => {
                 let (account, result) = cx
                     .background_spawn(async move {
-                        let http = match setup.proxy.client(crate::prices::user_agent()) {
+                        let http = match setup.proxy.client() {
                             Ok(http) => http,
                             Err(e) => return (None, Err(e)),
                         };

@@ -1,6 +1,7 @@
 //! Files around efa's database: reading the JSON files efa kept its data in before, which
 //! [`crate::db`] imports once, setting aside files that cannot be read rather than overwriting
-//! them, and creating files only the user can read.
+//! them, creating files only the user can read, and writing files so a reader never sees half
+//! of one.
 
 use std::path::{Path, PathBuf};
 
@@ -27,6 +28,24 @@ pub fn load<T: DeserializeOwned + Default>(path: &Path) -> T {
         Read::Ok(value) => value,
         Read::Missing | Read::Broken(_) => T::default(),
     }
+}
+
+/// Write `bytes` to `path` through a temporary file next to it, so the file is either the old
+/// one or the whole new one, never a torn mix. Missing folders are created.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    // Per process and per write, so two writers of one file never share a temporary file.
+    static WRITES: AtomicU64 = AtomicU64::new(0);
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir)?;
+    }
+    let n = WRITES.fetch_add(1, Ordering::Relaxed);
+    let tmp = with_suffix(path, &format!(".{}-{n}.tmp", std::process::id()));
+    let written = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
 }
 
 /// The app was called gyfa before; its folder moves to efa's the first time efa starts, so fits,
@@ -143,6 +162,21 @@ mod tests {
             .filter_map(Result::ok)
             .any(|e| e.file_name().to_string_lossy().contains("unreadable"));
         assert!(kept, "the broken file is set aside, not overwritten");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn atomic_writes_replace_the_file_and_leave_nothing_behind() {
+        let dir = std::env::temp_dir().join(format!("efa-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("deeper").join("file.bin");
+        write_atomic(&path, b"first").expect("write into a new folder");
+        write_atomic(&path, b"second").expect("overwrite");
+        assert_eq!(std::fs::read(&path).expect("read"), b"second");
+        let files = std::fs::read_dir(path.parent().expect("parent"))
+            .expect("dir")
+            .count();
+        assert_eq!(files, 1, "no temporary file is left");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -601,7 +601,12 @@ impl Login {
             &self.pkce.verifier,
         )
         .map_err(|e| e.to_string())?;
-        let claims = verify(http, &response.access_token, &self.client_id, super::now())?;
+        let claims = verify(
+            http,
+            &response.access_token,
+            &self.client_id,
+            crate::net::now(),
+        )?;
         Ok(account(response, claims))
     }
 }

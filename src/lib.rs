@@ -15,6 +15,7 @@ pub mod icons;
 pub mod implant_set;
 pub mod item_data;
 pub mod market;
+pub mod net;
 pub mod overrides;
 pub mod pack;
 pub mod paths;

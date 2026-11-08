@@ -288,11 +288,7 @@ pub struct Fit {
 }
 
 /// The time to stamp a changed fit with.
-pub fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
-}
+pub use crate::net::now;
 
 /// The kind of system a structure sits in, pyfa's "Citadel System Security". pyfa assumes null
 /// security until told otherwise.

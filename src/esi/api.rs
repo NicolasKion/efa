@@ -8,11 +8,11 @@ use super::{
     Account, IMPLANTS_SCOPE, READ_FITTINGS_SCOPE, SKILLS_SCOPE, WRITE_FITTINGS_SCOPE,
     accounts::Access, sso,
 };
-use crate::{data::TypeId, port::esi::Fitting};
-
-const ESI_URL: &str = "https://esi.evetech.net";
-/// ESI behaviour efa is written against, the same date the price fetch pins.
-const COMPATIBILITY_DATE: &str = "2026-08-18";
+use crate::{
+    data::TypeId,
+    net::{COMPATIBILITY_DATE, ESI_BASE},
+    port::esi::Fitting,
+};
 
 /// What "Get Skills" brings in for a character.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -43,7 +43,7 @@ impl Session {
 
     /// A current access token, refreshed when needed.
     fn token(&mut self) -> Result<String, String> {
-        let now = super::now();
+        let now = crate::net::now();
         if self.account.needs_refresh(now) {
             let (metadata, _) = sso::endpoints(&self.http, false)?;
             let response = sso::refresh(
@@ -92,7 +92,7 @@ impl Session {
     ) -> Result<Vec<u8>, String> {
         let mut request = self
             .http
-            .request(method, format!("{ESI_URL}{path}"))
+            .request(method, format!("{ESI_BASE}{path}"))
             .header("X-Compatibility-Date", COMPATIBILITY_DATE)
             .header(reqwest::header::ACCEPT, "application/json");
         if auth {

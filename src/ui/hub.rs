@@ -106,8 +106,11 @@ impl Hub {
         let (store, contents) = crate::db::Store::open_default();
         let mut saved = contents.saved;
         let overrides = saved.overrides.active();
+        let proxy = saved.preferences.network.proxy.clone();
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
-            let result = cx.background_spawn(async move { load(&overrides) }).await;
+            let result = cx
+                .background_spawn(async move { load(&overrides, &proxy) })
+                .await;
             let _ = this.update(cx, |hub, cx| {
                 hub.loading = match result {
                     Ok(loaded) => {

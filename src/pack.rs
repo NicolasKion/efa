@@ -100,12 +100,7 @@ impl Pack {
     /// Build a pack from `dump` and write it to `out`.
     pub fn write(dump: &Path, out: &Path) -> Result<usize, String> {
         let bytes = Self::build(dump)?;
-        if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
-            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        }
-        let tmp = out.with_extension("pack.tmp");
-        std::fs::write(&tmp, &bytes).map_err(|e| format!("{}: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, out).map_err(|e| format!("{}: {e}", out.display()))?;
+        crate::persist::write_atomic(out, &bytes).map_err(|e| format!("{}: {e}", out.display()))?;
         Ok(bytes.len())
     }
 

@@ -10,19 +10,21 @@
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
 
-use crate::data::TypeId;
+pub use crate::net::{Http, Reply};
+use crate::{
+    data::TypeId,
+    net::{COMPATIBILITY_DATE, ESI_BASE, now},
+};
 
 pub mod optimize;
 
-const ESI_URL: &str = "https://esi.evetech.net/markets/prices";
-/// ESI behaviour efa is written against. Bump on purpose after checking what changed.
-const COMPATIBILITY_DATE: &str = "2026-08-18";
-const AGENT: &str = "efa/0.1 (EVE Online fitting tool)";
+/// ESI's price list, under [`ESI_BASE`].
+const ESI_PRICES: &str = "/markets/prices";
 const CACHE_FILE: &str = "prices.json";
 /// How long prices are kept; ESI says so itself, the others are refreshed this often.
 const DEFAULT_MAX_AGE: Duration = Duration::from_secs(3600);
@@ -31,6 +33,8 @@ const CEVE_URL: &str = "https://www.ceve-market.org/tqapi/marketstat";
 const TYCOON_URL: &str = "https://evetycoon.com/api/v1/market/stats";
 /// Types per request to the sources that take a list, so the query string stays a sane length.
 const CHUNK: usize = 200;
+/// Requests EVE Tycoon gets at once; it is asked one type at a time.
+const TYCOON_THREADS: usize = 4;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Prices {
@@ -159,58 +163,6 @@ impl PriceSystem {
 pub struct Origin {
     pub source: PriceSource,
     pub system: PriceSystem,
-}
-
-/// What came back from a GET.
-#[derive(Debug, Clone, Default)]
-pub struct Reply {
-    pub status: u16,
-    pub etag: Option<String>,
-    /// From Cache-Control.
-    pub max_age: Option<Duration>,
-    pub body: Vec<u8>,
-}
-
-impl Reply {
-    fn ok(self, url: &str) -> Result<Self, String> {
-        if (200..300).contains(&self.status) {
-            Ok(self)
-        } else {
-            Err(format!("{url}: HTTP {}", self.status))
-        }
-    }
-}
-
-/// Something that can do a GET; a reqwest client, or canned replies in tests.
-pub trait Http {
-    fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Reply, String>;
-}
-
-impl Http for reqwest::blocking::Client {
-    fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Reply, String> {
-        let mut request = reqwest::blocking::Client::get(self, url);
-        for &(name, value) in headers {
-            request = request.header(name, value);
-        }
-        let response = request.send().map_err(|e| format!("{url}: {e}"))?;
-        let header = |name| {
-            response
-                .headers()
-                .get(name)
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_owned)
-        };
-        let etag = header(reqwest::header::ETAG);
-        let max_age = header(reqwest::header::CACHE_CONTROL).and_then(|v| max_age(&v));
-        let status = response.status().as_u16();
-        let body = response.bytes().map_err(|e| format!("{url}: {e}"))?;
-        Ok(Reply {
-            status,
-            etag,
-            max_age,
-            body: body.to_vec(),
-        })
-    }
 }
 
 #[derive(Deserialize)]
@@ -410,13 +362,14 @@ impl Prices {
         if let Some(etag) = etag.as_deref() {
             headers.push(("If-None-Match", etag));
         }
-        let reply = http.get(ESI_URL, &headers)?;
+        let url = esi_url();
+        let reply = http.get(&url, &headers)?;
         let expires = now() + reply.max_age.unwrap_or(DEFAULT_MAX_AGE).as_secs();
         if reply.status == 304 {
             let others = std::mem::take(&mut self.sources);
             self.by_type.retain(|t, _| !others.contains_key(t));
         } else {
-            let reply = reply.ok(ESI_URL)?;
+            let reply = reply.ok(&url)?;
             self.by_type = parse(&reply.body)?;
             self.sources.clear();
             self.etag = reply.etag;
@@ -426,12 +379,12 @@ impl Prices {
         Ok(())
     }
 
+    /// Best effort: without the file the next start fetches again.
     fn store(&self, cache_dir: &Path) {
         let Ok(json) = serde_json::to_vec(self) else {
             return;
         };
-        let _ = std::fs::create_dir_all(cache_dir);
-        let _ = std::fs::write(cache_dir.join(CACHE_FILE), json);
+        let _ = crate::persist::write_atomic(&cache_dir.join(CACHE_FILE), &json);
     }
 }
 
@@ -495,29 +448,68 @@ fn fetch(
             let hub = hub
                 .or_else(|| PriceSystem::Jita.hub())
                 .expect("Jita is a hub");
-            for &type_id in wanted {
-                let url = format!(
+            let url = |type_id: TypeId| {
+                format!(
                     "{TYCOON_URL}/{}/{type_id}?locationId={}",
                     hub.region, hub.station
-                );
-                let reply = http.get(&url, &[])?;
+                )
+            };
+            fetch_each(wanted, found, |type_id| {
+                let reply = http.get(&url(type_id), &[])?;
                 if reply.status != 200 {
-                    continue;
+                    return Ok(None);
                 }
-                if let Some(price) = parse_tycoon(&reply.body)? {
-                    found.insert(type_id, price);
-                }
-            }
+                parse_tycoon(&reply.body)
+            })?;
         }
         PriceSource::EsiAverage => {
+            let url = esi_url();
             let reply = http
-                .get(ESI_URL, &[("X-Compatibility-Date", COMPATIBILITY_DATE)])?
-                .ok(ESI_URL)?;
+                .get(&url, &[("X-Compatibility-Date", COMPATIBILITY_DATE)])?
+                .ok(&url)?;
             let all = parse(&reply.body)?;
             found.extend(wanted.iter().filter_map(|t| Some((*t, *all.get(t)?))));
         }
     }
     Ok(())
+}
+
+/// Ask a per-type source about each of `wanted`, a few at once, into `found`. After an error
+/// no new requests start, and what was found until then stays found.
+fn fetch_each(
+    wanted: &[TypeId],
+    found: &mut HashMap<TypeId, f64>,
+    ask: impl Fn(TypeId) -> Result<Option<f64>, String> + Sync,
+) -> Result<(), String> {
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let next = AtomicUsize::new(0);
+    let shared = Mutex::new((std::mem::take(found), None::<String>));
+    std::thread::scope(|scope| {
+        for _ in 0..TYCOON_THREADS.min(wanted.len()) {
+            scope.spawn(|| {
+                while let Some(&type_id) = wanted.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    let answer = ask(type_id);
+                    let mut shared = shared.lock().expect("price lock poisoned");
+                    match answer {
+                        Ok(Some(price)) => {
+                            shared.0.insert(type_id, price);
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            next.store(wanted.len(), Ordering::Relaxed);
+                            shared.1.get_or_insert(e);
+                        }
+                    }
+                }
+            });
+        }
+    });
+    let (prices, error) = shared.into_inner().expect("price lock poisoned");
+    *found = prices;
+    error.map_or(Ok(()), Err)
 }
 
 /// Ask a list source about `wanted` a chunk at a time, keeping only types that were asked for.
@@ -600,9 +592,8 @@ fn parse_tycoon(body: &[u8]) -> Result<Option<f64>, String> {
     Ok(stats.sell_avg_five_percent.filter(|&p| p > 0.0))
 }
 
-/// The user agent efa sends, for clients built elsewhere.
-pub fn user_agent() -> &'static str {
-    AGENT
+fn esi_url() -> String {
+    format!("{ESI_BASE}{ESI_PRICES}")
 }
 
 /// The average price where ESI has one, the adjusted price otherwise.
@@ -618,32 +609,19 @@ fn parse(body: &[u8]) -> Result<HashMap<TypeId, f64>, String> {
         .collect())
 }
 
-/// How long a response may be reused, from its Cache-Control max-age.
-fn max_age(cache_control: &str) -> Option<Duration> {
-    cache_control
-        .split(',')
-        .find_map(|part| part.trim().strip_prefix("max-age="))
-        .and_then(|secs| secs.parse().ok())
-        .map(Duration::from_secs)
-}
-
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
-}
-
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::sync::Mutex;
 
     use super::*;
+
+    const ESI_URL: &str = "https://esi.evetech.net/markets/prices";
 
     /// Canned replies by URL prefix, first match wins; every request is logged.
     #[derive(Default)]
     struct Canned {
         replies: Vec<(String, Result<Reply, String>)>,
-        log: RefCell<Vec<String>>,
+        log: Mutex<Vec<String>>,
     }
 
     impl Canned {
@@ -665,7 +643,8 @@ mod tests {
 
         fn asked(&self, prefix: &str) -> usize {
             self.log
-                .borrow()
+                .lock()
+                .expect("log")
                 .iter()
                 .filter(|u| u.starts_with(prefix))
                 .count()
@@ -674,7 +653,7 @@ mod tests {
 
     impl Http for Canned {
         fn get(&self, url: &str, _: &[(&str, &str)]) -> Result<Reply, String> {
-            self.log.borrow_mut().push(url.to_owned());
+            self.log.lock().expect("log").push(url.to_owned());
             self.replies
                 .iter()
                 .find(|(prefix, _)| url.starts_with(prefix.as_str()))
@@ -746,8 +725,9 @@ mod tests {
             .expect("fuzzwork answered");
         assert_eq!(prices.get(35), Some(7.0));
         assert_eq!(prices.source_of(34), Some(PriceSource::Fuzzwork));
-        assert_eq!(http.log.borrow().len(), 1);
-        assert!(http.log.borrow()[0].ends_with("?types=34,35&station=60003760"));
+        let log = http.log.lock().expect("log");
+        assert_eq!(log.len(), 1);
+        assert!(log[0].ends_with("?types=34,35&station=60003760"));
     }
 
     #[test]
@@ -839,14 +819,5 @@ mod tests {
         };
         assert!(prices.is_stale_for(amarr, &types));
         assert!(prices.is_stale_for(JITA, &[34, 35].into()));
-    }
-
-    #[test]
-    fn reads_max_age() {
-        assert_eq!(
-            max_age("public, max-age=1234"),
-            Some(Duration::from_secs(1234))
-        );
-        assert_eq!(max_age("public"), None);
     }
 }

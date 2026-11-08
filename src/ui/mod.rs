@@ -673,7 +673,7 @@ impl Efa {
         self.prices_fetch = Some(cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let http = proxy.client(crate::prices::user_agent())?;
+                    let http = proxy.client()?;
                     prices.refresh_from(&cache_dir, origin, &types, &http)
                 })
                 .await;
@@ -1438,7 +1438,10 @@ impl Efa {
     }
 }
 
-fn load(overrides: &crate::overrides::Values) -> Result<Loaded, String> {
+fn load(
+    overrides: &crate::overrides::Values,
+    proxy: &crate::preferences::Proxy,
+) -> Result<Loaded, String> {
     let start = std::time::Instant::now();
     let source = crate::pack::Source::detect()?;
     let catalog = source.catalog()?;
@@ -1453,7 +1456,8 @@ fn load(overrides: &crate::overrides::Values) -> Result<Loaded, String> {
         engine.apply_overrides(overrides)?;
     }
     let cache_dir = crate::paths::cache_dir();
-    let icons = Icons::new(source.dump_dir(), &cache_dir);
+    // A proxy setting that does not parse leaves icons to what is on disk.
+    let icons = Icons::new(source.dump_dir(), &cache_dir, proxy.client().ok());
     Ok(Loaded {
         catalog,
         engine: std::sync::Arc::new(engine),

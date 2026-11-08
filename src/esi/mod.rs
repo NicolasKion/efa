@@ -36,10 +36,3 @@ pub const DEFAULT_PORT: u16 = 6461;
 pub fn callback_url(port: u16) -> String {
     format!("http://localhost:{port}/callback")
 }
-
-/// Seconds since the epoch.
-pub fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
-}

@@ -380,14 +380,7 @@ fn write_cache(path: &Path, key: &str, data: &ItemData) {
     let Ok(bytes) = postcard::to_stdvec(&CacheFileRef { key, data }) else {
         return;
     };
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    // Per process, so two instances writing at once never interleave in one file.
-    let tmp = path.with_extension(format!("bin.{}.tmp", std::process::id()));
-    if std::fs::write(&tmp, bytes).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
-    }
+    let _ = crate::persist::write_atomic(path, &bytes);
 }
 
 #[derive(Deserialize)]

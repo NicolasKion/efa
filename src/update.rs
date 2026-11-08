@@ -127,7 +127,7 @@ struct Release {
 
 /// The tag of the newest release, previews included.
 fn newest_release(proxy: &Proxy) -> Result<Option<String>, String> {
-    let client = proxy.client(concat!("efa/", env!("CARGO_PKG_VERSION")))?;
+    let client = proxy.client()?;
     let body = client
         .get(format!(
             "https://api.github.com/repos/{REPO}/releases?per_page=20"

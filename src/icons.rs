@@ -2,22 +2,26 @@
 //!
 //! A deimos dump carries the attribute and market group icons. Everything else, and those too
 //! when running on the data pack, is fetched from CCP's CDN the first time it is asked for and
-//! kept in the cache folder, so the cost is paid once per icon.
+//! kept in the cache folder, so the cost is paid once per icon. What could not be fetched is
+//! asked for again a while later, so a start without network does not lose icons for good.
 
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, OnceLock,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Sender},
     },
+    time::{Duration, Instant},
 };
 
 use crate::{cdn::Cdn, data::Catalog};
 
 /// Downloads running at once. Opening a market group asks for dozens of icons together.
 const WORKERS: usize = 4;
+/// How long a failed connection to the CDN, or a failed icon, waits before it is tried again.
+const RETRY: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
@@ -35,61 +39,83 @@ pub enum Icon {
 enum State {
     Ready(PathBuf),
     Fetching,
+    /// The download failed at this time.
+    Failed(Instant),
+    /// Nothing to fetch it from: the data names no art for it, or there is no client.
     Missing,
 }
 
 type States = Arc<Mutex<HashMap<Icon, State>>>;
+
+/// The CDN connection the workers share, made once something is actually missing.
+enum Connection {
+    Untried,
+    Up(Arc<Cdn>),
+    /// Connecting failed at this time.
+    Down(Instant, String),
+}
 
 pub struct Icons {
     /// The dump's attribute and market group icons; the data pack has none.
     dump_dir: Option<PathBuf>,
     cache_dir: PathBuf,
     states: States,
-    fetch: Sender<(Icon, String, PathBuf)>,
+    /// None without a client to download with.
+    fetch: Option<Sender<(Icon, String, PathBuf)>>,
     /// Set when a download lands, so the UI knows to redraw.
     updated: Arc<AtomicBool>,
 }
 
 impl Icons {
-    pub fn new(dump_dir: Option<&Path>, cache_dir: &Path) -> Self {
+    /// Icons from the dump and the cache folder, and what is not there yet from CCP through
+    /// `http`. Without a client only what is on disk shows.
+    pub fn new(
+        dump_dir: Option<&Path>,
+        cache_dir: &Path,
+        http: Option<reqwest::blocking::Client>,
+    ) -> Self {
         let states: States = Arc::default();
         let updated = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = mpsc::channel::<(Icon, String, PathBuf)>();
-        let rx = Arc::new(Mutex::new(rx));
-        // Connecting costs a few seconds the first time, so it only happens once something is
-        // actually missing, and the workers share the one connection.
-        let cdn: Arc<OnceLock<Result<Cdn, String>>> = Arc::default();
-        for _ in 0..WORKERS {
-            let (rx, states, cdn, updated) = (
-                Arc::clone(&rx),
-                Arc::clone(&states),
-                Arc::clone(&cdn),
-                Arc::clone(&updated),
-            );
-            let cdn_cache = cache_dir.to_owned();
-            std::thread::spawn(move || {
-                loop {
-                    let job = rx.lock().expect("icon queue lock poisoned").recv();
-                    let Ok((icon, res_path, dest)) = job else {
-                        return;
-                    };
-                    let state = match fetch(&cdn, &cdn_cache, &res_path, &dest) {
-                        Ok(()) => State::Ready(dest),
-                        Err(_) => State::Missing,
-                    };
-                    states
-                        .lock()
-                        .expect("icon state lock poisoned")
-                        .insert(icon, state);
-                    updated.store(true, Ordering::Release);
-                }
-            });
-        }
+        let fetch = http.map(|http| {
+            let (tx, rx) = mpsc::channel::<(Icon, String, PathBuf)>();
+            let rx = Arc::new(Mutex::new(rx));
+            // Connecting costs a few seconds the first time, so it only happens once something
+            // is actually missing, and the workers share the one connection.
+            let cdn = Arc::new(Mutex::new(Connection::Untried));
+            for _ in 0..WORKERS {
+                let (rx, states, cdn, updated, http) = (
+                    Arc::clone(&rx),
+                    Arc::clone(&states),
+                    Arc::clone(&cdn),
+                    Arc::clone(&updated),
+                    http.clone(),
+                );
+                let cdn_cache = cache_dir.to_owned();
+                std::thread::spawn(move || {
+                    loop {
+                        let job = rx.lock().expect("icon queue lock poisoned").recv();
+                        let Ok((icon, res_path, dest)) = job else {
+                            return;
+                        };
+                        let state = match fetch(&http, &cdn, &cdn_cache, &res_path, &dest) {
+                            Ok(()) => State::Ready(dest),
+                            Err(_) => State::Failed(Instant::now()),
+                        };
+                        states
+                            .lock()
+                            .expect("icon state lock poisoned")
+                            .insert(icon, state);
+                        updated.store(true, Ordering::Release);
+                    }
+                });
+            }
+            tx
+        });
         Self {
             dump_dir: dump_dir.map(|d| d.join("icons")),
             cache_dir: cache_dir.join("icons"),
             states,
-            fetch: tx,
+            fetch,
             updated,
         }
     }
@@ -100,7 +126,8 @@ impl Icons {
         match states.get(&icon) {
             Some(State::Ready(path)) => return Some(path.clone()),
             Some(State::Fetching | State::Missing) => return None,
-            None => {}
+            Some(State::Failed(when)) if when.elapsed() < RETRY => return None,
+            Some(State::Failed(_)) | None => {}
         }
         let (dumped, cached, res_path) = match icon {
             Icon::Id(id) => (
@@ -134,16 +161,20 @@ impl Icons {
             states.insert(icon, State::Ready(path.clone()));
             return Some(path);
         }
-        match res_path {
-            Some(res_path) => {
-                states.insert(icon, State::Fetching);
+        let sent = res_path
+            .zip(self.fetch.as_ref())
+            .is_some_and(|(res_path, fetch)| {
                 let dest = std::path::absolute(&cached).unwrap_or(cached);
-                let _ = self.fetch.send((icon, res_path, dest));
-            }
-            None => {
-                states.insert(icon, State::Missing);
-            }
-        }
+                fetch.send((icon, res_path, dest)).is_ok()
+            });
+        states.insert(
+            icon,
+            if sent {
+                State::Fetching
+            } else {
+                State::Missing
+            },
+        );
         None
     }
 
@@ -154,27 +185,44 @@ impl Icons {
 }
 
 fn fetch(
-    cdn: &OnceLock<Result<Cdn, String>>,
+    http: &reqwest::blocking::Client,
+    cdn: &Mutex<Connection>,
     cache: &Path,
     res_path: &str,
     dest: &Path,
 ) -> Result<(), String> {
     let bytes = if res_path.starts_with("https://") {
         // The image server, not the game's resource CDN.
-        let response = reqwest::blocking::Client::builder()
-            .user_agent(crate::prices::user_agent())
-            .build()
-            .and_then(|client| client.get(res_path).send())
-            .and_then(reqwest::blocking::Response::error_for_status)
-            .map_err(|e| e.to_string())?;
-        response.bytes().map_err(|e| e.to_string())?.to_vec()
+        crate::cdn::get_bytes(http, res_path)?
     } else {
-        let cdn = cdn
-            .get_or_init(|| Cdn::connect(cache))
-            .as_ref()
-            .map_err(Clone::clone)?;
-        cdn.fetch(res_path)?
+        connect(http, cdn, cache)?.fetch(res_path)?
     };
-    std::fs::create_dir_all(dest.parent().unwrap_or(dest)).map_err(|e| e.to_string())?;
-    std::fs::write(dest, bytes).map_err(|e| e.to_string())
+    // Written whole or not at all: a file that is there counts as the icon from then on.
+    crate::persist::write_atomic(dest, &bytes).map_err(|e| e.to_string())
+}
+
+/// The shared CDN connection, made now if there is none and the last try is long enough ago.
+/// Other workers wait while one connects rather than all connecting at once.
+fn connect(
+    http: &reqwest::blocking::Client,
+    cdn: &Mutex<Connection>,
+    cache: &Path,
+) -> Result<Arc<Cdn>, String> {
+    let mut connection = cdn.lock().expect("CDN lock poisoned");
+    match &*connection {
+        Connection::Up(cdn) => return Ok(Arc::clone(cdn)),
+        Connection::Down(when, e) if when.elapsed() < RETRY => return Err(e.clone()),
+        Connection::Down(..) | Connection::Untried => {}
+    }
+    match Cdn::connect(http.clone(), cache) {
+        Ok(up) => {
+            let up = Arc::new(up);
+            *connection = Connection::Up(Arc::clone(&up));
+            Ok(up)
+        }
+        Err(e) => {
+            *connection = Connection::Down(Instant::now(), e.clone());
+            Err(e)
+        }
+    }
 }
