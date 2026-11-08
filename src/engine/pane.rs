@@ -12,7 +12,7 @@ use rc::{
 };
 
 use super::{Cap, Damage, Stats, read};
-use crate::{dogma::attr, fit::DamageProfile};
+use crate::{damage_pattern::UNIFORM, dogma::attr, fit::DamageProfile};
 
 /// Settings that change how numbers are calculated rather than what is fitted.
 #[derive(Debug, Clone, Copy, Default)]
@@ -153,9 +153,6 @@ const HOLDS: [(i32, &str); 21] = [
 
 /// Shield regeneration peaks at this fill level.
 pub(super) const PEAK_SHIELD: f64 = 0.25;
-
-/// Uniform damage, pyfa's default pattern.
-const UNIFORM: [f64; 4] = [25.0; 4];
 
 /// The EM, thermal, kinetic, explosive mix a damage profile stands for on this fit.
 pub(super) fn incoming_mix(f: &mut rc::Fit<'_>, profile: &DamageProfile) -> [f64; 4] {

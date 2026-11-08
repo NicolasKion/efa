@@ -16,6 +16,7 @@ use rc::{
 
 use super::{BuildOptions, CalcOptions, Damage, Engine, Pilot, build::Placed, read};
 use crate::{
+    damage_pattern,
     data::{Catalog, Hardpoint, Slot},
     dogma::{attr, effect, group},
     fit::{Fit, ModuleState},
@@ -123,14 +124,8 @@ impl Engine {
             drone_dps: stats.drone_dps,
             ..Ship::default()
         };
-        // Against uniform damage a layer's EHP is its HP over the average resonance.
         ship.ehp_uniform = std::array::from_fn(|i| {
-            let resonance = ship.resists[i].iter().map(|r| (1.0 - r) / 4.0).sum::<f64>();
-            if resonance > 0.0 {
-                ship.hp[i] / resonance
-            } else {
-                0.0
-            }
+            damage_pattern::effective_hp(ship.hp[i], ship.resists[i], damage_pattern::UNIFORM)
         });
         match stats.cap {
             Some(super::Cap::Stable(level)) => ship.cap_stable = Some(level),

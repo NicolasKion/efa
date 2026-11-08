@@ -142,6 +142,53 @@ impl<T> Tree<T> {
     }
 }
 
+/// What a clipboard import found.
+#[derive(Debug, Default, PartialEq)]
+pub struct Imported<T> {
+    /// Entries read in full.
+    pub items: Vec<T>,
+    /// Lines that named an entry, read or not.
+    pub lines: usize,
+}
+
+/// Something the clipboard format holds a list of.
+pub trait Kind {
+    /// What the notices call them.
+    const PLURAL: &'static str;
+}
+
+impl<T: Kind> Imported<T> {
+    /// pyfa's notice after an import; `ok` is its success message.
+    pub fn notice(&self, ok: &str) -> String {
+        let (lines, read, what) = (self.lines, self.items.len(), T::PLURAL);
+        if read == 0 {
+            format!("No {what} found for import")
+        } else if read == lines {
+            ok.to_owned()
+        } else {
+            // pyfa reports the lines as imported, not the ones that were read.
+            format!(
+                "{lines} {what} imported from clipboard; {} had errors",
+                lines - read
+            )
+        }
+    }
+}
+
+/// The `key = values` lines of pyfa's clipboard format, comments dropped. Lines without `=` or
+/// with nothing but a comment are skipped, as pyfa does.
+pub(crate) fn lines(text: &str) -> impl Iterator<Item = (&str, &str)> {
+    text.split(['\n', '\r']).filter_map(|line| {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            return None;
+        }
+        let line = line.split('#').next().unwrap_or_default();
+        let (key, data) = line.rsplit_once('=')?;
+        Some((key.trim(), data))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

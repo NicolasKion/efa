@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     fit::{DamageProfile, Fit},
-    profile::{self, Tree},
+    profile::{self, Imported, Kind, Tree, lines},
 };
 
 /// A named EM, thermal, kinetic, explosive mix; only the ratios matter.
@@ -39,6 +39,9 @@ impl DamagePattern {
 /// The name "Set {X} as Damage Pattern" gives the pattern it makes, as pyfa does.
 pub const SELECTED_AMMO: &str = "Selected Ammo";
 
+/// Uniform damage, pyfa's default pattern.
+pub const UNIFORM: [f64; 4] = [25.0; 4];
+
 /// Names pyfa keeps out of the editor and the export: they are set from the fit, not edited.
 const NOT_EDITABLE: [&str; 2] = ["Uniform", SELECTED_AMMO];
 
@@ -54,7 +57,7 @@ pub fn editable(pattern: &DamagePattern) -> bool {
 
 /// Raw name and EM, thermal, kinetic, explosive amounts, in pyfa's order.
 const BUILTIN: &[(&str, [f64; 4])] = &[
-    ("Uniform", [25.0, 25.0, 25.0, 25.0]),
+    ("Uniform", UNIFORM),
     ("[Generic]EM", [1.0, 0.0, 0.0, 0.0]),
     ("[Generic]Thermal", [0.0, 1.0, 0.0, 0.0]),
     ("[Generic]Kinetic", [0.0, 0.0, 1.0, 0.0]),
@@ -269,45 +272,8 @@ pub fn tree(user: &[DamagePattern]) -> Tree<DamagePattern> {
     tree
 }
 
-/// What a clipboard import found.
-#[derive(Debug, Default, PartialEq)]
-pub struct Imported<T> {
-    /// Entries read in full.
-    pub items: Vec<T>,
-    /// Lines that named an entry, read or not.
-    pub lines: usize,
-}
-
-impl<T> Imported<T> {
-    /// pyfa's notice after an import; `ok` is its success message.
-    pub fn notice(&self, ok: &str) -> String {
-        let (lines, read) = (self.lines, self.items.len());
-        if read == 0 {
-            "No patterns found for import".to_owned()
-        } else if read == lines {
-            ok.to_owned()
-        } else {
-            // pyfa reports the lines as imported, not the ones that were read.
-            format!(
-                "{lines} patterns imported from clipboard; {} had errors",
-                lines - read
-            )
-        }
-    }
-}
-
-/// The `key = values` lines of pyfa's clipboard format, comments dropped. Lines without `=` or
-/// with nothing but a comment are skipped, as pyfa does.
-pub(crate) fn lines(text: &str) -> impl Iterator<Item = (&str, &str)> {
-    text.split(['\n', '\r']).filter_map(|line| {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            return None;
-        }
-        let line = line.split('#').next().unwrap_or_default();
-        let (key, data) = line.rsplit_once('=')?;
-        Some((key.trim(), data))
-    })
+impl Kind for DamagePattern {
+    const PLURAL: &'static str = "patterns";
 }
 
 /// Read pyfa's `DamageProfile = name,em,thermal,kinetic,explosive` lines. Amounts are whole
