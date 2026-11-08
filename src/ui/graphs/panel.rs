@@ -1,52 +1,33 @@
 //! The settings strip under the plot: small labelled groups of tight rows, like pyfa's panel,
 //! with each setting's explanation on hover rather than taking room.
 
-use gpui_kit::component::{ActiveTheme, Sizable, h_flex, switch::Switch, v_flex};
+use gpui_kit::component::{Sizable, h_flex, switch::Switch, v_flex};
 use gpui_kit::{
-    AnyElement, App, Context, FontWeight, InteractiveElement, IntoElement, ParentElement,
-    SharedString, StatefulInteractiveElement, Styled, div, prelude::FluentBuilder, px,
+    AnyElement, App, Context, InteractiveElement, IntoElement, ParentElement, SharedString, Styled,
+    div, prelude::FluentBuilder, px,
 };
 
 use super::GraphsWindow;
-
-/// A small uppercase label, over a card or a picker.
-pub fn caption(text: &str, cx: &App) -> impl IntoElement {
-    div()
-        .px_1()
-        .text_xs()
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(cx.theme().muted_foreground)
-        .child(text.to_uppercase())
-}
+use crate::ui::widgets::{Segment, TipExt, caption, segmented};
 
 /// Height of a setting's row.
-pub const ROW_H: f32 = 28.;
+pub(super) const ROW_H: f32 = 28.;
 
 /// A setting: its name, then its control; the description shows on hover.
-pub fn row(
-    title: impl Into<SharedString>,
-    description: &str,
-    control: impl IntoElement,
-    _cx: &App,
-) -> AnyElement {
+fn row(title: impl Into<SharedString>, description: &str, control: impl IntoElement) -> AnyElement {
     let title: SharedString = title.into();
-    let tip: SharedString = description.to_owned().into();
     h_flex()
         .id(SharedString::from(format!("row-{title}")))
         .h(px(ROW_H))
         .gap_2()
         .child(div().flex_1().min_w_0().truncate().child(title))
         .child(div().flex_none().child(control))
-        .when(!tip.is_empty(), |d| {
-            d.tooltip(move |window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
-            })
-        })
+        .when(!description.is_empty(), |d| d.tip(description.to_owned()))
         .into_any_element()
 }
 
 /// A setting whose control takes the room its short name leaves, up to `max_w`.
-pub fn fill_row(
+pub(super) fn fill_row(
     title: &'static str,
     description: &'static str,
     control: impl IntoElement,
@@ -59,23 +40,21 @@ pub fn fill_row(
         .justify_between()
         .child(div().flex_none().child(title))
         .child(div().flex_1().min_w_0().max_w(px(max_w)).child(control))
-        .tooltip(move |window, cx| {
-            gpui_kit::component::tooltip::Tooltip::new(description).build(window, cx)
-        })
+        .tip(description)
         .into_any_element()
 }
 
 /// A labelled group of rows.
-pub fn section(title: &str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
+pub(super) fn section(title: &str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
     v_flex()
         .gap_1p5()
-        .child(caption(title, cx))
+        .child(caption(title, cx).px_1())
         .children(rows)
         .into_any_element()
 }
 
 /// A switch row that calls `apply` with the new value.
-pub fn switch(
+pub(super) fn switch(
     id: impl Into<SharedString>,
     title: &'static str,
     description: &'static str,
@@ -87,11 +66,12 @@ pub fn switch(
         .small()
         .checked(checked)
         .on_click(cx.listener(move |g, value: &bool, _, cx| apply(g, *value, cx)));
-    row(title, description, control, cx)
+    row(title, description, control)
 }
 
-/// One of a few values as a segmented control, under the setting's text.
-pub fn choice<T: Copy + PartialEq + 'static>(
+/// One of a few values as a segmented control beside the setting's name, or under it when the
+/// group is too narrow for both on a line.
+pub(super) fn choice<T: Copy + PartialEq + 'static>(
     id: &'static str,
     title: &'static str,
     description: &'static str,
@@ -100,48 +80,23 @@ pub fn choice<T: Copy + PartialEq + 'static>(
     apply: fn(&mut GraphsWindow, T, &mut Context<GraphsWindow>),
     cx: &mut Context<GraphsWindow>,
 ) -> AnyElement {
-    let theme = cx.theme();
-    let segments: Vec<AnyElement> = options
+    let segments = options
         .iter()
-        .enumerate()
-        .map(|(n, &(value, label))| {
-            let selected = current == value;
-            div()
-                .id(SharedString::from(format!("{id}-{n}")))
-                .flex()
-                .justify_center()
-                .px_2()
-                .rounded(px(5.))
-                .text_xs()
-                .whitespace_nowrap()
-                .when(selected, |d| {
-                    d.bg(theme.primary)
-                        .text_color(theme.primary_foreground)
-                        .font_weight(FontWeight::MEDIUM)
-                })
-                .when(!selected, |d| {
-                    d.text_color(theme.muted_foreground)
-                        .hover(|s| s.bg(theme.secondary).text_color(theme.foreground))
-                })
-                .child(label)
-                .on_mouse_down(
-                    gpui_kit::MouseButton::Left,
-                    cx.listener(move |g, _: &gpui_kit::MouseDownEvent, _, cx| apply(g, value, cx)),
-                )
-                .into_any_element()
-        })
+        .map(|&(value, label)| Segment::new(label, value == current))
         .collect();
-    let control = h_flex()
-        .flex_wrap()
-        .max_w_full()
-        .gap_0p5()
-        .p_0p5()
-        .rounded(px(5.))
-        .border_1()
-        .border_color(theme.border)
-        .bg(theme.background)
-        .children(segments);
-    // The control drops under its name when the group is too narrow for both on a line.
+    let values: Vec<T> = options.iter().map(|&(value, _)| value).collect();
+    let control = segmented(id, segments, cx, move |g, i, _, cx| {
+        if let Some(&value) = values.get(i) {
+            apply(g, value, cx);
+        }
+    });
+    // The segments share the width evenly, so the widest label sets how much each needs.
+    let widest = options
+        .iter()
+        .map(|(_, label)| label.chars().count())
+        .max()
+        .unwrap_or(0);
+    let min_w = options.len() as f32 * (widest as f32 * SEGMENT_CHAR_W + SEGMENT_PAD);
     h_flex()
         .id(SharedString::from(format!("row-{title}")))
         .flex_wrap()
@@ -155,12 +110,13 @@ pub fn choice<T: Copy + PartialEq + 'static>(
                 .truncate()
                 .child(title),
         )
-        .child(control)
-        .tooltip(move |window, cx| {
-            gpui_kit::component::tooltip::Tooltip::new(description).build(window, cx)
-        })
+        .child(div().flex_1().min_w(px(min_w)).child(control))
+        .tip(description)
         .into_any_element()
 }
 
 /// What a segmented setting's name keeps beside its control before the control wraps under it.
 const CHOICE_TITLE_MIN_W: f32 = 80.;
+/// About how wide a character of a segment's label is, and the room a segment takes around it.
+const SEGMENT_CHAR_W: f32 = 6.5;
+const SEGMENT_PAD: f32 = 18.;
