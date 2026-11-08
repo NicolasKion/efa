@@ -381,7 +381,12 @@ impl OverridesWindow {
             };
             let listed = types
                 .into_iter()
-                .map(|t| (t, overrides.of(t).map_or(0, std::collections::BTreeMap::len)))
+                .map(|t| {
+                    (
+                        t,
+                        overrides.of(t).map_or(0, std::collections::BTreeMap::len),
+                    )
+                })
                 .collect();
             (overrides.enabled, !overrides.values.is_empty(), listed)
         };
@@ -421,9 +426,11 @@ impl OverridesWindow {
                             .flex_1()
                             .min_w_0()
                             .child(div().font_weight(FontWeight::MEDIUM).child("Use overrides"))
-                            .child(div().text_xs().text_color(muted).child(
-                                "Overridden values replace the base values in every fit.",
-                            )),
+                            .child(
+                                div().text_xs().text_color(muted).child(
+                                    "Overridden values replace the base values in every fit.",
+                                ),
+                            ),
                     )
                     .child(div().flex_none().child(switch)),
             )
@@ -524,7 +531,8 @@ impl OverridesWindow {
     }
 
     fn body(&mut self, narrow: bool, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let muted = |text: &'static str, cx: &Context<Self>| empty_line(text, cx).into_any_element();
+        let muted =
+            |text: &'static str, cx: &Context<Self>| empty_line(text, cx).into_any_element();
         let Some(type_id) = self.selected else {
             return muted("Pick an item on the left to see its attributes.", cx);
         };

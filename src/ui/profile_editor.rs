@@ -9,23 +9,29 @@
 
 use std::{marker::PhantomData, rc::Rc};
 
+use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Sizable, WindowExt,
-    button::{Button, ButtonVariants},
-    h_flex,
+    ActiveTheme, Disableable, Sizable, h_flex,
     input::{Input, InputEvent, InputState},
     v_flex,
 };
 use gpui_kit::{
-    App, AppContext, ClickEvent, ClipboardItem, Context, Entity, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
-    div, prelude::FluentBuilder, px,
+    AnyElement, App, AppContext, ClickEvent, ClipboardItem, Context, Entity, FocusHandle,
+    FontWeight, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder, px,
 };
 
 use super::{
     Loaded,
+    dialogs::{Confirm, Prompt, confirm, prompt_text},
+    editor_kit::{
+        CONTEXT, Delete, Duplicate, FocusSearch, Rename, Sidebar, icon_button, name_problem,
+        next_after_delete,
+    },
     hub::{Hub, HubLoading},
-    widgets::{icon, icon_box},
+    widgets::{
+        TipExt, caption, empty_line, icon, icon_box, list_row, parse_decimal, redraw_on_change,
+    },
 };
 use crate::{
     damage_pattern::{self, DamagePattern},
@@ -36,9 +42,6 @@ use crate::{
     target_profile::{self, TargetProfile},
 };
 
-/// The list's width, and its width in a narrow window.
-const LIST_W: f32 = 250.;
-const LIST_NARROW_W: f32 = 170.;
 /// Below this width the list narrows and the fields' notes give way first.
 const NARROW_W: f32 = 640.;
 
@@ -60,6 +63,8 @@ pub trait Kind: 'static {
     const TITLE: &'static str;
     /// What pyfa calls one entry in its prompts.
     const ENTITY: &'static str;
+    /// The caption over the list.
+    const LIST: &'static str;
     const IMPORT_TIP: &'static str;
     const EXPORT_TIP: &'static str;
     const IMPORTED: &'static str;
@@ -195,9 +200,7 @@ fn number(text: &str) -> Result<Option<f64>, &'static str> {
     if text.is_empty() {
         return Ok(None);
     }
-    text.replace(',', ".")
-        .parse::<f64>()
-        .ok()
+    parse_decimal::<f64>(text)
         .filter(|v| v.is_finite())
         .map(Some)
         .ok_or(BAD_NUMBER)
@@ -210,6 +213,7 @@ impl Kind for DamagePatterns {
     type Item = DamagePattern;
     const TITLE: &'static str = "Damage Pattern Editor";
     const ENTITY: &'static str = "Damage Profile";
+    const LIST: &'static str = "Damage patterns";
     const IMPORT_TIP: &'static str = "Import patterns from clipboard";
     const EXPORT_TIP: &'static str = "Export patterns to clipboard";
     const IMPORTED: &'static str = "Patterns successfully imported from clipboard";
@@ -291,6 +295,7 @@ impl Kind for TargetProfiles {
     type Item = TargetProfile;
     const TITLE: &'static str = "Target Profile Editor";
     const ENTITY: &'static str = "Target Profile";
+    const LIST: &'static str = "Target profiles";
     const IMPORT_TIP: &'static str = "Import profiles from clipboard";
     const EXPORT_TIP: &'static str = "Export profiles to clipboard";
     const IMPORTED: &'static str = "Profiles successfully imported from clipboard";
@@ -416,7 +421,10 @@ pub struct Editor<K: Kind> {
     loaded: Option<Rc<Loaded>>,
     selected: Option<Selection>,
     inputs: Vec<Entity<InputState>>,
+    /// Narrows the list by name.
+    search: Entity<InputState>,
     notice: Option<SharedString>,
+    focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
     _kind: PhantomData<K>,
 }
@@ -432,24 +440,28 @@ impl<K: Kind> Editor<K> {
             .iter()
             .map(|_| cx.new(|cx| InputState::new(window, cx)))
             .collect();
-        let mut subscriptions = vec![cx.observe_in(&hub, window, |this, hub, window, cx| {
-            if this.loaded.is_none()
-                && let HubLoading::Ready(loaded) = &hub.read(cx).loading
-            {
-                this.loaded = Some(Rc::clone(loaded));
-            }
-            // Another window may have removed or renamed the shown entry.
-            if matches!(&this.selected, Some(Selection::User(_)))
-                && this.selected_item(cx).is_none()
-            {
-                let first = this
-                    .user(cx)
-                    .first()
-                    .map(|item| Selection::User(K::name(item).to_owned()));
-                this.select(first, window, cx);
-            }
-            cx.notify();
-        })];
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search"));
+        let mut subscriptions = vec![
+            cx.observe_in(&hub, window, |this, hub, window, cx| {
+                if this.loaded.is_none()
+                    && let HubLoading::Ready(loaded) = &hub.read(cx).loading
+                {
+                    this.loaded = Some(Rc::clone(loaded));
+                }
+                // Another window may have removed or renamed the shown entry.
+                if matches!(&this.selected, Some(Selection::User(_)))
+                    && this.selected_item(cx).is_none()
+                {
+                    let first = this
+                        .user(cx)
+                        .first()
+                        .map(|item| Selection::User(K::name(item).to_owned()));
+                    this.select(first, window, cx);
+                }
+                cx.notify();
+            }),
+            redraw_on_change(cx, &search),
+        ];
         subscriptions.extend(inputs.iter().map(|input| {
             cx.subscribe(input, |this, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
@@ -461,12 +473,16 @@ impl<K: Kind> Editor<K> {
             HubLoading::Ready(loaded) => Some(Rc::clone(loaded)),
             HubLoading::Pending | HubLoading::Failed(_) => None,
         };
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
         let mut this = Self {
             hub,
             loaded,
             selected: None,
             inputs,
+            search,
             notice: None,
+            focus,
             _subscriptions: subscriptions,
             _kind: PhantomData,
         };
@@ -586,20 +602,14 @@ impl<K: Kind> Editor<K> {
 
     /// Why `name` cannot name an entry, in pyfa's words. `keep` is the entry being renamed,
     /// which may keep its name.
-    fn name_problem(&self, name: &str, keep: Option<&str>, cx: &App) -> Option<String> {
-        if name.is_empty() {
-            Some(format!("You must supply a name for your {}!", K::ENTITY))
-        } else if K::user(&self.hub.read(cx).saved)
-            .iter()
-            .any(|item| K::name(item) == name && Some(name) != keep)
-        {
-            Some(format!(
-                "{} name already in use, please choose another.",
-                K::ENTITY
-            ))
-        } else {
-            None
-        }
+    fn name_problem(&self, name: &str, keep: Option<&str>, cx: &App) -> Option<SharedString> {
+        let user = K::user(&self.hub.read(cx).saved);
+        name_problem(name, user.iter().map(|item| K::name(item)), keep).map(|p| {
+            p.say(
+                format!("You must supply a name for your {}!", K::ENTITY),
+                format!("{} name already in use, please choose another.", K::ENTITY),
+            )
+        })
     }
 
     /// Carry out a name prompt that was answered with a usable name.
@@ -633,13 +643,12 @@ impl<K: Kind> Editor<K> {
         let Some(Selection::User(name)) = self.selected.clone() else {
             return;
         };
+        let at = self.user(cx).iter().position(|item| K::name(item) == name);
         self.edit(cx, |saved| {
             K::user_mut(saved).retain(|item| K::name(item) != name);
             K::retarget(&mut saved.fits, &name, None);
         });
-        let next = self
-            .user(cx)
-            .first()
+        let next = next_after_delete(&self.user(cx), at)
             .map(|item| Selection::User(K::name(item).to_owned()));
         self.select(next, window, cx);
     }
@@ -669,89 +678,65 @@ impl<K: Kind> Editor<K> {
         cx.notify();
     }
 
-    /// pyfa's name prompt for New, Rename and Copy, in this window.
+    /// pyfa's name prompt for New, Rename and Copy, in this window. A renamed entry may keep
+    /// its name.
     fn prompt_name(&mut self, naming: Naming, window: &mut Window, cx: &mut Context<Self>) {
-        let current = self
-            .selected_item(cx)
-            .map_or_default(|item| K::name(&item).to_owned());
-        let (title, message, default) = match naming {
+        let Some(item) = self.selected_item(cx) else {
+            if naming == Naming::New {
+                self.ask_name(naming, String::new(), window, cx);
+            }
+            return;
+        };
+        let current = K::name(&item).to_owned();
+        match naming {
+            Naming::New => self.ask_name(naming, String::new(), window, cx),
+            Naming::Rename if self.can_edit(cx) => self.ask_name(naming, current, window, cx),
+            Naming::Rename => {}
+            Naming::Copy => self.ask_name(naming, format!("{current} Copy"), window, cx),
+        }
+    }
+
+    fn ask_name(
+        &mut self,
+        naming: Naming,
+        default: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (title, message) = match naming {
             Naming::New => (
                 format!("New {}", K::ENTITY),
                 format!("Enter a name for your new {}:", K::ENTITY),
-                String::new(),
             ),
             Naming::Rename => (
                 format!("Rename {}", K::ENTITY),
                 format!("Enter a new name for your {}:", K::ENTITY),
-                current,
             ),
             Naming::Copy => (
                 format!("Copy {}", K::ENTITY),
                 format!("Enter a name for your {} copy:", K::ENTITY),
-                format!("{current} Copy"),
             ),
         };
         let keep = (naming == Naming::Rename).then(|| default.clone());
-        let input = cx.new(|cx| InputState::new(window, cx).default_value(default));
-        let error = cx.new(|_| None::<SharedString>);
         let editor = cx.weak_entity();
-        window.open_dialog(cx, move |dialog, _, cx| {
-            let (input, error, editor, keep) =
-                (input.clone(), error.clone(), editor.clone(), keep.clone());
-            let problem = error.read(cx).clone();
-            // The OK button and Enter both submit; it closes the dialog itself when done.
-            let submit: crate::ui::widgets::Submit = {
-                let (input, error, editor) = (input.clone(), error.clone(), editor.clone());
-                Rc::new(move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                    let name = input.read(cx).value().trim().to_owned();
-                    let problem = editor
-                        .upgrade()
-                        .and_then(|e| e.read(cx).name_problem(&name, keep.as_deref(), cx));
-                    if let Some(problem) = problem {
-                        error.update(cx, |e, cx| {
-                            *e = Some(problem.into());
-                            cx.notify();
-                        });
-                        window.refresh();
-                        return;
-                    }
-                    window.close_dialog(cx);
-                    let _ = editor.update(cx, |e, cx| e.named(naming, name, window, cx));
-                })
-            };
-            dialog
-                .on_ok({
-                    let submit = Rc::clone(&submit);
-                    move |e, w, cx| {
-                        submit(e, w, cx);
-                        false
-                    }
-                })
-                .title(title.clone())
-                .w(px(380.))
-                .child(
-                    v_flex()
-                        .gap_3()
-                        .child(message.clone())
-                        .child(Input::new(&input))
-                        .when_some(problem, |col, problem| {
-                            col.child(div().text_sm().text_color(cx.theme().danger).child(problem))
-                        })
-                        .child(
-                            h_flex().justify_end().child(
-                                Button::new("profile-name-ok")
-                                    .primary()
-                                    .label("OK")
-                                    .on_click({
-                                        let submit = Rc::clone(&submit);
-                                        move |e: &ClickEvent, w: &mut Window, cx: &mut App| {
-                                            submit(e, w, cx);
-                                        }
-                                    }),
-                            ),
-                        ),
-                )
-        });
+        let check = {
+            let editor = editor.clone();
+            move |name: &str, cx: &App| {
+                editor
+                    .upgrade()?
+                    .read(cx)
+                    .name_problem(name, keep.as_deref(), cx)
+            }
+        };
+        prompt_text(
+            window,
+            cx,
+            Prompt::new(title).message(message).default(default),
+            check,
+            move |name, window, cx| {
+                let _ = editor.update(cx, |e, cx| e.named(naming, name, window, cx));
+            },
+        );
     }
 
     /// pyfa asks before deleting.
@@ -760,35 +745,23 @@ impl<K: Kind> Editor<K> {
             return;
         };
         let editor = cx.weak_entity();
-        window.open_dialog(cx, move |dialog, _, _| {
-            let yes = editor.clone();
-            dialog.title("Confirm Delete").w(px(380.)).child(
-                v_flex()
-                    .gap_3()
-                    .child(format!(
-                        "Do you really want to delete the {name} {}?",
-                        K::ENTITY
-                    ))
-                    .child(
-                        h_flex()
-                            .justify_end()
-                            .gap_2()
-                            .child(
-                                Button::new("profile-delete-no")
-                                    .label("No")
-                                    .on_click(|_, window, cx| window.close_dialog(cx)),
-                            )
-                            .child(
-                                Button::new("profile-delete-yes")
-                                    .danger()
-                                    .label("Yes")
-                                    .on_click(move |_, window, cx| {
-                                        window.close_dialog(cx);
-                                        let _ = yes.update(cx, |e, cx| e.delete(window, cx));
-                                    }),
-                            ),
-                    ),
-            )
+        confirm(
+            window,
+            cx,
+            Confirm::delete(format!(
+                "Do you really want to delete the {name} {}?",
+                K::ENTITY
+            )),
+            move |window, cx| {
+                let _ = editor.update(cx, |e, cx| e.delete(window, cx));
+            },
+        );
+    }
+
+    fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search.update(cx, |input, cx| {
+            input.focus(window, cx);
+            input.select_all(window, cx);
         });
     }
 
@@ -798,40 +771,47 @@ impl<K: Kind> Editor<K> {
         label: String,
         selection: Selection,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let theme = cx.theme();
+    ) -> AnyElement {
         let selected = self.selected.as_ref() == Some(&selection);
-        div()
-            .id(id)
+        list_row(id, selected, cx)
             .px_2()
-            .py_0p5()
-            .truncate()
-            .when(selected, |row| row.bg(theme.table_active))
-            .hover(|s| s.bg(theme.table_hover))
-            .child(label)
+            .child(div().flex_1().min_w_0().truncate().child(label))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.select(Some(selection.clone()), window, cx);
+                window.focus(&this.focus, cx);
             }))
+            .into_any_element()
     }
 
-    fn list(&self, width: f32, cx: &mut Context<Self>) -> impl IntoElement {
+    fn list(&self, narrow: bool, cx: &mut Context<Self>) -> AnyElement {
+        let query = self.search.read(cx).value().trim().to_lowercase();
+        let shown = |name: &str| query.is_empty() || name.to_lowercase().contains(&query);
         let user: Vec<String> = self
             .user(cx)
             .iter()
             .map(|item| K::name(item).to_owned())
+            .filter(|name| shown(name))
             .collect();
-        let muted = cx.theme().muted_foreground;
-        let heading =
-            |text: &'static str| div().px_2().pt_1().text_xs().text_color(muted).child(text);
-        let mut list = v_flex().child(heading("Yours"));
-        if user.is_empty() {
-            list = list.child(
-                div()
-                    .px_2()
-                    .text_sm()
-                    .text_color(muted)
-                    .child("None yet. Click New, or Copy a builtin."),
-            );
+        let builtins: Vec<(usize, String)> = K::builtins()
+            .iter()
+            .enumerate()
+            .map(|(i, item)| (i, profile::full_name(K::name(item))))
+            .filter(|(_, name)| shown(name))
+            .collect();
+        let heading = |text: &str, cx: &App| {
+            div()
+                .px_2()
+                .pt_2()
+                .pb_1()
+                .child(caption(text, cx))
+                .into_any_element()
+        };
+        let mut rows = Vec::new();
+        if !user.is_empty() || query.is_empty() {
+            rows.push(heading("Yours", cx));
+        }
+        if user.is_empty() && query.is_empty() {
+            rows.push(empty_line("None yet. Click New, or Copy a builtin.", cx).into_any_element());
         }
         for (i, name) in user.into_iter().enumerate() {
             let row = self.entry_row(
@@ -840,29 +820,72 @@ impl<K: Kind> Editor<K> {
                 Selection::User(name),
                 cx,
             );
-            list = list.child(row);
+            rows.push(row);
         }
-        list = list.child(heading("Builtin"));
-        for (i, item) in K::builtins().iter().enumerate() {
+        if !builtins.is_empty() {
+            rows.push(heading("Builtin", cx));
+        }
+        for (i, name) in builtins {
             let row = self.entry_row(
                 SharedString::from(format!("builtin-{i}")),
-                profile::full_name(K::name(item)),
+                name,
                 Selection::Builtin(i),
                 cx,
             );
-            list = list.child(row);
+            rows.push(row);
         }
-        let theme = cx.theme();
-        div()
-            .id("profile-list")
-            .flex_none()
-            .w(px(width))
-            .h_full()
-            .overflow_y_scroll()
-            .border_1()
-            .border_color(theme.border)
-            .rounded(px(4.))
-            .child(list)
+        let has = self.selected.is_some();
+        let user = matches!(self.selected, Some(Selection::User(_)));
+        let editable = self.can_edit(cx);
+        let footer = h_flex()
+            .gap_1()
+            .child(
+                icon_button("profile-new", AssetIcon::Plus, "New").on_click(cx.listener(
+                    |this, _, window, cx| {
+                        this.prompt_name(Naming::New, window, cx);
+                    },
+                )),
+            )
+            .child(
+                icon_button("profile-copy", AssetIcon::Copy, "Copy (Ctrl+D)")
+                    .disabled(!has)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.prompt_name(Naming::Copy, window, cx);
+                    })),
+            )
+            .child(
+                icon_button("profile-rename", AssetIcon::Pencil, "Rename (F2)")
+                    .disabled(!editable)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.prompt_name(Naming::Rename, window, cx);
+                    })),
+            )
+            .child(
+                icon_button("profile-import", AssetIcon::ClipboardPaste, K::IMPORT_TIP)
+                    .on_click(cx.listener(|this, _, window, cx| this.import(window, cx))),
+            )
+            .child(
+                icon_button("profile-export", AssetIcon::ClipboardCopy, K::EXPORT_TIP)
+                    .on_click(cx.listener(|this, _, _, cx| this.export(cx))),
+            )
+            .child(div().flex_1())
+            .child(
+                icon_button("profile-delete", AssetIcon::Trash, "Delete (Delete)")
+                    .disabled(!user)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.confirm_delete(window, cx);
+                    })),
+            );
+        Sidebar {
+            caption: K::LIST.into(),
+            search: Some(self.search.clone()),
+            list_id: "profile-list",
+            rows,
+            empty: Some(empty_line("Nothing matches.", cx).into_any_element()),
+            footer: Some(footer.into_any_element()),
+            narrow,
+        }
+        .render(cx)
     }
 
     fn fields(&self, item: Option<&K::Item>, cx: &App) -> impl IntoElement {
@@ -873,7 +896,6 @@ impl<K: Kind> Editor<K> {
                 }
                 _ => div().w(px(20.)).into_any_element(),
             };
-            let tip = SharedString::from(field.tip);
             h_flex()
                 .id(SharedString::from(format!("field-{i}")))
                 .gap_2()
@@ -894,9 +916,7 @@ impl<K: Kind> Editor<K> {
                         .text_color(cx.theme().muted_foreground)
                         .child(item.and_then(|item| K::note(item, i)).unwrap_or_default()),
                 )
-                .tooltip(move |window, cx| {
-                    gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
-                })
+                .tip(field.tip)
         });
         v_flex().flex_none().gap_2().children(rows)
     }
@@ -904,14 +924,8 @@ impl<K: Kind> Editor<K> {
 
 impl<K: Kind> Render for Editor<K> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let list_w = if window.viewport_size().width < px(NARROW_W) {
-            LIST_NARROW_W
-        } else {
-            LIST_W
-        };
+        let narrow = window.viewport_size().width < px(NARROW_W);
         let item = self.selected_item(cx);
-        let user = matches!(self.selected, Some(Selection::User(_)));
-        let editable = self.can_edit(cx);
         let heading = match (&self.selected, &item) {
             (Some(Selection::Builtin(_)), Some(item)) => {
                 format!("{} (builtin, read-only)", profile::full_name(K::name(item)))
@@ -919,106 +933,41 @@ impl<K: Kind> Render for Editor<K> {
             (_, Some(item)) => K::name(item).to_owned(),
             (_, None) => format!("No {} selected", K::ENTITY),
         };
-        let theme = cx.theme();
         let notice = self.notice.clone();
-        v_flex()
+        h_flex()
             .size_full()
-            .p_3()
-            .gap_3()
-            .bg(theme.background)
-            .text_color(theme.foreground)
+            .key_context(CONTEXT)
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &Delete, window, cx| this.confirm_delete(window, cx)))
+            .on_action(cx.listener(|this, _: &Duplicate, window, cx| {
+                this.prompt_name(Naming::Copy, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &Rename, window, cx| {
+                this.prompt_name(Naming::Rename, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
+                this.focus_search(window, cx);
+            }))
+            .child(self.list(narrow, cx))
             .child(
-                h_flex()
-                    .gap_2()
-                    .child(
-                        Button::new("profile-new")
-                            .small()
-                            .label("New")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.prompt_name(Naming::New, window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("profile-rename")
-                            .small()
-                            .label("Rename")
-                            .disabled(!editable)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.prompt_name(Naming::Rename, window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("profile-copy")
-                            .small()
-                            .label("Copy")
-                            .disabled(item.is_none())
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.prompt_name(Naming::Copy, window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("profile-delete")
-                            .small()
-                            .danger()
-                            .label("Delete")
-                            .disabled(!user)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.confirm_delete(window, cx);
-                            })),
-                    ),
-            )
-            .child(
-                h_flex()
+                v_flex()
+                    .id("profile-fields")
                     .flex_1()
-                    .min_h_0()
+                    .min_w_0()
+                    .h_full()
+                    .overflow_y_scroll()
+                    .p_3()
                     .gap_3()
-                    .items_start()
-                    .child(self.list(list_w, cx))
                     .child(
-                        v_flex()
-                            .id("profile-fields")
-                            .flex_1()
-                            .min_w_0()
-                            .h_full()
-                            .overflow_y_scroll()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .truncate()
-                                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                                    .child(heading),
-                            )
-                            .child(self.fields(item.as_ref(), cx)),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(
-                        Button::new("profile-import")
-                            .small()
-                            .label("Import")
-                            .tooltip(K::IMPORT_TIP)
-                            .on_click(cx.listener(|this, _, window, cx| this.import(window, cx))),
+                        div()
+                            .flex_none()
+                            .truncate()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(heading),
                     )
-                    .child(
-                        Button::new("profile-export")
-                            .small()
-                            .label("Export")
-                            .tooltip(K::EXPORT_TIP)
-                            .on_click(cx.listener(|this, _, _, cx| this.export(cx))),
-                    )
-                    .when_some(notice, |row, notice| {
-                        row.child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(notice),
-                        )
+                    .child(self.fields(item.as_ref(), cx))
+                    .when_some(notice, |col, notice| {
+                        col.child(div().text_color(cx.theme().muted_foreground).child(notice))
                     }),
             )
     }
