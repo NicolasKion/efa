@@ -12,7 +12,7 @@ use gpui_kit::{App, ClipboardItem, Context, WeakEntity, Window};
 use super::{
     Efa, Loaded,
     actions::{Action, MutaTarget},
-    widgets::{entry, item_entry, item_label},
+    widgets::{entry, item_entry, item_label, on_efa},
 };
 use crate::{
     data::{TypeId, muta::short_name},
@@ -41,14 +41,14 @@ pub(super) fn mutation_entries(
 ) -> PopupMenu {
     let catalog = &loaded.catalog;
     if let Some(mutation) = mutation {
-        let (this, target) = (this.clone(), target.clone());
+        let target = target.clone();
         let label = format!("Revert to {}", catalog.name(mutation.base));
-        return menu.item(
-            entry(IconName::Undo2, label).on_click(move |_, _, cx: &mut App| {
-                let target = target.clone();
-                Efa::app_update(&this, cx, |g, cx| g.apply(Action::Revert(target), cx));
-            }),
-        );
+        return menu.item(entry(IconName::Undo2, label).on_click(on_efa(
+            this,
+            move |g, _, _, cx| {
+                g.apply(Action::Revert(target.clone()), cx);
+            },
+        )));
     }
     let mutaplasmids: Vec<(TypeId, String)> = catalog
         .mutaplasmids
@@ -70,15 +70,13 @@ pub(super) fn mutation_entries(
                 menu.scrollable(true)
                     .max_h(crate::ui::widgets::menu_max_h(window, MENU_MAX_H)),
                 |menu, (id, name)| {
-                    let (this, target, id) = (this.clone(), target.clone(), *id);
-                    menu.item(item_entry(&loaded, id, name.clone()).on_click(
-                        move |_, _, cx: &mut App| {
-                            let target = target.clone();
-                            Efa::app_update(&this, cx, |g, cx| {
-                                g.apply(Action::Mutate(target, id), cx);
-                            });
+                    let (target, id) = (target.clone(), *id);
+                    menu.item(item_entry(&loaded, id, name.clone()).on_click(on_efa(
+                        &this,
+                        move |g, _, _, cx| {
+                            g.apply(Action::Mutate(target.clone(), id), cx);
                         },
-                    ))
+                    )))
                 },
             )
         },
