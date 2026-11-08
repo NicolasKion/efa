@@ -21,7 +21,12 @@ use gpui_kit::{
     div, prelude::FluentBuilder, px,
 };
 
-use super::{Efa, Hub, port::html_path};
+use super::{
+    Efa, Hub,
+    dialogs::{Confirm, confirm},
+    port::html_path,
+    widgets::{ROW_H, Segment, TipExt, band, parse_decimal, section_title, segmented},
+};
 use crate::{
     preferences::{AdditionsLabels, Preferences, ProxyMode},
     prices::{PriceSource, PriceSystem},
@@ -32,6 +37,8 @@ use crate::{
 const NARROW_W: f32 = 720.;
 /// A setting's text keeps this much beside its control before the control drops under it.
 const TEXT_MIN_W: f32 = 200.;
+/// The widest a choice's buttons grow, so a few short options do not span a wide window.
+const CHOICE_MAX_W: f32 = 420.;
 /// Below this height the page's title scrolls with its settings.
 const SHORT_H: f32 = 520.;
 /// The page list's width, and with icons only.
@@ -199,12 +206,12 @@ impl PreferencesWindow {
             cx.observe(&hub, |_, _, cx| cx.notify()),
             cx.observe(&updates, |_, _, cx| cx.notify()),
             on_change(&fields.spool, cx, |s, v| {
-                if let Ok(percent) = v.trim().trim_end_matches('%').parse::<f64>() {
+                if let Some(percent) = parse_decimal::<f64>(v.trim().trim_end_matches('%')) {
                     s.settings.preferences.engine.default_spool = (percent / 100.0).clamp(0.0, 1.0);
                 }
             }),
             on_change(&fields.search_delay, cx, |s, v| {
-                if let Ok(ms) = v.trim().parse::<u64>() {
+                if let Some(ms) = parse_decimal::<u64>(v) {
                     s.settings.preferences.market.search_delay_ms = ms.min(10_000);
                 }
             }),
@@ -226,7 +233,7 @@ impl PreferencesWindow {
                     .clone_into(&mut s.settings.preferences.esi.client_id);
             }),
             on_change(&fields.esi_port, cx, |s, v| {
-                if let Ok(port) = v.trim().parse::<u16>()
+                if let Some(port) = parse_decimal::<u16>(v)
                     && port > 0
                 {
                     s.settings.preferences.esi.port = port;
@@ -290,52 +297,22 @@ impl PreferencesWindow {
         apply: fn(&mut Saved, T),
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = cx.theme();
-        let segments: Vec<AnyElement> = options
+        let values: Vec<T> = options.iter().map(|&(value, _)| value).collect();
+        let segments = options
             .iter()
-            .enumerate()
-            .map(|(n, &(value, label))| {
-                let selected = current == value;
-                div()
-                    .id(SharedString::from(format!("{id}-{n}")))
-                    .px_3()
-                    .py_1()
-                    .rounded(px(5.))
-                    .text_xs()
-                    .when(selected, |d| {
-                        d.bg(theme.primary)
-                            .text_color(theme.primary_foreground)
-                            .font_weight(FontWeight::MEDIUM)
-                    })
-                    .when(!selected, |d| {
-                        d.text_color(theme.muted_foreground)
-                            .hover(|s| s.bg(theme.secondary).text_color(theme.foreground))
-                    })
-                    .child(label)
-                    .on_mouse_down(
-                        gpui_kit::MouseButton::Left,
-                        cx.listener(move |this, _: &gpui_kit::MouseDownEvent, _, cx| {
-                            this.set(cx, |s| apply(s, value));
-                        }),
-                    )
-                    .into_any_element()
-            })
+            .map(|&(value, label)| Segment::new(label, current == value))
             .collect();
-        let control = h_flex()
-            .flex_wrap()
-            .gap_0p5()
-            .p_0p5()
-            .rounded(px(7.))
-            .border_1()
-            .border_color(theme.border)
-            .bg(theme.background)
-            .children(segments);
+        let control = segmented(id, segments, cx, move |this, n, _, cx| {
+            if let Some(&value) = values.get(n) {
+                this.set(cx, |s| apply(s, value));
+            }
+        });
         v_flex()
             .gap_2()
             .px_4()
-            .py_3()
+            .py_2()
             .child(text(title, description, false, cx))
-            .child(h_flex().child(control))
+            .child(div().w_full().max_w(px(CHOICE_MAX_W)).child(control))
             .into_any_element()
     }
 
@@ -870,7 +847,7 @@ impl PreferencesWindow {
             h_flex()
                 .gap_6()
                 .px_4()
-                .py_3()
+                .py_2()
                 .child(
                     v_flex()
                         .flex_1()
@@ -947,7 +924,7 @@ impl PreferencesWindow {
         let register = v_flex()
             .gap_2()
             .px_4()
-            .py_3()
+            .py_2()
             .child(div().text_xs().text_color(theme.muted_foreground).child(
                 "Only needed for an application of your own: register it at \
                  developers.eveonline.com with this callback URL and these scopes, then paste its \
@@ -1117,31 +1094,13 @@ impl PreferencesWindow {
     }
 
     fn confirm_wipe(wipe: Wipe, window: &mut Window, cx: &mut Context<Self>) {
-        use gpui_kit::component::{
-            WindowExt,
-            button::{Button, ButtonVariants},
-        };
         let this = cx.weak_entity();
-        window.open_dialog(cx, move |dialog, _, _| {
-            let this = this.clone();
-            dialog.title("Confirm").w(px(380.)).child(
-                v_flex().gap_3().child(wipe.question()).child(
-                    h_flex()
-                        .justify_end()
-                        .gap_2()
-                        .child(
-                            Button::new("wipe-no")
-                                .label("No")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(Button::new("wipe-yes").danger().label("Yes").on_click(
-                            move |_, window, cx| {
-                                window.close_dialog(cx);
-                                let _ = this.update(cx, |this, cx| this.wipe(wipe, cx));
-                            },
-                        )),
-                ),
-            )
+        let question = Confirm {
+            danger: true,
+            ..Confirm::new("Confirm", wipe.question())
+        };
+        confirm(window, cx, question, move |_, cx| {
+            let _ = this.update(cx, |this, cx| this.wipe(wipe, cx));
         });
     }
 
@@ -1207,7 +1166,7 @@ fn row(
         .gap_x_6()
         .gap_y_2()
         .px_4()
-        .py_3()
+        .py_2()
         .when(nested, Styled::pl_10)
         .child(
             div()
@@ -1219,32 +1178,21 @@ fn row(
         .into_any_element()
 }
 
-/// A titled card of settings, divided by hairlines.
+/// A band titling a run of settings, like the fitting view's rack labels, with hairlines
+/// between the settings.
 pub(super) fn section(title: &'static str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
     let theme = cx.theme();
-    let mut card = v_flex()
-        .rounded(px(8.))
-        .border_1()
-        .border_color(theme.border)
-        .bg(theme.sidebar)
-        .overflow_hidden();
-    for (n, row) in rows.into_iter().enumerate() {
-        if n > 0 {
-            card = card.child(div().h_px().mx_4().bg(theme.border));
-        }
-        card = card.child(row);
-    }
+    let count = rows.len();
     v_flex()
-        .gap_2()
-        .child(
+        .child(band(
+            h_flex().h(px(ROW_H)).px_4().child(section_title(title)),
+            cx,
+        ))
+        .children(rows.into_iter().enumerate().map(|(n, row)| {
             div()
-                .px_1()
-                .text_xs()
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme.muted_foreground)
-                .child(title.to_uppercase()),
-        )
-        .child(card)
+                .when(n + 1 < count, |d| d.border_b_1().border_color(theme.border))
+                .child(row)
+        }))
         .into_any_element()
 }
 
@@ -1305,11 +1253,7 @@ impl Render for PreferencesWindow {
                         }),
                 )
                 .when(!narrow, |d| d.child(page.title()))
-                .when(narrow, |d| {
-                    d.tooltip(move |window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(page.title()).build(window, cx)
-                    })
-                })
+                .when(narrow, |d| d.tip(page.title()))
                 .on_mouse_down(
                     gpui_kit::MouseButton::Left,
                     cx.listener(move |this, _: &gpui_kit::MouseDownEvent, _, cx| {
@@ -1363,9 +1307,6 @@ impl Render for PreferencesWindow {
         h_flex()
             .size_full()
             .items_start()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .text_sm()
             .child(
                 v_flex()
                     .id("preferences-pages")
@@ -1406,13 +1347,7 @@ impl Render for PreferencesWindow {
                             .min_h_0()
                             .overflow_y_scroll()
                             .children(scrolled_header)
-                            .child(
-                                v_flex()
-                                    .flex_none()
-                                    .when(narrow, |d| d.px_4().pb_4().gap_4())
-                                    .when(!narrow, |d| d.px_8().pb_8().gap_6())
-                                    .children(body),
-                            ),
+                            .child(v_flex().flex_none().pb_4().gap_3().children(body)),
                     ),
             )
     }
