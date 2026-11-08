@@ -24,7 +24,7 @@ const BAR_W: f32 = 180.;
 pub fn render(failed: Option<SharedString>, cx: &App) -> impl IntoElement {
     let theme = cx.theme();
     // The mark's amber, so the bar belongs to the logo above it.
-    let accent = gpui_kit::rgb(0xf2a33a);
+    let accent = gpui_kit::rgb(0x00f2_a33a);
     let (muted, track) = (theme.muted_foreground, theme.border);
     v_flex()
         .flex_1()
