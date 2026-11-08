@@ -4,7 +4,8 @@ use std::path::Path;
 
 use efa::{
     data::Catalog,
-    engine::{Engine, drone_attr, drone_effect},
+    dogma::{attr as drone_attr, effect},
+    engine::Engine,
     fit::Fit,
 };
 
@@ -63,7 +64,7 @@ fn stacks_get_their_own_numbers() {
     assert!(miner.mining.0 > 0.0, "mining {:?}", miner.mining);
     // Speed factor reads 1 on every drone; only the web effect makes it mean something.
     let web = &stats.drones[3];
-    assert!(!hobgoblin.has_effect(drone_effect::WEBIFIER));
-    assert!(web.has_effect(drone_effect::WEBIFIER));
+    assert!(!hobgoblin.has_effect(effect::ENTITY_WEBIFIER));
+    assert!(web.has_effect(effect::ENTITY_WEBIFIER));
     assert!(web.attr(drone_attr::SPEED_FACTOR).is_some_and(|v| v < 0.0));
 }

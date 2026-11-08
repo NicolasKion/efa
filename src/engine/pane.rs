@@ -12,7 +12,7 @@ use rc::{
 };
 
 use super::{Cap, Damage, Stats};
-use crate::fit::DamageProfile;
+use crate::{dogma::attr, fit::DamageProfile};
 
 /// Settings that change how numbers are calculated rather than what is fitted.
 #[derive(Debug, Clone, Copy, Default)]
@@ -124,11 +124,6 @@ pub struct Misc {
     pub probe_size: Option<f64>,
     /// Special holds the ship has, with their capacity in m³.
     pub holds: Vec<(&'static str, f64)>,
-}
-
-mod attr {
-    pub const RECHARGE_RATE: i32 = 55;
-    pub const WARP_SCRAMBLE_STATUS: i32 = 104;
 }
 
 /// Special holds in the order pyfa lists them in the cargo tooltip.

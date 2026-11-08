@@ -14,9 +14,10 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::{Budget, Change, HullSize, Layer, SearchTiers, Setup, attr, group};
+use super::{Budget, Change, HullSize, Layer, SearchTiers, Setup};
 use crate::{
     data::{Catalog, Slot, TypeId},
+    dogma::{attr, group},
     engine::{
         CalcOptions, Cap, Engine, Layer as EngineLayer, Pilot, Resource, Stats, TankBench,
         TankProbe,
@@ -38,19 +39,13 @@ const MAX_THREADS: usize = 6;
 
 const DAMAGE_TYPES: [&str; 4] = ["EM", "Thermal", "Kinetic", "Explosive"];
 
-/// Repairers and boosters, by group.
-mod groups {
-    pub const ARMOR_REPAIRER: i32 = 62;
-    pub const SHIELD_BOOSTER: i32 = 40;
-}
-
 /// Whether a module repairs its layer: a repairer or booster, ancillary or not.
 fn is_repairer(catalog: &Catalog, id: TypeId) -> bool {
     catalog.get(id).is_some_and(|t| {
         matches!(
             t.group_id,
-            groups::ARMOR_REPAIRER
-                | groups::SHIELD_BOOSTER
+            group::ARMOR_REPAIRER
+                | group::SHIELD_BOOSTER
                 | group::ANCILLARY_ARMOR_REPAIRER
                 | group::ANCILLARY_SHIELD_BOOSTER
         )
@@ -826,7 +821,7 @@ impl Setup<'_> {
             .iter()
             .filter_map(|c| self.catalog.get(c.module.type_id))
             .map(|t| t.group_id)
-            .filter(|&g| g != group::CAP_BOOSTER)
+            .filter(|&g| g != group::CAPACITOR_BOOSTER)
             .collect();
         let rig_groups: HashSet<i32> = self
             .rig_candidates(choices, true, &[0, 1, 2, 3])

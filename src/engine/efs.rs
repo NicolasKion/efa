@@ -12,6 +12,7 @@ use serde_json::{Map, Value, json};
 use super::{BuildOptions, CalcOptions, Engine, Pilot, Stats, pane};
 use crate::{
     data::{Catalog, Hardpoint, Kind, Slot, TypeId},
+    dogma::attr,
     fit::{Fit, ModuleState},
 };
 
@@ -23,65 +24,6 @@ const CAPSULE: TypeId = 670;
 const TECH_II: i32 = 2;
 /// Fighter shield HP to EHP, pyfa's rough average fighter resist.
 const FIGHTER_EHP: f64 = 0.8875;
-
-/// Dogma attribute IDs by pyfa's names.
-mod attr {
-    pub const HI_SLOTS: i32 = 14;
-    pub const MED_SLOTS: i32 = 13;
-    pub const LOW_SLOTS: i32 = 12;
-    pub const RIG_SLOTS: i32 = 1137;
-    pub const TURRET_SLOTS: i32 = 102;
-    pub const LAUNCHER_SLOTS: i32 = 101;
-    pub const POWER_OUTPUT: i32 = 11;
-    pub const CPU_OUTPUT: i32 = 48;
-    pub const RIG_SIZE: i32 = 1547;
-    pub const DRONE_BANDWIDTH: i32 = 1271;
-    pub const SIGNATURE_RADIUS: i32 = 552;
-    pub const SCAN_RESOLUTION: i32 = 564;
-    pub const CAPACITOR_CAPACITY: i32 = 482;
-    pub const RECHARGE_RATE: i32 = 55;
-    pub const MASS: i32 = 4;
-    pub const SHIELD_RECHARGE_RATE: i32 = 479;
-    pub const AGILITY: i32 = 70;
-    pub const ENERGY_WARFARE_RESISTANCE: i32 = 2045;
-    /// EM, thermal, kinetic, explosive resonances of hull, armor and shield.
-    pub const HULL_RESONANCE: [i32; 4] = [113, 110, 109, 111];
-    pub const ARMOR_RESONANCE: [i32; 4] = [267, 270, 269, 268];
-    pub const SHIELD_RESONANCE: [i32; 4] = [271, 274, 273, 272];
-    pub const SHIELD_CAPACITY: i32 = 263;
-    pub const MAX_VELOCITY: i32 = 37;
-    pub const DURATION: i32 = 73;
-    pub const RATE_OF_FIRE: i32 = 51;
-    pub const CAPACITOR_NEED: i32 = 6;
-    pub const ARMOR_DAMAGE_AMOUNT: i32 = 84;
-    pub const SHIELD_BONUS: i32 = 68;
-    pub const RELOAD_TIME: i32 = 1795;
-    pub const CHARGED_ARMOR_DAMAGE_MULTIPLIER: i32 = 1886;
-    pub const MAX_RANGE: i32 = 54;
-    pub const FALLOFF: i32 = 158;
-    pub const FALLOFF_EFFECTIVENESS: i32 = 2044;
-    pub const SPEED_FACTOR: i32 = 20;
-    pub const POWER_TRANSFER_AMOUNT: i32 = 90;
-    pub const NEUT_SIG_RESOLUTION: i32 = 2451;
-    pub const ENERGY_NEUTRALIZER_AMOUNT: i32 = 97;
-    pub const ACTIVATION_BLOCKED_STRENGTH: i32 = 1350;
-    pub const WARP_SCRAMBLE_STRENGTH: i32 = 105;
-    pub const WARP_SCRAMBLE_RANGE: i32 = 103;
-    pub const SIGNATURE_RADIUS_BONUS: i32 = 554;
-    pub const ECM_BURST_RANGE: i32 = 142;
-    pub const TRACKING_SPEED: i32 = 160;
-    pub const OPTIMAL_SIG_RADIUS: i32 = 620;
-    pub const DAMAGE_MULTIPLIER: i32 = 64;
-    pub const DAMAGE_MULTIPLIER_BONUS_MAX: i32 = 2734;
-    pub const DAMAGE_MULTIPLIER_BONUS_PER_CYCLE: i32 = 2733;
-    pub const EMP_FIELD_RANGE: i32 = 99;
-    pub const EXPLOSION_DELAY: i32 = 281;
-    pub const AOE_DAMAGE_REDUCTION_FACTOR: i32 = 1353;
-    pub const AOE_CLOUD_SIZE: i32 = 654;
-    pub const AOE_VELOCITY: i32 = 653;
-    /// EM, thermal, kinetic, explosive damage of a charge or drone.
-    pub const DAMAGE: [i32; 4] = [114, 118, 117, 116];
-}
 
 /// pyfa's module attributes per projection kind, by attribute name and ID.
 const PROJECTION_ATTRS: &[(&str, &[(&str, i32)])] = &[
@@ -118,7 +60,7 @@ const PROJECTION_ATTRS: &[(&str, &[(&str, i32)])] = &[
             ("entityCapacitorLevelModifierSmall", 1895),
             ("entityCapacitorLevelModifierMedium", 1896),
             ("entityCapacitorLevelModifierLarge", 1897),
-            ("energyNeutralizerAmount", attr::ENERGY_NEUTRALIZER_AMOUNT),
+            ("energyNeutralizerAmount", attr::NEUT_AMOUNT),
         ],
     ),
     (

@@ -6,6 +6,7 @@ pub mod damage_pattern;
 pub mod data;
 pub mod db;
 pub mod desktop;
+pub mod dogma;
 pub mod engine;
 pub mod errors;
 pub mod esi;

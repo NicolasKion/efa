@@ -6,7 +6,8 @@ use std::path::Path;
 
 use efa::{
     data::{Catalog, Kind, Slot},
-    engine::{Engine, FitItem, Stats, misc_attr},
+    dogma::attr as misc_attr,
+    engine::{Engine, FitItem, Stats},
     fit::{DamageProfile, Fit, ModuleState, RahPattern},
 };
 

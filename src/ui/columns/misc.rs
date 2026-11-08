@@ -3,7 +3,8 @@
 
 use crate::{
     data::{Catalog, TypeId, category},
-    engine::{ModuleMisc, misc_attr as a},
+    dogma::attr as a,
+    engine::ModuleMisc,
     ui::stats::format::{amount, capitalize, format_list, signed},
 };
 
@@ -155,7 +156,7 @@ pub fn module_misc(
     let t = catalog.get(type_id)?;
     let attr = |id| m.attr(id);
     let nonzero = |id| m.attr(id).filter(|&v| v != 0.0);
-    let cycle_ms = nonzero(a::DURATION).or_else(|| nonzero(a::SPEED));
+    let cycle_ms = nonzero(a::DURATION).or_else(|| nonzero(a::RATE_OF_FIRE));
     let effect_in = |effect| m.has_effect(effect);
     let burst = matches!(
         t.group_id,
@@ -215,7 +216,7 @@ pub fn module_misc(
         }
         g::ENERGY_NEUTRALIZER | g::STRUCTURE_NEUTRALIZER => neut(m, a::NEUT_AMOUNT, cycle_ms),
         _ if burst && effect_in(effect::DOOMSDAY_AOE_NEUT) => neut(m, a::NEUT_AMOUNT, cycle_ms),
-        g::ENERGY_NOSFERATU => neut(m, a::NOS_AMOUNT, cycle_ms),
+        g::ENERGY_NOSFERATU => neut(m, a::POWER_TRANSFER_AMOUNT, cycle_ms),
         g::SALVAGER => text(
             percent(nonzero(a::ACCESS_DIFFICULTY_BONUS)?),
             "Item retrieval chance",
@@ -422,7 +423,7 @@ fn reps(rps: f64, what: &str) -> Option<(String, String)> {
 }
 
 fn painter(m: &ModuleMisc) -> Option<(String, String)> {
-    let bonus = m.attr(a::SIG_RADIUS_BONUS).filter(|&v| v != 0.0)?;
+    let bonus = m.attr(a::SIGNATURE_RADIUS_BONUS).filter(|&v| v != 0.0)?;
     text(
         format!("{}%", short_signed(bonus)),
         "Signature radius increase",

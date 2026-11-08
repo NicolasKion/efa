@@ -22,6 +22,7 @@ use rc::{AttrId, EveAttrId, ItemCommon, ItemId, SolOwned, Src};
 
 use crate::{
     data::TypeId,
+    dogma::attr,
     fit::{Fit, ModuleState},
 };
 
@@ -29,10 +30,10 @@ use build::{BuildOptions, Built, Placed};
 use items::{booster_info, drone_info};
 use stats::{damage, fit_stats, resource, slots};
 
-pub use column::{ModuleMisc, RackHeat, ShipHeat, misc_attr};
+pub use column::{ModuleMisc, RackHeat, ShipHeat};
 pub use efs::EfsContext;
 pub use inspect::{AttrValue, FitItem, Inspection, ModOp, Modifier, Source, SourceKind};
-pub use items::{BoosterInfo, DroneInfo, SideEffectInfo, drone_attr, drone_effect};
+pub use items::{BoosterInfo, DroneInfo, SideEffectInfo};
 pub use overrides::Overridden;
 pub use pane::{
     CalcOptions, CapDetail, FirepowerDetail, Mining, MiningRate, Misc, Outgoing, SpoolRange, Tank,
@@ -55,18 +56,6 @@ pub struct Engine {
     source: EngineSource,
     /// The built-in All 5 character, which [`Engine::compute`] flies fits with.
     all5: Pilot,
-}
-
-mod attr {
-    pub const CPU: i32 = 50;
-    pub const POWER: i32 = 30;
-    pub const CAP_NEED: i32 = 6;
-    pub const DURATION: i32 = 73;
-    pub const RATE_OF_FIRE: i32 = 51;
-    pub const OPTIMAL: i32 = 54;
-    pub const FALLOFF: i32 = 158;
-    pub const CAPACITY: i32 = 38;
-    pub const BOOSTER_DURATION: i32 = 330;
 }
 
 impl Engine {
@@ -251,7 +240,7 @@ fn stats_of(built: &mut Built, fit: &Fit, options: CalcOptions) -> Stats {
                 .ok()
                 .map(|v| v.modified.into_f64())
         };
-        let cap_need = get(attr::CAP_NEED).filter(|&c| c > 0.0);
+        let cap_need = get(attr::CAPACITOR_NEED).filter(|&c| c > 0.0);
         // Missing attributes read as 0, so filter before falling back: turrets and launchers
         // cycle on their rate of fire, everything else on its duration.
         let cycle = get(attr::DURATION)
@@ -261,7 +250,7 @@ fn stats_of(built: &mut Built, fit: &Fit, options: CalcOptions) -> Stats {
             cpu: get(attr::CPU).filter(|&v| v > 0.0),
             powergrid: get(attr::POWER).filter(|&v| v > 0.0),
             cap_per_sec: cap_need.zip(cycle).map(|(need, ms)| need / (ms / 1000.0)),
-            optimal: get(attr::OPTIMAL).filter(|&v| v > 0.0),
+            optimal: get(attr::MAX_RANGE).filter(|&v| v > 0.0),
             falloff: get(attr::FALLOFF).filter(|&v| v > 0.0),
             spool_max,
             burnout: None,

@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use super::{FitItem, Stats};
 use crate::{
     data::Slot,
+    dogma::attr,
     fit::{Fit, ModuleState},
 };
 
@@ -17,163 +18,88 @@ use rc::{
     },
 };
 
-/// Attributes the Miscellanea column reads, by their dogma ID.
-pub mod misc_attr {
-    pub const TRACKING_SPEED: i32 = 160;
-    pub const OPTIMAL_SIG_RADIUS: i32 = 620;
-    pub const NEUT_AMOUNT: i32 = 97;
-    pub const NOS_AMOUNT: i32 = 90;
-    pub const ACCESS_DIFFICULTY_BONUS: i32 = 902;
-    pub const VIRUS_STRENGTH: i32 = 1910;
-    pub const VIRUS_COHERENCE: i32 = 1909;
-    pub const DURATION: i32 = 73;
-    pub const SPEED: i32 = 51;
-    pub const WARP_SCRAMBLE_STRENGTH: i32 = 105;
-    pub const SPEED_FACTOR: i32 = 20;
-    pub const SIG_RADIUS_BONUS: i32 = 554;
-    pub const MAX_TARGET_RANGE_BONUS: i32 = 309;
-    pub const SCAN_RESOLUTION_BONUS: i32 = 566;
-    pub const MAX_RANGE_BONUS: i32 = 351;
-    pub const FALLOFF_BONUS: i32 = 349;
-    pub const TRACKING_SPEED_BONUS: i32 = 767;
-    pub const AOE_VELOCITY_BONUS: i32 = 847;
-    pub const AOE_CLOUD_SIZE_BONUS: i32 = 848;
-    pub const EXPLOSION_DELAY_BONUS: i32 = 596;
-    pub const MISSILE_VELOCITY_BONUS: i32 = 547;
-    pub const DAMAGE_MULTIPLIER: i32 = 64;
-    pub const SPEED_MULTIPLIER: i32 = 204;
-    pub const MISSILE_DAMAGE_MULTIPLIER_BONUS: i32 = 213;
-    pub const DRONE_DAMAGE_BONUS: i32 = 1255;
-    pub const SCAN_GRAVIMETRIC_BONUS: i32 = 238;
-    pub const SCAN_LADAR_BONUS: i32 = 239;
-    pub const SCAN_MAGNETOMETRIC_BONUS: i32 = 240;
-    pub const SCAN_RADAR_BONUS: i32 = 241;
-    pub const SCAN_GRAVIMETRIC_PERCENT: i32 = 1027;
-    pub const SCAN_LADAR_PERCENT: i32 = 1028;
-    pub const SCAN_MAGNETOMETRIC_PERCENT: i32 = 1029;
-    pub const SCAN_RADAR_PERCENT: i32 = 1030;
-    pub const CLOAKING_TARGETING_DELAY: i32 = 560;
-    pub const COMMAND_BONUS: i32 = 833;
-    pub const COMMAND_BONUS_HIDDEN: i32 = 1310;
-    pub const CONSUMPTION_QUANTITY: i32 = 714;
-    pub const CONSUMPTION_TYPE: i32 = 713;
-    pub const RELOAD_TIME: i32 = 1795;
-    pub const ARMOR_DAMAGE_AMOUNT: i32 = 84;
-    pub const SHIELD_BONUS: i32 = 68;
-    pub const ARMOR_EM_RESONANCE: i32 = 267;
-    pub const ARMOR_EXPLOSIVE_RESONANCE: i32 = 268;
-    pub const ARMOR_KINETIC_RESONANCE: i32 = 269;
-    pub const ARMOR_THERMAL_RESONANCE: i32 = 270;
-    /// warfareBuff1Value to warfareBuff4Value.
-    pub const WARFARE_BUFF_VALUES: [i32; 4] = [2469, 2471, 2473, 2537];
-    pub const HI_SLOT_MODIFIER: i32 = 1374;
-    pub const MED_SLOT_MODIFIER: i32 = 1375;
-    pub const LOW_SLOT_MODIFIER: i32 = 1376;
+/// Attributes the Miscellanea column reads off a module or subsystem.
+pub(super) const MODULE_ATTRS: [i32; 54] = [
+    attr::TRACKING_SPEED,
+    attr::OPTIMAL_SIG_RADIUS,
+    attr::NEUT_AMOUNT,
+    attr::POWER_TRANSFER_AMOUNT,
+    attr::ACCESS_DIFFICULTY_BONUS,
+    attr::VIRUS_STRENGTH,
+    attr::VIRUS_COHERENCE,
+    attr::DURATION,
+    attr::RATE_OF_FIRE,
+    attr::WARP_SCRAMBLE_STRENGTH,
+    attr::SPEED_FACTOR,
+    attr::SIGNATURE_RADIUS_BONUS,
+    attr::MAX_TARGET_RANGE_BONUS,
+    attr::SCAN_RESOLUTION_BONUS,
+    attr::MAX_RANGE_BONUS,
+    attr::FALLOFF_BONUS,
+    attr::TRACKING_SPEED_BONUS,
+    attr::AOE_VELOCITY_BONUS,
+    attr::AOE_CLOUD_SIZE_BONUS,
+    attr::EXPLOSION_DELAY_BONUS,
+    attr::MISSILE_VELOCITY_BONUS,
+    attr::DAMAGE_MULTIPLIER,
+    attr::SPEED_MULTIPLIER,
+    attr::MISSILE_DAMAGE_MULTIPLIER_BONUS,
+    attr::DRONE_DAMAGE_BONUS,
+    attr::SCAN_GRAVIMETRIC_BONUS,
+    attr::SCAN_LADAR_BONUS,
+    attr::SCAN_MAGNETOMETRIC_BONUS,
+    attr::SCAN_RADAR_BONUS,
+    attr::SCAN_GRAVIMETRIC_PERCENT,
+    attr::SCAN_LADAR_PERCENT,
+    attr::SCAN_MAGNETOMETRIC_PERCENT,
+    attr::SCAN_RADAR_PERCENT,
+    attr::CLOAKING_TARGETING_DELAY,
+    attr::COMMAND_BONUS,
+    attr::COMMAND_BONUS_HIDDEN,
+    attr::CONSUMPTION_QUANTITY,
+    attr::CONSUMPTION_TYPE,
+    attr::RELOAD_TIME,
+    attr::ARMOR_DAMAGE_AMOUNT,
+    attr::SHIELD_BONUS,
+    attr::ARMOR_EM_RESONANCE,
+    attr::ARMOR_EXPLOSIVE_RESONANCE,
+    attr::ARMOR_KINETIC_RESONANCE,
+    attr::ARMOR_THERMAL_RESONANCE,
+    attr::WARFARE_BUFF_VALUES[0],
+    attr::WARFARE_BUFF_VALUES[1],
+    attr::WARFARE_BUFF_VALUES[2],
+    attr::WARFARE_BUFF_VALUES[3],
+    attr::HI_SLOT_MODIFIER,
+    attr::MED_SLOT_MODIFIER,
+    attr::LOW_SLOT_MODIFIER,
+    // Vorton projectors carry their explosion on the module.
+    attr::AOE_CLOUD_SIZE,
+    attr::AOE_VELOCITY,
+];
 
-    pub const MODULE: [i32; 54] = [
-        TRACKING_SPEED,
-        OPTIMAL_SIG_RADIUS,
-        NEUT_AMOUNT,
-        NOS_AMOUNT,
-        ACCESS_DIFFICULTY_BONUS,
-        VIRUS_STRENGTH,
-        VIRUS_COHERENCE,
-        DURATION,
-        SPEED,
-        WARP_SCRAMBLE_STRENGTH,
-        SPEED_FACTOR,
-        SIG_RADIUS_BONUS,
-        MAX_TARGET_RANGE_BONUS,
-        SCAN_RESOLUTION_BONUS,
-        MAX_RANGE_BONUS,
-        FALLOFF_BONUS,
-        TRACKING_SPEED_BONUS,
-        AOE_VELOCITY_BONUS,
-        AOE_CLOUD_SIZE_BONUS,
-        EXPLOSION_DELAY_BONUS,
-        MISSILE_VELOCITY_BONUS,
-        DAMAGE_MULTIPLIER,
-        SPEED_MULTIPLIER,
-        MISSILE_DAMAGE_MULTIPLIER_BONUS,
-        DRONE_DAMAGE_BONUS,
-        SCAN_GRAVIMETRIC_BONUS,
-        SCAN_LADAR_BONUS,
-        SCAN_MAGNETOMETRIC_BONUS,
-        SCAN_RADAR_BONUS,
-        SCAN_GRAVIMETRIC_PERCENT,
-        SCAN_LADAR_PERCENT,
-        SCAN_MAGNETOMETRIC_PERCENT,
-        SCAN_RADAR_PERCENT,
-        CLOAKING_TARGETING_DELAY,
-        COMMAND_BONUS,
-        COMMAND_BONUS_HIDDEN,
-        CONSUMPTION_QUANTITY,
-        CONSUMPTION_TYPE,
-        RELOAD_TIME,
-        ARMOR_DAMAGE_AMOUNT,
-        SHIELD_BONUS,
-        ARMOR_EM_RESONANCE,
-        ARMOR_EXPLOSIVE_RESONANCE,
-        ARMOR_KINETIC_RESONANCE,
-        ARMOR_THERMAL_RESONANCE,
-        WARFARE_BUFF_VALUES[0],
-        WARFARE_BUFF_VALUES[1],
-        WARFARE_BUFF_VALUES[2],
-        WARFARE_BUFF_VALUES[3],
-        HI_SLOT_MODIFIER,
-        MED_SLOT_MODIFIER,
-        LOW_SLOT_MODIFIER,
-        // Vorton projectors carry their explosion on the module.
-        AOE_CLOUD_SIZE,
-        AOE_VELOCITY,
-    ];
-
-    /// Attributes mostly read off a module's charge.
-    pub const AOE_CLOUD_SIZE: i32 = 654;
-    pub const AOE_VELOCITY: i32 = 653;
-    pub const CAPACITOR_BONUS: i32 = 67;
-    pub const BASE_SENSOR_STRENGTH: i32 = 1371;
-    pub const BASE_SCAN_RANGE: i32 = 1370;
-    pub const DOT_DURATION: i32 = 5735;
-    pub const DOT_MAX_DAMAGE_PER_TICK: i32 = 5736;
-    pub const DOT_MAX_HP_PERCENTAGE_PER_TICK: i32 = 5737;
-    /// warfareBuff1ID to warfareBuff4ID.
-    pub const WARFARE_BUFF_IDS: [i32; 4] = [2468, 2470, 2472, 2536];
-
-    pub const CHARGE: [i32; 12] = [
-        AOE_CLOUD_SIZE,
-        AOE_VELOCITY,
-        CAPACITOR_BONUS,
-        BASE_SENSOR_STRENGTH,
-        BASE_SCAN_RANGE,
-        DOT_DURATION,
-        DOT_MAX_DAMAGE_PER_TICK,
-        DOT_MAX_HP_PERCENTAGE_PER_TICK,
-        WARFARE_BUFF_IDS[0],
-        WARFARE_BUFF_IDS[1],
-        WARFARE_BUFF_IDS[2],
-        WARFARE_BUFF_IDS[3],
-    ];
-}
-
-/// Attributes behind overheating, by their dogma ID.
-mod heat_attr {
-    pub const HEAT_GENERATION_MULTIPLIER: i32 = 1224;
-    pub const HEAT_ABSORBTION_RATE_MODIFIER: i32 = 1180;
-    pub const HEAT_ATTENUATION_HI: i32 = 1259;
-    pub const HEAT_ATTENUATION_MED: i32 = 1261;
-    pub const HEAT_ATTENUATION_LOW: i32 = 1262;
-    pub const HP: i32 = 9;
-    pub const HEAT_DAMAGE: i32 = 1211;
-}
+/// Attributes the Miscellanea column reads off a module's charge.
+pub(super) const CHARGE_ATTRS: [i32; 12] = [
+    attr::AOE_CLOUD_SIZE,
+    attr::AOE_VELOCITY,
+    attr::CAPACITOR_BONUS,
+    attr::BASE_SENSOR_STRENGTH,
+    attr::BASE_SCAN_RANGE,
+    attr::DOT_DURATION,
+    attr::DOT_MAX_DAMAGE_PER_TICK,
+    attr::DOT_MAX_HP_PERCENTAGE_PER_TICK,
+    attr::WARFARE_BUFF_IDS[0],
+    attr::WARFARE_BUFF_IDS[1],
+    attr::WARFARE_BUFF_IDS[2],
+    attr::WARFARE_BUFF_IDS[3],
+];
 
 /// What pyfa's Miscellanea column reads off a module or subsystem, after all bonuses. Most of it
 /// is plain attributes; the rest is what refine works out as if the module were running.
 #[derive(Debug, Clone, Default)]
 pub struct ModuleMisc {
-    /// The attributes in [`misc_attr::MODULE`] the item has.
+    /// The attributes in [`MODULE_ATTRS`] the item has.
     pub attrs: HashMap<i32, f64>,
-    /// The attributes in [`misc_attr::CHARGE`] its charge has.
+    /// The attributes in [`CHARGE_ATTRS`] its charge has.
     pub charge_attrs: HashMap<i32, f64>,
     /// Dogma effects the item carries.
     pub effects: HashSet<i32>,
@@ -231,7 +157,7 @@ fn burst_at(spool: f64) -> StatTimeOptions {
 /// whatever its state, so the numbers come from the item switched on.
 pub(super) fn module_misc(sol: &mut SolOwned, id: ItemId) -> ModuleMisc {
     let mut misc = ModuleMisc {
-        attrs: attrs_of(sol, id, &misc_attr::MODULE),
+        attrs: attrs_of(sol, id, &MODULE_ATTRS),
         ..ModuleMisc::default()
     };
     if let Ok(item) = sol.get_item(&id)
@@ -245,14 +171,14 @@ pub(super) fn module_misc(sol: &mut SolOwned, id: ItemId) -> ModuleMisc {
             .collect();
     }
     let cycle = misc
-        .attr(misc_attr::DURATION)
+        .attr(attr::DURATION)
         .filter(|&d| d > 0.0)
-        .or_else(|| misc.attr(misc_attr::SPEED).filter(|&d| d > 0.0))
+        .or_else(|| misc.attr(attr::RATE_OF_FIRE).filter(|&d| d > 0.0))
         .map(|ms| ms / 1000.0);
     if let Ok(mut module) = sol.get_module(&id) {
         if let Some(charge) = module.get_charge() {
             let charge = charge.get_item_id();
-            misc.charge_attrs = attrs_of(sol, charge, &misc_attr::CHARGE);
+            misc.charge_attrs = attrs_of(sol, charge, &CHARGE_ATTRS);
         }
         if let Ok(mut module) = sol.get_module(&id) {
             misc.charged_cycles = module.get_charged_cycle_count().map(rc::Count::into_u32);
@@ -417,23 +343,23 @@ pub(super) fn ship_heat(sol: &mut SolOwned, ship: ItemId) -> (f64, [f64; 3]) {
         sol,
         ship,
         &[
-            heat_attr::HEAT_GENERATION_MULTIPLIER,
-            heat_attr::HEAT_ATTENUATION_HI,
-            heat_attr::HEAT_ATTENUATION_MED,
-            heat_attr::HEAT_ATTENUATION_LOW,
+            attr::HEAT_GENERATION_MULTIPLIER,
+            attr::HEAT_ATTENUATION_HI,
+            attr::HEAT_ATTENUATION_MED,
+            attr::HEAT_ATTENUATION_LOW,
         ],
     );
     // pyfa falls back to 0.25 where a ship has no attenuation of its own.
     let attenuation = |attr| attrs.get(&attr).copied().unwrap_or(0.25);
     (
         attrs
-            .get(&heat_attr::HEAT_GENERATION_MULTIPLIER)
+            .get(&attr::HEAT_GENERATION_MULTIPLIER)
             .copied()
             .unwrap_or(0.0),
         [
-            attenuation(heat_attr::HEAT_ATTENUATION_HI),
-            attenuation(heat_attr::HEAT_ATTENUATION_MED),
-            attenuation(heat_attr::HEAT_ATTENUATION_LOW),
+            attenuation(attr::HEAT_ATTENUATION_HI),
+            attenuation(attr::HEAT_ATTENUATION_MED),
+            attenuation(attr::HEAT_ATTENUATION_LOW),
         ],
     )
 }
@@ -444,16 +370,16 @@ pub(super) fn module_heat(sol: &mut SolOwned, id: ItemId) -> (f64, f64, f64) {
         sol,
         id,
         &[
-            heat_attr::HEAT_ABSORBTION_RATE_MODIFIER,
-            heat_attr::HP,
-            heat_attr::HEAT_DAMAGE,
+            attr::HEAT_ABSORBTION_RATE_MODIFIER,
+            attr::HP,
+            attr::HEAT_DAMAGE,
         ],
     );
     let get = |attr| attrs.get(&attr).copied().unwrap_or(0.0);
     (
-        get(heat_attr::HEAT_ABSORBTION_RATE_MODIFIER),
-        get(heat_attr::HP),
-        get(heat_attr::HEAT_DAMAGE),
+        get(attr::HEAT_ABSORBTION_RATE_MODIFIER),
+        get(attr::HP),
+        get(attr::HEAT_DAMAGE),
     )
 }
 
@@ -522,7 +448,7 @@ pub(super) fn burnout(
             // pyfa steps the simulation by rate of fire first, but times the result by
             // duration first.
             let seconds = |a: i32| misc.attr(a).filter(|&v| v > 0.0).map(|ms| ms / 1000.0);
-            let (speed, duration) = (seconds(misc_attr::SPEED), seconds(misc_attr::DURATION));
+            let (speed, duration) = (seconds(attr::RATE_OF_FIRE), seconds(attr::DURATION));
             if let (Some(step), Some(cycle)) = (speed.or(duration), duration.or(speed)) {
                 timings.push((i, step, cycle));
             }

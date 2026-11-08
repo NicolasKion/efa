@@ -8,12 +8,13 @@ use std::collections::HashSet;
 use rc::{AttrId, EveAttrId, ItemCommon, ItemId, ItemTypeId, ModRack, Sol};
 
 use super::{
-    BuildOptions, Built, CalcOptions, Cap, CapDetail, Engine, Layer, Pilot, Resource, Tank, attr,
+    BuildOptions, Built, CalcOptions, Cap, CapDetail, Engine, Layer, Pilot, Resource, Tank,
     build::{add_fit_module, at},
     pane, resource, stats,
 };
 use crate::{
     data::{Slot, TypeId},
+    dogma::attr,
     fit::{Fit, Module},
 };
 
@@ -177,7 +178,7 @@ fn cap_per_sec(sol: &mut Sol, id: ItemId) -> Option<f64> {
             .map(|v| v.modified.into_f64())
             .filter(|&v| v > 0.0)
     };
-    let need = get(attr::CAP_NEED)?;
+    let need = get(attr::CAPACITOR_NEED)?;
     let cycle = get(attr::DURATION).or_else(|| get(attr::RATE_OF_FIRE))?;
     Some(need / (cycle / 1000.0))
 }

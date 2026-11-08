@@ -19,6 +19,7 @@ use super::{
 };
 use crate::{
     data::Slot,
+    dogma::attr,
     fit::{
         Fit, Module, ModuleState,
         fighters::Fighter,
@@ -28,7 +29,6 @@ use crate::{
 
 /// The capsule: a ship item with nothing on it that bonuses modules or drones.
 const CAPSULE: i32 = 670;
-const RADIUS: i32 = 162;
 
 /// Fighter abilities pyfa leaves off when a squadron has no attack to start with.
 const PROPULSION_ABILITIES: [i32; 2] = [4, 13];
@@ -403,7 +403,7 @@ fn radius(sol: &mut SolOwned, id: ItemId) -> f64 {
     sol.get_item(&id)
         .ok()
         .and_then(|mut item| {
-            item.get_attr(&AttrId::Eve(EveAttrId::from_i32(RADIUS)))
+            item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr::RADIUS)))
                 .ok()
                 .map(|v| v.modified.into_f64())
         })

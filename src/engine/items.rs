@@ -7,7 +7,7 @@ use rc::{
     stats::{ItemStatsCommon, StatMiningResourceKind, StatTimeOptions},
 };
 
-use super::attr;
+use crate::dogma::attr;
 
 /// What the Boosters tab shows for a booster, after skills.
 #[derive(Debug, Clone, Default)]
@@ -29,7 +29,7 @@ pub struct SideEffectInfo {
 /// stack is the same).
 #[derive(Debug, Clone, Default)]
 pub struct DroneInfo {
-    /// The attributes in [`drone_attr::ALL`] after bonuses; missing ones read as 0.
+    /// The attributes the drones pane shows, after bonuses; missing ones read as 0.
     pub attrs: HashMap<i32, f64>,
     /// Dogma effects the drone carries. Some attributes default to nonzero values, so pyfa asks
     /// for the effect before reading them.
@@ -55,72 +55,34 @@ impl DroneInfo {
     }
 }
 
-/// Attributes the drones pane shows, by their dogma ID.
-pub mod drone_attr {
-    pub const MAX_RANGE: i32 = 54;
-    pub const SHIELD_TRANSFER_RANGE: i32 = 87;
-    pub const POWER_TRANSFER_RANGE: i32 = 91;
-    pub const EMP_FIELD_RANGE: i32 = 99;
-    pub const ECM_BURST_RANGE: i32 = 142;
-    pub const ECM_RANGE_OPTIMAL: i32 = 936;
-    pub const FALLOFF: i32 = 158;
-    pub const FALLOFF_EFFECTIVENESS: i32 = 2044;
-    pub const MAX_VELOCITY: i32 = 37;
-    pub const TRACKING_SPEED: i32 = 160;
-    pub const OPTIMAL_SIG_RADIUS: i32 = 620;
-    pub const NEUT_AMOUNT: i32 = 97;
-    pub const NEUT_DURATION: i32 = 942;
-    pub const FALLOFF_BONUS: i32 = 349;
-    pub const MAX_RANGE_BONUS: i32 = 351;
-    pub const TRACKING_SPEED_BONUS: i32 = 767;
-    pub const SCAN_GRAVIMETRIC_BONUS: i32 = 238;
-    pub const SCAN_LADAR_BONUS: i32 = 239;
-    pub const SCAN_MAGNETOMETRIC_BONUS: i32 = 240;
-    pub const SCAN_RADAR_BONUS: i32 = 241;
-    pub const ACCESS_DIFFICULTY_BONUS: i32 = 902;
-    pub const SPEED_FACTOR: i32 = 20;
-    pub const SIG_RADIUS_BONUS: i32 = 554;
-    pub const MAX_TARGET_RANGE_BONUS: i32 = 309;
-    pub const SCAN_RESOLUTION_BONUS: i32 = 566;
-
-    pub const ALL: [i32; 25] = [
-        MAX_RANGE,
-        SHIELD_TRANSFER_RANGE,
-        POWER_TRANSFER_RANGE,
-        EMP_FIELD_RANGE,
-        ECM_BURST_RANGE,
-        ECM_RANGE_OPTIMAL,
-        FALLOFF,
-        FALLOFF_EFFECTIVENESS,
-        MAX_VELOCITY,
-        TRACKING_SPEED,
-        OPTIMAL_SIG_RADIUS,
-        NEUT_AMOUNT,
-        NEUT_DURATION,
-        FALLOFF_BONUS,
-        MAX_RANGE_BONUS,
-        TRACKING_SPEED_BONUS,
-        SCAN_GRAVIMETRIC_BONUS,
-        SCAN_LADAR_BONUS,
-        SCAN_MAGNETOMETRIC_BONUS,
-        SCAN_RADAR_BONUS,
-        ACCESS_DIFFICULTY_BONUS,
-        SPEED_FACTOR,
-        SIG_RADIUS_BONUS,
-        MAX_TARGET_RANGE_BONUS,
-        SCAN_RESOLUTION_BONUS,
-    ];
-}
-
-/// Effects of combat drones that also do electronic warfare, by their dogma ID.
-pub mod drone_effect {
-    pub const NEUTRALIZER: i32 = 6691;
-    pub const WEBIFIER: i32 = 6690;
-    pub const TARGET_PAINTER: i32 = 6692;
-    pub const SENSOR_DAMPENER: i32 = 6693;
-    pub const WEAPON_DISRUPTOR: i32 = 6694;
-    pub const ECM: i32 = 6695;
-}
+/// Attributes the drones pane shows.
+const DRONE_ATTRS: [i32; 25] = [
+    attr::MAX_RANGE,
+    attr::SHIELD_TRANSFER_RANGE,
+    attr::POWER_TRANSFER_RANGE,
+    attr::EMP_FIELD_RANGE,
+    attr::ECM_BURST_RANGE,
+    attr::ECM_RANGE_OPTIMAL,
+    attr::FALLOFF,
+    attr::FALLOFF_EFFECTIVENESS,
+    attr::MAX_VELOCITY,
+    attr::TRACKING_SPEED,
+    attr::OPTIMAL_SIG_RADIUS,
+    attr::NEUT_AMOUNT,
+    attr::NEUT_DURATION,
+    attr::FALLOFF_BONUS,
+    attr::MAX_RANGE_BONUS,
+    attr::TRACKING_SPEED_BONUS,
+    attr::SCAN_GRAVIMETRIC_BONUS,
+    attr::SCAN_LADAR_BONUS,
+    attr::SCAN_MAGNETOMETRIC_BONUS,
+    attr::SCAN_RADAR_BONUS,
+    attr::ACCESS_DIFFICULTY_BONUS,
+    attr::SPEED_FACTOR,
+    attr::SIGNATURE_RADIUS_BONUS,
+    attr::MAX_TARGET_RANGE_BONUS,
+    attr::SCAN_RESOLUTION_BONUS,
+];
 
 /// Shield level at which passive regeneration peaks.
 const PEAK_RECHARGE: f64 = 0.25;
@@ -158,7 +120,7 @@ pub(super) fn booster_info(sol: &mut SolOwned, id: ItemId) -> BoosterInfo {
 pub(super) fn drone_info(sol: &mut SolOwned, id: ItemId) -> DroneInfo {
     let mut info = DroneInfo::default();
     if let Ok(mut item) = sol.get_item(&id) {
-        for attr in drone_attr::ALL {
+        for attr in DRONE_ATTRS {
             if let Ok(v) = item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr))) {
                 info.attrs.insert(attr, v.modified.into_f64());
             }
