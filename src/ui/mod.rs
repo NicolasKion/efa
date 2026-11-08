@@ -26,6 +26,7 @@ mod preferences;
 pub mod profile_editor;
 pub mod profile_menus;
 mod side;
+mod splash;
 mod stats;
 mod status_bar;
 mod updates;
@@ -1447,18 +1448,7 @@ impl Render for Efa {
                 };
                 return root
                     .child(self.menu_bar(window, cx))
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_h_0()
-                            .p_4()
-                            .items_center()
-                            .justify_center()
-                            .map(|body| match failed {
-                                Some(e) => body.text_color(cx.theme().danger).child(e),
-                                None => body.child("Loading EVE data…"),
-                            }),
-                    )
+                    .child(splash::render(failed, cx))
                     .child(self.status_bar(cx))
                     .into_any_element();
             }
