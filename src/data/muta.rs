@@ -259,7 +259,7 @@ impl Source {
         dir: &Path,
         names: &HashMap<TypeId, String>,
         dogma: &HashMap<String, PhbTypeDogma>,
-    ) -> Mutaplasmids {
+    ) -> Result<Mutaplasmids, String> {
         let mut by_type = HashMap::with_capacity(self.items.len());
         let mut for_base: HashMap<TypeId, Vec<TypeId>> = HashMap::new();
         let mut mutable: HashMap<TypeId, HashSet<i32>> = HashMap::new();
@@ -335,8 +335,7 @@ impl Source {
                 (base, values)
             })
             .collect();
-        let attrs = read::<HashMap<String, SdeAttr>>(dir, "sde/dogmaattributes.json")
-            .unwrap_or_default()
+        let attrs = read::<HashMap<String, SdeAttr>>(dir, "sde/dogmaattributes.json")?
             .into_iter()
             .filter_map(|(id, a)| {
                 let id: i32 = id.parse().ok()?;
@@ -349,12 +348,12 @@ impl Source {
                 ))
             })
             .collect();
-        Mutaplasmids {
+        Ok(Mutaplasmids {
             by_type,
             for_base,
             base_values,
             attrs,
-        }
+        })
     }
 }
 

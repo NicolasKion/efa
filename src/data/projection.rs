@@ -257,9 +257,8 @@ impl<'a> Builder<'a> {
         }
     }
 
-    pub(super) fn finish(mut self, dir: &Path) -> Projection {
-        let abilities: HashMap<String, SdeAbility> =
-            read(dir, "sde/fighterabilities.json").unwrap_or_default();
+    pub(super) fn finish(mut self, dir: &Path) -> Result<Projection, String> {
+        let abilities: HashMap<String, SdeAbility> = read(dir, "sde/fighterabilities.json")?;
         self.projection.ability_names = abilities
             .into_iter()
             .filter_map(|(id, a)| Some((id.parse().ok()?, a.display_name?.en)))
@@ -267,7 +266,7 @@ impl<'a> Builder<'a> {
         let (menu, types) = env_menu(&self.env);
         self.projection.env_menu = menu;
         self.projection.env_types = types;
-        self.projection
+        Ok(self.projection)
     }
 }
 

@@ -657,7 +657,7 @@ impl Catalog {
             t.omega = needs_omega(t.id, &required_skills, &alpha, &mut omega);
         }
 
-        let projection = projection.finish(dir);
+        let projection = projection.finish(dir)?;
         let mutaplasmids = muta.finish(
             dir,
             &types
@@ -666,7 +666,7 @@ impl Catalog {
                 .map(|(&id, t)| (id, t.name.clone()))
                 .collect(),
             &dogma,
-        );
+        )?;
 
         // Published names win when two types share one, which happens with old unpublished copies;
         // otherwise the lowest type ID does, so every build picks the same one.
