@@ -220,6 +220,9 @@ pub struct ShipHeat {
     pub slot_factor: f64,
 }
 
+/// Heat attenuation pyfa falls back to where a ship has none of its own.
+const DEFAULT_ATTENUATION: f64 = 0.25;
+
 /// How long pyfa's simulation of overheating runs, in seconds.
 const HEAT_SIM_TIME: f64 = 600.0;
 
@@ -312,8 +315,7 @@ pub(super) fn ship_heat(sol: &mut SolOwned, ship: ItemId) -> (f64, [f64; 3]) {
             attr::HEAT_ATTENUATION_LOW,
         ],
     );
-    // pyfa falls back to 0.25 where a ship has no attenuation of its own.
-    let attenuation = |attr| attrs.get(&attr).copied().unwrap_or(0.25);
+    let attenuation = |attr| attrs.get(&attr).copied().unwrap_or(DEFAULT_ATTENUATION);
     (
         attrs
             .get(&attr::HEAT_GENERATION_MULTIPLIER)
@@ -392,15 +394,21 @@ pub(super) fn burnout(
         }
     }
     for (n, &slot) in RACKS.iter().enumerate() {
-        let hot: Vec<usize> = heat
-            .keys()
-            .filter(|&&(s, i)| s == slot && overheated(s, i))
-            .map(|&(_, i)| i)
+        // The rack's modules by position, so sums come out the same every time.
+        let in_rack: Vec<usize> = module_ids
+            .iter()
+            .filter(|&&(s, ..)| s == slot)
+            .map(|&(_, i, _)| i)
+            .collect();
+        let hot: Vec<usize> = in_rack
+            .iter()
+            .copied()
+            .filter(|&i| overheated(slot, i))
             .collect();
         let rack = RackHeat {
             attenuation: attenuation[n],
             absorption: hot.iter().map(|&i| heat[&(slot, i)].0).sum(),
-            overheated: hot.clone(),
+            overheated: hot,
         };
         // Each overheated module's step and cycle, in seconds.
         let mut timings = Vec::new();
@@ -434,17 +442,14 @@ pub(super) fn burnout(
             .map(|&(i, _, _)| heat[&(slot, i)].2)
             .collect();
         let neighbour_damage = damages.iter().sum::<f64>() / damages.len() as f64;
-        let cold: Vec<usize> = heat
-            .keys()
-            .filter(|&&(s, i)| s == slot && !overheated(s, i))
-            .filter(|&&(s, i)| {
-                fit.rack(s)
+        let cold = in_rack.iter().copied().filter(|&i| {
+            !overheated(slot, i)
+                && fit
+                    .rack(slot)
                     .get(i)
                     .and_then(Option::as_ref)
                     .is_some_and(|m| m.state != ModuleState::Offline)
-            })
-            .map(|&(_, i)| i)
-            .collect();
+        });
         for i in cold {
             let (_, hp, _) = heat[&(slot, i)];
             if hp <= 0.0 {
