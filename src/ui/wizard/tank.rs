@@ -15,7 +15,6 @@ use gpui_kit::component::{
     h_flex,
     input::{Input, InputEvent, InputState},
     menu::{DropdownMenu, PopupMenuItem},
-    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
@@ -25,9 +24,7 @@ use gpui_kit::{
     prelude::FluentBuilder, px,
 };
 
-use super::{
-    Efa, Layout, Shared, Stat, Target, divider, field, fieldset, join_and, muted, notice, plural,
-};
+use super::{Efa, Layout, Shared, Stat, Target, divider, field, fieldset, join_and, muted, notice};
 use crate::{
     data::{Slot, TypeId},
     engine::{Resource, Stats},
@@ -36,11 +33,9 @@ use crate::{
     prices::Prices,
     theme::Palette,
     ui::{
-        columns,
-        editor_kit::empty_state,
-        side,
+        columns, side,
         stats::{self, SectionKind},
-        widgets::{self, Segment, segmented},
+        widgets::{self, Segment, TipExt, count, empty_state, segmented},
     },
     wizard::{
         self, Budget, Change, Layer, SearchGroup,
@@ -717,7 +712,7 @@ impl TankSection {
                 false,
                 n == Some(MAX_REPAIRERS),
             ))
-            .tooltip(move |window, cx| Tooltip::new(tip).build(window, cx))
+            .tip(tip)
             .into_any_element()
     }
 
@@ -740,7 +735,7 @@ impl TankSection {
                             });
                         }),
                 )
-                .tooltip(move |window, cx| Tooltip::new(tip).build(window, cx))
+                .tip(tip)
         });
         div()
             .grid()
@@ -917,20 +912,24 @@ impl TankSection {
         };
         let mut room = Vec::new();
         if r.slots > 0 {
-            room.push(plural(r.slots, &format!("{rack} slot")));
+            room.push(count(
+                r.slots,
+                &format!("{rack} slot"),
+                &format!("{rack} slots"),
+            ));
         }
         if r.rigs > 0 {
-            room.push(plural(r.rigs, "rig slot"));
+            room.push(count(r.rigs, "rig slot", "rig slots"));
         }
         if room.is_empty() {
             return format!("No free {rack} slots or rigs.");
         }
         let mut off = Vec::new();
         if r.modules_off > 0 {
-            off.push(plural(r.modules_off, "tank module"));
+            off.push(count(r.modules_off, "tank module", "tank modules"));
         }
         if r.rigs_off > 0 {
-            off.push(plural(r.rigs_off, "rig"));
+            off.push(count(r.rigs_off, "rig", "rigs"));
         }
         let off = if off.is_empty() {
             String::new()
@@ -1147,7 +1146,7 @@ impl TankSection {
                 })
                 .when(full <= 0.99, |d| d.text_color(theme.muted_foreground))
                 .child(format!("{:.0}%", full * 100.0))
-                .tooltip(move |window, cx| Tooltip::new(fitting_tip.clone()).build(window, cx)),
+                .tip(fitting_tip),
         )
         .child(
             div()
@@ -1283,7 +1282,7 @@ impl TankSection {
                 .gap_1()
                 .child(div().text_color(theme.muted_foreground).child(label))
                 .child(div().text_color(color).child(text))
-                .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                .tip(tip)
         };
         let price = self
             .outcomes()

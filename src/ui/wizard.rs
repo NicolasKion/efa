@@ -7,24 +7,26 @@
 
 mod tank;
 
-use std::{rc::Rc, time::Duration};
+use std::rc::Rc;
 
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
     ActiveTheme, Icon as UiIcon, Sizable,
     button::{Button, ButtonVariants},
-    h_flex,
-    tooltip::Tooltip,
-    v_flex,
+    h_flex, v_flex,
 };
 use gpui_kit::{
     AnyElement, AnyView, App, AppContext, Context, Div, Entity, FocusHandle, InteractiveElement,
-    IntoElement, KeyDownEvent, MouseButton, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
-    prelude::FluentBuilder, px,
+    IntoElement, KeyDownEvent, MouseButton, ParentElement, Render, SharedString, Styled,
+    Subscription, WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
-use super::{Efa, Loaded, hub::Hub, item_stats, widgets};
+use super::{
+    Efa, Loaded,
+    hub::Hub,
+    item_data,
+    widgets::{self, TipExt},
+};
 use crate::{
     engine::Pilot,
     fit::Fit,
@@ -74,8 +76,6 @@ struct Shared {
     /// The fit's identity, which outlives its place in the list.
     uid: u64,
     fit: Fit,
-    /// The fit as saved, to tell when it changes.
-    saved: String,
     facts: Facts,
     palette: Palette,
 }
@@ -200,6 +200,8 @@ pub(super) struct WizardDialog {
     /// The hub has had the fit under its identity: a fit just given one is not there until its
     /// window publishes, which is no reason to call it deleted.
     seen: bool,
+    /// The fit's revision in the hub last compared with the copy, and whether they differed.
+    compared: Option<(u64, bool)>,
     focused: bool,
     _hub: Subscription,
 }
@@ -215,29 +217,20 @@ impl Efa {
             cx.notify();
             return;
         }
-        let Some(data) = item_stats::hover_data(&loaded, cx) else {
+        let Some(data) = item_data::hover_data(&loaded, cx) else {
             self.set_status("Loading item data for the fitting wizard…");
             cx.notify();
             let this = cx.weak_entity();
             let window_handle = window.window_handle();
-            cx.spawn(async move |_, cx| {
-                for _ in 0..600 {
-                    cx.background_executor()
-                        .timer(Duration::from_millis(100))
-                        .await;
-                    let ready = cx.update(|cx| item_stats::hover_data(&loaded, cx).is_some());
-                    if ready {
-                        let _ = window_handle.update(cx, |_, window, cx| {
-                            Efa::app_update(&this, cx, |g, cx| {
-                                g.status = None;
-                                g.open_wizard(window, cx);
-                            });
-                        });
-                        return;
-                    }
-                }
-            })
-            .detach();
+            // Not in yet, so this runs once it lands, outside this update.
+            item_data::when_ready(&loaded, cx, move |_, cx| {
+                let _ = window_handle.update(cx, |_, window, cx| {
+                    let _ = this.update(cx, |g, cx| {
+                        g.status = None;
+                        g.open_wizard(window, cx);
+                    });
+                });
+            });
             return;
         };
         let Some(current) = self.saved.settings.current else {
@@ -249,19 +242,21 @@ impl Efa {
         self.save();
         let fit = (*self.saved.fits[current]).clone();
         let pilot = self.pilot(&loaded);
-        let Some(shared) = Shared::new(
-            self.hub.clone(),
-            cx.weak_entity(),
+        let Some(facts) = Facts::gather(&loaded.engine, &data, &loaded.catalog, &fit, &pilot)
+        else {
+            return;
+        };
+        let shared = Rc::new(Shared {
+            hub: self.hub.clone(),
+            efa: cx.weak_entity(),
             loaded,
             data,
             pilot,
             uid,
             fit,
-            self.palette,
-        ) else {
-            return;
-        };
-        let shared = Rc::new(shared);
+            facts,
+            palette: self.palette,
+        });
         let again = Rc::clone(&shared);
         let opening = super::chrome::open_single(
             "Fitting Wizard",
@@ -275,36 +270,28 @@ impl Efa {
 }
 
 impl Shared {
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        hub: Entity<Hub>,
-        efa: WeakEntity<Efa>,
-        loaded: Rc<Loaded>,
-        data: Rc<ItemData>,
-        pilot: Rc<Pilot>,
-        uid: u64,
-        fit: Fit,
-        palette: Palette,
-    ) -> Option<Self> {
-        let facts = Facts::gather(&loaded.engine, &data, &loaded.catalog, &fit, &pilot)?;
+    /// The same wizard over `fit`, None when it has no ship to work on.
+    fn with_fit(&self, fit: Fit) -> Option<Self> {
+        let loaded = &self.loaded;
+        let facts = Facts::gather(
+            &loaded.engine,
+            &self.data,
+            &loaded.catalog,
+            &fit,
+            &self.pilot,
+        )?;
         Some(Self {
-            hub,
-            efa,
-            loaded,
-            data,
-            pilot,
-            uid,
-            saved: fit_text(&fit),
+            hub: self.hub.clone(),
+            efa: self.efa.clone(),
+            loaded: Rc::clone(loaded),
+            data: Rc::clone(&self.data),
+            pilot: Rc::clone(&self.pilot),
+            uid: self.uid,
             fit,
             facts,
-            palette,
+            palette: self.palette,
         })
     }
-}
-
-/// A fit as text, to compare copies by.
-fn fit_text(fit: &Fit) -> String {
-    serde_json::to_string(fit).unwrap_or_default()
 }
 
 impl WizardDialog {
@@ -316,6 +303,7 @@ impl WizardDialog {
             section,
             target: Target::Same,
             seen: false,
+            compared: None,
             focused: false,
             _hub: cx.observe(&hub, |d: &mut Self, _, cx| d.check(cx)),
             shared: Rc::clone(&shared),
@@ -337,6 +325,7 @@ impl WizardDialog {
         self.shared = shared;
         self.target = Target::Same;
         self.seen = false;
+        self.compared = None;
         self.focused = false;
         cx.notify();
     }
@@ -355,16 +344,7 @@ impl WizardDialog {
         else {
             return;
         };
-        let Some(shared) = Shared::new(
-            s.hub.clone(),
-            s.efa.clone(),
-            Rc::clone(&s.loaded),
-            Rc::clone(&s.data),
-            Rc::clone(&s.pilot),
-            s.uid,
-            fit,
-            s.palette,
-        ) else {
+        let Some(shared) = s.with_fit(fit) else {
             return;
         };
         self.load(Rc::new(shared), window, cx);
@@ -378,9 +358,25 @@ impl WizardDialog {
         let target = match found {
             None if !self.seen => Target::Same,
             None => Target::Gone,
-            Some(i) if fit_text(&hub.saved.fits[i]) != self.shared.saved => Target::Changed,
-            Some(i) if !hub.saved.settings.open.contains(&i) => Target::Closed,
-            Some(_) => Target::Same,
+            Some(i) => {
+                // Compared again only when the fit changed in the hub.
+                let revision = hub.fit_revision(i);
+                let changed = match self.compared {
+                    Some((seen, changed)) if seen == revision => changed,
+                    _ => {
+                        let changed = *hub.saved.fits[i] != self.shared.fit;
+                        self.compared = Some((revision, changed));
+                        changed
+                    }
+                };
+                if changed {
+                    Target::Changed
+                } else if hub.saved.settings.open.contains(&i) {
+                    Target::Same
+                } else {
+                    Target::Closed
+                }
+            }
         };
         if target != self.target {
             self.target = target;
@@ -445,7 +441,6 @@ impl WizardDialog {
             .px_2()
             .rounded(px(4.))
             .cursor_pointer()
-            .text_sm()
             .when(current, |d| {
                 d.bg(theme.secondary).text_color(theme.foreground)
             })
@@ -455,7 +450,7 @@ impl WizardDialog {
             })
             .child(UiIcon::new(panel.icon()).xsmall())
             .child(section.label())
-            .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+            .tip(tip)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _: &gpui_kit::MouseDownEvent, window, cx| {
@@ -478,7 +473,7 @@ impl WizardDialog {
                 .gap_1p5()
                 .child(div().text_color(theme.muted_foreground).child(s.label))
                 .child(s.value)
-                .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                .tip(tip)
         });
         h_flex()
             .flex_none()
@@ -492,7 +487,6 @@ impl WizardDialog {
             .border_b_1()
             .border_color(theme.border)
             .bg(theme.title_bar)
-            .text_sm()
             .child(
                 h_flex()
                     .min_w_0()
@@ -579,15 +573,11 @@ impl Render for WizardDialog {
         let header = self.header(cx);
         let banner = self.banner(cx);
         let view = self.panel().map(Panel::view);
-        let theme = cx.theme();
         v_flex()
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 this.key(event, window, cx);
             }))
             .size_full()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .text_sm()
             .child(header)
             .children(banner)
             .child(div().flex_1().min_h_0().children(view))
@@ -662,15 +652,6 @@ fn notice(icon: AssetIcon, color: Rgb, text: impl Into<SharedString>, cx: &App) 
 /// A hairline between parts of a pane.
 fn divider(cx: &App) -> Div {
     div().h_px().w_full().bg(cx.theme().border)
-}
-
-/// "1 slot", "3 slots".
-fn plural(n: usize, word: &str) -> String {
-    if n == 1 {
-        format!("1 {word}")
-    } else {
-        format!("{n} {word}s")
-    }
 }
 
 /// "a, b and c".
