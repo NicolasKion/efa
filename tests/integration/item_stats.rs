@@ -152,7 +152,8 @@ fn type_data_has_descriptions_traits_and_requirements() {
     assert!(info.attr(type_attr::MASS).is_some_and(|m| m > 0.0));
     assert_eq!(info.required_skills(), [(frigate, 1)]);
     assert!(
-        data.required_for[&frigate]
+        catalog
+            .required_for(frigate)
             .iter()
             .any(|&(id, level)| id == rifter && level == 1)
     );

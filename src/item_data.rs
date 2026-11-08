@@ -2,18 +2,18 @@
 //! and icon, each type's base attributes and effects, descriptions and traits.
 //!
 //! Only the stats window needs this, and descriptions alone are megabytes, so it is loaded on
-//! first use instead of at start, and cached on disk like the catalog.
+//! first use instead of at start, and cached on disk like the catalog. What needs a skill comes
+//! from the catalog, which knows every type's skills already.
 
 use std::{
     collections::{HashMap, HashSet},
-    fs::File,
-    io::BufReader,
     path::Path,
 };
 
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 
-use crate::data::TypeId;
+pub use crate::data::sde::REQUIRED_SKILL_ATTRS;
+use crate::data::{TypeId, cache, sde};
 
 /// Bump whenever what [`ItemData`] holds or how it is built changes.
 const CACHE_FORMAT: u32 = 2;
@@ -27,16 +27,6 @@ pub mod type_attr {
     pub const VOLUME: i32 = 161;
     pub const RADIUS: i32 = 162;
 }
-
-/// The skill and level attribute pairs a type lists its prerequisites in, in the game's order.
-pub const REQUIRED_SKILL_ATTRS: [(i32, i32); 6] = [
-    (182, 277),
-    (183, 278),
-    (184, 279),
-    (1285, 1286),
-    (1289, 1287),
-    (1290, 1288),
-];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttrInfo {
@@ -140,9 +130,6 @@ pub struct ItemData {
     #[serde(default)]
     #[serde(serialize_with = "crate::sorted::map")]
     pub masteries: HashMap<TypeId, Vec<String>>,
-    /// Types needing a skill, with the level they need, keyed by the skill.
-    #[serde(skip)]
-    pub required_for: HashMap<TypeId, Vec<(TypeId, u8)>>,
 }
 
 impl ItemData {
@@ -157,16 +144,14 @@ impl ItemData {
         let path = cache_dir.join(CACHE_FILE);
         let key = key.map(|k| format!("{CACHE_FORMAT}:{}:{k}", wanted.len()));
         if let Some(key) = &key
-            && let Some(mut data) = read_cache(&path, key)
+            && let Some(data) = cache::read(&path, key)
         {
-            data.link();
             return Ok(data);
         }
-        let mut data = Self::load(dir, wanted)?;
+        let data = Self::load(dir, wanted)?;
         if let Some(key) = key {
-            write_cache(&path, &key, &data);
+            cache::write(&path, &key, &data);
         }
-        data.link();
         Ok(data)
     }
 
@@ -184,28 +169,24 @@ impl ItemData {
                 "the item data is in format {format}, this build reads {CACHE_FORMAT}"
             ));
         }
-        let mut data: Self =
-            postcard::from_bytes(bytes).map_err(|e| format!("reading the item data: {e}"))?;
-        data.link();
-        Ok(data)
+        postcard::from_bytes(bytes).map_err(|e| format!("reading the item data: {e}"))
     }
 
     /// Read the dump for the types in `wanted`.
     pub fn load(dir: &Path, wanted: &HashSet<TypeId>) -> Result<Self, String> {
-        let sde_attrs: HashMap<String, SdeAttr> = read(dir, "sde/dogmaattributes.json")?;
-        let sde_units: HashMap<String, SdeUnit> = read(dir, "sde/dogmaunits.json")?;
-        let sde_effects: HashMap<String, SdeEffect> = read(dir, "sde/dogmaeffects.json")?;
-        let dogma: HashMap<String, TypeDogma> = read(dir, "sde/typedogma.json")?;
-        let bonuses: HashMap<String, SdeTypeBonus> = read(dir, "sde/typebonus.json")?;
-        let sde_types: HashMap<String, SdeType> = read(dir, "sde/types.json")?;
+        let sde_attrs: HashMap<i32, sde::Attr> = sde::read(dir, "sde/dogmaattributes.json")?;
+        let sde_units: HashMap<i32, sde::Unit> = sde::read(dir, "sde/dogmaunits.json")?;
+        let sde_effects: HashMap<i32, sde::Effect> = sde::read(dir, "sde/dogmaeffects.json")?;
+        let dogma: HashMap<TypeId, sde::TypeDogma> = sde::read(dir, "sde/typedogma.json")?;
+        let bonuses: HashMap<TypeId, sde::TypeBonus> = sde::read(dir, "sde/typebonus.json")?;
+        let sde_types: HashMap<TypeId, sde::TypeDetails> = sde::read(dir, "sde/types.json")?;
         let masteries = masteries(dir, wanted)?;
 
         let attrs = sde_attrs
             .into_iter()
-            .filter_map(|(id, a)| {
-                let id: i32 = id.parse().ok()?;
+            .map(|(id, a)| {
                 let display_name = a.display_name.map(|d| d.en).filter(|d| !d.is_empty());
-                Some((
+                (
                     id,
                     AttrInfo {
                         id,
@@ -215,45 +196,41 @@ impl ItemData {
                         icon: a.icon_id,
                         published: a.published,
                     },
-                ))
+                )
             })
             .collect();
         let units = sde_units
             .into_iter()
-            .filter_map(|(id, u)| {
+            .map(|(id, u)| {
                 let display_name = u.display_name.map(|d| d.en).filter(|d| !d.is_empty());
-                Some((
-                    id.parse().ok()?,
+                (
+                    id,
                     UnitInfo {
                         name: u.name,
                         display_name,
                     },
-                ))
+                )
             })
             .collect();
         let effects = sde_effects
             .into_iter()
-            .filter_map(|(id, e)| {
-                Some((
-                    id.parse().ok()?,
+            .map(|(id, e)| {
+                (
+                    id,
                     EffectInfo {
                         name: e.name,
                         category: e.effect_category_id,
                     },
-                ))
+                )
             })
             .collect();
 
         let mut types = HashMap::with_capacity(wanted.len());
         for (id, t) in sde_types {
-            let Ok(id) = id.parse::<TypeId>() else {
-                continue;
-            };
             if !wanted.contains(&id) {
                 continue;
             }
-            let key = id.to_string();
-            let dogma = dogma.get(&key);
+            let dogma = dogma.get(&id);
             let mut attrs: Vec<(i32, f64)> = dogma.map_or_default(|d| {
                 d.attributes
                     .iter()
@@ -279,7 +256,7 @@ impl ItemData {
                     .map(|e| (e.effect_id, e.is_default))
                     .collect()
             });
-            let traits = bonuses.get(&key).map(traits_from).filter(|t| !t.is_empty());
+            let traits = bonuses.get(&id).map(traits_from).filter(|t| !t.is_empty());
             types.insert(
                 id,
                 TypeInfo {
@@ -301,19 +278,7 @@ impl ItemData {
             effects,
             types,
             masteries,
-            required_for: HashMap::new(),
         })
-    }
-
-    /// Fill in what is derived rather than stored.
-    fn link(&mut self) {
-        let mut required_for: HashMap<TypeId, Vec<(TypeId, u8)>> = HashMap::new();
-        for (&id, info) in &self.types {
-            for (skill, level) in info.required_skills() {
-                required_for.entry(skill).or_default().push((id, level));
-            }
-        }
-        self.required_for = required_for;
     }
 
     pub fn type_info(&self, id: TypeId) -> Option<&TypeInfo> {
@@ -344,19 +309,19 @@ fn bonus_number(bonus: f64, unit: Option<i32>) -> String {
     }
 }
 
-fn bonuses_from(list: &[SdeBonus]) -> Vec<Bonus> {
-    let mut sorted: Vec<&SdeBonus> = list.iter().collect();
+fn bonuses_from(list: &[sde::Bonus]) -> Vec<Bonus> {
+    let mut sorted: Vec<&sde::Bonus> = list.iter().collect();
     sorted.sort_by_key(|b| b.importance);
     sorted
         .into_iter()
         .map(|b| Bonus {
-            number: b.bonus.map(|v| bonus_number(v, b.unit_id)),
-            text: b.bonus_text.en.clone(),
+            number: b.amount.map(|v| bonus_number(v, b.unit_id)),
+            text: b.text.en.clone(),
         })
         .collect()
 }
 
-fn traits_from(bonus: &SdeTypeBonus) -> Traits {
+fn traits_from(bonus: &sde::TypeBonus) -> Traits {
     Traits {
         skills: bonus
             .types
@@ -369,59 +334,13 @@ fn traits_from(bonus: &SdeTypeBonus) -> Traits {
     }
 }
 
-fn read_cache(path: &Path, key: &str) -> Option<ItemData> {
-    let bytes = std::fs::read(path).ok()?;
-    let cache: CacheFile = postcard::from_bytes(&bytes).ok()?;
-    (cache.key == key).then_some(cache.data)
-}
-
-/// Best effort: without a cache the next use just builds the data again.
-fn write_cache(path: &Path, key: &str, data: &ItemData) {
-    let Ok(bytes) = postcard::to_stdvec(&CacheFileRef { key, data }) else {
-        return;
-    };
-    let _ = crate::persist::write_atomic(path, &bytes);
-}
-
-#[derive(Deserialize)]
-struct CacheFile {
-    key: String,
-    data: ItemData,
-}
-
-/// [`CacheFile`] for writing without copying; postcard only cares about field order.
-#[derive(Serialize)]
-struct CacheFileRef<'a> {
-    key: &'a str,
-    data: &'a ItemData,
-}
-
-/// masteries.json: per ship, its mastery levels, each a list of certificate IDs.
-#[derive(Deserialize)]
-struct SdeMastery {
-    #[serde(rename = "_value")]
-    levels: Vec<SdeMasteryLevel>,
-}
-
-#[derive(Deserialize)]
-struct SdeMasteryLevel {
-    #[serde(rename = "_value")]
-    certificates: Vec<i32>,
-}
-
-#[derive(Deserialize)]
-struct SdeCertificate {
-    name: Localized,
-}
-
 /// The certificate names of each wanted ship's highest mastery level.
 fn masteries(dir: &Path, wanted: &HashSet<TypeId>) -> Result<HashMap<TypeId, Vec<String>>, String> {
-    let masteries: HashMap<String, SdeMastery> = read(dir, "sde/masteries.json")?;
-    let certificates: HashMap<String, SdeCertificate> = read(dir, "sde/certificates.json")?;
+    let masteries: HashMap<TypeId, sde::Mastery> = sde::read(dir, "sde/masteries.json")?;
+    let certificates: HashMap<i32, sde::Certificate> = sde::read(dir, "sde/certificates.json")?;
     Ok(masteries
         .into_iter()
         .filter_map(|(ship, mastery)| {
-            let ship: TypeId = ship.parse().ok()?;
             if !wanted.contains(&ship) {
                 return None;
             }
@@ -429,123 +348,12 @@ fn masteries(dir: &Path, wanted: &HashSet<TypeId>) -> Result<HashMap<TypeId, Vec
             let names = top
                 .certificates
                 .iter()
-                .filter_map(|c| certificates.get(&c.to_string()))
+                .filter_map(|c| certificates.get(c))
                 .map(|c| c.name.en.clone())
                 .collect();
             Some((ship, names))
         })
         .collect())
-}
-
-fn read<T: DeserializeOwned>(dir: &Path, file: &str) -> Result<T, String> {
-    let path = dir.join(file);
-    let reader = File::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    serde_json::from_reader(BufReader::with_capacity(1 << 20, reader))
-        .map_err(|e| format!("{}: {e}", path.display()))
-}
-
-#[derive(Deserialize, Default)]
-struct Localized {
-    #[serde(default)]
-    en: String,
-}
-
-#[derive(Deserialize)]
-struct SdeAttr {
-    name: String,
-    #[serde(rename = "displayName")]
-    display_name: Option<Localized>,
-    #[serde(rename = "unitID")]
-    unit_id: Option<i32>,
-    #[serde(rename = "iconID")]
-    icon_id: Option<i32>,
-    #[serde(default)]
-    published: bool,
-}
-
-#[derive(Deserialize)]
-struct SdeUnit {
-    name: String,
-    #[serde(rename = "displayName")]
-    display_name: Option<Localized>,
-}
-
-#[derive(Deserialize)]
-struct SdeEffect {
-    name: String,
-    #[serde(rename = "effectCategoryID", default)]
-    effect_category_id: i32,
-}
-
-#[derive(Deserialize)]
-struct TypeDogma {
-    #[serde(rename = "dogmaAttributes", default)]
-    attributes: Vec<DogmaAttr>,
-    #[serde(rename = "dogmaEffects", default)]
-    effects: Vec<DogmaEffect>,
-}
-
-#[derive(Deserialize)]
-struct DogmaAttr {
-    #[serde(rename = "attributeID")]
-    attribute_id: i32,
-    value: f64,
-}
-
-#[derive(Deserialize)]
-struct DogmaEffect {
-    #[serde(rename = "effectID")]
-    effect_id: i32,
-    #[serde(rename = "isDefault", default)]
-    is_default: bool,
-}
-
-#[derive(Deserialize)]
-struct SdeTypeBonus {
-    #[serde(default)]
-    types: Vec<SkillBonuses>,
-    #[serde(rename = "roleBonuses", default)]
-    role_bonuses: Vec<SdeBonus>,
-    #[serde(rename = "miscBonuses", default)]
-    misc_bonuses: Vec<SdeBonus>,
-}
-
-#[derive(Deserialize)]
-struct SkillBonuses {
-    #[serde(rename = "_key")]
-    key: TypeId,
-    #[serde(rename = "_value", default)]
-    value: Vec<SdeBonus>,
-}
-
-#[derive(Deserialize)]
-struct SdeBonus {
-    bonus: Option<f64>,
-    #[serde(rename = "bonusText", default)]
-    bonus_text: Localized,
-    #[serde(default)]
-    importance: i32,
-    #[serde(rename = "unitID")]
-    unit_id: Option<i32>,
-}
-
-#[derive(Deserialize)]
-struct SdeType {
-    description: Option<Localized>,
-    #[serde(rename = "basePrice")]
-    base_price: Option<f64>,
-    #[serde(rename = "portionSize")]
-    portion_size: Option<i32>,
-    #[serde(rename = "techLevel")]
-    tech_level: Option<i32>,
-    #[serde(rename = "raceID")]
-    race_id: Option<i32>,
-    #[serde(rename = "factionID")]
-    faction_id: Option<i32>,
-    mass: Option<f64>,
-    capacity: Option<f64>,
-    volume: Option<f64>,
-    radius: Option<f64>,
 }
 
 #[cfg(test)]

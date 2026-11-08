@@ -842,8 +842,8 @@ impl ItemStats {
             .into_any_element()
     }
 
-    fn dependents_tab(&self, data: &ItemData, cx: &mut Context<Self>) -> AnyElement {
-        let nodes = dependents(&self.loaded.catalog, data, self.type_id);
+    fn dependents_tab(&self, cx: &mut Context<Self>) -> AnyElement {
+        let nodes = dependents(&self.loaded.catalog, self.type_id);
         if nodes.is_empty() {
             return Self::empty("Nothing needs this skill.", cx);
         }
@@ -1061,7 +1061,7 @@ impl Render for ItemStats {
             Tab::Attributes => self.attributes_tab(&data, cx),
             Tab::Compare => self.compare_tab(&data, cx),
             Tab::Requirements => self.requirements_tab(&data, cx),
-            Tab::Dependents => self.dependents_tab(&data, cx),
+            Tab::Dependents => self.dependents_tab(cx),
             Tab::Effects => self.effects_tab(&data, cx),
             Tab::AffectedBy => self.affected_tab(&data, cx),
             Tab::Properties => self.properties_tab(&data, cx),
@@ -1126,10 +1126,8 @@ fn requirements(catalog: &crate::data::Catalog, data: &ItemData, type_id: TypeId
 }
 
 /// pyfa's dependents tree: what a skill unlocks, by the level it needs.
-fn dependents(catalog: &crate::data::Catalog, data: &ItemData, skill: TypeId) -> Vec<Node> {
-    let Some(users) = data.required_for.get(&skill) else {
-        return Vec::new();
-    };
+fn dependents(catalog: &crate::data::Catalog, skill: TypeId) -> Vec<Node> {
+    let users = catalog.required_for(skill);
     let mut by_level: std::collections::BTreeMap<u8, Vec<TypeId>> =
         std::collections::BTreeMap::new();
     for &(id, level) in users {

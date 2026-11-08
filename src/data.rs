@@ -3,22 +3,22 @@
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    fs::File,
-    io::BufReader,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     market::jargon::{Jargon, Query},
     ship_browser::Race,
 };
 
+pub(crate) mod cache;
 pub mod muta;
 pub mod projection;
-pub mod renames;
 mod publish;
+pub mod renames;
+pub(crate) mod sde;
 
 pub type TypeId = i32;
 
@@ -103,15 +103,6 @@ mod attr {
     /// canFitShipType1 to 12 and a subsystem's fitsToShipType: the ships an item is limited to.
     pub const CAN_FIT_SHIP_TYPE: [i32; 13] = [
         1302, 1303, 1304, 1305, 1944, 2103, 2463, 2486, 2487, 2488, 2758, 5948, 1380,
-    ];
-    /// requiredSkill1..6 and the level attribute that goes with each.
-    pub const REQUIRED_SKILLS: [(i32, i32); 6] = [
-        (182, 277),
-        (183, 278),
-        (184, 279),
-        (1285, 1286),
-        (1289, 1287),
-        (1290, 1288),
     ];
 }
 
@@ -300,6 +291,9 @@ pub struct Catalog {
     /// their prerequisites here too.
     #[serde(serialize_with = "crate::sorted::map")]
     pub required_skills: HashMap<TypeId, Vec<(TypeId, u8)>>,
+    /// The other way round: the types needing each skill, with the level they need, by type.
+    #[serde(serialize_with = "crate::sorted::map")]
+    required_for: HashMap<TypeId, Vec<(TypeId, u8)>>,
     /// Environmental effects, projectable items and fighter data.
     pub projection: projection::Projection,
     /// Published ships by group, groups by name and ships by race and name, the fittings
@@ -326,23 +320,8 @@ pub struct AlphaClone {
 
 /// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
 /// instead of loaded.
-const CACHE_FORMAT: u32 = 11;
+const CACHE_FORMAT: u32 = 12;
 const CACHE_FILE: &str = "catalog.bin";
-
-/// The cache on disk: the key it was built for, then the catalog.
-#[derive(Deserialize)]
-struct CacheFile {
-    key: String,
-    catalog: Catalog,
-}
-
-/// [`CacheFile`] for writing, without copying the catalog. Same fields in the same order, which
-/// is all postcard's layout depends on.
-#[derive(Serialize)]
-struct CacheFileRef<'a> {
-    key: &'a str,
-    catalog: &'a Catalog,
-}
 
 impl Catalog {
     /// The catalog from the cache when it was built from this exact data, otherwise built from
@@ -352,13 +331,13 @@ impl Catalog {
         let path = cache_dir.join(CACHE_FILE);
         let key = cache_key(dir);
         if let Some(key) = &key
-            && let Some(catalog) = read_cache(&path, key)
+            && let Some(catalog) = cache::read(&path, key)
         {
             return Ok(catalog);
         }
         let catalog = Self::load(dir)?;
         if let Some(key) = key {
-            write_cache(&path, &key, &catalog);
+            cache::write(&path, &key, &catalog);
         }
         Ok(catalog)
     }
@@ -381,40 +360,38 @@ impl Catalog {
     }
 
     pub fn load(dir: &Path) -> Result<Self, String> {
-        let groups: HashMap<String, SdeGroup> = read(dir, "sde/groups.json")?;
-        let market: HashMap<String, SdeMarketGroup> = read(dir, "sde/marketgroups.json")?;
-        let sde_types: HashMap<String, SdeType> = read(dir, "sde/types.json")?;
-        let effects: HashMap<String, PhbEffect> = read(dir, "fsd_built/dogmaeffects.json")?;
-        let dogma: HashMap<String, PhbTypeDogma> = read(dir, "fsd_built/typedogma.json")?;
-        let icons: HashMap<String, SdeIcon> = read(dir, "sde/icons.json")?;
-        let meta_groups: HashMap<String, SdeMetaGroup> = read(dir, "sde/metagroups.json")?;
-        let graphics: HashMap<String, SdeGraphic> = read(dir, "sde/graphics.json")?;
-        let clone_grades: HashMap<String, SdeCloneGrade> = read(dir, "sde/clonegrades.json")?;
+        let groups: HashMap<i32, sde::Group> = sde::read(dir, "sde/groups.json")?;
+        let market: HashMap<i32, sde::MarketGroup> = sde::read(dir, "sde/marketgroups.json")?;
+        let sde_types: HashMap<TypeId, sde::Type> = sde::read(dir, "sde/types.json")?;
+        let effects: HashMap<i32, sde::PhbEffect> = sde::read(dir, "fsd_built/dogmaeffects.json")?;
+        let dogma: HashMap<TypeId, sde::TypeDogma> = sde::read(dir, "fsd_built/typedogma.json")?;
+        let icons: HashMap<i32, sde::Icon> = sde::read(dir, "sde/icons.json")?;
+        let meta_groups: HashMap<i32, sde::MetaGroup> = sde::read(dir, "sde/metagroups.json")?;
+        let graphics: HashMap<i32, sde::Graphic> = sde::read(dir, "sde/graphics.json")?;
+        let clone_grades: HashMap<i32, sde::CloneGrade> = sde::read(dir, "sde/clonegrades.json")?;
         let muta = muta::Source::read(dir)?;
         let stand_ins = muta.stand_ins();
         let icon_files: HashMap<i32, String> = icons
             .into_iter()
-            .filter_map(|(id, icon)| Some((id.parse().ok()?, icon.icon_file?)))
+            .filter_map(|(id, icon)| Some((id, icon.icon_file?)))
             .collect();
 
         let chance_effects: HashSet<i32> = effects
             .iter()
             .filter(|(_, e)| e.fitting_usage_chance_attribute_id.is_some())
-            .filter_map(|(id, _)| id.parse().ok())
+            .map(|(&id, _)| id)
             .collect();
         let effect_category: HashMap<i32, i32> = effects
             .into_iter()
-            .filter_map(|(id, e)| Some((id.parse().ok()?, e.effect_category)))
+            .map(|(id, e)| (id, e.effect_category))
             .collect();
-        let group_category: HashMap<i32, i32> = groups
-            .iter()
-            .filter_map(|(id, g)| Some((id.parse().ok()?, g.category_id)))
-            .collect();
+        let group_category: HashMap<i32, i32> =
+            groups.iter().map(|(&id, g)| (id, g.category_id)).collect();
 
         // Skills carry the race a ship's race is read from.
         let type_races: HashMap<TypeId, i32> = sde_types
             .iter()
-            .filter_map(|(id, t)| Some((id.parse().ok()?, t.race_id.filter(|&r| r != 0)?)))
+            .filter_map(|(&id, t)| Some((id, t.race_id.filter(|&r| r != 0)?)))
             .collect();
 
         let mut projection = projection::Builder::new(&effect_category);
@@ -424,16 +401,8 @@ impl Catalog {
         let mut required_skills = HashMap::new();
         let today = publish::today();
         for (id, mut t) in sde_types {
-            let Ok(id) = id.parse::<TypeId>() else {
-                continue;
-            };
             let category_id = group_category.get(&t.group_id).copied().unwrap_or(0);
-            let last_injection = dogma.get(&id.to_string()).and_then(|d| {
-                d.attributes
-                    .iter()
-                    .find(|a| a.attribute_id == publish::LAST_INJECTION)
-                    .map(|a| a.value)
-            });
+            let last_injection = dogma.get(&id).and_then(|d| d.attr(publish::LAST_INJECTION));
             t.published = publish::published(
                 id,
                 &t.name.en,
@@ -443,7 +412,7 @@ impl Catalog {
                 last_injection,
                 today,
             );
-            projection.consider(id, &t, category_id, dogma.get(&id.to_string()));
+            projection.consider(id, &t, category_id, dogma.get(&id));
             // Cargo can hold anything, but these are what pyfa's market offers or EFT cargo lines
             // usually name (fuel blocks, ice products); loading every category would mostly add
             // NPC and map junk.
@@ -472,11 +441,9 @@ impl Catalog {
             }
 
             // Abyssal types read the attributes they lack from a type they are made from.
-            let stand_in = stand_ins.get(&id).and_then(|b| dogma.get(&b.to_string()));
-            let dogma = dogma.get(&id.to_string());
-            let has_effect = |wanted: i32| {
-                dogma.is_some_and(|d| d.effects.iter().any(|e| e.effect_id == wanted))
-            };
+            let stand_in = stand_ins.get(&id).and_then(|b| dogma.get(b));
+            let dogma = dogma.get(&id);
+            let has_effect = |wanted: i32| dogma.is_some_and(|d| d.has_effect(wanted));
             let has_effect_category = |wanted: &[i32]| {
                 dogma.is_some_and(|d| {
                     d.effects
@@ -490,12 +457,10 @@ impl Catalog {
                 })
             };
             let attr = |wanted: i32| {
-                [dogma, stand_in].into_iter().flatten().find_map(|d| {
-                    d.attributes
-                        .iter()
-                        .find(|a| a.attribute_id == wanted)
-                        .map(|a| a.value)
-                })
+                [dogma, stand_in]
+                    .into_iter()
+                    .flatten()
+                    .find_map(|d| d.attr(wanted))
             };
 
             let kind = match category_id {
@@ -530,7 +495,7 @@ impl Catalog {
             if kind == Kind::Skill && t.published {
                 skills.push(id);
             }
-            let required: Vec<(TypeId, u8)> = attr::REQUIRED_SKILLS
+            let required: Vec<(TypeId, u8)> = sde::REQUIRED_SKILL_ATTRS
                 .iter()
                 .filter_map(|&(skill, level)| {
                     let skill = attr(skill).filter(|&s| s > 0.0)? as TypeId;
@@ -570,7 +535,7 @@ impl Catalog {
             // client does it; everything else names an icon directly.
             let render = || {
                 let graphic = t.graphic_id?;
-                let folder = graphics.get(&graphic.to_string())?.icon_folder.as_ref()?;
+                let folder = graphics.get(&graphic)?.icon_folder.as_ref()?;
                 Some(format!("{folder}/{graphic}_64.png"))
             };
             let icon = match kind {
@@ -643,12 +608,10 @@ impl Catalog {
 
         let mut alpha_clones: Vec<AlphaClone> = clone_grades
             .into_iter()
-            .filter_map(|(id, grade)| {
-                Some(AlphaClone {
-                    id: id.parse().ok()?,
-                    name: grade.name,
-                    caps: grade.skills.iter().map(|s| (s.type_id, s.level)).collect(),
-                })
+            .map(|(id, grade)| AlphaClone {
+                id,
+                name: grade.name,
+                caps: grade.skills.iter().map(|s| (s.type_id, s.level)).collect(),
             })
             .collect();
         alpha_clones.sort_by(|a, b| a.name.cmp(&b.name));
@@ -656,6 +619,15 @@ impl Catalog {
         let mut omega = HashMap::new();
         for t in types.values_mut() {
             t.omega = needs_omega(t.id, &required_skills, &alpha, &mut omega);
+        }
+        let mut required_for: HashMap<TypeId, Vec<(TypeId, u8)>> = HashMap::new();
+        for (&id, skills) in &required_skills {
+            for &(skill, level) in skills {
+                required_for.entry(skill).or_default().push((id, level));
+            }
+        }
+        for users in required_for.values_mut() {
+            users.sort_unstable();
         }
 
         let projection = projection.finish(dir)?;
@@ -686,9 +658,8 @@ impl Catalog {
 
         let mut market_groups: BTreeMap<i32, MarketGroup> = market
             .into_iter()
-            .filter_map(|(id, g)| {
-                let id = id.parse().ok()?;
-                Some((
+            .map(|(id, g)| {
+                (
                     id,
                     MarketGroup {
                         id,
@@ -698,7 +669,7 @@ impl Catalog {
                         types: Vec::new(),
                         icon_id: g.icon_id,
                     },
-                ))
+                )
             })
             .collect();
         for root in CARGO_MARKET_ROOTS {
@@ -798,12 +769,10 @@ impl Catalog {
         }
         let meta_group_names = meta_groups
             .into_iter()
-            .filter_map(|(id, g)| Some((id.parse().ok()?, g.name.en)))
+            .map(|(id, g)| (id, g.name.en))
             .collect();
-        let group_names: HashMap<i32, String> = groups
-            .into_iter()
-            .filter_map(|(id, g)| Some((id.parse().ok()?, g.name.en)))
-            .collect();
+        let group_names: HashMap<i32, String> =
+            groups.into_iter().map(|(id, g)| (id, g.name.en)).collect();
         let ship_groups = ship_groups(&types, &group_names);
 
         Ok(Self {
@@ -818,6 +787,7 @@ impl Catalog {
             group_names,
             cargo_searchable,
             required_skills,
+            required_for,
             projection,
             ship_groups,
             mutaplasmids,
@@ -887,6 +857,11 @@ impl Catalog {
             .and_then(|current| self.by_name.get(current))
             .or_else(|| self.by_name.get(&key))
             .and_then(|id| self.types.get(id))
+    }
+
+    /// What needs `skill`, with the level each needs, by type ID.
+    pub fn required_for(&self, skill: TypeId) -> &[(TypeId, u8)] {
+        self.required_for.get(&skill).map_or(&[], Vec::as_slice)
     }
 
     /// An Alpha clone grade by ID.
@@ -1037,118 +1012,6 @@ pub fn cache_key(dir: &Path) -> Option<String> {
     ))
 }
 
-fn read_cache(path: &Path, key: &str) -> Option<Catalog> {
-    let bytes = std::fs::read(path).ok()?;
-    let cache: CacheFile = postcard::from_bytes(&bytes).ok()?;
-    (cache.key == key).then_some(cache.catalog)
-}
-
-/// Best effort: without a cache the next start just builds the catalog again.
-fn write_cache(path: &Path, key: &str, catalog: &Catalog) {
-    let Ok(bytes) = postcard::to_stdvec(&CacheFileRef { key, catalog }) else {
-        return;
-    };
-    let _ = crate::persist::write_atomic(path, &bytes);
-}
-
-fn read<T: DeserializeOwned>(dir: &Path, file: &str) -> Result<T, String> {
-    let path: PathBuf = dir.join(file);
-    let reader = File::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    serde_json::from_reader(BufReader::with_capacity(1 << 20, reader))
-        .map_err(|e| format!("{}: {e}", path.display()))
-}
-
-#[derive(Deserialize)]
-struct Localized {
-    #[serde(default)]
-    en: String,
-}
-
-#[derive(Deserialize)]
-struct SdeGroup {
-    #[serde(rename = "categoryID")]
-    category_id: i32,
-    name: Localized,
-}
-
-#[derive(Deserialize)]
-struct SdeMarketGroup {
-    name: Localized,
-    #[serde(rename = "parentGroupID")]
-    parent_group_id: Option<i32>,
-    #[serde(rename = "iconID")]
-    icon_id: Option<i32>,
-}
-
-#[derive(Deserialize)]
-struct SdeIcon {
-    #[serde(rename = "iconFile")]
-    icon_file: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct SdeGraphic {
-    #[serde(rename = "iconFolder")]
-    icon_folder: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct SdeType {
-    name: Localized,
-    #[serde(rename = "groupID")]
-    group_id: i32,
-    #[serde(rename = "marketGroupID")]
-    market_group_id: Option<i32>,
-    #[serde(default)]
-    published: bool,
-    #[serde(rename = "iconID")]
-    icon_id: Option<i32>,
-    #[serde(rename = "graphicID")]
-    graphic_id: Option<i32>,
-    #[serde(rename = "variationParentTypeID")]
-    variation_parent_type_id: Option<i32>,
-    #[serde(rename = "metaGroupID")]
-    meta_group_id: Option<i32>,
-    #[serde(rename = "metaLevel")]
-    meta_level: Option<i32>,
-    volume: Option<f64>,
-    #[serde(rename = "packagedVolume")]
-    packaged_volume: Option<f64>,
-    capacity: Option<f64>,
-    #[serde(rename = "factionID")]
-    faction_id: Option<i32>,
-    #[serde(rename = "raceID")]
-    race_id: Option<i32>,
-}
-
-#[derive(Deserialize)]
-struct SdeCloneGrade {
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    skills: Vec<SdeCloneSkill>,
-}
-
-#[derive(Deserialize)]
-struct SdeCloneSkill {
-    #[serde(rename = "typeID")]
-    type_id: TypeId,
-    level: u8,
-}
-
-#[derive(Deserialize)]
-struct SdeMetaGroup {
-    name: Localized,
-}
-
-#[derive(Deserialize)]
-struct PhbEffect {
-    #[serde(rename = "effectCategory", default)]
-    effect_category: i32,
-    #[serde(rename = "fittingUsageChanceAttributeID", default)]
-    fitting_usage_chance_attribute_id: Option<i32>,
-}
-
 /// Groups types into pyfa's replacement sets while the catalog is built.
 #[derive(Default)]
 struct SameItems {
@@ -1179,15 +1042,15 @@ impl SameItems {
     fn consider(
         &mut self,
         id: TypeId,
-        t: &SdeType,
+        t: &sde::Type,
         category_id: i32,
-        dogma: Option<&PhbTypeDogma>,
+        dogma: Option<&sde::TypeDogma>,
         required: &[(TypeId, u8)],
     ) {
         if !Self::CATEGORIES.contains(&category_id) {
             return;
         }
-        let skill_attrs: HashSet<i32> = attr::REQUIRED_SKILLS
+        let skill_attrs: HashSet<i32> = sde::REQUIRED_SKILL_ATTRS
             .iter()
             .flat_map(|&(skill, level)| [skill, level])
             .collect();
@@ -1236,25 +1099,4 @@ impl SameItems {
         }
         out
     }
-}
-
-#[derive(Deserialize)]
-struct PhbTypeDogma {
-    #[serde(rename = "dogmaAttributes", default)]
-    attributes: Vec<PhbAttr>,
-    #[serde(rename = "dogmaEffects", default)]
-    effects: Vec<PhbEffectRef>,
-}
-
-#[derive(Deserialize)]
-struct PhbAttr {
-    #[serde(rename = "attributeID")]
-    attribute_id: i32,
-    value: f64,
-}
-
-#[derive(Deserialize)]
-struct PhbEffectRef {
-    #[serde(rename = "effectID")]
-    effect_id: i32,
 }

@@ -9,7 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::{PhbTypeDogma, TypeId, read};
+use super::{TypeId, sde};
 
 /// One mutaplasmid.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,7 +196,7 @@ struct PhbDynamicItem {
     #[serde(rename = "inputOutputMapping", default)]
     mappings: Vec<PhbMapping>,
     #[serde(rename = "attributeIDs", default)]
-    attributes: HashMap<String, PhbRange>,
+    attributes: HashMap<i32, PhbRange>,
 }
 
 #[derive(Deserialize)]
@@ -213,13 +213,6 @@ struct PhbRange {
     max: f64,
 }
 
-#[derive(Deserialize)]
-struct SdeAttr {
-    name: String,
-    #[serde(rename = "highIsGood", default)]
-    high_is_good: bool,
-}
-
 /// The raw mutaplasmid table, read before the types so abyssal types can borrow attributes.
 pub(super) struct Source {
     items: HashMap<TypeId, PhbDynamicItem>,
@@ -227,12 +220,7 @@ pub(super) struct Source {
 
 impl Source {
     pub(super) fn read(dir: &Path) -> Result<Self, String> {
-        let raw: HashMap<String, PhbDynamicItem> =
-            read(dir, "fsd_built/dynamicitemattributes.json")?;
-        let items = raw
-            .into_iter()
-            .filter_map(|(id, item)| Some((id.parse().ok()?, item)))
-            .collect();
+        let items = sde::read(dir, "fsd_built/dynamicitemattributes.json")?;
         Ok(Self { items })
     }
 
@@ -258,7 +246,7 @@ impl Source {
         self,
         dir: &Path,
         names: &HashMap<TypeId, String>,
-        dogma: &HashMap<String, PhbTypeDogma>,
+        dogma: &HashMap<TypeId, sde::TypeDogma>,
     ) -> Result<Mutaplasmids, String> {
         let mut by_type = HashMap::with_capacity(self.items.len());
         let mut for_base: HashMap<TypeId, Vec<TypeId>> = HashMap::new();
@@ -268,14 +256,14 @@ impl Source {
             let mut ranges: Vec<(i32, Range)> = item
                 .attributes
                 .iter()
-                .filter_map(|(attr, r)| {
-                    Some((
-                        attr.parse().ok()?,
+                .map(|(&attr, r)| {
+                    (
+                        attr,
                         Range {
                             min: r.min,
                             max: r.max,
                         },
-                    ))
+                    )
                 })
                 .collect();
             ranges.sort_by_key(|&(a, _)| a);
@@ -306,14 +294,7 @@ impl Source {
         }
         // Like refine, the base item's own value wins; an attribute it lacks comes from the
         // abyssal type.
-        let dogma_value = |type_id: TypeId, attr: i32| {
-            dogma
-                .get(&type_id.to_string())?
-                .attributes
-                .iter()
-                .find(|a| a.attribute_id == attr)
-                .map(|a| a.value)
-        };
+        let dogma_value = |type_id: TypeId, attr: i32| dogma.get(&type_id)?.attr(attr);
         let base_values = mutable
             .into_iter()
             .map(|(base, attrs)| {
@@ -335,10 +316,9 @@ impl Source {
                 (base, values)
             })
             .collect();
-        let attrs = read::<HashMap<String, SdeAttr>>(dir, "sde/dogmaattributes.json")?
+        let attrs = sde::read::<HashMap<i32, sde::Attr>>(dir, "sde/dogmaattributes.json")?
             .into_iter()
             .filter_map(|(id, a)| {
-                let id: i32 = id.parse().ok()?;
                 attr_ids.contains(&id).then_some((
                     id,
                     MutaAttr {

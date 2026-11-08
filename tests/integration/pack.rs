@@ -99,9 +99,13 @@ fn a_pack_gives_what_the_dump_gives() {
         items.to_bytes().expect("serializes"),
         dump_items.to_bytes().expect("serializes")
     );
+    let frigate = catalog
+        .find("Minmatar Frigate")
+        .expect("the skill exists")
+        .id;
     assert!(
-        !items.required_for.is_empty(),
-        "loading from the pack links skills to what needs them"
+        !catalog.required_for(frigate).is_empty(),
+        "the pack's catalog links skills to what needs them"
     );
 
     let (mut fit, unknown) = Fit::from_eft(&catalog, VEXOR).expect("the fit parses");

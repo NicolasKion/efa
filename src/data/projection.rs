@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::{Localized, PhbTypeDogma, SdeType, TypeId, category, effect_category, read};
+use super::{TypeId, category, effect_category, sde};
 use std::path::Path;
 
 mod group {
@@ -188,23 +188,16 @@ impl<'a> Builder<'a> {
     pub(super) fn consider(
         &mut self,
         id: TypeId,
-        t: &SdeType,
+        t: &sde::Type,
         category_id: i32,
-        dogma: Option<&PhbTypeDogma>,
+        dogma: Option<&sde::TypeDogma>,
     ) {
         let effects = || {
             dogma
                 .into_iter()
                 .flat_map(|d| d.effects.iter().map(|e| e.effect_id))
         };
-        let attr = |wanted: i32| {
-            dogma.and_then(|d| {
-                d.attributes
-                    .iter()
-                    .find(|a| a.attribute_id == wanted)
-                    .map(|a| a.value)
-            })
-        };
+        let attr = |wanted: i32| dogma.and_then(|d| d.attr(wanted));
         let env_group = matches!(
             t.group_id,
             group::EFFECT_BEACON
@@ -258,10 +251,11 @@ impl<'a> Builder<'a> {
     }
 
     pub(super) fn finish(mut self, dir: &Path) -> Result<Projection, String> {
-        let abilities: HashMap<String, SdeAbility> = read(dir, "sde/fighterabilities.json")?;
+        let abilities: HashMap<i32, sde::FighterAbility> =
+            sde::read(dir, "sde/fighterabilities.json")?;
         self.projection.ability_names = abilities
             .into_iter()
-            .filter_map(|(id, a)| Some((id.parse().ok()?, a.display_name?.en)))
+            .filter_map(|(id, a)| Some((id, a.display_name?.en)))
             .collect();
         let (menu, types) = env_menu(&self.env);
         self.projection.env_menu = menu;
@@ -272,12 +266,6 @@ impl<'a> Builder<'a> {
 
 /// The group of sovereignty hub upgrades that change a whole system.
 const IHUB_GROUP: i32 = 4839;
-
-#[derive(Deserialize)]
-struct SdeAbility {
-    #[serde(rename = "displayName")]
-    display_name: Option<Localized>,
-}
 
 /// pyfa's `customName`: what it calls Caustic clouds.
 fn custom_name(name: &str) -> String {

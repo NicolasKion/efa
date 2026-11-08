@@ -157,7 +157,7 @@ fn requirements_and_dependents() {
     let reqs = requirements(&catalog, &data, id(&catalog, "Rifter"));
     assert_eq!(labels(&reqs), ["Minmatar Frigate  I"]);
     assert!(!reqs[0].children.is_empty(), "the frigate skill needs more");
-    let deps = dependents(&catalog, &data, id(&catalog, "Minmatar Frigate"));
+    let deps = dependents(&catalog, id(&catalog, "Minmatar Frigate"));
     let level1 = deps
         .iter()
         .find(|n| n.label == "Level I")
