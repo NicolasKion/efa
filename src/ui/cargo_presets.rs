@@ -15,7 +15,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, AppContext, ClickEvent, Context, Entity, FocusHandle, Focusable, FontWeight,
-    InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render, SharedString,
+    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
     prelude::FluentBuilder, px,
 };
@@ -23,9 +23,13 @@ use gpui_kit::{
 use super::{
     Action, AdditionsTab, Efa, Loaded,
     additions::amount,
-    editor_kit::{self, ItemTree, ListEntry, caption, empty_state, icon_button},
+    dialogs::{Confirm, Prompt, confirm, prompt_text},
+    editor_kit::{
+        self, CONTEXT, Delete, Duplicate, FOLD_W, FocusSearch, ItemTree, ListEntry, MIDDLE_MIN_W,
+        Rename, Sidebar, icon_button, name_problem, next_after_delete,
+    },
     fitting::{DragPreview, DragSource, Dragged},
-    widgets::icon_box,
+    widgets::{DropHighlight, TipExt, caption, count, empty_state, icon_box, redraw_on_change},
 };
 use crate::{
     cargo_preset::{self, CargoPolicy, CargoPreset},
@@ -36,16 +40,10 @@ use crate::{
 /// The editor window's starting size.
 const EDITOR_W: f32 = 1100.;
 const EDITOR_H: f32 = 700.;
-const LIST_W: f32 = 230.;
-/// The preset list's width in a narrow window.
-const LIST_NARROW_W: f32 = 180.;
 const TREE_W: f32 = 340.;
-/// Below this window width the market folds away behind a button.
-const NARROW_W: f32 = 900.;
 /// Below this window width the rows drop their volume column; the header still has the total.
 const COMPACT_W: f32 = 640.;
-/// The preset's column keeps this much beside an open market in a narrow window.
-const PRESET_MIN_W: f32 = 260.;
+const ITEM_ROW_H: f32 = 30.;
 const QUANTITY_W: f32 = 84.;
 const VOLUME_W: f32 = 110.;
 
@@ -57,24 +55,19 @@ fn carried(t: &ItemType) -> bool {
     !matches!(t.kind, Kind::Ship | Kind::Skill | Kind::Mode | Kind::Other)
 }
 
-/// What is wrong with a new name, given the names in use.
-fn name_problem<'a>(name: &str, mut taken: impl Iterator<Item = &'a str>) -> Option<&'static str> {
-    if name.is_empty() {
-        Some(NAME_MISSING)
-    } else if taken.any(|t| t == name) {
-        Some(NAME_TAKEN)
-    } else {
-        None
-    }
+/// What is wrong with a name, given the presets; `keep` is the one being renamed.
+fn preset_name_problem(
+    name: &str,
+    presets: &[CargoPreset],
+    keep: Option<&str>,
+) -> Option<SharedString> {
+    name_problem(name, presets.iter().map(|p| p.name.as_str()), keep)
+        .map(|p| p.say(NAME_MISSING, NAME_TAKEN))
 }
 
 /// "3 items" for a list's detail.
 fn item_count(n: usize) -> String {
-    if n == 1 {
-        "1 item".to_owned()
-    } else {
-        format!("{n} items")
-    }
+    count(n, "item", "items")
 }
 
 impl Efa {
@@ -151,16 +144,13 @@ impl Efa {
             let this = this.clone();
             move |name: &str, cx: &App| {
                 let saved = this.upgrade()?;
-                let presets = &saved.read(cx).saved.cargo_presets;
-                name_problem(name, presets.iter().map(|p| p.name.as_str()))
+                preset_name_problem(name, &saved.read(cx).saved.cargo_presets, None)
             }
         };
-        editor_kit::prompt_name(
+        prompt_text(
             window,
             cx,
-            "Save Cargo as Preset".to_owned(),
-            "Enter a name for the new cargo preset:".to_owned(),
-            String::new(),
+            Prompt::new("Save Cargo as Preset").message("Enter a name for the new cargo preset:"),
             check,
             move |name, _, cx| {
                 let preset = CargoPreset {
@@ -206,16 +196,10 @@ impl CargoPresetEditor {
     ) -> Self {
         let list_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search presets"));
         let tree = ItemTree::new(&loaded.catalog, carried, "Search items", window, cx);
-        let redraw =
-            |_: &mut Self, _: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>| {
-                if matches!(event, InputEvent::Change) {
-                    cx.notify();
-                }
-            };
         let subscriptions = vec![
             cx.observe(efa, |_, _, cx| cx.notify()),
-            cx.subscribe(&list_search, redraw),
-            cx.subscribe(&tree.search, redraw),
+            redraw_on_change(cx, &list_search),
+            redraw_on_change(cx, &tree.search),
         ];
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
@@ -272,10 +256,6 @@ impl CargoPresetEditor {
         cx.notify();
     }
 
-    fn taken_problem(&self, name: &str, cx: &App) -> Option<&'static str> {
-        name_problem(name, self.presets(cx).iter().map(|p| p.name.as_str()))
-    }
-
     fn create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.ask_name(Naming::New, window, cx);
     }
@@ -302,20 +282,17 @@ impl CargoPresetEditor {
         };
         let editor = cx.weak_entity();
         let check = {
-            let (editor, current) = (editor.clone(), current.clone());
+            let editor = editor.clone();
+            let keep = (naming == Naming::Rename).then(|| current.clone());
             move |name: &str, cx: &App| {
-                if naming == Naming::Rename && name == current {
-                    return None;
-                }
-                editor.upgrade()?.read(cx).taken_problem(name, cx)
+                let editor = editor.upgrade()?;
+                preset_name_problem(name, editor.read(cx).presets(cx), keep.as_deref())
             }
         };
-        editor_kit::prompt_name(
+        prompt_text(
             window,
             cx,
-            title.to_owned(),
-            message.to_owned(),
-            default,
+            Prompt::new(title).message(message).default(default),
             check,
             move |name, window, cx| {
                 let _ = editor.update(cx, |e, cx| e.named(naming, name, window, cx));
@@ -357,10 +334,10 @@ impl CargoPresetEditor {
             return;
         };
         let editor = cx.weak_entity();
-        editor_kit::confirm_delete(
+        confirm(
             window,
             cx,
-            format!("Delete the cargo preset {name}?"),
+            Confirm::delete(format!("Delete the cargo preset {name}?")),
             move |window, cx| {
                 let _ = editor.update(cx, |e, cx| e.delete(window, cx));
             },
@@ -373,11 +350,16 @@ impl CargoPresetEditor {
         };
         let at = self.presets(cx).iter().position(|p| p.name == old);
         self.edit(cx, |presets| presets.retain(|p| p.name != old));
-        let presets = self.presets(cx);
-        let next = at
-            .and_then(|at| presets.get(at).or_else(|| presets.last()))
-            .map(|p| p.name.clone());
+        let next = next_after_delete(self.presets(cx), at).map(|p| p.name.clone());
         self.select(next, window, cx);
+    }
+
+    /// Delete: take the picked item out of the preset, or with none picked, delete the preset.
+    fn delete_picked(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.picked {
+            Some(t) => self.remove_item(t, cx),
+            None => self.confirm_delete(window, cx),
+        }
     }
 
     fn add_item(&mut self, type_id: TypeId, count: u32, cx: &mut Context<Self>) {
@@ -459,42 +441,20 @@ impl CargoPresetEditor {
         cx.notify();
     }
 
-    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let keystroke = &event.keystroke;
-        let m = keystroke.modifiers;
-        let plain = !(m.control || m.alt || m.shift || m.platform);
-        let ctrl = m.control && !m.alt && !m.shift;
-        match keystroke.key.as_str() {
-            // Only when no text field has the keys, so Delete still edits text.
-            "delete" if plain && self.focus.is_focused(window) => match self.picked {
-                Some(t) => self.remove_item(t, cx),
-                None => self.confirm_delete(window, cx),
-            },
-            "d" if ctrl => self.ask_name(Naming::Duplicate, window, cx),
-            "f2" if plain => self.ask_name(Naming::Rename, window, cx),
-            "f" if ctrl => self
-                .tree
-                .search
-                .update(cx, |input, cx| input.focus(window, cx)),
-            _ => return,
-        }
-        cx.stop_propagation();
+    fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.tree
+            .search
+            .update(cx, |input, cx| input.focus(window, cx));
     }
 
     fn list_column(
         &self,
-        presets: &[CargoPreset],
+        entries: Vec<ListEntry>,
         narrow: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let query = self.list_search.read(cx).value().to_string();
-        let entries: Vec<ListEntry> = presets
-            .iter()
-            .map(|p| ListEntry {
-                name: p.name.clone(),
-                detail: item_count(p.items.len()),
-            })
-            .collect();
+        let any = !entries.is_empty();
         let rows = editor_kit::name_list(
             entries,
             &query,
@@ -504,74 +464,57 @@ impl CargoPresetEditor {
             None,
         );
         let has = self.selected.is_some();
-        let empty = if presets.is_empty() {
-            Some(empty_state(
-                AssetIcon::Package,
-                "No presets yet",
-                "Click New, or save a fit's cargo from the Cargo tab's menu.",
-                cx,
-            ))
-        } else if rows.is_empty() {
-            Some(empty_state(
+        let empty = if any {
+            empty_state(
                 AssetIcon::SearchX,
                 "No presets match",
                 "Clear the search to see them all.",
                 cx,
-            ))
+            )
         } else {
-            None
+            empty_state(
+                AssetIcon::Package,
+                "No presets yet",
+                "Click New, or save a fit's cargo from the Cargo tab's menu.",
+                cx,
+            )
         };
-        let theme = cx.theme();
-        v_flex()
-            .w(px(if narrow { LIST_NARROW_W } else { LIST_W }))
-            .flex_none()
-            .h_full()
-            .gap_2()
-            .p_3()
-            .border_r_1()
-            .border_color(theme.border)
-            .bg(theme.sidebar)
-            .child(caption("Cargo presets", cx))
-            .child(Input::new(&self.list_search).small().cleanable(true))
+        let footer = h_flex()
+            .gap_1()
             .child(
-                v_flex()
-                    .id("preset-list")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .gap_0p5()
-                    .children(empty)
-                    .children(rows),
+                icon_button("preset-new", AssetIcon::Plus, "New preset")
+                    .on_click(cx.listener(|e, _, window, cx| e.create(window, cx))),
             )
             .child(
-                h_flex()
-                    .gap_1()
-                    .child(
-                        icon_button("preset-new", AssetIcon::Plus, "New preset")
-                            .on_click(cx.listener(|e, _, window, cx| e.create(window, cx))),
-                    )
-                    .child(
-                        icon_button("preset-duplicate", AssetIcon::Copy, "Duplicate (Ctrl+D)")
-                            .disabled(!has)
-                            .on_click(cx.listener(|e, _, window, cx| {
-                                e.ask_name(Naming::Duplicate, window, cx);
-                            })),
-                    )
-                    .child(
-                        icon_button("preset-rename", AssetIcon::Pencil, "Rename (F2)")
-                            .disabled(!has)
-                            .on_click(cx.listener(|e, _, window, cx| {
-                                e.ask_name(Naming::Rename, window, cx);
-                            })),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        icon_button("preset-delete", AssetIcon::Trash, "Delete (Delete)")
-                            .disabled(!has)
-                            .on_click(cx.listener(|e, _, window, cx| e.confirm_delete(window, cx))),
-                    ),
+                icon_button("preset-duplicate", AssetIcon::Copy, "Duplicate (Ctrl+D)")
+                    .disabled(!has)
+                    .on_click(cx.listener(|e, _, window, cx| {
+                        e.ask_name(Naming::Duplicate, window, cx);
+                    })),
             )
-            .into_any_element()
+            .child(
+                icon_button("preset-rename", AssetIcon::Pencil, "Rename (F2)")
+                    .disabled(!has)
+                    .on_click(cx.listener(|e, _, window, cx| {
+                        e.ask_name(Naming::Rename, window, cx);
+                    })),
+            )
+            .child(div().flex_1())
+            .child(
+                icon_button("preset-delete", AssetIcon::Trash, "Delete (Delete)")
+                    .disabled(!has)
+                    .on_click(cx.listener(|e, _, window, cx| e.confirm_delete(window, cx))),
+            );
+        Sidebar {
+            caption: "Cargo presets".into(),
+            search: Some(self.list_search.clone()),
+            list_id: "preset-list",
+            rows,
+            empty: Some(empty.into_any_element()),
+            footer: Some(footer.into_any_element()),
+            narrow,
+        }
+        .render(cx)
     }
 
     /// The quantity field of an item, made on first use and kept in step with the preset while
@@ -624,21 +567,14 @@ impl CargoPresetEditor {
         let row = h_flex()
             .id(SharedString::from(format!("preset-item-{type_id}")))
             .gap_3()
-            .h(px(editor_kit::ROW_HEIGHT + 2.))
+            .h(px(ITEM_ROW_H))
             .flex_none()
             .px_2()
-            .rounded(px(4.))
             .when(n % 2 == 1 && !picked, |r| r.bg(theme.table_even))
             .when(picked, |r| r.bg(theme.table_active))
             .hover(|s| s.bg(theme.table_hover))
             // Dropped on its own row, a market item adds to the count like anywhere else.
-            .drag_over::<Dragged>(|style, dragged, _, cx| {
-                if matches!(dragged.source, DragSource::Market) {
-                    style.bg(cx.theme().drop_target)
-                } else {
-                    style
-                }
-            })
+            .drop_highlight_if::<Dragged>(|d| matches!(d.source, DragSource::Market))
             .child(icon_box(catalog, &loaded.icons, Icon::Type(type_id), 24.))
             .child(
                 div()
@@ -697,7 +633,7 @@ impl CargoPresetEditor {
     /// open market in a narrow one.
     fn compact(&self, window: &Window) -> bool {
         let width = window.viewport_size().width;
-        width < px(COMPACT_W) || (width < px(NARROW_W) && self.market_open)
+        width < px(COMPACT_W) || (width < px(FOLD_W) && self.market_open)
     }
 
     fn preset_column(
@@ -733,7 +669,7 @@ impl CargoPresetEditor {
             .efa
             .upgrade()
             .is_some_and(|g| g.read(cx).fit().is_some());
-        let narrow = window.viewport_size().width < px(NARROW_W);
+        let narrow = window.viewport_size().width < px(FOLD_W);
         let compact = self.compact(window);
         let theme = cx.theme();
         let policy = preset.policy;
@@ -810,12 +746,7 @@ impl CargoPresetEditor {
                                     .bg(theme.secondary)
                                     .text_color(theme.foreground)
                                     .child(policy.label())
-                                    .tooltip(move |window, cx| {
-                                        gpui_kit::component::tooltip::Tooltip::new(
-                                            policy.explanation(),
-                                        )
-                                        .build(window, cx)
-                                    }),
+                                    .tip(policy.explanation()),
                             )
                             .child(div().truncate().child(format!(
                                 "{}, {units} units, {} m³",
@@ -854,17 +785,11 @@ impl CargoPresetEditor {
         v_flex()
             .id("preset-column")
             .flex_1()
-            .min_w(px(if narrow { PRESET_MIN_W } else { 0. }))
+            .min_w(px(if narrow { MIDDLE_MIN_W } else { 0. }))
             .h_full()
             .gap_2()
             .p_3()
-            .drag_over::<Dragged>(|style, dragged, _, cx| {
-                if matches!(dragged.source, DragSource::Market) {
-                    style.bg(cx.theme().drop_target)
-                } else {
-                    style
-                }
-            })
+            .drop_highlight_if::<Dragged>(|d| matches!(d.source, DragSource::Market))
             .on_drop(cx.listener(|e, dragged: &Dragged, _, cx| {
                 if matches!(dragged.source, DragSource::Market) {
                     for t in dragged.types() {
@@ -926,28 +851,31 @@ enum Naming {
 
 impl Render for CargoPresetEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let presets = self.presets(cx).to_vec();
+        // Only the list's lines and the shown preset are taken from the presets.
+        let (entries, preset) = {
+            let presets = self.presets(cx);
+            let entries: Vec<ListEntry> = presets
+                .iter()
+                .map(|p| ListEntry {
+                    name: p.name.clone(),
+                    detail: item_count(p.items.len()),
+                })
+                .collect();
+            (entries, self.current(cx))
+        };
         // Another window may have removed the preset this one was showing.
-        if self
-            .selected
-            .as_ref()
-            .is_some_and(|name| !presets.iter().any(|p| &p.name == name))
-        {
+        if self.selected.is_some() && preset.is_none() {
             self.selected = None;
             self.quantities.clear();
         }
-        let preset = self
-            .selected
-            .as_ref()
-            .and_then(|name| presets.iter().find(|p| &p.name == name));
-        if let Some(preset) = preset {
+        if let Some(preset) = &preset {
             self.quantities
                 .retain(|t, _| preset.items.iter().any(|&(i, _)| i == *t));
         }
         let loaded = Rc::clone(&self.loaded);
-        let narrow = window.viewport_size().width < px(NARROW_W);
-        let list = self.list_column(&presets, narrow, cx);
-        let middle = self.preset_column(preset, window, cx);
+        let narrow = window.viewport_size().width < px(FOLD_W);
+        let list = self.list_column(entries, narrow, cx);
+        let middle = self.preset_column(preset.as_ref(), window, cx);
         let tree = self.tree.render(
             &loaded,
             cx,
@@ -961,48 +889,44 @@ impl Render for CargoPresetEditor {
         h_flex()
             .size_full()
             .track_focus(&self.focus)
-            .key_context("CargoPresets")
-            .on_key_down(
-                cx.listener(|e, event: &KeyDownEvent, window, cx| e.key(event, window, cx)),
-            )
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .text_sm()
+            .key_context(CONTEXT)
+            .on_action(cx.listener(|e, _: &Delete, window, cx| e.delete_picked(window, cx)))
+            .on_action(cx.listener(|e, _: &Duplicate, window, cx| {
+                e.ask_name(Naming::Duplicate, window, cx);
+            }))
+            .on_action(cx.listener(|e, _: &Rename, window, cx| {
+                e.ask_name(Naming::Rename, window, cx);
+            }))
+            .on_action(cx.listener(|e, _: &FocusSearch, window, cx| e.focus_search(window, cx)))
             .when(show_list, |row| row.child(list))
             .child(middle)
-            .when(show_market, |row| row.child(
-                v_flex()
-                    .when(narrow, |d| d.flex_1().min_w_0().max_w(px(TREE_W)))
-                    .when(!narrow, |d| d.w(px(TREE_W)).flex_none())
-                    .h_full()
-                    .gap_2()
-                    .p_3()
-                    .border_l_1()
-                    .border_color(theme.border)
-                    .bg(theme.sidebar)
-                    // A preset's item dragged back here comes off the preset.
-                    .id("preset-market")
-                    .drag_over::<Dragged>(|style, dragged, _, cx| {
-                        if matches!(dragged.source, DragSource::Listed) {
-                            style.bg(cx.theme().drop_target)
-                        } else {
-                            style
-                        }
-                    })
-                    .on_drop(cx.listener(|e, dragged: &Dragged, _, cx| {
-                        if matches!(dragged.source, DragSource::Listed) {
-                            e.remove_item(dragged.type_id, cx);
-                        }
-                    }))
-                    .child(caption("Market", cx))
-                    .child(div().flex_1().min_h_0().child(tree))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child("Drag an item onto the preset, or double-click it. Drag one back here to remove it."),
-                    ),
-            ))
+            .when(show_market, |row| {
+                row.child(
+                    v_flex()
+                        .when(narrow, |d| d.flex_1().min_w_0().max_w(px(TREE_W)))
+                        .when(!narrow, |d| d.w(px(TREE_W)).flex_none())
+                        .h_full()
+                        .gap_2()
+                        .p_2()
+                        .border_l_1()
+                        .border_color(theme.border)
+                        .bg(theme.sidebar)
+                        // A preset's item dragged back here comes off the preset.
+                        .id("preset-market")
+                        .drop_highlight_if::<Dragged>(|d| matches!(d.source, DragSource::Listed))
+                        .on_drop(cx.listener(|e, dragged: &Dragged, _, cx| {
+                            if matches!(dragged.source, DragSource::Listed) {
+                                e.remove_item(dragged.type_id, cx);
+                            }
+                        }))
+                        .child(caption("Market", cx))
+                        .child(div().flex_1().min_h_0().child(tree))
+                        .child(div().text_xs().text_color(theme.muted_foreground).child(
+                            "Drag an item onto the preset, or double-click it. Drag one back \
+                             here to remove it.",
+                        )),
+                )
+            })
     }
 }
 
@@ -1013,7 +937,7 @@ pub(super) fn menu_entries(
     window: &mut Window,
     cx: &mut Context<gpui_kit::component::menu::PopupMenu>,
 ) -> gpui_kit::component::menu::PopupMenu {
-    use super::widgets::{entry, icon_label};
+    use super::widgets::{entry, icon_label, on_efa};
     use gpui_kit::component::IconName;
     let Some(efa) = this.upgrade() else {
         return menu;
@@ -1036,29 +960,29 @@ pub(super) fn menu_entries(
             cx,
             move |menu, _, _| {
                 names.iter().fold(menu, |menu, name| {
-                    let (this, name) = (this.clone(), name.clone());
+                    let name = name.clone();
                     menu.item(
-                        entry(IconName::Inbox, name.clone()).on_click(move |_, _, cx| {
-                            Efa::app_update(&this, cx, |g, cx| g.apply_cargo_preset(&name, cx));
-                        }),
+                        entry(IconName::Inbox, name.clone())
+                            .on_click(on_efa(&this, move |g, _, _, cx| {
+                                g.apply_cargo_preset(&name, cx)
+                            })),
                     )
                 })
             },
         );
     }
     if has_cargo {
-        let this = this.clone();
-        menu = menu.item(entry(IconName::Plus, "Save Cargo as Preset…").on_click(
-            move |_, window, cx| {
-                Efa::app_update(&this, cx, |g, cx| g.save_cargo_preset_dialog(window, cx));
-            },
-        ));
+        menu = menu.item(
+            entry(IconName::Plus, "Save Cargo as Preset…")
+                .on_click(on_efa(this, |g, _, window, cx| {
+                    g.save_cargo_preset_dialog(window, cx)
+                })),
+        );
     }
-    let this = this.clone();
     menu.item(
-        entry(IconName::Settings2, "Edit Cargo Presets…").on_click(move |_, _, cx| {
-            Efa::app_update(&this, cx, |g, cx| g.open_cargo_preset_editor(None, cx));
-        }),
+        entry(IconName::Settings2, "Edit Cargo Presets…").on_click(on_efa(this, |g, _, _, cx| {
+            g.open_cargo_preset_editor(None, cx)
+        })),
     )
 }
 
@@ -1068,9 +992,14 @@ mod tests {
 
     #[test]
     fn names_must_be_new_and_not_blank() {
-        let taken = ["Filaments", "Scripts"];
-        assert_eq!(name_problem("", taken.into_iter()), Some(NAME_MISSING));
-        assert_eq!(name_problem("Scripts", taken.into_iter()), Some(NAME_TAKEN));
-        assert_eq!(name_problem("Fuel", taken.into_iter()), None);
+        let presets = ["Filaments", "Scripts"].map(CargoPreset::new);
+        let problem = |name| preset_name_problem(name, &presets, None);
+        assert_eq!(problem(""), Some(NAME_MISSING.into()));
+        assert_eq!(problem("Scripts"), Some(NAME_TAKEN.into()));
+        assert_eq!(problem("Fuel"), None);
+        assert_eq!(
+            preset_name_problem("Scripts", &presets, Some("Scripts")),
+            None
+        );
     }
 }

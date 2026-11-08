@@ -1,5 +1,5 @@
-//! Pieces the list editors share: captions, empty states, the name prompt and delete
-//! confirmation, the list of named entries and the market item tree to add from.
+//! Pieces the list editors share: their keys, the sidebar listing the named entries, name
+//! checks, and the market item tree to add from.
 
 use std::{collections::HashSet, rc::Rc};
 
@@ -12,31 +12,51 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, AppContext, ClickEvent, Context, Entity, FontWeight, InteractiveElement,
-    IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    prelude::FluentBuilder, px,
+    IntoElement, KeyBinding, ParentElement, SharedString, StatefulInteractiveElement, Styled,
+    Window, div, prelude::FluentBuilder, px,
 };
 
-pub use super::widgets::{INDENT, caption, empty_state};
 use super::{
     Loaded,
-    dialogs::{Confirm, Prompt, confirm, prompt_text},
     fitting::{DragPreview, DragSource, Dragged},
-    widgets::{icon_box, list_row, tree_row},
+    widgets::{DropHighlight, caption, empty_state, icon_box, list_row, tree_row},
 };
-use crate::ui::widgets::DropHighlight;
 use crate::{
     data::{Catalog, ItemType, TypeId},
     icons::Icon,
 };
 
+gpui_kit::actions!(list_editor, [Delete, Duplicate, Rename, FocusSearch]);
+
+/// The key context every list editor's window sets, for the shortcuts below.
+pub(super) const CONTEXT: &str = "ListEditor";
+
+/// The list editors' shortcuts. A text field with the focus keeps Delete for its text.
+pub(super) fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("delete", Delete, Some(CONTEXT)),
+        KeyBinding::new("ctrl-d", Duplicate, Some(CONTEXT)),
+        KeyBinding::new("f2", Rename, Some(CONTEXT)),
+        KeyBinding::new("ctrl-f", FocusSearch, Some(CONTEXT)),
+    ]);
+}
+
 /// Most search hits the item tree lists, so a one-letter query stays cheap to draw.
 const SEARCH_LIMIT: usize = 200;
-pub const ROW_HEIGHT: f32 = 28.;
-/// Height of a line of an item tree.
-pub const TREE_ROW: f32 = 24.;
+/// The list's width, and its width in a narrow window.
+const LIST_W: f32 = 230.;
+const LIST_NARROW_W: f32 = 180.;
+/// Below this window width an editor folds its market away behind a button.
+pub(super) const FOLD_W: f32 = 960.;
+/// What the middle column keeps beside an open market in a narrow window.
+pub(super) const MIDDLE_MIN_W: f32 = 260.;
 
 /// A small ghost button showing only an icon, with a tooltip.
-pub fn icon_button(id: impl Into<SharedString>, icon: AssetIcon, tip: &'static str) -> Button {
+pub(super) fn icon_button(
+    id: impl Into<SharedString>,
+    icon: AssetIcon,
+    tip: &'static str,
+) -> Button {
     Button::new(id.into())
         .ghost()
         .small()
@@ -44,49 +64,110 @@ pub fn icon_button(id: impl Into<SharedString>, icon: AssetIcon, tip: &'static s
         .tooltip(tip)
 }
 
-/// Ask for a name in a dialog. `check` returns what is wrong with a name, which keeps the
-/// dialog open; otherwise `done` gets the trimmed name. Enter submits like the OK button.
-pub fn prompt_name(
-    window: &mut Window,
-    cx: &mut App,
-    title: String,
-    message: String,
-    default: String,
-    check: impl Fn(&str, &App) -> Option<&'static str> + 'static,
-    done: impl Fn(String, &mut Window, &mut App) + 'static,
-) {
-    let prompt = Prompt::new(title).message(message).default(default);
-    prompt_text(
-        window,
-        cx,
-        prompt,
-        move |name, cx| check(name, cx).map(SharedString::from),
-        done,
-    );
+/// What is wrong with a name for an entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum NameProblem {
+    Missing,
+    Taken,
 }
 
-/// Ask before deleting; `yes` runs once the user agrees.
-pub fn confirm_delete(
-    window: &mut Window,
-    cx: &mut App,
-    message: String,
-    yes: impl Fn(&mut Window, &mut App) + 'static,
-) {
-    confirm(window, cx, Confirm::delete(message), yes);
+impl NameProblem {
+    /// The editor's own words for the problem.
+    pub(super) fn say(
+        self,
+        missing: impl Into<SharedString>,
+        taken: impl Into<SharedString>,
+    ) -> SharedString {
+        match self {
+            Self::Missing => missing.into(),
+            Self::Taken => taken.into(),
+        }
+    }
+}
+
+/// What is wrong with `name` given the names in use, if anything. `keep` is the entry being
+/// renamed, which may keep its name.
+pub(super) fn name_problem<'a>(
+    name: &str,
+    taken: impl IntoIterator<Item = &'a str>,
+    keep: Option<&str>,
+) -> Option<NameProblem> {
+    if name.is_empty() {
+        Some(NameProblem::Missing)
+    } else if Some(name) != keep && taken.into_iter().any(|t| t == name) {
+        Some(NameProblem::Taken)
+    } else {
+        None
+    }
+}
+
+/// The entry shown after deleting the one at `at`: the one that took its place, or the last.
+pub(super) fn next_after_delete<T>(items: &[T], at: Option<usize>) -> Option<&T> {
+    at.and_then(|i| items.get(i).or_else(|| items.last()))
+}
+
+/// The column of named entries down a list editor's left side: a caption, a search box, the
+/// rows, what shows when there are none, and the editor's buttons under them.
+pub(super) struct Sidebar {
+    pub(super) caption: SharedString,
+    pub(super) search: Option<Entity<InputState>>,
+    pub(super) list_id: &'static str,
+    pub(super) rows: Vec<AnyElement>,
+    /// Shown when `rows` is empty.
+    pub(super) empty: Option<AnyElement>,
+    pub(super) footer: Option<AnyElement>,
+    /// The window is narrow, and the list takes less of it.
+    pub(super) narrow: bool,
+}
+
+impl Sidebar {
+    pub(super) fn render(self, cx: &App) -> AnyElement {
+        let theme = cx.theme();
+        let empty = if self.rows.is_empty() {
+            self.empty
+        } else {
+            None
+        };
+        v_flex()
+            .w(px(if self.narrow { LIST_NARROW_W } else { LIST_W }))
+            .flex_none()
+            .h_full()
+            .gap_2()
+            .p_2()
+            .border_r_1()
+            .border_color(theme.border)
+            .bg(theme.sidebar)
+            .child(caption(&self.caption, cx))
+            .children(
+                self.search
+                    .map(|search| Input::new(&search).small().cleanable(true)),
+            )
+            .child(
+                v_flex()
+                    .id(self.list_id)
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .children(empty)
+                    .children(self.rows),
+            )
+            .children(self.footer)
+            .into_any_element()
+    }
 }
 
 /// A line of a list of named entries, with a muted detail such as its size.
-pub struct ListEntry {
-    pub name: String,
-    pub detail: String,
+pub(super) struct ListEntry {
+    pub(super) name: String,
+    pub(super) detail: String,
 }
 
 /// What dropping market items on an entry of a [`name_list`] does, given the entry's name.
-pub type DropOnEntry<V> = fn(&mut V, String, &Dragged, &mut Context<V>);
+pub(super) type DropOnEntry<V> = fn(&mut V, String, &Dragged, &mut Context<V>);
 
 /// The entries matching `query`, as clickable rows; the selected one highlighted. With
 /// `on_drop`, items from the market can be dropped on an entry.
-pub fn name_list<V: 'static>(
+pub(super) fn name_list<V: 'static>(
     entries: Vec<ListEntry>,
     query: &str,
     selected: Option<&str>,
@@ -106,9 +187,7 @@ pub fn name_list<V: 'static>(
             let drop_name = entry.name.clone();
             let row = list_row(SharedString::from(format!("entry-{i}")), is_selected, cx)
                 .gap_2()
-                .h(px(ROW_HEIGHT))
                 .px_2()
-                .rounded(px(4.))
                 .when(is_selected, |row| row.font_weight(FontWeight::MEDIUM))
                 .child(div().flex_1().min_w_0().truncate().child(entry.name))
                 .child(
@@ -143,8 +222,8 @@ pub fn name_list<V: 'static>(
 
 /// The market as a tree to add items from, narrowed to what `accepts`, with a search box that
 /// lists hits instead. Items can be dragged out or double-clicked.
-pub struct ItemTree {
-    pub search: Entity<InputState>,
+pub(super) struct ItemTree {
+    pub(super) search: Entity<InputState>,
     accepts: fn(&ItemType) -> bool,
     /// Market groups holding something accepted, themselves or below.
     useful: HashSet<i32>,
@@ -154,7 +233,7 @@ pub struct ItemTree {
 
 impl ItemTree {
     /// A tree with its top groups open.
-    pub fn new(
+    pub(super) fn new(
         catalog: &Catalog,
         accepts: fn(&ItemType) -> bool,
         placeholder: &'static str,
@@ -178,7 +257,7 @@ impl ItemTree {
         }
     }
 
-    pub fn toggle(&mut self, group: i32) {
+    pub(super) fn toggle(&mut self, group: i32) {
         if !self.expanded.remove(&group) {
             self.expanded.insert(group);
         }
@@ -186,7 +265,7 @@ impl ItemTree {
 
     /// The search box and the tree or the search hits under it. `tree` finds this tree in the
     /// view, `add` takes a double-clicked item.
-    pub fn render<V: 'static>(
+    pub(super) fn render<V: 'static>(
         &self,
         loaded: &Rc<Loaded>,
         cx: &mut Context<V>,
@@ -344,5 +423,28 @@ fn item_row<V: 'static>(
             })
             .into_any_element(),
         None => row.into_any_element(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_renamed_entry_may_keep_its_name() {
+        let taken = ["Fuel", "Scripts"];
+        assert_eq!(name_problem("", taken, None), Some(NameProblem::Missing));
+        assert_eq!(name_problem("Fuel", taken, None), Some(NameProblem::Taken));
+        assert_eq!(name_problem("Fuel", taken, Some("Fuel")), None);
+        assert_eq!(name_problem("Ammo", taken, None), None);
+    }
+
+    #[test]
+    fn deleting_shows_the_next_entry_or_the_last() {
+        let left = ["a", "c"];
+        assert_eq!(next_after_delete(&left, Some(1)), Some(&"c"));
+        assert_eq!(next_after_delete(&left, Some(2)), Some(&"c"));
+        assert_eq!(next_after_delete::<&str>(&[], Some(0)), None);
+        assert_eq!(next_after_delete(&left, None), None);
     }
 }

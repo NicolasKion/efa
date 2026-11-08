@@ -9,23 +9,27 @@ use gpui_kit::component::{
     ActiveTheme, Disableable, Icon as UiIcon, Selectable, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
-    input::{Input, InputEvent, InputState},
+    input::{Input, InputState},
     v_flex,
 };
 use gpui_kit::{
     AnyElement, App, AppContext, ClickEvent, ClipboardItem, Context, Entity, FocusHandle,
-    FontWeight, InteractiveElement, IntoElement, KeyBinding, ParentElement, Render, SharedString,
+    FontWeight, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
     prelude::FluentBuilder, px, uniform_list,
 };
 
 use super::{
     Action, Efa, Loaded,
-    editor_kit::{self, INDENT, ListEntry, TREE_ROW, caption, empty_state, icon_button},
+    dialogs::{Confirm, Prompt, confirm, prompt_text},
+    editor_kit::{
+        self, CONTEXT, Delete, Duplicate, FOLD_W, FocusSearch, ListEntry, MIDDLE_MIN_W, Rename,
+        Sidebar, icon_button, name_problem, next_after_delete,
+    },
     fitting::{DragPreview, DragSource, Dragged},
     item_data, item_stats, side,
     stats::format,
-    widgets::icon_box,
+    widgets::{DropHighlight, caption, count, empty_state, icon_box, redraw_on_change, tree_row},
 };
 use crate::{
     data::TypeId,
@@ -36,26 +40,12 @@ use crate::{
     prices::Prices,
 };
 
-gpui_kit::actions!(
-    implant_set_editor,
-    [DeletePicked, DuplicateSet, RenameSet, FocusSearch]
-);
-
-const CONTEXT: &str = "ImplantSetEditor";
-
 /// The editor window's starting size.
 const EDITOR_W: f32 = 1100.;
 const EDITOR_H: f32 = 700.;
-const LIST_W: f32 = 230.;
-/// The set list's width in a narrow window.
-const LIST_NARROW_W: f32 = 180.;
-/// Below this window width the implant list folds away behind a button.
-const NARROW_W: f32 = 960.;
 /// Wide enough for the longest hardwiring names.
 const TREE_W: f32 = 420.;
-/// The set's column keeps this much beside an open market in a narrow window.
-const SET_MIN_W: f32 = 260.;
-const TREE_ICON: f32 = 20.;
+const TREE_ICON: f32 = 18.;
 const SLOT_ROW_H: f32 = 38.;
 const SLOT_ICON: f32 = 26.;
 /// What a new set is called until it is renamed.
@@ -63,16 +53,6 @@ const NEW_SET: &str = "New Implant Set";
 
 const NAME_MISSING: &str = "You must supply a name for the Implant Set!";
 const NAME_TAKEN: &str = "Implant Set name already in use, please choose another.";
-
-/// The editor's shortcuts. A text field with the focus keeps Delete for its text.
-pub(super) fn bind_keys(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("delete", DeletePicked, Some(CONTEXT)),
-        KeyBinding::new("ctrl-d", DuplicateSet, Some(CONTEXT)),
-        KeyBinding::new("f2", RenameSet, Some(CONTEXT)),
-        KeyBinding::new("ctrl-f", FocusSearch, Some(CONTEXT)),
-    ]);
-}
 
 impl Efa {
     /// Change the saved sets, keeping them sorted by name, and write them out.
@@ -132,14 +112,12 @@ impl Efa {
         let this = cx.weak_entity();
         let check = {
             let this = this.clone();
-            move |name: &str, cx: &App| name_problem(&this, name, None, cx)
+            move |name: &str, cx: &App| set_name_problem(&this, name, None, cx)
         };
-        editor_kit::prompt_name(
+        prompt_text(
             window,
             cx,
-            "New Implant Set".into(),
-            "Enter a name for your new Implant Set:".into(),
-            String::new(),
+            Prompt::new("New Implant Set").message("Enter a name for your new Implant Set:"),
             check,
             move |name, window, cx| {
                 Efa::app_update(&this, cx, |g, cx| {
@@ -157,23 +135,18 @@ impl Efa {
 
 /// What is wrong with a name for a set, if anything. `keep` is the set being renamed, which
 /// may keep its name.
-fn name_problem(
+fn set_name_problem(
     efa: &WeakEntity<Efa>,
     name: &str,
     keep: Option<&str>,
     cx: &App,
-) -> Option<&'static str> {
-    if name.is_empty() {
-        return Some(NAME_MISSING);
-    }
-    let taken = efa.upgrade().is_some_and(|g| {
-        g.read(cx)
-            .saved
-            .implant_sets
-            .iter()
-            .any(|s| s.name == name && Some(s.name.as_str()) != keep)
-    });
-    taken.then_some(NAME_TAKEN)
+) -> Option<SharedString> {
+    let efa = efa.upgrade();
+    let sets = efa
+        .as_ref()
+        .map_or(&[][..], |g| &g.read(cx).saved.implant_sets);
+    name_problem(name, sets.iter().map(|s| s.name.as_str()), keep)
+        .map(|p| p.say(NAME_MISSING, NAME_TAKEN))
 }
 
 /// Which part of the implant tree is shown.
@@ -232,23 +205,52 @@ enum TreeRow {
     },
 }
 
-/// Whether every word of a search is found in one of the texts, ignoring case.
+/// Whether every word of a search is found in one of the texts. Both are lowercase already.
 fn matches(words: &[String], texts: &[&str]) -> bool {
-    if words.is_empty() {
-        return true;
-    }
-    let texts: Vec<String> = texts.iter().map(|t| t.to_lowercase()).collect();
     words
         .iter()
         .all(|word| texts.iter().any(|text| text.contains(word.as_str())))
 }
 
-fn plural(n: usize, one: &str, many: &str) -> String {
-    if n == 1 {
-        format!("1 {one}")
-    } else {
-        format!("{n} {many}")
+/// A kind of implant with its names in lowercase, worked out once for the search.
+struct SearchGroup {
+    name: String,
+    lower: String,
+    implants: Vec<(TypeId, String)>,
+}
+
+/// The implants of a slot, ready to search.
+struct SearchSlot {
+    slot: u8,
+    groups: Vec<SearchGroup>,
+}
+
+impl SearchSlot {
+    fn index(catalog: &crate::data::Catalog, slots: Vec<SlotImplants>) -> Vec<Self> {
+        let lower = |t: TypeId| catalog.get(t).map_or_default(|t| t.name.to_lowercase());
+        slots
+            .into_iter()
+            .map(|s| Self {
+                slot: s.slot,
+                groups: s
+                    .groups
+                    .into_iter()
+                    .map(|g| SearchGroup {
+                        lower: g.name.to_lowercase(),
+                        implants: g.implants.iter().map(|&t| (t, lower(t))).collect(),
+                        name: g.name,
+                    })
+                    .collect(),
+            })
+            .collect()
     }
+}
+
+/// One grade of a pirate or faction set, with its name in lowercase for the search.
+struct PirateSet {
+    name: SharedString,
+    lower: String,
+    implants: Rc<[TypeId]>,
 }
 
 /// A drag of these implants out of the tree, shown under `label` when there are several.
@@ -275,9 +277,9 @@ pub struct ImplantSetEditor {
     /// What of the tree is folded away; everything starts open.
     folded: HashSet<Fold>,
     /// Every implant by slot and kind, worked out once.
-    by_slot: Rc<[SlotImplants]>,
+    by_slot: Vec<SearchSlot>,
     /// Every grade of every pirate and faction set, by name.
-    pirate_sets: Rc<[(SharedString, Rc<[TypeId]>)]>,
+    pirate_sets: Vec<PirateSet>,
     notice: Option<SharedString>,
     focus: FocusHandle,
     /// The implant list is open in a narrow window, where it is folded away by default.
@@ -297,16 +299,10 @@ impl ImplantSetEditor {
     ) -> Self {
         let list_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search sets"));
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search implants"));
-        let redraw =
-            |_: &mut Self, _: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>| {
-                if matches!(event, InputEvent::Change) {
-                    cx.notify();
-                }
-            };
         let subscriptions = vec![
             cx.observe(efa, |_, _, cx| cx.notify()),
-            cx.subscribe(&search, redraw),
-            cx.subscribe(&list_search, redraw),
+            redraw_on_change(cx, &search),
+            redraw_on_change(cx, &list_search),
             // Descriptions, for the bonus lines, load in the background.
             item_data::observe_data(cx),
         ];
@@ -317,10 +313,12 @@ impl ImplantSetEditor {
             .iter()
             .flat_map(|set| {
                 set.grades.iter().map(move |grade| {
-                    (
-                        SharedString::from(implant_set::grade_name(set, grade)),
-                        Rc::from(grade.1.as_slice()),
-                    )
+                    let name = implant_set::grade_name(set, grade);
+                    PirateSet {
+                        lower: name.to_lowercase(),
+                        name: name.into(),
+                        implants: Rc::from(grade.1.as_slice()),
+                    }
                 })
             })
             .collect();
@@ -328,7 +326,7 @@ impl ImplantSetEditor {
         window.focus(&focus, cx);
         Self {
             efa: efa.downgrade(),
-            by_slot: implant_set::by_slot(catalog).into(),
+            by_slot: SearchSlot::index(catalog, implant_set::by_slot(catalog)),
             pirate_sets,
             loaded,
             selected: select,
@@ -392,13 +390,13 @@ impl ImplantSetEditor {
     fn create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let initial = implant_set::free_name(self.sets(cx), NEW_SET);
         let (efa, this) = (self.efa.clone(), cx.weak_entity());
-        editor_kit::prompt_name(
+        prompt_text(
             window,
             cx,
-            "New Implant Set".into(),
-            "Enter a name for your new Implant Set:".into(),
-            initial,
-            move |name, cx| name_problem(&efa, name, None, cx),
+            Prompt::new("New Implant Set")
+                .message("Enter a name for your new Implant Set:")
+                .default(initial),
+            move |name, cx| set_name_problem(&efa, name, None, cx),
             move |name, _, cx| {
                 let _ = this.update(cx, |e, cx| {
                     let set = ImplantSet::new(name.clone());
@@ -415,13 +413,13 @@ impl ImplantSetEditor {
             return;
         };
         let (efa, this, keep) = (self.efa.clone(), cx.weak_entity(), old.clone());
-        editor_kit::prompt_name(
+        prompt_text(
             window,
             cx,
-            "Rename Implant Set".into(),
-            "Enter a new name for the Implant Set:".into(),
-            old.clone(),
-            move |name, cx| name_problem(&efa, name, Some(&keep), cx),
+            Prompt::new("Rename Implant Set")
+                .message("Enter a new name for the Implant Set:")
+                .default(old.clone()),
+            move |name, cx| set_name_problem(&efa, name, Some(&keep), cx),
             move |name, _, cx| {
                 let old = old.clone();
                 let _ = this.update(cx, |e, cx| {
@@ -453,10 +451,12 @@ impl ImplantSetEditor {
             return;
         };
         let this = cx.weak_entity();
-        editor_kit::confirm_delete(
+        confirm(
             window,
             cx,
-            format!("Delete the implant set \"{name}\"? This cannot be undone."),
+            Confirm::delete(format!(
+                "Delete the implant set \"{name}\"? This cannot be undone."
+            )),
             move |_, cx| {
                 let _ = this.update(cx, |e, cx| e.delete(&name, cx));
             },
@@ -468,10 +468,7 @@ impl ImplantSetEditor {
         let at = self.sets(cx).iter().position(|s| s.name == name);
         let gone = name.to_owned();
         self.edit(cx, |sets| sets.retain(|s| s.name != gone));
-        let sets = self.sets(cx);
-        let next = at
-            .and_then(|i| sets.get(i).or_else(|| sets.last()))
-            .map(|s| s.name.clone());
+        let next = next_after_delete(self.sets(cx), at).map(|s| s.name.clone());
         self.notice = Some(format!("Deleted {name}.").into());
         self.select(next, cx);
     }
@@ -556,14 +553,14 @@ impl ImplantSetEditor {
             return;
         };
         let imported = implant_set::import(&self.loaded.catalog, &text);
-        let (count, errors) = (imported.sets.len(), imported.errors);
-        let sets = plural(count, "set", "sets");
-        self.notice = Some(match (count, errors) {
+        let (found, errors) = (imported.sets.len(), imported.errors);
+        let sets = count(found, "set", "sets");
+        self.notice = Some(match (found, errors) {
             (0, _) => "No implant sets found on the clipboard.".into(),
             (_, 0) => format!("Imported {sets} from the clipboard.").into(),
             _ => format!(
                 "Imported {sets} from the clipboard; {} could not be read.",
-                plural(errors, "line", "lines")
+                count(errors, "line", "lines")
             )
             .into(),
         });
@@ -586,11 +583,11 @@ impl ImplantSetEditor {
 
     fn export(&mut self, cx: &mut Context<Self>) {
         let sets = self.sets(cx);
-        let count = sets.len();
+        let total = sets.len();
         let text = implant_set::export(&self.loaded.catalog, sets);
         cx.write_to_clipboard(ClipboardItem::new_string(text));
         self.notice =
-            Some(format!("Copied {} to the clipboard.", plural(count, "set", "sets")).into());
+            Some(format!("Copied {} to the clipboard.", count(total, "set", "sets")).into());
         cx.notify();
     }
 
@@ -610,16 +607,9 @@ impl ImplantSetEditor {
 
     // The set list.
 
-    fn list_column(&self, sets: &[ImplantSet], cx: &mut Context<Self>) -> AnyElement {
-        let width = if self.narrow { LIST_NARROW_W } else { LIST_W };
+    fn list_column(&self, entries: Vec<ListEntry>, cx: &mut Context<Self>) -> AnyElement {
         let query = self.list_search.read(cx).value().to_string();
-        let entries: Vec<ListEntry> = sets
-            .iter()
-            .map(|s| ListEntry {
-                name: s.name.clone(),
-                detail: format!("{}/{}", s.implants.len(), SLOTS.end()),
-            })
-            .collect();
+        let any = !entries.is_empty();
         let rows = editor_kit::name_list(
             entries,
             &query,
@@ -638,88 +628,71 @@ impl ImplantSetEditor {
             }),
         );
         let has = self.selected.is_some();
-        let empty = if sets.is_empty() {
-            Some(empty_state(
+        let empty = if any {
+            empty_state(
+                AssetIcon::SearchX,
+                "No sets match",
+                "Clear the search to see them all.",
+                cx,
+            )
+        } else {
+            empty_state(
                 AssetIcon::Layers,
                 "No sets yet",
                 "Click New, import sets from the clipboard, or save a fit's implants from the \
                  Implants tab's menu.",
                 cx,
-            ))
-        } else if rows.is_empty() {
-            Some(empty_state(
-                AssetIcon::SearchX,
-                "No sets match",
-                "Clear the search to see them all.",
-                cx,
-            ))
-        } else {
-            None
+            )
         };
-        let theme = cx.theme();
-        v_flex()
-            .w(px(width))
-            .flex_none()
-            .h_full()
-            .gap_2()
-            .p_3()
-            .border_r_1()
-            .border_color(theme.border)
-            .bg(theme.sidebar)
-            .child(caption("Implant sets", cx))
-            .child(Input::new(&self.list_search).small().cleanable(true))
+        let footer = h_flex()
+            .gap_1()
             .child(
-                v_flex()
-                    .id("implant-set-list")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .gap_0p5()
-                    .children(empty)
-                    .children(rows),
+                icon_button("set-new", AssetIcon::Plus, "New set")
+                    .on_click(cx.listener(|e, _, window, cx| e.create(window, cx))),
             )
             .child(
-                h_flex()
-                    .gap_1()
-                    .child(
-                        icon_button("set-new", AssetIcon::Plus, "New set")
-                            .on_click(cx.listener(|e, _, window, cx| e.create(window, cx))),
-                    )
-                    .child(
-                        icon_button("set-duplicate", AssetIcon::Copy, "Duplicate (Ctrl+D)")
-                            .disabled(!has)
-                            .on_click(cx.listener(|e, _, _, cx| e.duplicate(cx))),
-                    )
-                    .child(
-                        icon_button("set-rename", AssetIcon::Pencil, "Rename (F2)")
-                            .disabled(!has)
-                            .on_click(cx.listener(|e, _, window, cx| e.rename(window, cx))),
-                    )
-                    .child(
-                        icon_button(
-                            "sets-import",
-                            AssetIcon::ClipboardPaste,
-                            "Import sets from the clipboard, in pyfa's format",
-                        )
-                        .on_click(cx.listener(|e, _, _, cx| e.import(cx))),
-                    )
-                    .child(
-                        icon_button(
-                            "sets-export",
-                            AssetIcon::ClipboardCopy,
-                            "Copy every set to the clipboard, in pyfa's format",
-                        )
-                        .disabled(sets.is_empty())
-                        .on_click(cx.listener(|e, _, _, cx| e.export(cx))),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        icon_button("set-delete", AssetIcon::Trash, "Delete (Delete)")
-                            .disabled(!has)
-                            .on_click(cx.listener(|e, _, window, cx| e.confirm_delete(window, cx))),
-                    ),
+                icon_button("set-duplicate", AssetIcon::Copy, "Duplicate (Ctrl+D)")
+                    .disabled(!has)
+                    .on_click(cx.listener(|e, _, _, cx| e.duplicate(cx))),
             )
-            .into_any_element()
+            .child(
+                icon_button("set-rename", AssetIcon::Pencil, "Rename (F2)")
+                    .disabled(!has)
+                    .on_click(cx.listener(|e, _, window, cx| e.rename(window, cx))),
+            )
+            .child(
+                icon_button(
+                    "sets-import",
+                    AssetIcon::ClipboardPaste,
+                    "Import sets from the clipboard, in pyfa's format",
+                )
+                .on_click(cx.listener(|e, _, _, cx| e.import(cx))),
+            )
+            .child(
+                icon_button(
+                    "sets-export",
+                    AssetIcon::ClipboardCopy,
+                    "Copy every set to the clipboard, in pyfa's format",
+                )
+                .disabled(!any)
+                .on_click(cx.listener(|e, _, _, cx| e.export(cx))),
+            )
+            .child(div().flex_1())
+            .child(
+                icon_button("set-delete", AssetIcon::Trash, "Delete (Delete)")
+                    .disabled(!has)
+                    .on_click(cx.listener(|e, _, window, cx| e.confirm_delete(window, cx))),
+            );
+        Sidebar {
+            caption: "Implant sets".into(),
+            search: Some(self.list_search.clone()),
+            list_id: "implant-set-list",
+            rows,
+            empty: Some(empty.into_any_element()),
+            footer: Some(footer.into_any_element()),
+            narrow: self.narrow,
+        }
+        .render(cx)
     }
 
     // The chosen set.
@@ -733,17 +706,11 @@ impl ImplantSetEditor {
         let column = v_flex()
             .id("implant-set")
             .flex_1()
-            .min_w(px(if self.narrow { SET_MIN_W } else { 0. }))
+            .min_w(px(if self.narrow { MIDDLE_MIN_W } else { 0. }))
             .h_full()
             .gap_2()
             .p_3()
-            .drag_over::<Dragged>(|style, dragged, _, cx| {
-                if matches!(dragged.source, DragSource::Market) {
-                    style.bg(cx.theme().drop_target.opacity(0.25))
-                } else {
-                    style
-                }
-            })
+            .drop_highlight_if::<Dragged>(|d| matches!(d.source, DragSource::Market))
             .on_drop(cx.listener(|e, dragged: &Dragged, _, cx| {
                 cx.stop_propagation();
                 if matches!(dragged.source, DragSource::Market) {
@@ -794,7 +761,7 @@ impl ImplantSetEditor {
         let missing = if unpriced > 0 {
             format!(
                 " ({} without a price)",
-                plural(unpriced, "implant", "implants")
+                count(unpriced, "implant", "implants")
             )
         } else {
             String::new()
@@ -899,16 +866,11 @@ impl ImplantSetEditor {
             .when(picked, |row| row.bg(theme.table_active))
             .hover(|s| s.bg(theme.table_hover))
             // The row an implant would go into lights up under it.
-            .drag_over::<Dragged>(move |style, dragged, _, cx| {
-                let lands_here = matches!(dragged.source, DragSource::Market)
+            .drop_highlight_if::<Dragged>(move |dragged| {
+                matches!(dragged.source, DragSource::Market)
                     && dragged
                         .types()
-                        .any(|t| implant_slot(&fills.catalog, t) == slot);
-                if lands_here {
-                    style.bg(cx.theme().drop_target)
-                } else {
-                    style
-                }
+                        .any(|t| implant_slot(&fills.catalog, t) == slot)
             })
             .child(
                 div()
@@ -1007,11 +969,9 @@ impl ImplantSetEditor {
     /// The tree's lines for the search and slot filter. A search shows everything it finds,
     /// folded or not.
     fn tree_rows(&self, query: &str) -> Vec<TreeRow> {
-        let catalog = &self.loaded.catalog;
         let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
         let searching = !words.is_empty();
         let open = |fold: &Fold| searching || !self.folded.contains(fold);
-        let name = |t: TypeId| catalog.get(t).map_or("", |t| t.name.as_str());
         let mut rows = Vec::new();
         for slot in self
             .by_slot
@@ -1025,8 +985,8 @@ impl ImplantSetEditor {
                     let hits = g
                         .implants
                         .iter()
-                        .copied()
-                        .filter(|&t| matches(&words, &[name(t), &g.name]))
+                        .filter(|(_, name)| matches(&words, &[name, &g.lower]))
+                        .map(|&(t, _)| t)
                         .collect();
                     (g.name.as_str(), hits)
                 })
@@ -1061,10 +1021,10 @@ impl ImplantSetEditor {
             }
         }
         if self.filter.shows_sets() {
-            let sets: Vec<&(SharedString, Rc<[TypeId]>)> = self
+            let sets: Vec<&PirateSet> = self
                 .pirate_sets
                 .iter()
-                .filter(|(set, _)| matches(&words, &[set.as_ref(), "set"]))
+                .filter(|set| matches(&words, &[&set.lower, "set"]))
                 .collect();
             if !sets.is_empty() {
                 let sets_open = open(&Fold::Sets);
@@ -1075,9 +1035,9 @@ impl ImplantSetEditor {
                     open: sets_open,
                 });
                 if sets_open {
-                    rows.extend(sets.into_iter().map(|(name, implants)| TreeRow::Set {
-                        name: name.clone(),
-                        implants: Rc::clone(implants),
+                    rows.extend(sets.into_iter().map(|set| TreeRow::Set {
+                        name: set.name.clone(),
+                        implants: Rc::clone(&set.implants),
                     }));
                 }
             }
@@ -1179,13 +1139,7 @@ impl ImplantSetEditor {
             .border_color(theme.border)
             .bg(theme.sidebar)
             // An implant of the set dragged back here comes out of the set.
-            .drag_over::<Dragged>(|style, dragged, _, cx| {
-                if matches!(dragged.source, DragSource::Listed) {
-                    style.bg(cx.theme().drop_target)
-                } else {
-                    style
-                }
-            })
+            .drop_highlight_if::<Dragged>(|d| matches!(d.source, DragSource::Listed))
             .child(
                 h_flex()
                     .justify_between()
@@ -1194,7 +1148,7 @@ impl ImplantSetEditor {
                         div()
                             .text_xs()
                             .text_color(muted)
-                            .child(plural(found, "implant", "implants")),
+                            .child(count(found, "implant", "implants")),
                     ),
             )
             .child(Input::new(&self.search).small().cleanable(true))
@@ -1213,35 +1167,31 @@ impl ImplantSetEditor {
         in_set: &HashSet<TypeId>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = cx.theme();
-        let muted = theme.muted_foreground;
-        let heading = |fold: &Fold, title: &SharedString, count: usize, open: bool| {
+        let muted = cx.theme().muted_foreground;
+        let heading = |fold: &Fold,
+                       depth: usize,
+                       title: &SharedString,
+                       count: usize,
+                       open: bool,
+                       cx: &mut Context<Self>| {
             let fold = fold.clone();
-            h_flex()
-                .id(SharedString::from(format!("tree-{fold:?}")))
-                .h(px(TREE_ROW))
-                .pr_1()
-                .gap_1()
-                .rounded(px(4.))
-                .hover(|s| s.bg(theme.list_hover))
-                .child(
-                    UiIcon::new(if open {
-                        AssetIcon::ChevronDown
-                    } else {
-                        AssetIcon::ChevronRight
-                    })
-                    .size(px(14.))
-                    .text_color(muted),
-                )
-                .child(div().flex_1().min_w_0().truncate().child(title.clone()))
-                .child(
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(muted)
-                        .child(count.to_string()),
-                )
-                .on_click(cx.listener(move |e, _, _, cx| e.toggle(fold.clone(), cx)))
+            tree_row(
+                SharedString::from(format!("tree-{fold:?}")),
+                depth,
+                Some(open),
+                None,
+                title.clone(),
+                false,
+                cx,
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(count.to_string()),
+            )
+            .on_click(cx.listener(move |e, _, _, cx| e.toggle(fold.clone(), cx)))
         };
         match row {
             TreeRow::Section {
@@ -1249,7 +1199,7 @@ impl ImplantSetEditor {
                 title,
                 count,
                 open,
-            } => heading(fold, title, *count, *open)
+            } => heading(fold, 0, title, *count, *open, cx)
                 .font_weight(FontWeight::SEMIBOLD)
                 .into_any_element(),
             TreeRow::Group {
@@ -1257,9 +1207,7 @@ impl ImplantSetEditor {
                 title,
                 count,
                 open,
-            } => heading(fold, title, *count, *open)
-                .pl(px(INDENT))
-                .into_any_element(),
+            } => heading(fold, 1, title, *count, *open, cx).into_any_element(),
             TreeRow::Item(id) => self.tree_item(*id, in_set.contains(id), cx),
             TreeRow::Set { name, implants } => self.tree_set(name, implants, cx),
         }
@@ -1268,34 +1216,34 @@ impl ImplantSetEditor {
     fn tree_item(&self, id: TypeId, in_set: bool, cx: &mut Context<Self>) -> AnyElement {
         let loaded = Rc::clone(&self.loaded);
         let catalog = &loaded.catalog;
-        let theme = cx.theme();
         let price = self.prices(cx).get(id).filter(|&p| p > 0.0);
         let tip = Rc::clone(&loaded);
-        let row = h_flex()
-            .id(SharedString::from(format!("tree-item-{id}")))
-            .h(px(TREE_ROW))
-            .pl(px(INDENT * 2.))
-            .pr_1()
-            .gap_2()
-            .rounded(px(4.))
-            // Small enough for the longest hardwiring names to fit.
-            .text_xs()
-            .hover(|s| s.bg(theme.list_hover))
-            .child(icon_box(catalog, &loaded.icons, Icon::Type(id), TREE_ICON))
-            .child(div().flex_1().min_w_0().truncate().child(catalog.name(id)))
-            .when(in_set, |row| {
-                row.child(
-                    UiIcon::new(AssetIcon::Check)
-                        .size(px(12.))
-                        .text_color(theme.primary),
-                )
-            })
-            .tooltip(move |window, cx| side::item_tooltip(&tip, id, price, window, cx))
-            .on_click(cx.listener(move |e, event: &ClickEvent, _, cx| {
-                if event.click_count() >= 2 {
-                    e.add_implants(&[id], cx);
-                }
-            }));
+        let icon = icon_box(catalog, &loaded.icons, Icon::Type(id), TREE_ICON).into_any_element();
+        let primary = cx.theme().primary;
+        let row = tree_row(
+            SharedString::from(format!("tree-item-{id}")),
+            2,
+            None,
+            Some(icon),
+            catalog.name(id),
+            false,
+            cx,
+        )
+        // Small enough for the longest hardwiring names to fit.
+        .text_xs()
+        .when(in_set, |row| {
+            row.child(
+                UiIcon::new(AssetIcon::Check)
+                    .size(px(12.))
+                    .text_color(primary),
+            )
+        })
+        .tooltip(move |window, cx| side::item_tooltip(&tip, id, price, window, cx))
+        .on_click(cx.listener(move |e, event: &ClickEvent, _, cx| {
+            if event.click_count() >= 2 {
+                e.add_implants(&[id], cx);
+            }
+        }));
         match tree_drag(&loaded, &[id], None) {
             Some(dragged) => row
                 .on_drag(dragged, |dragged, _, _, cx| {
@@ -1314,7 +1262,6 @@ impl ImplantSetEditor {
     ) -> AnyElement {
         let loaded = Rc::clone(&self.loaded);
         let catalog = &loaded.catalog;
-        let theme = cx.theme();
         let mut lines = vec![name.to_string(), String::new()];
         lines.extend(
             implants
@@ -1324,33 +1271,32 @@ impl ImplantSetEditor {
         lines.push(String::new());
         lines.push("Drag onto the set or double-click to add every piece.".to_owned());
         let add = Rc::clone(implants);
-        let row = h_flex()
-            .id(SharedString::from(format!("tree-set-{name}")))
-            .h(px(TREE_ROW))
-            .pl(px(INDENT))
-            .pr_1()
-            .gap_2()
-            .rounded(px(4.))
-            .text_xs()
-            .hover(|s| s.bg(theme.list_hover))
-            .children(
-                implants
-                    .first()
-                    .map(|&t| icon_box(catalog, &loaded.icons, Icon::Type(t), TREE_ICON)),
-            )
-            .child(div().flex_1().min_w_0().truncate().child(name.clone()))
-            .child(
-                div()
-                    .flex_none()
-                    .text_color(theme.muted_foreground)
-                    .child(plural(implants.len(), "piece", "pieces")),
-            )
-            .tooltip(move |window, cx| side::text_tooltip(lines.clone(), window, cx))
-            .on_click(cx.listener(move |e, event: &ClickEvent, _, cx| {
-                if event.click_count() >= 2 {
-                    e.add_implants(&add, cx);
-                }
-            }));
+        let icon = implants.first().map(|&t| {
+            icon_box(catalog, &loaded.icons, Icon::Type(t), TREE_ICON).into_any_element()
+        });
+        let muted = cx.theme().muted_foreground;
+        let row = tree_row(
+            SharedString::from(format!("tree-set-{name}")),
+            1,
+            None,
+            icon,
+            name.clone(),
+            false,
+            cx,
+        )
+        .text_xs()
+        .child(
+            div()
+                .flex_none()
+                .text_color(muted)
+                .child(count(implants.len(), "piece", "pieces")),
+        )
+        .tooltip(move |window, cx| side::text_tooltip(lines.clone(), window, cx))
+        .on_click(cx.listener(move |e, event: &ClickEvent, _, cx| {
+            if event.click_count() >= 2 {
+                e.add_implants(&add, cx);
+            }
+        }));
         match tree_drag(&loaded, implants, Some(name)) {
             Some(dragged) => row
                 .on_drag(dragged, |dragged, _, _, cx| {
@@ -1364,34 +1310,41 @@ impl ImplantSetEditor {
 
 impl Render for ImplantSetEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.narrow = window.viewport_size().width < px(NARROW_W);
-        let sets = self.sets(cx).to_vec();
-        // Another window may have removed or renamed the set this one was showing.
-        if self
-            .selected
-            .as_ref()
-            .is_none_or(|name| !sets.iter().any(|s| &s.name == name))
-        {
-            self.selected = sets.first().map(|s| s.name.clone());
-            self.slot = None;
-        }
-        let selected = self
-            .selected
-            .as_ref()
-            .and_then(|name| sets.iter().find(|s| &s.name == name));
-        let list = self.list_column(&sets, cx);
-        let middle = self.set_column(selected, !sets.is_empty(), cx);
+        self.narrow = window.viewport_size().width < px(FOLD_W);
+        // Only the list's lines and the shown set are taken from the sets.
+        let (entries, selected) = {
+            let sets = self.sets(cx);
+            // Another window may have removed or renamed the set this one was showing.
+            if self
+                .selected
+                .as_ref()
+                .is_none_or(|name| !sets.iter().any(|s| &s.name == name))
+            {
+                self.selected = sets.first().map(|s| s.name.clone());
+                self.slot = None;
+            }
+            let entries: Vec<ListEntry> = sets
+                .iter()
+                .map(|s| ListEntry {
+                    name: s.name.clone(),
+                    detail: format!("{}/{}", s.implants.len(), SLOTS.end()),
+                })
+                .collect();
+            (entries, self.current(cx).cloned())
+        };
+        let any_sets = !entries.is_empty();
+        let list = self.list_column(entries, cx);
+        let middle = self.set_column(selected.as_ref(), any_sets, cx);
         let tree = (!self.narrow || self.tree_open).then(|| self.tree_column(cx));
         // Narrow, an open market takes the list's place while a set is open.
         let list = (!self.narrow || !self.tree_open || selected.is_none()).then_some(list);
-        let theme = cx.theme();
         h_flex()
             .size_full()
             .key_context(CONTEXT)
             .track_focus(&self.focus)
-            .on_action(cx.listener(|e, _: &DeletePicked, window, cx| e.delete_picked(window, cx)))
-            .on_action(cx.listener(|e, _: &DuplicateSet, _, cx| e.duplicate(cx)))
-            .on_action(cx.listener(|e, _: &RenameSet, window, cx| e.rename(window, cx)))
+            .on_action(cx.listener(|e, _: &Delete, window, cx| e.delete_picked(window, cx)))
+            .on_action(cx.listener(|e, _: &Duplicate, _, cx| e.duplicate(cx)))
+            .on_action(cx.listener(|e, _: &Rename, window, cx| e.rename(window, cx)))
             .on_action(cx.listener(|e, _: &FocusSearch, window, cx| e.focus_search(window, cx)))
             // An implant of the set dragged anywhere but the set comes out of it.
             .on_drop(cx.listener(|e, dragged: &Dragged, _, cx| {
@@ -1400,9 +1353,6 @@ impl Render for ImplantSetEditor {
                     e.remove_implants(&implants, cx);
                 }
             }))
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .text_sm()
             .children(list)
             .child(middle)
             .children(tree)
@@ -1422,15 +1372,15 @@ mod tests {
         assert!(matches(&words(""), &["Anything"]));
         assert!(matches(
             &words("snake alpha"),
-            &["High-grade Snake Alpha", "Snake set"]
+            &["high-grade snake alpha", "snake set"]
         ));
         assert!(matches(
             &words("ARMOR noble"),
-            &["'Noble' Repair", "Armor Implants"]
+            &["'noble' repair", "armor implants"]
         ));
         assert!(!matches(
             &words("snake beta"),
-            &["High-grade Snake Alpha", "Snake set"]
+            &["high-grade snake alpha", "snake set"]
         ));
     }
 
