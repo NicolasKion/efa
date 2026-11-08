@@ -54,7 +54,7 @@ struct PlacedModule {
     state: ModuleState,
 }
 
-/// What [`Engine::place`] put into the solar system.
+/// The parts of a built fit the graphs read.
 struct Placement {
     ship: ItemId,
     modules: Vec<PlacedModule>,
