@@ -312,7 +312,7 @@ pub fn stats_after(engine: &Engine, pilot: &Pilot, fit: &Fit, change: &Change) -
 /// Turn active guns off, so the capacitor goes to the tank.
 fn idle_guns(fit: &mut Fit) {
     for module in fit.high.iter_mut().flatten() {
-        if matches!(module.state, ModuleState::Active | ModuleState::Overload) {
+        if module.state.is_running() {
             module.state = ModuleState::Online;
         }
     }

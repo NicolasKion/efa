@@ -12,6 +12,7 @@ use super::{BuildOptions, Engine, FitItem, Pilot};
 use crate::{
     data::{Slot, TypeId},
     fit::Fit,
+    text::roman,
 };
 
 /// Where on the fit a problem sits: a module's problems include its charge's.
@@ -176,13 +177,6 @@ fn budget_word(budget: Budget) -> &'static str {
         Budget::HeavyFighters => "Heavy fighters",
         Budget::SupportFighters => "Support fighters",
     }
-}
-
-fn roman(level: u8) -> &'static str {
-    ["0", "I", "II", "III", "IV", "V"]
-        .get(usize::from(level))
-        .copied()
-        .unwrap_or("?")
 }
 
 /// Everything wrong with a fit.

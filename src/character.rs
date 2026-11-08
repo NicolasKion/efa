@@ -14,7 +14,10 @@ use crate::{
     fit::plug_implant,
 };
 
-pub use crate::engine::MAX_LEVEL;
+pub use crate::{
+    engine::MAX_LEVEL,
+    text::{ROMAN, roman},
+};
 /// Security status runs from -10 to 5.
 pub const SEC_STATUS_RANGE: (f64, f64) = (-10.0, 5.0);
 
@@ -209,11 +212,11 @@ impl Characters {
     /// level pyfa shows and checks requirements against. None when not learned.
     pub fn flown_level(&self, id: CharacterId, skill: TypeId, catalog: &Catalog) -> Option<u8> {
         let level = self.level(id, skill)?;
-        let cap = self
+        let caps = self
             .alpha_clone(id)
             .and_then(|clone| catalog.alpha_clone(clone))
-            .map(|clone| clone.caps.get(&skill).copied().unwrap_or(0));
-        Some(cap.map_or(level, |cap| level.min(cap)))
+            .map(|clone| &clone.caps);
+        Some(Pilot::capped(caps, skill, level))
     }
 
     /// [`Characters::flown_level`] where not learned counts as 0, for requirements.
@@ -552,17 +555,6 @@ pub fn parse_level(text: &str) -> Option<u8> {
         .iter()
         .position(|r| r.eq_ignore_ascii_case(text))
         .map(|i| i as u8 + 1)
-}
-
-/// Levels I to V.
-pub const ROMAN: [&str; 5] = ["I", "II", "III", "IV", "V"];
-
-/// A level in Roman numerals, as `EVEMon` writes them; 0 stays a digit.
-pub fn roman(level: u8) -> String {
-    match level {
-        1..=MAX_LEVEL => ROMAN[usize::from(level) - 1].to_owned(),
-        _ => level.to_string(),
-    }
 }
 
 #[cfg(test)]

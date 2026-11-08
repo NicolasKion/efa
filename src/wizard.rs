@@ -401,22 +401,8 @@ fn bonus_lines(traits: &Traits) -> Vec<String> {
         .flat_map(|(_, b)| b)
         .chain(&traits.role)
         .chain(&traits.misc)
-        .map(|b| strip_markup(&b.text).to_lowercase())
+        .map(|b| crate::text::strip_tags(&b.text).to_lowercase())
         .collect()
-}
-
-fn strip_markup(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut in_tag = false;
-    for c in text.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            c if !in_tag => out.push(c),
-            _ => {}
-        }
-    }
-    out
 }
 
 /// How many of the strongest variations of each faction, deadspace or officer group a search

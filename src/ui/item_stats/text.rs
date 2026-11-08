@@ -77,17 +77,8 @@ pub fn plain(html: &str) -> String {
         .replace("<br />\n", "\n")
         .replace("<br />", "\n")
         .replace("<br>", "\n");
-    let mut out = String::with_capacity(text.len());
-    let mut in_tag = false;
-    for c in text.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' if in_tag => in_tag = false,
-            _ if !in_tag => out.push(c),
-            _ => {}
-        }
-    }
-    out.replace("&amp;", "&")
+    crate::text::strip_tags(&text)
+        .replace("&amp;", "&")
         .replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&quot;", "\"")

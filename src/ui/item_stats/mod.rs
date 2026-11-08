@@ -42,6 +42,7 @@ use crate::{
     fit::Fit,
     icons::Icon,
     item_data::{ItemData, TypeInfo},
+    text::roman,
 };
 use tree::{Node, Openness};
 
@@ -1098,13 +1099,6 @@ fn export_csv(file_name: &str, csv: String, cx: &mut App) {
         }
     })
     .detach();
-}
-
-/// Roman numerals for skill levels, as pyfa writes them.
-const ROMAN: [&str; 6] = ["0", "I", "II", "III", "IV", "V"];
-
-fn roman(level: u8) -> &'static str {
-    ROMAN.get(usize::from(level)).copied().unwrap_or("?")
 }
 
 /// pyfa's requirements tree: each skill with what it needs in turn. A skill's own needs are

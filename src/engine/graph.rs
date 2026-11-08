@@ -1164,11 +1164,7 @@ Damage Control II
     fn fit(catalog: &Catalog, eft: &str) -> Fit {
         let (mut fit, unknown) = Fit::from_eft(catalog, eft).expect("the fit parses");
         assert!(unknown.is_empty(), "unknown items: {unknown:?}");
-        for m in [&mut fit.high, &mut fit.mid, &mut fit.low]
-            .into_iter()
-            .flatten()
-            .flatten()
-        {
+        for m in fit.modules_mut() {
             m.state = ModuleState::Active;
         }
         fit

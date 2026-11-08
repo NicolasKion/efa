@@ -22,6 +22,9 @@ const VERSION: f64 = 0.06;
 const CAPSULE: TypeId = 670;
 /// pyfa's Tech II meta group, which the weapon test set is taken from.
 const TECH_II: i32 = 2;
+/// What pyfa assumes a Tech II siege module does for a dreadnought's turrets and launchers.
+const SIEGE_TURRET_MULTIPLIER: f64 = 9.4;
+const SIEGE_LAUNCHER_MULTIPLIER: f64 = 15.0;
 /// Fighter shield HP to EHP, pyfa's rough average fighter resist.
 const FIGHTER_EHP: f64 = 0.8875;
 
@@ -342,10 +345,9 @@ impl Engine {
         let round2 = |v: f64| (v * 100.0).round() / 100.0;
         let mut effective_turrets = round2(turret_slots * multipliers[0]);
         let mut effective_launchers = round2(launcher_slots * multipliers[1]);
-        // A Tech II siege module, assumed for dreadnoughts.
         if ship_group == "Dreadnought" {
-            effective_turrets *= 9.4;
-            effective_launchers *= 15.0;
+            effective_turrets *= SIEGE_TURRET_MULTIPLIER;
+            effective_launchers *= SIEGE_LAUNCHER_MULTIPLIER;
         }
         let resonance = |built: &mut Built, ids: [i32; 4]| {
             let [em, therm, kin, exp] = ids.map(|id| built.ship(id));

@@ -249,11 +249,7 @@ fn boosted_gunboat(catalog: &Catalog, effect: &str) -> (Fit, Vec<Fit>) {
          200mm AutoCannon II, EMP S\n200mm AutoCannon II, EMP S\n",
         1,
     );
-    for m in [&mut target.high, &mut target.mid, &mut target.low]
-        .into_iter()
-        .flatten()
-        .flatten()
-    {
+    for m in target.modules_mut() {
         m.state = ModuleState::Active;
     }
     let booster = eft(

@@ -306,12 +306,7 @@ impl GraphsWindow {
     fn fit_with(&self, fit: usize, ammo: Option<AmmoChoice>) -> Option<Fit> {
         let mut f = self.fits.get(fit)?.clone();
         if let Some(choice) = ammo {
-            for m in [&mut f.high, &mut f.mid, &mut f.low]
-                .into_iter()
-                .flatten()
-                .flatten()
-                .filter(|m| m.type_id == choice.module)
-            {
+            for m in f.modules_mut().filter(|m| m.type_id == choice.module) {
                 m.charge = Some(choice.charge);
             }
         }

@@ -28,6 +28,7 @@ pub mod ship_browser;
 mod sorted;
 pub mod store;
 pub mod target_profile;
+pub mod text;
 pub mod theme;
 pub mod ui;
 pub mod update;

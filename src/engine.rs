@@ -21,11 +21,7 @@ use std::{path::Path, sync::RwLock};
 
 use rc::{ItemId, SolOwned, Src};
 
-use crate::{
-    data::TypeId,
-    dogma::attr,
-    fit::{Fit, ModuleState},
-};
+use crate::{data::TypeId, dogma::attr, fit::Fit};
 
 use build::{BuildOptions, Built, Placed};
 use items::{booster_info, drone_info};
@@ -262,7 +258,7 @@ fn stats_of(built: &mut Built, fit: &Fit, options: CalcOptions) -> Stats {
             fit.rack(slot)
                 .get(i)
                 .and_then(Option::as_ref)
-                .is_some_and(|m| matches!(m.state, ModuleState::Active | ModuleState::Overload))
+                .is_some_and(|m| m.state.is_running())
         })
         .filter_map(|&(slot, i, id)| {
             let cap = stats.modules.get(&(slot, i))?.cap_per_sec?;
