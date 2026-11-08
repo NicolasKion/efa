@@ -9,7 +9,6 @@ use gpui_kit::component::{
     h_flex,
     input::Input,
     menu::{DropdownMenu, PopupMenuItem},
-    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
@@ -26,7 +25,7 @@ use crate::{
         plot::DroneMode,
     },
     icons::Icon,
-    ui::widgets::icon_box,
+    ui::widgets::{TipExt, icon_box},
 };
 
 /// The fit and target lists' height, and theirs in a short window.
@@ -39,8 +38,9 @@ const STACK_LISTS_W: f32 = 760.;
 /// The plot's least height; below it the area under the toolbar scrolls.
 const PLOT_MIN_H: f32 = 240.;
 const PLOT_SHORT_MIN_H: f32 = 170.;
-/// A settings group's least width; groups wrap onto more lines when they don't fit.
-const SECTION_MIN_W: f32 = 220.;
+/// A settings group's least width inside its padding; groups wrap onto more lines when they
+/// don't fit.
+const SECTION_MIN_W: f32 = 196.;
 /// The axis pickers' widest.
 const AXIS_W: f32 = 200.;
 /// The graph picker's width.
@@ -50,18 +50,13 @@ const HEADER_MIN_W: f32 = 260.;
 
 impl Render for GraphsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let root = v_flex()
-            .size_full()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .text_sm();
+        let root = v_flex().size_full();
         if self.loaded.is_none() {
             return root
                 .items_center()
                 .justify_center()
                 .gap_2()
-                .text_color(theme.muted_foreground)
+                .text_color(cx.theme().muted_foreground)
                 .child(UiIcon::new(AssetIcon::ChartSpline).size(px(28.)))
                 .child("Loading EVE data…")
                 .into_any_element();
@@ -74,27 +69,38 @@ impl Render for GraphsWindow {
         let stack = has_targets && width < STACK_LISTS_W;
         // Each list's width, for how many value columns fit beside the names.
         let list_w = if has_targets && !stack {
-            (width - 24.) / 2.
+            (width - 1.) / 2.
         } else {
-            width - 16.
+            width
         };
         let sources = lists::sources(self, list_w, cx);
         let targets = has_targets.then(|| lists::targets(self, list_w, cx));
+        let border = cx.theme().border;
         let lists = if stack {
             v_flex()
                 .flex_none()
-                .gap_2()
-                .p_2()
                 .child(h_flex().h(px(lists_h)).child(sources))
-                .children(targets.map(|t| h_flex().h(px(lists_h)).child(t)))
+                .children(targets.map(|t| {
+                    h_flex()
+                        .h(px(lists_h))
+                        .border_t_1()
+                        .border_color(border)
+                        .child(t)
+                }))
         } else {
             h_flex()
                 .flex_none()
                 .h(px(lists_h))
-                .gap_2()
-                .p_2()
                 .child(sources)
-                .children(targets)
+                .children(targets.map(|t| {
+                    h_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .border_l_1()
+                        .border_color(border)
+                        .child(t)
+                }))
         };
         let plot_min = if short { PLOT_SHORT_MIN_H } else { PLOT_MIN_H };
         // pyfa's order, top to bottom: the pickers, the plot, its settings, then the lists.
@@ -299,7 +305,7 @@ impl GraphsWindow {
                         .text_color(theme.muted_foreground),
                 )
                 .hover(|s| s.bg(theme.secondary))
-                .tooltip(|window, cx| Tooltip::new("Unpin the readout").build(window, cx))
+                .tip("Unpin the readout")
                 .on_click(cx.listener(|g, _: &ClickEvent, _, cx| {
                     g.unpin(cx);
                     cx.notify();
@@ -408,8 +414,8 @@ impl GraphsWindow {
             .id("graph-settings")
             .flex_none()
             .overflow_hidden()
+            // The lists' title bands under it bring their own rule.
             .border_t_1()
-            .border_b_1()
             .border_color(theme.border)
             .bg(theme.sidebar)
             .child(
@@ -419,16 +425,16 @@ impl GraphsWindow {
                     .ml(px(-1.))
                     .mt(px(-1.))
                     .children(sections.into_iter().map(|s| {
-                        // Each group takes an equal share of its line's width.
+                        // Each group takes an equal share of its line's width, and no less than
+                        // its widest control needs.
                         div()
                             .flex_1()
-                            .min_w(px(SECTION_MIN_W))
                             .px_3()
                             .py_2()
                             .border_l_1()
                             .border_t_1()
                             .border_color(theme.border)
-                            .child(s)
+                            .child(div().min_w(px(SECTION_MIN_W)).child(s))
                     })),
             )
     }
@@ -473,7 +479,7 @@ impl GraphsWindow {
             .child(div().flex_none().child(input))
             .when_some(
                 tooltip.or((!description.is_empty()).then_some(description)),
-                |d, tip| d.tooltip(move |window, cx| Tooltip::new(tip).build(window, cx)),
+                TipExt::tip,
             )
             .into_any_element()
     }
@@ -488,12 +494,7 @@ impl GraphsWindow {
         let dials = h_flex()
             .id("graph-dials")
             .gap_4()
-            .tooltip(|window, cx| {
-                Tooltip::new(
-                    "Drag in a circle to set speed and heading. 0° points at the other ship.",
-                )
-                .build(window, cx)
-            })
+            .tip("Drag in a circle to set speed and heading. 0° points at the other ship.")
             .when_some(src, |row, def| {
                 row.child(vector::render(
                     &self.atk_vector,

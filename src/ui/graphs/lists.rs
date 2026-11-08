@@ -8,13 +8,12 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     h_flex,
     menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
-    tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Context, Div, FontWeight, InteractiveElement, IntoElement,
-    KeyDownEvent, ParentElement, SharedString, StatefulInteractiveElement, Styled, WeakEntity,
-    Window, div, prelude::FluentBuilder, px,
+    AnyElement, App, ClickEvent, Context, Div, InteractiveElement, IntoElement, KeyDownEvent,
+    ParentElement, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
+    prelude::FluentBuilder, px,
 };
 
 use super::{
@@ -35,7 +34,7 @@ use crate::icons::Icon;
 use crate::ui::{
     profile_editor::open_target_profile_editor,
     profile_menus::{FirstProfile, PickProfile, target_profile_menu},
-    widgets::icon_box,
+    widgets::{ROW_H, TipExt, band, band_label, empty_line, icon_box, list_row, table_head},
 };
 
 /// A weapon type with its name and the charges it takes, each with its name.
@@ -86,10 +85,13 @@ impl Target {
     }
 }
 
-const ROW_H: f32 = 24.;
 /// The line sample's column, and the ship icon's.
 const SWATCH_W: f32 = 36.;
 const ICON: f32 = 20.;
+/// The gap between a row's cells, [`list_row`]'s.
+const GAP: f32 = 4.;
+/// A row's padding on either side, [`list_row`]'s.
+const PAD: f32 = 4.;
 /// A value column.
 const COL_W: f32 = 80.;
 /// The least a row's name keeps before value columns drop off its end.
@@ -98,9 +100,9 @@ const NAME_MIN_W: f32 = 120.;
 /// How many of `cols` fit in a list `width` wide, after the swatch, icon and a readable name.
 /// The rest are told in the row's tooltip.
 fn shown_columns(cols: &[Column], width: f32) -> usize {
-    // The card's border, the row's margin and padding, the swatch, the icon and their gaps.
-    let fixed = 2. + 8. + 16. + SWATCH_W + 8. + ICON + NAME_MIN_W;
-    let room = ((width - fixed) / (COL_W + 8.)).floor().max(0.);
+    // The row's padding, the swatch, the icon and their gaps.
+    let fixed = 2. * PAD + SWATCH_W + GAP + ICON + GAP + NAME_MIN_W;
+    let room = ((width - fixed) / (COL_W + GAP)).floor().max(0.);
     cols.len().min(room as usize)
 }
 
@@ -183,20 +185,12 @@ fn resists_text(resists: &[f64; 4]) -> String {
         .join("/")
 }
 
-/// The column names over a list's rows.
+/// The column names over a list's rows, lined up with them.
 fn header(cols: &[Column], first: &'static str, cx: &App) -> impl IntoElement {
-    let theme = cx.theme();
-    h_flex()
+    table_head(cx)
         .flex_none()
-        .h(px(22.))
-        .px_2()
-        .gap_2()
-        .border_b_1()
-        .border_color(theme.border)
         .text_xs()
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(theme.muted_foreground)
-        .child(div().flex_none().w(px(SWATCH_W + ICON)).mr_2())
+        .child(div().flex_none().w(px(SWATCH_W + GAP + ICON)))
         .child(div().flex_1().child(first))
         .children(cols.iter().map(|c| value_cell().child(c.header())))
 }
@@ -211,76 +205,23 @@ fn value_cell() -> Div {
         .overflow_hidden()
 }
 
-/// A list card's title bar: its icon, name and count, then its buttons.
-fn title_bar(
-    icon: AssetIcon,
-    title: &'static str,
-    count: usize,
-    actions: [AnyElement; 2],
-    cx: &App,
-) -> impl IntoElement {
-    let theme = cx.theme();
-    h_flex()
+/// A list's title band, as the fitting view labels its racks: its name and count, then its
+/// buttons.
+fn title_bar(title: &'static str, count: usize, actions: [AnyElement; 2], cx: &App) -> Div {
+    band(h_flex(), cx)
         .flex_none()
-        .gap_2()
+        .h(px(ROW_H))
         .pl_2()
         .pr_1()
-        .py_0p5()
-        .border_b_1()
-        .border_color(theme.border)
-        .child(
-            UiIcon::new(icon)
-                .size(px(14.))
-                .text_color(theme.muted_foreground),
-        )
-        .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
-        .child(
-            div()
-                .px_1p5()
-                .rounded_full()
-                .bg(theme.secondary)
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child(count.to_string()),
-        )
+        .gap_1()
+        .child(band_label(title, count.to_string(), cx))
         .child(div().flex_1())
         .children(actions)
 }
 
-/// What an empty list says, in place of its rows.
-fn empty_state(icon: AssetIcon, title: &'static str, hint: &'static str, cx: &App) -> Div {
-    let theme = cx.theme();
-    v_flex()
-        .flex_1()
-        .items_center()
-        .justify_center()
-        .gap_0p5()
-        .py_2()
-        .child(
-            UiIcon::new(icon)
-                .size(px(16.))
-                .text_color(theme.muted_foreground),
-        )
-        .child(div().font_weight(FontWeight::MEDIUM).child(title))
-        .child(
-            div()
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child(hint),
-        )
-}
-
-/// A list's card: a hairline border on the sidebar color, like the settings cards.
-fn card(cx: &App) -> Div {
-    let theme = cx.theme();
-    v_flex()
-        .flex_1()
-        .min_w_0()
-        .h_full()
-        .rounded(px(4.))
-        .border_1()
-        .border_color(theme.border)
-        .overflow_hidden()
+/// A list: its title band, column heads and rows, flat like the fitting view's panes.
+fn list() -> Div {
+    v_flex().flex_1().min_w_0().h_full().overflow_hidden()
 }
 
 /// A ship's icon, or `fallback` drawn in its place for what has no ship.
@@ -306,19 +247,9 @@ fn ship_icon(g: &GraphsWindow, fit: Option<usize>, fallback: AssetIcon, cx: &App
     }
 }
 
-/// A list row's frame: hover and selection like the fittings browser's rows.
+/// A list row, drawn like the fitting view's.
 fn row_frame(id: SharedString, selected: bool, cx: &App) -> gpui_kit::Stateful<Div> {
-    let theme = cx.theme();
-    h_flex()
-        .id(id)
-        .flex_none()
-        .h(px(ROW_H))
-        .mx_1()
-        .px_2()
-        .gap_2()
-        .text_xs()
-        .when(selected, |r| r.bg(theme.list_active))
-        .when(!selected, |r| r.hover(|s| s.bg(theme.list_hover)))
+    list_row(id, selected, cx).text_xs()
 }
 
 /// A list's value columns, and how many of them fit.
@@ -393,14 +324,11 @@ pub(super) fn sources(g: &GraphsWindow, width: f32, cx: &mut Context<GraphsWindo
         }))
         .flex_1()
         .min_h_0()
-        .py_1()
         .overflow_y_scroll()
         .children(rows)
         .when(empty, |list| {
-            list.child(empty_state(
-                AssetIcon::Rocket,
-                "No fits yet",
-                "Add a fit with the Add button above, or right-click here.",
+            list.child(empty_line(
+                "No fits yet. Add one with the Add button above, or right-click here.",
                 cx,
             ))
         })
@@ -408,14 +336,8 @@ pub(super) fn sources(g: &GraphsWindow, width: f32, cx: &mut Context<GraphsWindo
         .context_menu(move |menu, window, cx| {
             source_menu(menu, &this, &fits, &tabs, None, window, cx)
         });
-    card(cx)
-        .child(title_bar(
-            AssetIcon::Rocket,
-            "Fits",
-            g.sources.len(),
-            [add, remove],
-            cx,
-        ))
+    list()
+        .child(title_bar("Fits", g.sources.len(), [add, remove], cx))
         .child(header(cols.shown(), "Fit", cx))
         .child(body)
         .into_any_element()
@@ -655,9 +577,7 @@ fn source_row(
         .child(icon)
         .child(div().flex_1().min_w_0().truncate().text_sm().child(name))
         .children(cols.shown().iter().map(|&c| value_cell().child(value(c))))
-        .when_some(hidden, |row, tip| {
-            row.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
-        })
+        .when_some(hidden, TipExt::tip)
         .on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
             if event.click_count() >= 2 {
                 // pyfa removes a row on double-click.
@@ -730,14 +650,11 @@ pub(super) fn targets(g: &GraphsWindow, width: f32, cx: &mut Context<GraphsWindo
         }))
         .flex_1()
         .min_h_0()
-        .py_1()
         .overflow_y_scroll()
         .children(rows)
         .when(empty, |list| {
-            list.child(empty_state(
-                AssetIcon::Crosshair,
-                "No targets",
-                "Add a fit or a target profile with the Add button above.",
+            list.child(empty_line(
+                "No targets. Add a fit or a target profile with the Add button above.",
                 cx,
             ))
         })
@@ -745,14 +662,8 @@ pub(super) fn targets(g: &GraphsWindow, width: f32, cx: &mut Context<GraphsWindo
         .context_menu(move |menu, window, cx| {
             target_menu(menu, &this, &fits, &tabs, None, window, cx)
         });
-    card(cx)
-        .child(title_bar(
-            AssetIcon::Crosshair,
-            "Targets",
-            g.targets.len(),
-            [add, remove],
-            cx,
-        ))
+    list()
+        .child(title_bar("Targets", g.targets.len(), [add, remove], cx))
         .child(header(cols.shown(), "Target", cx))
         .child(body)
         .into_any_element()
@@ -959,9 +870,7 @@ fn target_row(
         .child(icon)
         .child(div().flex_1().min_w_0().truncate().text_sm().child(name))
         .children(cols.shown().iter().map(|&c| value_cell().child(value(c))))
-        .when_some(hidden, |row, tip| {
-            row.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
-        })
+        .when_some(hidden, TipExt::tip)
         .on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
             if event.click_count() >= 2 {
                 g.remove_target(i);
