@@ -5,6 +5,9 @@
 /// `boosterLastInjectionDatetime`: the last day a booster can be used, in days since 1970.
 pub const LAST_INJECTION: i32 = 2422;
 
+/// The boosters group.
+const GROUP_BOOSTER: i32 = 303;
+
 /// The destructible effect beacons group, which pyfa publishes for its projection menus.
 const GROUP_DESTRUCTIBLE_BEACON: i32 = 4033;
 
@@ -20,6 +23,7 @@ pub fn published(
     id: i32,
     name: &str,
     group_id: i32,
+    on_market: bool,
     flag: bool,
     last_injection: Option<f64>,
     today: f64,
@@ -36,6 +40,12 @@ pub fn published(
         || is_air_booster(name)
     {
         return true;
+    }
+    // Boosters you can use are sold. The ones that are not are event, Festival-only, Serenity
+    // (the China server) and skill accelerator leftovers; the AIR boosters above are the
+    // exception pyfa makes.
+    if group_id == GROUP_BOOSTER && !on_market {
+        return false;
     }
     if name.starts_with("Limited Synth ")
         || name.starts_with("Expired ")
@@ -83,7 +93,23 @@ mod tests {
     const TODAY: f64 = 20_765.0;
 
     fn check(name: &str, flag: bool, last: Option<f64>) -> bool {
-        published(1, name, 1, flag, last, TODAY)
+        published(1, name, 1, true, flag, last, TODAY)
+    }
+
+    fn booster(name: &str, on_market: bool) -> bool {
+        published(1, name, GROUP_BOOSTER, on_market, true, None, TODAY)
+    }
+
+    #[test]
+    fn boosters_off_the_market_are_hidden_but_air() {
+        assert!(!booster(
+            "Serenity Autumn Limited 'Hardshell' Dose Type-A",
+            false
+        ));
+        assert!(!booster("Festival-only 'Rock' AH2 Dose", false));
+        assert!(!booster("Standard Cerebral Accelerator", false));
+        assert!(booster("AIR Repairer Booster III", false));
+        assert!(booster("Agency 'Hardshell' TB3 Dose I", true));
     }
 
     #[test]

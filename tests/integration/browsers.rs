@@ -136,7 +136,9 @@ fn off_market_boosters_get_a_group_of_their_own() {
     let group = &catalog.market_groups[&efa::data::MARKET_SPECIAL_BOOSTERS];
     assert!(group.types.contains(&booster.id));
     assert!(
-        catalog.search("air repairer booster", 50).contains(&booster.id),
+        catalog
+            .search("air repairer booster", 50)
+            .contains(&booster.id),
         "found by search"
     );
     // Accelerators stay out of it.

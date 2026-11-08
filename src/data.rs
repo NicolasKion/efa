@@ -325,7 +325,7 @@ pub struct AlphaClone {
 
 /// Bump whenever what the catalog holds or how it is built changes, so old caches are rebuilt
 /// instead of loaded.
-const CACHE_FORMAT: u32 = 10;
+const CACHE_FORMAT: u32 = 11;
 const CACHE_FILE: &str = "catalog.bin";
 
 /// The cache on disk: the key it was built for, then the catalog.
@@ -437,6 +437,7 @@ impl Catalog {
                 id,
                 &t.name.en,
                 t.group_id,
+                t.market_group_id.is_some(),
                 t.published,
                 last_injection,
                 today,
