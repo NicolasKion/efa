@@ -581,3 +581,39 @@ fn a_repair_tank_takes_no_rig_that_does_not_repair() {
     tanks.dedup();
     assert_eq!(tanks.len(), count, "each tank once");
 }
+
+/// A Vedmak that runs out of capacitor (three neutralizers and an afterburner, the booster
+/// unloaded) still gets a repair tank: the repair is judged while the repairers run, so it is not
+/// zero for every tank, leaving the buffer to decide.
+#[test]
+fn a_repair_tank_counts_the_repair_while_it_runs() {
+    let Some(all) = setup() else {
+        return;
+    };
+    let catalog = all.0;
+    let (fit, _) = Fit::from_eft(
+        catalog,
+        "[Vedmak, Repair]\nImperial Navy 800mm Steel Plates\n[Empty Low slot]\n\
+         Entropic Radiation Sink II\n[Empty Low slot]\nNanofiber Internal Structure II\n\
+         Centum C-Type Medium Armor Repairer\n\nShadow Serpentis 100MN Afterburner\n\
+         Dark Blood Medium Capacitor Booster\nDread Guristas Warp Scrambler\n\
+         Republic Fleet Warp Disruptor\n\nVeles Heavy Entropic Disintegrator\n\
+         Small Energy Neutralizer II\nSmall Energy Neutralizer II\nSmall Energy Neutralizer II\n\n\
+         Medium Ancillary Current Router II\nMedium Ancillary Current Router II\n",
+    )
+    .expect("the fit reads");
+    let (_, outcomes) = best(all, &fit, |c| {
+        c.layer = Layer::Armor;
+        c.goal = Goal::Repair;
+        c.refit = false;
+    });
+    let found = outcomes.first().expect("a tank");
+    assert!(found.numbers.repair > 0.0, "repairs while running");
+    let rigs = names(catalog, &found.rig_types);
+    assert!(!rigs.iter().any(|n| n.contains("Trimark")), "{rigs:?}");
+    let modules = names(catalog, &found.types);
+    assert!(
+        modules.iter().any(|n| n.contains("Armor Repairer")),
+        "{modules:?}"
+    );
+}

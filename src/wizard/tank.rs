@@ -189,7 +189,7 @@ pub struct Numbers {
     pub resist: f64,
     /// The tanked layer's EHP per raw HP.
     pub multiplier: f64,
-    /// The tanked layer's sustained repair, raw HP/s.
+    /// The tanked layer's repair while its repairers run, raw HP/s.
     pub repair: f64,
     /// That repair in effective HP/s: times the multiplier.
     pub repair_ehp: f64,
@@ -204,8 +204,8 @@ pub struct Numbers {
 impl Numbers {
     pub fn of(probe: &TankProbe, layer: Layer) -> Self {
         let (stats, repair) = match layer {
-            Layer::Shield => (probe.shield, probe.sustained.shield),
-            Layer::Armor => (probe.armor, probe.sustained.armor),
+            Layer::Shield => (probe.shield, probe.repairs.shield),
+            Layer::Armor => (probe.armor, probe.repairs.armor),
         };
         let multiplier = stats.mult.unwrap_or(1.0).max(1.0);
         let layers = [probe.shield, probe.armor, probe.hull];
@@ -239,7 +239,7 @@ impl Numbers {
                 armor: stats.armor,
                 hull: stats.hull,
                 incoming: stats.incoming,
-                sustained: stats.sustained,
+                repairs: stats.tank,
                 cap_stable: matches!(stats.cap, Some(Cap::Stable(_))),
             },
             layer,

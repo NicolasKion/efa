@@ -3,14 +3,12 @@
 //! in a transaction, and only what the score needs is read, so a probe costs a fraction of
 //! [`Engine::compute_for`].
 
-use std::collections::HashSet;
-
-use rc::{ItemCommon, ItemId, ItemTypeId, ModRack};
+use rc::{ItemTypeId, ModRack};
 
 use super::{
-    BuildOptions, Built, CalcOptions, Cap, CapDetail, Engine, Layer, Pilot, Resource, Tank,
+    BuildOptions, Built, CalcOptions, Cap, Engine, Layer, Pilot, Resource, Tank,
     build::{add_fit_module, at},
-    pane, read, resource, stats,
+    pane, resource, stats,
 };
 use crate::{
     data::{Slot, TypeId},
@@ -29,7 +27,8 @@ pub struct TankProbe {
     /// The damage mix the layers are judged against: EM, thermal, kinetic, explosive.
     pub incoming: [f64; 4],
     /// Repair rates the capacitor can keep up, reloads counted; armor spool-up is left out.
-    pub sustained: Tank,
+    /// Local repairs per second while the repairers run.
+    pub repairs: Tank,
     pub cap_stable: bool,
 }
 
@@ -47,10 +46,6 @@ impl TankProbe {
 #[derive(Clone)]
 pub struct TankBench {
     built: Built,
-    fit: Fit,
-    /// Module types that repair nothing, learnt along the way so they are not switched off
-    /// again to find out.
-    idle: HashSet<i32>,
 }
 
 /// Reloads count, so an ancillary repairer is judged by what it repairs on average.
@@ -60,7 +55,7 @@ const PROBE_OPTIONS: CalcOptions = CalcOptions {
 };
 
 impl Engine {
-    /// The fit's resources, layers and sustained repair, flown by `pilot` alone in space.
+    /// The fit's resources, layers and repair, flown by `pilot` alone in space.
     pub fn probe_tank(&self, fit: &Fit, pilot: &Pilot) -> TankProbe {
         self.tank_bench(fit, pilot)
             .map_or_default(|mut bench| bench.probe(&[], &[]))
@@ -70,8 +65,6 @@ impl Engine {
     pub fn tank_bench(&self, fit: &Fit, pilot: &Pilot) -> Option<TankBench> {
         Some(TankBench {
             built: self.build(fit, pilot, BuildOptions::default())?,
-            fit: fit.clone(),
-            idle: HashSet::new(),
         })
     }
 }
@@ -86,29 +79,13 @@ impl TankBench {
         let Ok(mut f) = tx.get_fit(&fit_id) else {
             return TankProbe::default();
         };
-        // Running modules in rack order, the fit's and the tank's, for their capacitor use.
-        let mut running: Vec<(Slot, usize, ItemId, TypeId)> = self
-            .built
-            .fit
-            .modules
-            .iter()
-            .filter_map(|&(slot, i, id)| {
-                let m = self.fit.rack(slot).get(i)?.as_ref()?;
-                m.state.is_running().then_some((slot, i, id, m.type_id))
-            })
-            .collect();
         for &(slot, i, module) in modules {
             let Some(rack) = rack(slot) else { continue };
-            if let Ok(added) = add_fit_module(&mut f, rack, at(i), module)
-                && module.state.is_running()
-            {
-                running.push((slot, i, added.get_item_id(), module.type_id));
-            }
+            let _ = add_fit_module(&mut f, rack, at(i), module);
         }
         for &rig in rigs {
             f.add_rig(ItemTypeId::from_i32(rig));
         }
-        running.sort_by_key(|&(slot, i, ..)| (slot, i));
 
         let mut s = f.stats();
         let [shield, armor, hull] = stats::layers(&mut s, pane::dps_profile(incoming));
@@ -124,38 +101,9 @@ impl TankBench {
             ..TankProbe::default()
         };
         let time = PROBE_OPTIONS.time();
-        let base = pane::repairs(&mut f, time);
-        probe.sustained = if probe.cap_stable {
-            base
-        } else {
-            let (recharge, used) = pane::cap_flow(&mut f.stats());
-            let cap = CapDetail {
-                recharge,
-                used,
-                ..CapDetail::default()
-            };
-            // Only repairers change the repairs when switched off; the rest are known by type
-            // once tried.
-            let tried: Vec<(ItemId, f64, TypeId)> = running
-                .iter()
-                .filter(|&&(.., type_id)| !self.idle.contains(&type_id))
-                .filter_map(|&(_, _, id, type_id)| {
-                    Some((id, read::cap_per_sec(&mut tx, id)?, type_id))
-                })
-                .collect();
-            let pairs: Vec<(ItemId, f64)> = tried.iter().map(|&(id, cap, _)| (id, cap)).collect();
-            let shares = pane::repair_shares(&mut tx, fit_id, &pairs, time);
-            let mut repairers = Vec::new();
-            for (share, &(_, cap, type_id)) in shares.into_iter().zip(&tried) {
-                match share {
-                    Some(share) => repairers.push((share, cap)),
-                    None => {
-                        self.idle.insert(type_id);
-                    }
-                }
-            }
-            pane::sustain(base, repairers, cap)
-        };
+        // The repairs while the repairers cycle, cap permitting: an active tank fights on its
+        // cap booster, so whether the capacitor lasts is the preview's warning, not the score.
+        probe.repairs = pane::repairs(&mut f, time);
         probe
     }
 }
