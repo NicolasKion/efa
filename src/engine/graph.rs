@@ -187,14 +187,22 @@ struct PlacedDrones {
 }
 
 impl Engine {
-    /// Everything the graphs need about `fit`, read from refine.
-    pub fn graph_snapshot(&self, fit: &Fit, pilot: &Pilot, catalog: &Catalog) -> FitSnapshot {
+    /// Everything the graphs need about `fit`, read from refine with what surrounds it, as the
+    /// main window shows it: `fits` are the saved fits its command and projected fits are looked
+    /// up in.
+    pub fn graph_snapshot(
+        &self,
+        fit: &Fit,
+        fits: &[Fit],
+        pilot: &Pilot,
+        catalog: &Catalog,
+    ) -> FitSnapshot {
         let mut snap = FitSnapshot::default();
         if fit.ship.is_none() {
             return snap;
         }
-        let stats = self.compute_for(fit, pilot, CalcOptions::default());
-        let Some(mut built) = self.build(fit, pilot, BuildOptions::default()) else {
+        let stats = self.compute_among(fit, fits, pilot, CalcOptions::default());
+        let Some(mut built) = self.build(fit, pilot, BuildOptions::among(fits)) else {
             return snap;
         };
         let Placement {
@@ -260,7 +268,7 @@ impl Engine {
         // Ships without the attribute take breacher damage in full.
         ship.breacher_resist = attr_opt(sol, ship_id, attr::BREACHER_RESIST).unwrap_or(1.0);
         ship.subwarp_speed = self
-            .subwarp_speed(fit, pilot, catalog)
+            .subwarp_speed(fit, fits, pilot, catalog)
             .unwrap_or(ship.max_velocity);
 
         let mut scrammable = Vec::new();
@@ -331,22 +339,24 @@ impl Engine {
             snap.ewar.extend(fighter_ewar(sol, id));
         }
         if !scrammable.is_empty() {
-            ship.scrammed = Some(self.without(fit, pilot, &scrammable));
+            ship.scrammed = Some(self.without(fit, fits, pilot, &scrammable));
         }
         snap.ship = ship;
         snap
     }
 
     /// The fit's turret or launcher groups, whichever it has more of, each with every charge of
-    /// `quality` it takes loaded in turn, for the Application Profile graph.
+    /// `quality` it takes loaded in turn, for the Application Profile graph. `fits` are the saved
+    /// fits, as for [`Engine::graph_snapshot`].
     pub fn graph_ammo(
         &self,
         fit: &Fit,
+        fits: &[Fit],
         pilot: &Pilot,
         catalog: &Catalog,
         quality: AmmoQuality,
     ) -> Vec<WeaponGroup> {
-        let Some(mut built) = self.build(fit, pilot, BuildOptions::default()) else {
+        let Some(mut built) = self.build(fit, pilot, BuildOptions::among(fits)) else {
             return Vec::new();
         };
         let placement = placement(fit, &built.fit);
@@ -427,7 +437,7 @@ impl Engine {
     }
 
     /// Speed and signature with the given module types switched to online.
-    fn without(&self, fit: &Fit, pilot: &Pilot, types: &[i32]) -> (f64, f64) {
+    fn without(&self, fit: &Fit, fits: &[Fit], pilot: &Pilot, types: &[i32]) -> (f64, f64) {
         let mut grounded = fit.clone();
         for module in [&mut grounded.high, &mut grounded.mid, &mut grounded.low]
             .into_iter()
@@ -440,12 +450,18 @@ impl Engine {
                 module.state = ModuleState::Online;
             }
         }
-        let stats = self.compute_for(&grounded, pilot, CalcOptions::default());
+        let stats = self.compute_among(&grounded, fits, pilot, CalcOptions::default());
         (stats.speed.unwrap_or(0.0), stats.sig_radius.unwrap_or(0.0))
     }
 
     /// Top speed with the modules that cannot run in warp switched off.
-    fn subwarp_speed(&self, fit: &Fit, pilot: &Pilot, catalog: &Catalog) -> Option<f64> {
+    fn subwarp_speed(
+        &self,
+        fit: &Fit,
+        fits: &[Fit],
+        pilot: &Pilot,
+        catalog: &Catalog,
+    ) -> Option<f64> {
         let mut grounded = fit.clone();
         let mut changed = false;
         for module in [&mut grounded.high, &mut grounded.mid, &mut grounded.low]
@@ -464,7 +480,7 @@ impl Engine {
         if !changed {
             return None;
         }
-        self.compute_for(&grounded, pilot, CalcOptions::default())
+        self.compute_among(&grounded, fits, pilot, CalcOptions::default())
             .speed
     }
 }
@@ -1379,8 +1395,8 @@ Damage Control II
     }
 
     fn graph_dps(engine: &Engine, catalog: &Catalog, attacker: &Fit, target: &Fit) -> plot::Series {
-        let src = engine.graph_snapshot(attacker, engine.all5(), catalog);
-        let tgt = engine.graph_snapshot(target, engine.all5(), catalog);
+        let src = engine.graph_snapshot(attacker, &[], engine.all5(), catalog);
+        let tgt = engine.graph_snapshot(target, &[], engine.all5(), catalog);
         let target = TargetData::profile(
             tgt.ship.max_velocity,
             tgt.ship.sig_radius,
@@ -1444,7 +1460,7 @@ Damage Control II
             return;
         };
         let attacker = fit(&catalog, RUPTURE);
-        let snap = engine.graph_snapshot(&attacker, engine.all5(), &catalog);
+        let snap = engine.graph_snapshot(&attacker, &[], engine.all5(), &catalog);
         let mut built = engine
             .build(&attacker, engine.all5(), BuildOptions::default())
             .expect("places");
@@ -1481,7 +1497,7 @@ Damage Control II
         };
         let carrier = fit(&catalog, "[Thanatos, Fighters]\n\nTemplar II x9\n");
         assert_eq!(carrier.fighters.len(), 1, "the squadron parsed");
-        let snap = engine.graph_snapshot(&carrier, engine.all5(), &catalog);
+        let snap = engine.graph_snapshot(&carrier, &[], engine.all5(), &catalog);
         let fighter = snap
             .weapons
             .iter()
@@ -1500,7 +1516,7 @@ Damage Control II
             &catalog,
             "[Kestrel, Breacher]\n\nSmall Breacher Pod Launcher, SCARAB Breacher Pod S\n",
         );
-        let snap = engine.graph_snapshot(&kestrel, engine.all5(), &catalog);
+        let snap = engine.graph_snapshot(&kestrel, &[], engine.all5(), &catalog);
         let pod = snap
             .weapons
             .iter()
@@ -1537,8 +1553,8 @@ Damage Control II
         };
         let tackle = fit(&catalog, "[Rifter, Tackle]\n\nWarp Scrambler II\n");
         let runner = fit(&catalog, "[Rifter, Runner]\n\n5MN Microwarpdrive II\n");
-        let tackle = engine.graph_snapshot(&tackle, engine.all5(), &catalog);
-        let runner = engine.graph_snapshot(&runner, engine.all5(), &catalog);
+        let tackle = engine.graph_snapshot(&tackle, &[], engine.all5(), &catalog);
+        let runner = engine.graph_snapshot(&runner, &[], engine.all5(), &catalog);
         assert!(tackle.scram_range.is_some_and(|r| r > 5_000.0));
         let (speed, sig) = runner.ship.scrammed.expect("the MWD can be scrammed");
         assert!(speed < runner.ship.max_velocity / 2.0, "{speed}");
@@ -1552,6 +1568,7 @@ Damage Control II
         };
         let groups = engine.graph_ammo(
             &fit(&catalog, RUPTURE),
+            &[],
             engine.all5(),
             &catalog,
             AmmoQuality::Navy,
@@ -1587,7 +1604,7 @@ Damage Control II
         let Some((catalog, engine)) = setup() else {
             return;
         };
-        let snap = engine.graph_snapshot(&fit(&catalog, RUPTURE), engine.all5(), &catalog);
+        let snap = engine.graph_snapshot(&fit(&catalog, RUPTURE), &[], engine.all5(), &catalog);
         assert_eq!(snap.weapons.len(), 4);
         let gun = &snap.weapons[0];
         assert!(matches!(gun.kind, WeaponKind::Turret(g) if g.optimal > 0.0 && g.falloff > 0.0));

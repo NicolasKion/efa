@@ -162,6 +162,22 @@ pub(super) fn fighter_classes(sol: &mut SolOwned, fit_id: rc::FitId) -> FighterC
     }
 }
 
+/// The saved fits `fit` is boosted or projected by, which its numbers depend on.
+pub fn surrounding_fits<'a>(fit: &'a Fit, fits: &'a [Fit]) -> impl Iterator<Item = &'a Fit> + 'a {
+    let uids = fit
+        .command
+        .iter()
+        .map(|c| c.fit)
+        .chain(fit.projected.fits.iter().map(|p| p.fit));
+    let mut seen = Vec::new();
+    uids.filter(move |&uid| {
+        let new = uid != 0 && !seen.contains(&uid);
+        seen.push(uid);
+        new
+    })
+    .filter_map(|uid| fits.iter().find(|f| f.uid == uid))
+}
+
 impl Engine {
     /// A hidden fit to hold loose projected items: a capsule with the character's skills.
     fn add_holder(&self, sol: &mut SolOwned) -> (rc::FitId, ItemId) {

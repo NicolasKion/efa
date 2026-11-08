@@ -41,7 +41,7 @@ pub use pilot::{MAX_LEVEL, Pilot, SkillTarget};
 pub use probe::TankProbe;
 pub use source::{EngineSource, PackedEngine};
 pub use stats::{Breacher, Cap, Damage, Layer, ModuleInfo, Resource, Slots, Stats};
-pub use surroundings::{AbilityInfo, FighterClasses, FighterInfo};
+pub use surroundings::{AbilityInfo, FighterClasses, FighterInfo, surrounding_fits};
 pub use validate::{Budget, ItemRef, MissingSkill, Problem, Validation};
 
 /// Type ID of the character item. EVE uses this one for everyone.

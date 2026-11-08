@@ -321,16 +321,29 @@ impl GraphsWindow {
     fn snapshot_with(&mut self, fit: usize, ammo: Option<AmmoChoice>) -> Option<Rc<FitSnapshot>> {
         let loaded = self.loaded.clone()?;
         let f = self.fit_with(fit, ammo)?;
-        let key = serde_json::to_string(&f).unwrap_or_default();
+        let key = self.cache_key(&f);
         if let Some((cached, snap)) = self.snapshots.get(&(fit, ammo))
             && *cached == key
         {
             return Some(Rc::clone(snap));
         }
         let pilot = self.pilot(&f, &loaded);
-        let snap = Rc::new(loaded.engine.graph_snapshot(&f, &pilot, &loaded.catalog));
+        let snap = Rc::new(
+            loaded
+                .engine
+                .graph_snapshot(&f, &self.fits, &pilot, &loaded.catalog),
+        );
         self.snapshots.insert((fit, ammo), (key, Rc::clone(&snap)));
         Some(snap)
+    }
+
+    /// What a fit's numbers depend on: the fit and the fits boosting or projecting onto it.
+    fn cache_key(&self, f: &Fit) -> String {
+        let mut key = serde_json::to_string(f).unwrap_or_default();
+        for other in crate::engine::surrounding_fits(f, &self.fits) {
+            key.push_str(&serde_json::to_string(other).unwrap_or_default());
+        }
+        key
     }
 
     /// Each fit flies with its own character, as in the main window.
@@ -345,18 +358,19 @@ impl GraphsWindow {
         let loaded = self.loaded.clone()?;
         let quality = self.settings.ammo_quality;
         let f = self.fits.get(fit)?.clone();
-        let key = serde_json::to_string(&f).unwrap_or_default();
+        let key = self.cache_key(&f);
         if let Some((cached, groups)) = self.ammo_groups.get(&(fit, quality))
             && *cached == key
         {
             return Some(Rc::clone(groups));
         }
         let pilot = self.pilot(&f, &loaded);
-        let groups = Rc::new(
-            loaded
-                .engine
-                .graph_ammo(&f, &pilot, &loaded.catalog, quality),
-        );
+        let groups =
+            Rc::new(
+                loaded
+                    .engine
+                    .graph_ammo(&f, &self.fits, &pilot, &loaded.catalog, quality),
+            );
         self.ammo_groups
             .insert((fit, quality), (key, Rc::clone(&groups)));
         Some(groups)
