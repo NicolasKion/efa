@@ -1,13 +1,28 @@
 //! The user's fits, characters, ESI logins and settings, in one SQLite database: `efa.db` in the
 //! data folder, readable by the user only since it holds the refresh tokens.
 //!
-//! Each list (fits, implant sets, characters, ...) is a table with a row per item: its place in
-//! the list, a few columns worth looking at and the item itself as JSON. Everything else is a
-//! JSON value in `settings`, by field name. The app keeps its lists as vectors, so the store
-//! remembers what it last wrote for each row and a save only touches rows that changed.
+//! The data is kept in tables of its own: a fit is a `fits` row with its racks, drones,
+//! fighters, implants, boosters, cargo and projections in child tables that point at it and go
+//! with it on delete; implant sets, cargo presets, characters and logins likewise. Lists keep
+//! their order in a `position` column. The tables are in [`schema`].
+//!
+//! Preferences and window state (open tabs, column widths, graph and export settings and the
+//! like) are configuration rather than data, and are kept as JSON values in `settings`, by
+//! field name, so they can change shape without a schema change. Attribute overrides are data
+//! and have a table; only whether they are on is a setting.
+//!
+//! The app keeps its lists as vectors, so the store remembers what it last wrote for each row
+//! (the item serialized, in memory only) and a save only touches the items that changed: a
+//! changed fit has its row updated and its parts replaced, in one transaction.
 //!
 //! A database that cannot be read is set aside and the backup, made once per start with
 //! `VACUUM INTO`, loads instead. The JSON files of earlier versions are imported the first time.
+
+mod fits;
+mod lists;
+mod overrides;
+mod schema;
+mod sync;
 
 use std::{
     collections::HashMap,
@@ -19,50 +34,19 @@ use rusqlite::{Connection, ErrorCode, Transaction, params};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value};
 
+use self::sync::{Item, Row};
 use crate::{character::Characters, esi::accounts::Accounts, store::Saved};
 
 pub const FILE: &str = "efa.db";
 
-/// Schema changes in order; the database's `user_version` counts those applied.
-const MIGRATIONS: &[&str] = &[
-    "CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
-     CREATE TABLE fits (
-         id INTEGER PRIMARY KEY, position INTEGER NOT NULL, name TEXT NOT NULL,
-         ship_type_id INTEGER, payload TEXT NOT NULL);
-     CREATE INDEX fits_ship ON fits (ship_type_id);
-     CREATE TABLE implant_sets (
-         id INTEGER PRIMARY KEY, position INTEGER NOT NULL, name TEXT NOT NULL,
-         payload TEXT NOT NULL);
-     CREATE TABLE damage_patterns (
-         id INTEGER PRIMARY KEY, position INTEGER NOT NULL, name TEXT NOT NULL,
-         payload TEXT NOT NULL);
-     CREATE TABLE target_profiles (
-         id INTEGER PRIMARY KEY, position INTEGER NOT NULL, name TEXT NOT NULL,
-         payload TEXT NOT NULL);
-     CREATE TABLE cargo_presets (
-         id INTEGER PRIMARY KEY, position INTEGER NOT NULL, name TEXT NOT NULL,
-         payload TEXT NOT NULL);
-     CREATE TABLE characters (
-         id INTEGER PRIMARY KEY, position INTEGER NOT NULL, name TEXT NOT NULL,
-         character_id INTEGER, payload TEXT NOT NULL);
-     CREATE TABLE esi_accounts (
-         id INTEGER PRIMARY KEY, position INTEGER NOT NULL, name TEXT NOT NULL,
-         character_id INTEGER, payload TEXT NOT NULL);",
-];
-
-/// A list kept as a table: the field holding it, and an integer column taken from each item.
-struct Table {
-    name: &'static str,
-    field: &'static str,
-    /// The column and the item's field it copies.
-    key: Option<(&'static str, &'static str)>,
-}
-
-/// A struct kept in the database: its lists as tables and its other fields as settings, under
-/// a prefix so structs do not share keys.
+/// A struct whose lists are tables and whose other fields are settings, under a prefix so
+/// structs do not share keys.
 struct Doc {
     prefix: &'static str,
-    tables: &'static [Table],
+    /// The fields kept as tables.
+    lists: &'static [&'static str],
+    /// Fields of a setting kept as tables, by setting.
+    nested: &'static [(&'static str, &'static str)],
 }
 
 impl Doc {
@@ -70,47 +54,47 @@ impl Doc {
     fn field<'a>(&self, key: &'a str) -> Option<&'a str> {
         key.strip_prefix(self.prefix).filter(|f| !f.contains('.'))
     }
-}
 
-const fn list(name: &'static str) -> Table {
-    Table {
-        name,
-        field: name,
-        key: None,
+    /// The struct's settings: its fields besides the lists.
+    fn settings(&self, value: &impl Serialize) -> Result<Map<String, Value>, String> {
+        let Value::Object(mut object) = serde_json::to_value(value).map_err(|e| e.to_string())?
+        else {
+            return Err("not a struct".into());
+        };
+        for list in self.lists {
+            object.remove(*list);
+        }
+        for (field, inner) in self.nested {
+            if let Some(Value::Object(setting)) = object.get_mut(*field) {
+                setting.remove(*inner);
+            }
+        }
+        Ok(object)
     }
 }
 
 const SAVED: Doc = Doc {
     prefix: "",
-    tables: &[
-        Table {
-            name: "fits",
-            field: "fits",
-            key: Some(("ship_type_id", "ship")),
-        },
-        list("implant_sets"),
-        list("damage_patterns"),
-        list("target_profiles"),
-        list("cargo_presets"),
+    lists: &[
+        "fits",
+        "implant_sets",
+        "damage_patterns",
+        "target_profiles",
+        "cargo_presets",
     ],
+    nested: &[("overrides", "values")],
 };
 
 const CHARACTERS: Doc = Doc {
     prefix: "characters.",
-    tables: &[Table {
-        name: "characters",
-        field: "characters",
-        key: Some(("character_id", "id")),
-    }],
+    lists: &["characters"],
+    nested: &[],
 };
 
 const ESI: Doc = Doc {
     prefix: "esi.",
-    tables: &[Table {
-        name: "esi_accounts",
-        field: "accounts",
-        key: Some(("character_id", "character_id")),
-    }],
+    lists: &["accounts"],
+    nested: &[],
 };
 
 /// Everything the database holds.
@@ -121,27 +105,14 @@ pub struct Contents {
     pub accounts: Accounts,
 }
 
-/// What was last written for a row, in list order.
-#[derive(Debug, Clone)]
-struct Row {
-    id: i64,
-    position: i64,
-    payload: String,
-}
-
-/// An item about to be written.
-struct Entry {
-    name: String,
-    key: Option<i64>,
-    payload: String,
-}
-
 /// The open database and what it holds as of the last load or save.
 pub struct Store {
     conn: Connection,
     path: PathBuf,
     rows: HashMap<&'static str, Vec<Row>>,
     settings: HashMap<String, String>,
+    /// The attribute overrides as last written.
+    overrides: crate::overrides::Values,
 }
 
 /// Why a database could not be opened.
@@ -265,11 +236,11 @@ impl Store {
         let Some(mut store) = store else {
             return (None, contents);
         };
-        if let Err(e) = store.write(&[
-            (&SAVED, &contents.saved as &dyn Erased),
-            (&CHARACTERS, &contents.characters as &dyn Erased),
-            (&ESI, &contents.accounts as &dyn Erased),
-        ]) {
+        if let Err(e) = store.write(
+            Some(&contents.saved),
+            Some(&contents.characters),
+            Some(&contents.accounts),
+        ) {
             // Without the import, the next start tries again from the same files.
             drop(store);
             remove_db(path);
@@ -318,6 +289,7 @@ impl Store {
             path: path.to_owned(),
             rows: HashMap::new(),
             settings: HashMap::new(),
+            overrides: crate::overrides::Values::new(),
         };
         let contents = store.load().map_err(OpenError::Other)?;
         Ok((store, contents))
@@ -329,9 +301,18 @@ impl Store {
             .read_settings(&mut problems)
             .map_err(|e| e.to_string())?;
         let mut saved: Saved = self.load_doc(&SAVED, &settings, &mut problems)?;
+        saved.fits = self.load_list(&mut problems)?;
+        saved.implant_sets = self.load_list(&mut problems)?;
+        saved.damage_patterns = self.load_list(&mut problems)?;
+        saved.target_profiles = self.load_list(&mut problems)?;
+        saved.cargo_presets = self.load_list(&mut problems)?;
+        self.overrides = overrides::read(&self.conn).map_err(|e| e.to_string())?;
+        saved.overrides.values.clone_from(&self.overrides);
         saved.tidy();
-        let characters = self.load_doc(&CHARACTERS, &settings, &mut problems)?;
-        let accounts = self.load_doc(&ESI, &settings, &mut problems)?;
+        let mut characters: Characters = self.load_doc(&CHARACTERS, &settings, &mut problems)?;
+        characters.characters = self.load_list(&mut problems)?;
+        let mut accounts: Accounts = self.load_doc(&ESI, &settings, &mut problems)?;
+        accounts.accounts = self.load_list(&mut problems)?;
         if !problems.is_empty() {
             crate::errors::report(
                 format!("Parts of {} could not be read", self.path.display()),
@@ -362,8 +343,8 @@ impl Store {
         Ok(settings)
     }
 
-    /// Put a struct together from its settings and tables. Rows and settings that do not
-    /// deserialize are left out, and left alone by later saves.
+    /// A struct from its settings, its lists left empty. Settings that do not deserialize are
+    /// left out, and left alone by later saves.
     fn load_doc<T: DeserializeOwned>(
         &mut self,
         doc: &Doc,
@@ -377,83 +358,66 @@ impl Store {
                 Some((key.clone(), field.to_owned(), value.clone()))
             })
             .collect();
-        let mut lists = Vec::new();
-        for table in doc.tables {
-            let (rows, items) = self
-                .read_table(table, problems)
-                .map_err(|e| e.to_string())?;
-            lists.push((rows, items));
-        }
-
-        let assemble = |fields: &[(String, String, Value)], lists: &[(Vec<Row>, Vec<Value>)]| {
-            let mut object: Map<String, Value> = fields
+        let assemble = |fields: &[(String, String, Value)]| {
+            let object: Map<String, Value> = fields
                 .iter()
                 .map(|(_, field, value)| (field.clone(), value.clone()))
                 .collect();
-            for (table, (_, items)) in doc.tables.iter().zip(lists) {
-                object.insert(table.field.to_owned(), Value::Array(items.clone()));
-            }
             serde_json::from_value::<T>(Value::Object(object))
         };
-        let value = if let Ok(value) = assemble(&fields, &lists) {
+        let value = if let Ok(value) = assemble(&fields) {
             value
         } else {
-            drop_unreadable::<T>(doc, &mut fields, &mut lists, problems);
-            assemble(&fields, &lists).map_err(|e| e.to_string())?
+            fields.retain(|field| {
+                let alone = assemble(std::slice::from_ref(field));
+                if let Err(e) = &alone {
+                    problems.push(format!("setting {}: {e}", field.0));
+                }
+                alone.is_ok()
+            });
+            assemble(&fields).map_err(|e| e.to_string())?
         };
         for (key, _, value) in fields {
             self.settings.insert(key, value.to_string());
         }
-        for (table, (rows, _)) in doc.tables.iter().zip(lists) {
-            self.rows.insert(table.name, rows);
-        }
         Ok(value)
     }
 
-    /// A table's rows in order, with the items that parse as JSON.
-    fn read_table(
-        &self,
-        table: &Table,
-        problems: &mut Vec<String>,
-    ) -> rusqlite::Result<(Vec<Row>, Vec<Value>)> {
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT id, position, payload FROM {} ORDER BY position, id",
-            table.name
-        ))?;
-        let rows = stmt.query_map([], |r| {
-            Ok(Row {
-                id: r.get(0)?,
-                position: r.get(1)?,
-                payload: r.get(2)?,
-            })
-        })?;
-        let (mut kept, mut items) = (Vec::new(), Vec::new());
-        for row in rows {
-            let row = row?;
-            match serde_json::from_str::<Value>(&row.payload) {
+    /// A table's items in order. Rows that do not read are left out, and left alone by later
+    /// saves.
+    fn load_list<T: Item>(&mut self, problems: &mut Vec<String>) -> Result<Vec<T>, String> {
+        let loaded = T::read(&self.conn).map_err(|e| e.to_string())?;
+        let (mut rows, mut items) = (Vec::new(), Vec::new());
+        for read in loaded.rows {
+            match read.item {
                 Ok(item) => {
+                    rows.push(Row {
+                        id: read.id,
+                        position: read.position,
+                        fingerprint: sync::fingerprint(&item).map_err(|e| e.to_string())?,
+                    });
                     items.push(item);
-                    kept.push(row);
                 }
-                Err(e) => problems.push(format!("{} row {}: {e}", table.name, row.id)),
+                Err(e) => problems.push(format!("{} row {}: {e}", T::TABLE, read.id)),
             }
         }
-        Ok((kept, items))
+        self.rows.insert(T::TABLE, rows);
+        Ok(items)
     }
 
     /// Write the fits and settings, touching only what changed since the last save.
     pub fn save_saved(&mut self, saved: &Saved) -> Result<(), String> {
-        self.write(&[(&SAVED, saved as &dyn Erased)])
+        self.write(Some(saved), None, None)
     }
 
     /// Write the characters, touching only what changed.
     pub fn save_characters(&mut self, characters: &Characters) -> Result<(), String> {
-        self.write(&[(&CHARACTERS, characters as &dyn Erased)])
+        self.write(None, Some(characters), None)
     }
 
     /// Write the ESI logins, touching only what changed.
     pub fn save_accounts(&mut self, accounts: &Accounts) -> Result<(), String> {
-        self.write(&[(&ESI, accounts as &dyn Erased)])
+        self.write(None, None, Some(accounts))
     }
 
     /// How many rows were inserted, changed or deleted since the database was opened.
@@ -468,33 +432,49 @@ impl Store {
 
     /// Write structs in one transaction. What was written is only remembered once it is
     /// committed, so a failed save is tried again in full next time.
-    fn write(&mut self, docs: &[(&Doc, &dyn Erased)]) -> Result<(), String> {
-        let mut values = Vec::with_capacity(docs.len());
-        for (doc, value) in docs {
-            match value.to_value().map_err(|e| e.to_string())? {
-                Value::Object(object) => values.push((*doc, object)),
-                _ => return Err("not a struct".into()),
-            }
+    fn write(
+        &mut self,
+        saved: Option<&Saved>,
+        characters: Option<&Characters>,
+        accounts: Option<&Accounts>,
+    ) -> Result<(), String> {
+        let mut docs = Vec::new();
+        if let Some(saved) = saved {
+            docs.push((&SAVED, SAVED.settings(saved)?));
         }
-        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+        if let Some(characters) = characters {
+            docs.push((&CHARACTERS, CHARACTERS.settings(characters)?));
+        }
+        if let Some(accounts) = accounts {
+            docs.push((&ESI, ESI.settings(accounts)?));
+        }
+        let e = |e: rusqlite::Error| e.to_string();
+        let tx = self.conn.transaction().map_err(e)?;
+        let old = &self.rows;
         let mut rows = Vec::new();
-        let mut settings = Vec::new();
-        for (doc, mut object) in values {
-            for table in doc.tables {
-                let items = match object.remove(table.field) {
-                    Some(Value::Array(items)) => items,
-                    _ => Vec::new(),
-                };
-                let entries = items.iter().map(|item| entry(table, item)).collect();
-                let old = self.rows.get(table.name).map_or(&[][..], Vec::as_slice);
-                let new = sync_table(&tx, table, old, entries).map_err(|e| e.to_string())?;
-                rows.push((table.name, new));
-            }
-            sync_settings(&tx, doc, &self.settings, object, &mut settings)
-                .map_err(|e| e.to_string())?;
+        if let Some(saved) = saved {
+            rows.push(sync_list(&tx, old, &saved.fits).map_err(e)?);
+            rows.push(sync_list(&tx, old, &saved.implant_sets).map_err(e)?);
+            rows.push(sync_list(&tx, old, &saved.damage_patterns).map_err(e)?);
+            rows.push(sync_list(&tx, old, &saved.target_profiles).map_err(e)?);
+            rows.push(sync_list(&tx, old, &saved.cargo_presets).map_err(e)?);
+            overrides::sync(&tx, &self.overrides, &saved.overrides.values).map_err(e)?;
         }
-        tx.commit().map_err(|e| e.to_string())?;
+        if let Some(characters) = characters {
+            rows.push(sync_list(&tx, old, &characters.characters).map_err(e)?);
+        }
+        if let Some(accounts) = accounts {
+            rows.push(sync_list(&tx, old, &accounts.accounts).map_err(e)?);
+        }
+        let mut settings = Vec::new();
+        for (doc, object) in docs {
+            sync_settings(&tx, doc, &self.settings, object, &mut settings).map_err(e)?;
+        }
+        tx.commit().map_err(e)?;
         self.rows.extend(rows);
+        if let Some(saved) = saved {
+            self.overrides.clone_from(&saved.overrides.values);
+        }
         for (key, value) in settings {
             match value {
                 Some(value) => self.settings.insert(key, value),
@@ -525,172 +505,14 @@ impl Store {
     }
 }
 
-/// A struct the store writes, without the store being generic over it.
-trait Erased {
-    fn to_value(&self) -> serde_json::Result<Value>;
-}
-
-impl<T: Serialize> Erased for T {
-    fn to_value(&self) -> serde_json::Result<Value> {
-        serde_json::to_value(self)
-    }
-}
-
-/// Leave out the settings and items that do not deserialize on their own, noting each.
-fn drop_unreadable<T: DeserializeOwned>(
-    doc: &Doc,
-    fields: &mut Vec<(String, String, Value)>,
-    lists: &mut [(Vec<Row>, Vec<Value>)],
-    problems: &mut Vec<String>,
-) {
-    let alone = |field: &str, value: &Value| {
-        let object = Map::from_iter([(field.to_owned(), value.clone())]);
-        serde_json::from_value::<T>(Value::Object(object)).err()
-    };
-    fields.retain(|(key, field, value)| {
-        let error = alone(field, value);
-        if let Some(e) = &error {
-            problems.push(format!("setting {key}: {e}"));
-        }
-        error.is_none()
-    });
-    for (table, (rows, items)) in doc.tables.iter().zip(lists) {
-        let errors: Vec<_> = items
-            .iter()
-            .map(|item| alone(table.field, &Value::Array(vec![item.clone()])))
-            .collect();
-        let (mut kept_rows, mut kept_items) = (Vec::new(), Vec::new());
-        for ((row, item), error) in rows.drain(..).zip(items.drain(..)).zip(errors) {
-            if let Some(e) = error {
-                problems.push(format!("{} row {}: {e}", table.name, row.id));
-            } else {
-                kept_rows.push(row);
-                kept_items.push(item);
-            }
-        }
-        *rows = kept_rows;
-        *items = kept_items;
-    }
-}
-
-fn entry(table: &Table, item: &Value) -> Entry {
-    Entry {
-        name: item
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned(),
-        key: table.key.and_then(|(_, field)| item.get(field)?.as_i64()),
-        payload: item.to_string(),
-    }
-}
-
-/// Bring a table in line with `new`, reusing rows: an unchanged item keeps its row, a changed
-/// one takes the row at its old place or any row left over. Positions only have to increase,
-/// so items keep theirs while they stay in order; deleting a fit moves no others. Returns the
-/// rows as now written, in order.
-fn sync_table(
+/// Bring an item's table in line with `items`, given the rows last written.
+fn sync_list<T: Item>(
     tx: &Transaction<'_>,
-    table: &Table,
-    old: &[Row],
-    new: Vec<Entry>,
-) -> rusqlite::Result<Vec<Row>> {
-    let mut by_payload: HashMap<&str, Vec<usize>> = HashMap::new();
-    for (i, row) in old.iter().enumerate().rev() {
-        by_payload.entry(row.payload.as_str()).or_default().push(i);
-    }
-    let mut used = vec![false; old.len()];
-    let mut assigned: Vec<Option<usize>> = new
-        .iter()
-        .map(|entry| {
-            let i = by_payload.get_mut(entry.payload.as_str())?.pop()?;
-            used[i] = true;
-            Some(i)
-        })
-        .collect();
-    for (i, slot) in assigned.iter_mut().enumerate() {
-        if slot.is_none() && i < old.len() && !used[i] {
-            used[i] = true;
-            *slot = Some(i);
-        }
-    }
-    let mut spare = (0..old.len())
-        .filter(|&i| !used[i])
-        .collect::<Vec<_>>()
-        .into_iter();
-    for slot in &mut assigned {
-        if slot.is_none() {
-            *slot = spare.next();
-        }
-    }
-    let unused: Vec<usize> = spare.collect();
-
-    let (key_column, key_value) = match table.key {
-        Some((column, _)) => (format!(", {column}"), ", ?4"),
-        None => (String::new(), ""),
-    };
-    let set_key = table
-        .key
-        .map_or(String::new(), |(column, _)| format!(", {column} = ?4"));
-    let mut insert = tx.prepare_cached(&format!(
-        "INSERT INTO {} (position, name, payload{key_column}) VALUES (?1, ?2, ?3{key_value})",
-        table.name
-    ))?;
-    let mut update = tx.prepare_cached(&format!(
-        "UPDATE {} SET position = ?1, name = ?2, payload = ?3{set_key} WHERE id = ?5",
-        table.name
-    ))?;
-    let mut place = tx.prepare_cached(&format!(
-        "UPDATE {} SET position = ?1 WHERE id = ?2",
-        table.name
-    ))?;
-    let mut delete = tx.prepare_cached(&format!("DELETE FROM {} WHERE id = ?1", table.name))?;
-
-    let mut rows = Vec::with_capacity(new.len());
-    let mut last = -1_i64;
-    for (entry, slot) in new.into_iter().zip(assigned) {
-        let reused = slot.map(|i| &old[i]);
-        let position = match reused {
-            Some(row) if row.position > last => row.position,
-            _ => last + 1,
-        };
-        last = position;
-        let id = match reused {
-            Some(row) if row.payload == entry.payload => {
-                if row.position != position {
-                    place.execute(params![position, row.id])?;
-                }
-                row.id
-            }
-            Some(row) => {
-                update.execute(params![
-                    position,
-                    entry.name,
-                    entry.payload,
-                    entry.key,
-                    row.id
-                ])?;
-                row.id
-            }
-            None => {
-                if table.key.is_some() {
-                    insert.execute(params![position, entry.name, entry.payload, entry.key])?;
-                } else {
-                    insert.execute(params![position, entry.name, entry.payload])?;
-                }
-                tx.last_insert_rowid()
-            }
-        };
-        rows.push(Row {
-            id,
-            position,
-            payload: entry.payload,
-        });
-    }
-    for i in unused {
-        delete.execute([old[i].id])?;
-    }
-    Ok(rows)
+    rows: &HashMap<&'static str, Vec<Row>>,
+    items: &[T],
+) -> rusqlite::Result<(&'static str, Vec<Row>)> {
+    let old = rows.get(T::TABLE).map_or(&[][..], Vec::as_slice);
+    Ok((T::TABLE, sync::sync(tx, old, items)?))
 }
 
 /// Write the settings that changed and drop those no longer there, noting each change.
@@ -730,8 +552,8 @@ fn sync_settings(
 /// Apply the schema changes the database has not had yet, each in its own transaction.
 fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    // A newer efa's database: its additions are left alone and its JSON read as far as known.
-    for (i, sql) in (1_i64..).zip(MIGRATIONS) {
+    // A newer efa's database: its additions are left alone and the rest read as far as known.
+    for (i, sql) in (1_i64..).zip(schema::MIGRATIONS) {
         if i <= version {
             continue;
         }
