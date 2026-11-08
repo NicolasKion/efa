@@ -2,6 +2,7 @@
 
 use std::{collections::HashSet, path::Path};
 
+use super::tabs::{dependents, requirements};
 use super::*;
 use crate::{
     data::{Catalog, Slot, category},
