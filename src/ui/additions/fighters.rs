@@ -192,16 +192,9 @@ impl Efa {
             true
         });
         match refused {
-            Some(name) => self.status = Some(format!("Nothing on this fit takes {name}").into()),
-            None => self.show_fighters_tab(),
-        }
-    }
-
-    /// pyfa brings the Fighters tab forward when a squadron goes in.
-    fn show_fighters_tab(&mut self) {
-        if self.additions_tab != super::super::AdditionsTab::Fighters {
-            self.additions_tab = super::super::AdditionsTab::Fighters;
-            self.clear_selection();
+            Some(name) => self.set_error(format!("Nothing on this fit takes {name}")),
+            // pyfa brings the Fighters tab forward when a squadron goes in.
+            None => self.show_additions_tab(super::super::AdditionsTab::Fighters),
         }
     }
 

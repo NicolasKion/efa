@@ -15,8 +15,8 @@ use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext, Bounds, Context, Entity, FocusHandle, Global, Pixels, Point,
-    SharedString, Subscription, WeakEntity, Window, WindowBounds, WindowOptions, px, size,
+    App, AppContext, Bounds, Context, Entity, FocusHandle, Pixels, Point, SharedString,
+    Subscription, Task, Window,
 };
 
 use self::{
@@ -44,53 +44,39 @@ use crate::{
 /// Something read from a fit, with the fit it was read from to tell when it is stale.
 type Cached<T> = (String, Rc<T>);
 
-/// The open graph window, so a second "Graphs" only brings it forward, as in pyfa.
-#[derive(Default)]
-struct OpenGraphs(Option<(AnyWindowHandle, WeakEntity<GraphsWindow>)>);
-
-impl Global for OpenGraphs {}
-
-/// Open the graph window, or bring it forward, with `fit` in its fit list when opened fresh.
-/// `hidden` also lists the graphs pyfa keeps behind Ctrl+Alt+G.
-pub fn open(hub: Entity<Hub>, fit: Option<usize>, hidden: bool, cx: &mut App) {
-    if let Some((handle, view)) = cx.try_global::<OpenGraphs>().and_then(|g| g.0.clone())
-        && handle
-            .update(cx, |_, window, _| window.activate_window())
-            .is_ok()
-    {
-        if hidden {
-            let _ = view.update(cx, |g, cx| {
+/// Open the graph window, or bring it forward, as pyfa does, with `fit` in its fit list when
+/// opened fresh. `hidden` also lists the graphs pyfa keeps behind Ctrl+Alt+G.
+pub fn open(
+    hub: Entity<Hub>,
+    fit: Option<usize>,
+    hidden: bool,
+    cx: &mut App,
+) -> Task<Result<(), SharedString>> {
+    crate::ui::chrome::open_single(
+        "Graphs",
+        (1180., 900.),
+        cx,
+        move |g: &mut GraphsWindow, _, cx| {
+            if hidden {
                 g.include_hidden = true;
                 cx.notify();
-            });
-        }
-        return;
-    }
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::centered(size(px(1180.), px(900.)), cx)),
-        app_id: Some("efa".into()),
-        ..Default::default()
-    };
-    let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
-        window.set_window_title("efa: Graphs");
-        cx.new(|cx| GraphsWindow::new(hub, fit, hidden, window, cx))
-    });
-    match opened {
-        Ok((handle, view)) => cx.set_global(OpenGraphs(Some((handle, view.downgrade())))),
-        Err(e) => eprintln!("opening the graph window: {e}"),
-    }
+            }
+        },
+        move |window, cx| GraphsWindow::new(hub, fit, hidden, window, cx),
+    )
 }
 
 impl super::Efa {
-    /// pyfa's Fit > Graphs (Ctrl+G), starting with the current fit. The new window only reads the
-    /// hub, never this window, so opening it from inside this window's update is safe.
-    pub(super) fn open_graphs(&mut self, cx: &mut App) {
-        open(self.hub.clone(), self.saved.current, false, cx);
+    /// pyfa's Fit > Graphs (Ctrl+G), starting with the current fit.
+    pub(super) fn open_graphs(&mut self, cx: &mut Context<Self>) {
+        let opening = open(self.hub.clone(), self.saved.current, false, cx);
+        Self::report_open(opening, cx);
     }
 
     /// pyfa's Ctrl+Alt+G: the graph window with its hidden graphs listed too.
-    pub(super) fn open_hidden_graphs(&mut self, cx: &mut App) {
-        open(self.hub.clone(), self.saved.current, true, cx);
+    pub(super) fn open_hidden_graphs(&mut self, cx: &mut Context<Self>) {
+        let opening = open(self.hub.clone(), self.saved.current, true, cx);
+        Self::report_open(opening, cx);
     }
 }
 
@@ -158,10 +144,7 @@ impl GraphsWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let subscriptions = vec![
-            cx.observe(&hub, |this, _, cx| this.pull(cx)),
-            cx.on_release(|_, cx| cx.set_global(OpenGraphs(None))),
-        ];
+        let subscriptions = vec![cx.observe(&hub, |this, _, cx| this.pull(cx))];
         let (settings, effective_hp) = {
             let hub = hub.read(cx);
             (hub.saved.graphs, !hub.raw_hp)

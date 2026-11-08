@@ -44,7 +44,38 @@ impl Health {
     }
 }
 
+/// The status line's message, and whether it reports a failure, which shows in the error color.
+#[derive(Debug, Clone)]
+pub struct Status {
+    pub text: SharedString,
+    pub error: bool,
+}
+
 impl Efa {
+    /// Show a message in the status line.
+    pub(super) fn set_status(&mut self, text: impl Into<SharedString>) {
+        self.status = Some(Status {
+            text: text.into(),
+            error: false,
+        });
+    }
+
+    /// Show a failure in the status line, in the error color.
+    pub(super) fn set_error(&mut self, text: impl Into<SharedString>) {
+        self.status = Some(Status {
+            text: text.into(),
+            error: true,
+        });
+    }
+
+    /// Show a result in the status line: the message, or the failure in the error color.
+    pub(super) fn set_outcome(&mut self, outcome: Result<SharedString, SharedString>) {
+        match outcome {
+            Ok(text) => self.set_status(text),
+            Err(text) => self.set_error(text),
+        }
+    }
+
     pub(super) fn status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let (muted, border) = (theme.muted_foreground, theme.border);
@@ -204,8 +235,10 @@ impl Efa {
 
     /// The last message, filling what is left; failures in the error color.
     fn message_item(&self, cx: &App) -> Option<AnyElement> {
-        let status = self.status.clone()?;
-        let error = looks_like_error(&status);
+        let Status {
+            text: status,
+            error,
+        } = self.status.clone()?;
         let color = if error {
             cx.theme().danger
         } else {
@@ -264,14 +297,6 @@ fn eve_build(version: &str) -> Option<&str> {
     (!build.is_empty() && build.bytes().all(|b| b.is_ascii_digit())).then_some(build)
 }
 
-/// Messages that report a failure are shown in the error color.
-fn looks_like_error(message: &str) -> bool {
-    let lower = message.to_lowercase();
-    ["could not", "failed", "error", "cannot", "can't"]
-        .iter()
-        .any(|word| lower.contains(word))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,13 +305,6 @@ mod tests {
     fn the_build_comes_out_of_the_release_name() {
         assert_eq!(eve_build("sde-3670638-client-3670638"), Some("3670638"));
         assert_eq!(eve_build("something-else"), None);
-    }
-
-    #[test]
-    fn failures_read_as_errors() {
-        assert!(looks_like_error("Could not fetch prices: timeout"));
-        assert!(looks_like_error("Import failed: no ship"));
-        assert!(!looks_like_error("Saved the cargo as preset Ammo"));
     }
 
     #[test]

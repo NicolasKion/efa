@@ -772,10 +772,8 @@ impl Efa {
     /// A new fit for a ship from the fittings browser, named the way pyfa's browser names it.
     fn new_fit_for_ship(&mut self, ship: TypeId, cx: &mut Context<Self>) {
         let Some(loaded) = self.loaded() else { return };
-        let mut fit = self.new_fit(format!("{} fit", loaded.catalog.name(ship)));
-        fit.ship = Some(ship);
-        fit.mode = loaded.catalog.modes_for(ship).first().copied();
-        self.new_fit_defaults(&mut fit);
+        let name = format!("{} fit", loaded.catalog.name(ship));
+        let fit = self.fresh_fit(name, Some(ship), &loaded.catalog);
         self.ship_browser.go(Stage::Fits(ship));
         self.add_fit(fit, cx);
     }
@@ -1690,11 +1688,8 @@ fn market_menu(
             entry(IconName::Globe, format!("Project {category} onto Fit")).on_click(use_with(
                 |g, id, _, cx| {
                     g.project_item(id, cx);
-                    if g.additions_tab != AdditionsTab::Projected {
-                        g.additions_tab = AdditionsTab::Projected;
-                        g.clear_selection();
-                        cx.notify();
-                    }
+                    g.show_additions_tab(AdditionsTab::Projected);
+                    cx.notify();
                 },
             )),
         );

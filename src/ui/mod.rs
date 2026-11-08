@@ -55,7 +55,7 @@ use gpui_kit::{
     AnyElement, App, AppContext, ClickEvent, Context, Entity, FocusHandle, InteractiveElement,
     IntoElement, MouseButton, MouseUpEvent, ParentElement, Render, ScrollHandle, ScrollStrategy,
     SharedString, StatefulInteractiveElement, Styled, Subscription, Task, UniformListScrollHandle,
-    WeakEntity, Window, WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, size,
+    WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
 pub use actions::{Action, AddKind, RowRef, Scope};
@@ -273,7 +273,7 @@ pub struct Efa {
     /// The market search waiting out the search delay preference.
     search_debounce: Option<Task<()>>,
     stats_view: stats::View,
-    status: Option<SharedString>,
+    status: Option<status_bar::Status>,
     palette: Palette,
     theme_generation: Option<String>,
     /// Item prices; replaced, not mutated, when a refresh lands.
@@ -565,21 +565,30 @@ impl Efa {
         // The new window starts from the hub, so it has to have this window's latest.
         self.publish(cx);
         let hub = self.hub.clone();
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(1400.), px(860.)), cx)),
-            app_id: Some("efa".into()),
-            ..Default::default()
-        };
+        let options = chrome::window_options(1400., 860., cx);
         let opened = gpui_kit::open_window(chrome::options(options), cx, move |window, cx| {
             cx.new(|cx| Efa::new(hub, Role::Detached(index), window, cx))
         });
         match opened {
             Ok(_) => self.close_fit(index, cx),
             Err(e) => {
-                self.status = Some(format!("Could not open a window: {e}").into());
+                self.set_error(format!("Could not open a window: {e}"));
                 cx.notify();
             }
         }
+    }
+
+    /// Let a window open, and say in the status line why it could not.
+    fn report_open(opening: Task<Result<(), SharedString>>, cx: &mut Context<Self>) {
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            if let Err(e) = opening.await {
+                let _ = this.update(cx, |g, cx| {
+                    g.set_error(e);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
     }
 
     /// Move a tab to where another one is.
@@ -691,7 +700,7 @@ impl Efa {
                         eprintln!("prices: {e}");
                         g.prices_retry = Some(Instant::now() + PRICE_RETRY);
                         if !g.price_waiters.is_empty() {
-                            g.status = Some(format!("Could not fetch prices: {e}").into());
+                            g.set_error(format!("Could not fetch prices: {e}"));
                         }
                     }
                 }
@@ -794,58 +803,64 @@ impl Efa {
 
     /// Set rolls from stats windows on whichever fits they belong to, one undo step each.
     fn apply_mutation_edits(&mut self, edits: Vec<hub::MutationEdit>, cx: &mut Context<Self>) {
-        let Some(loaded) = self.loaded() else { return };
         for edit in edits {
-            let Some(fit) = self.saved.fits.get_mut(edit.fit) else {
-                continue;
-            };
-            let before = fit.clone();
-            let Some(mutation) = fit.mutation_mut(edit.item) else {
-                continue;
-            };
-            for (attr, value) in edit.values {
-                mutation.set(&loaded.catalog, attr, value);
-            }
-            self.history
-                .record(edit.fit, before, &self.saved.fits[edit.fit]);
+            self.edit_fit(
+                edit.fit,
+                false,
+                |fit, env| {
+                    let Some(mutation) = fit.mutation_mut(edit.item) else {
+                        return actions::Outcome::skipped();
+                    };
+                    for (attr, value) in edit.values {
+                        mutation.set(&env.loaded.catalog, attr, value);
+                    }
+                    actions::Outcome::default()
+                },
+                cx,
+            );
         }
-        self.changed(cx);
     }
 
     /// Make the fitting wizard's changes on the fits they belong to, one undo step each.
     /// Modules the fitting rules refuse are left out.
     fn apply_wizard_edits(&mut self, edits: Vec<hub::WizardEdit>, cx: &mut Context<Self>) {
-        let Some(loaded) = self.loaded() else { return };
-        let pilot = self.pilot(&loaded);
         for edit in edits {
-            let Some(index) = self.saved.fits.iter().position(|f| f.uid == edit.uid) else {
+            let Some(index) = self.saved.fit_index(edit.uid) else {
                 continue;
             };
-            let before = self.saved.fits[index].clone();
-            let fit = &mut self.saved.fits[index];
-            crate::wizard::apply(
-                fit,
-                &crate::wizard::Change {
-                    removed: edit.change.removed,
-                    placements: Vec::new(),
+            self.edit_fit(
+                index,
+                false,
+                |fit, env| {
+                    let (engine, pilot) = (&env.loaded.engine, env.pilot);
+                    crate::wizard::apply(
+                        fit,
+                        &crate::wizard::Change {
+                            removed: edit.change.removed,
+                            placements: Vec::new(),
+                        },
+                    );
+                    let mut outcome = actions::Outcome {
+                        structural: true,
+                        ..actions::Outcome::default()
+                    };
+                    let mut base = engine.validate(fit, pilot);
+                    for placement in edit.change.placements {
+                        let mut next = fit.clone();
+                        crate::wizard::place(&mut next, &placement);
+                        let after = engine.validate(&next, pilot);
+                        if let Some(problem) = base.refusal(&after, next.ignore_restrictions) {
+                            outcome.error = Some(problem.describe(|t| env.loaded.catalog.name(t)));
+                            continue;
+                        }
+                        *fit = next;
+                        base = after;
+                    }
+                    outcome
                 },
+                cx,
             );
-            let mut base = loaded.engine.validate(fit, &pilot);
-            for placement in edit.change.placements {
-                let mut next = fit.clone();
-                crate::wizard::place(&mut next, &placement);
-                let after = loaded.engine.validate(&next, &pilot);
-                if let Some(problem) = base.refusal(&after, next.ignore_restrictions) {
-                    self.status = Some(problem.describe(|t| loaded.catalog.name(t)).into());
-                    continue;
-                }
-                *fit = next;
-                base = after;
-            }
-            self.record_edit(index, before);
         }
-        self.clear_selection();
-        self.changed(cx);
     }
 
     fn open_fit(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -857,12 +872,15 @@ impl Efa {
         self.changed(cx);
     }
 
-    /// An empty fit flown by the character picked last.
-    fn new_fit(&self, name: impl Into<String>) -> Fit {
-        Fit {
-            character: self.last_character,
-            ..Fit::new(name)
-        }
+    /// A fit new to efa: on `ship` with its first mode when there is one, flown by the
+    /// character picked last, with the preferences' defaults.
+    fn fresh_fit(&self, name: impl Into<String>, ship: Option<TypeId>, catalog: &Catalog) -> Fit {
+        let mut fit = match ship {
+            Some(ship) => crate::port::new_fit(catalog, ship, name.into()),
+            None => Fit::new(name),
+        };
+        self.new_fit_defaults(&mut fit);
+        fit
     }
 
     fn add_fit(&mut self, mut fit: Fit, cx: &mut Context<Self>) {
@@ -888,17 +906,14 @@ impl Efa {
     }
 
     fn delete_fit(&mut self, index: usize, cx: &mut Context<Self>) {
-        self.clear_selection();
-        self.saved.open.retain(|&i| i != index);
-        if self.saved.current == Some(index) {
-            self.saved.current = self.saved.open.last().copied();
+        if index >= self.saved.fits.len() {
+            return;
         }
+        self.clear_selection();
         self.saved.fits.remove(index);
+        hub::shift_tabs(&mut self.saved.open, &mut self.saved.current, index);
         self.history.forget(index);
         self.pending_deletions.push(index);
-        let shift = |i: usize| if i > index { i - 1 } else { i };
-        self.saved.open = self.saved.open.iter().map(|&i| shift(i)).collect();
-        self.saved.current = self.saved.current.map(shift);
         self.inputs_show = None;
         self.changed(cx);
     }
@@ -916,14 +931,13 @@ impl Efa {
             self.delete_fit(index, cx);
             return;
         }
-        let Some(fit) = self.saved.fits.get(index) else {
+        // The list may change while the question is up, so find the fit again by its identity.
+        let Some(uid) = self.saved.ensure_uid(index) else {
             return;
         };
-        // The list may change while the question is up, so find the fit again by what it is.
-        let (name, modified) = (fit.name.clone(), fit.modified);
         let this = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
-            let (this, name) = (this.clone(), name.clone());
+            let this = this.clone();
             alert
                 .confirm()
                 .title("Confirm Delete")
@@ -932,12 +946,7 @@ impl Efa {
                 .cancel_text("No")
                 .on_ok(move |_, _, cx| {
                     let _ = this.update(cx, |g, cx| {
-                        let found = g
-                            .saved
-                            .fits
-                            .iter()
-                            .position(|f| f.name == name && f.modified == modified);
-                        if let Some(index) = found {
+                        if let Some(index) = g.saved.fit_index(uid) {
                             g.delete_fit(index, cx);
                         }
                     });
@@ -962,72 +971,57 @@ impl Efa {
     fn add_item(&mut self, id: TypeId, cx: &mut Context<Self>) {
         let Some(loaded) = self.loaded() else { return };
         let catalog = &loaded.catalog;
-        let is_ship = catalog.get(id).is_some_and(|t| t.kind == Kind::Ship);
+        let kind = catalog.get(id).map(|t| t.kind);
+        let name = catalog.name(id);
         // A ship starts a new fit rather than swapping the hull under an existing one.
-        if is_ship {
-            let mut fit = self.new_fit(catalog.name(id));
-            fit.ship = Some(id);
-            fit.mode = catalog.modes_for(id).first().copied();
-            self.new_fit_defaults(&mut fit);
+        if kind == Some(Kind::Ship) {
+            let fit = self.fresh_fit(name, Some(id), catalog);
             self.status = None;
             self.add_fit(fit, cx);
             return;
         }
-        let before = self.saved.current.map(|i| self.saved.fits[i].clone());
         let Some(i) = self.saved.current else {
-            self.status = Some("Pick a ship first".into());
+            self.set_status("Pick a ship first");
             cx.notify();
             return;
         };
         // pyfa launches a new squadron only when a tube of its class is free.
-        if catalog.get(id).is_some_and(|t| t.kind == Kind::Fighter) {
+        if kind == Some(Kind::Fighter) {
             self.status = None;
             self.add_fighter_squadrons(vec![crate::fit::fighters::Fighter::new(id)], cx);
             return;
         }
-        let added = self.saved.fits[i].add(catalog, id);
         // Like pyfa, a module only goes on when the ship has room for it and, with the fitting
         // restrictions on, can take it.
-        if let Some(before) = &before
-            && catalog
-                .get(id)
-                .is_some_and(|t| matches!(t.kind, Kind::Module(_)))
-            && let Some(reason) = self.refusal(&loaded, before, &self.saved.fits[i].clone())
-        {
-            self.saved.fits[i] = before.clone();
-            self.status = Some(format!("{}: {reason}", catalog.name(id)).into());
-            cx.notify();
+        let module = matches!(kind, Some(Kind::Module(_)));
+        let mut added = false;
+        let kept = self.edit_fit(
+            i,
+            module,
+            |fit, _| {
+                added = fit.add(catalog, id);
+                actions::Outcome {
+                    error: (!added).then(|| format!("Nothing on this fit takes {name}")),
+                    about: Some(name.clone()),
+                    ..actions::Outcome::default()
+                }
+            },
+            cx,
+        );
+        if !kept {
             return;
         }
-        // pyfa brings the Boosters tab up even when the booster was already there.
-        if catalog.get(id).is_some_and(|t| t.kind == Kind::Booster)
-            && self.additions_tab != AdditionsTab::Boosters
-        {
-            self.additions_tab = AdditionsTab::Boosters;
-            self.additions_selection.clear();
-            self.additions_anchor = None;
+        if added {
+            self.status = None;
         }
-        if catalog.get(id).is_some_and(|t| t.kind == Kind::Implant)
-            && self.additions_tab != AdditionsTab::Implants
-        {
-            self.additions_tab = AdditionsTab::Implants;
-            self.clear_selection();
+        // pyfa brings the Boosters and Implants tabs up even when the item was already there,
+        // and the drones pane only when a drone went in.
+        match kind {
+            Some(Kind::Booster) => self.show_additions_tab(AdditionsTab::Boosters),
+            Some(Kind::Implant) => self.show_additions_tab(AdditionsTab::Implants),
+            Some(Kind::Drone) if added => self.show_additions_tab(AdditionsTab::Drones),
+            _ => {}
         }
-        // pyfa brings the drones pane forward when a drone goes in.
-        if added
-            && self.additions_tab != AdditionsTab::Drones
-            && catalog.get(id).is_some_and(|t| t.kind == Kind::Drone)
-        {
-            self.additions_tab = AdditionsTab::Drones;
-            self.additions_selection.clear();
-            self.additions_anchor = None;
-        }
-        self.status =
-            (!added).then(|| format!("Nothing on this fit takes {}", catalog.name(id)).into());
-        if let Some(before) = before {
-            self.record_edit(i, before);
-        }
-        self.changed(cx);
     }
 
     fn open_import_dialog(window: &mut Window, cx: &mut Context<Self>) {

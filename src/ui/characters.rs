@@ -16,7 +16,7 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, App, AppContext, ClipboardItem, Context, Entity, InteractiveElement, IntoElement,
     ParentElement, PathPromptOptions, SharedString, StatefulInteractiveElement, Styled, WeakEntity,
-    Window, WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, size,
+    Window, div, prelude::FluentBuilder, px,
 };
 
 use super::{
@@ -167,34 +167,15 @@ impl Efa {
     pub(super) fn open_character_editor(&mut self, cx: &mut Context<Self>) {
         let Some(loaded) = self.loaded() else { return };
         let select = self.fit_character();
-        let open = self.hub.read(cx).character_editor.clone();
-        if let Some((handle, editor)) = open {
-            let shown = handle.update(cx, |_, window, cx| {
-                let _ = editor.update(cx, |e, cx| e.select(select, window, cx));
-                window.activate_window();
-            });
-            if shown.is_ok() {
-                return;
-            }
-        }
         let hub = self.hub.clone();
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(950.), px(680.)), cx)),
-            app_id: Some("efa".into()),
-            ..Default::default()
-        };
-        let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
-            cx.new(|cx| CharacterEditor::new(hub, loaded, select, window, cx))
-        });
-        match opened {
-            Ok((handle, editor)) => self.hub.update(cx, |hub, _| {
-                hub.character_editor = Some((handle, editor.downgrade()));
-            }),
-            Err(e) => {
-                self.status = Some(format!("Could not open the character editor: {e}").into());
-                cx.notify();
-            }
-        }
+        let opening = crate::ui::chrome::open_single(
+            "Character Editor",
+            (950., 680.),
+            cx,
+            move |e: &mut CharacterEditor, window, cx| e.select(select, window, cx),
+            move |window, cx| CharacterEditor::new(hub, loaded, select, window, cx),
+        );
+        Self::report_open(opening, cx);
     }
 
     /// pyfa's Import Character File: `EVEMon` character sheets, each a new character.
@@ -231,11 +212,11 @@ impl Efa {
                         }
                     }
                 });
-                g.status = Some(if failed.is_empty() {
-                    format!("Imported {imported} character(s)").into()
+                if failed.is_empty() {
+                    g.set_status(format!("Imported {imported} character(s)"));
                 } else {
-                    format!("Could not import {}", failed.join("; ")).into()
-                });
+                    g.set_error(format!("Could not import {}", failed.join("; ")));
+                }
                 cx.notify();
             });
         })
@@ -262,10 +243,10 @@ impl Efa {
             let written = evemon::plan_file(PlanFormat::for_path(&path), &xml, &text)
                 .and_then(|bytes| std::fs::write(&path, bytes).map_err(|e| e.to_string()));
             let _ = this.update(cx, |g, cx| {
-                g.status = Some(match written {
-                    Ok(()) => format!("Saved skills to {}", path.display()).into(),
-                    Err(e) => format!("Could not save skills: {e}").into(),
-                });
+                match written {
+                    Ok(()) => g.set_status(format!("Saved skills to {}", path.display())),
+                    Err(e) => g.set_error(format!("Could not save skills: {e}")),
+                }
                 cx.notify();
             });
         })

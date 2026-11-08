@@ -15,8 +15,8 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, App, AppContext, ClickEvent, ClipboardItem, Context, Entity, FocusHandle,
     FontWeight, InteractiveElement, IntoElement, KeyBinding, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, WindowBounds,
-    WindowOptions, div, prelude::FluentBuilder, px, size, uniform_list,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
+    prelude::FluentBuilder, px, uniform_list,
 };
 
 use super::{
@@ -105,30 +105,21 @@ impl Efa {
             .flat_map(|s| s.implants.iter().copied())
             .collect();
         // A window of its own, like pyfa's editors, so it can sit beside the fit.
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(EDITOR_W), px(EDITOR_H)), cx)),
-            app_id: Some("efa".into()),
-            ..Default::default()
-        };
-        // Opened once this update is over: the new window draws right away, and drawing reads
-        // this view, which gpui does not allow while it is being updated.
-        cx.defer(move |cx| {
-            let weak = efa.downgrade();
-            let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
-                window.set_window_title("efa: Implant Set Editor");
-                cx.new(|cx| ImplantSetEditor::new(&efa, loaded, select, window, cx))
-            });
-            match opened {
-                // The sets' prices, for their totals.
-                Ok(_) => Efa::app_update(&weak, cx, |g, cx| {
-                    g.with_prices_for(priced, cx, |_, _| {});
-                }),
-                Err(e) => Efa::app_update(&weak, cx, |g, cx| {
-                    g.status = Some(format!("Could not open the implant set editor: {e}").into());
-                    cx.notify();
-                }),
-            }
-        });
+        let shown = select.clone();
+        let opening = crate::ui::chrome::open_single(
+            "Implant Set Editor",
+            (EDITOR_W, EDITOR_H),
+            cx,
+            move |e: &mut ImplantSetEditor, _, cx| {
+                if shown.is_some() {
+                    e.select(shown, cx);
+                }
+            },
+            move |window, cx| ImplantSetEditor::new(&efa, loaded, select, window, cx),
+        );
+        Self::report_open(opening, cx);
+        // The sets' prices, for their totals.
+        self.with_prices_for(priced, cx, |_, _| {});
     }
 
     /// Ask for a name, save the fit's applied implants under it, then show the set in the

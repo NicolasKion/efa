@@ -17,8 +17,8 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, AppContext, ClickEvent, Context, Entity, FontWeight, InteractiveElement,
     IntoElement, ParentElement, PathPromptOptions, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, WindowBounds,
-    WindowOptions, div, prelude::FluentBuilder, px, size,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
+    prelude::FluentBuilder, px,
 };
 
 use super::{Efa, Hub, Loaded, item_stats, preferences::section, widgets::icon_box};
@@ -62,24 +62,14 @@ impl Efa {
     pub(super) fn open_overrides(&mut self, cx: &mut Context<Self>) {
         let Some(loaded) = self.loaded() else { return };
         let hub = self.hub.clone();
-        let weak = cx.entity().downgrade();
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(960.), px(640.)), cx)),
-            app_id: Some("efa".into()),
-            ..Default::default()
-        };
-        cx.defer(move |cx| {
-            let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
-                window.set_window_title("efa: Attribute Overrides");
-                cx.new(|cx| OverridesWindow::new(hub, loaded, window, cx))
-            });
-            if let Err(e) = opened {
-                Efa::app_update(&weak, cx, |g, cx| {
-                    g.status = Some(format!("Could not open a window: {e}").into());
-                    cx.notify();
-                });
-            }
-        });
+        let opening = crate::ui::chrome::open_single(
+            "Attribute Overrides",
+            (960., 640.),
+            cx,
+            |_: &mut OverridesWindow, _, _| {},
+            move |window, cx| OverridesWindow::new(hub, loaded, window, cx),
+        );
+        Self::report_open(opening, cx);
     }
 
     /// pyfa's Global > Turn Overrides On/Off.

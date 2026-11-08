@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use gpui_kit::{Context, PathPromptOptions, SharedString, Task, WeakEntity};
+use gpui_kit::{Context, PathPromptOptions, Task, WeakEntity};
 
 use super::{Action, AddKind, AdditionsTab, Efa};
 use crate::{
@@ -45,7 +45,7 @@ impl Efa {
                 count
             }
             Err(e) => {
-                self.status = Some(format!("Import failed: {e}").into());
+                self.set_error(format!("Import failed: {e}"));
                 0
             }
         }
@@ -72,14 +72,14 @@ impl Efa {
             unknown.dedup();
             status = format!("{status}; skipped unknown items: {}", unknown.join(", "));
         }
-        self.status = Some(status.into());
+        self.set_status(status);
     }
 
     /// pyfa's "From Clipboard": a fit in any format becomes a new fit; a list of items goes into
     /// the current fit, onto the additions tab they belong to.
     pub(super) fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
-            self.status = Some("Nothing on the clipboard".into());
+            self.set_status("Nothing on the clipboard");
             cx.notify();
             return;
         };
@@ -104,7 +104,7 @@ impl Efa {
                 if let Some(items) = items {
                     self.paste_items(&loaded.catalog, &text, items, cx);
                 } else {
-                    self.status = Some(format!("Import failed: {e}").into());
+                    self.set_error(format!("Import failed: {e}"));
                     cx.notify();
                 }
             }
@@ -144,9 +144,7 @@ impl Efa {
         } else {
             (AddKind::Cargo, AdditionsTab::Cargo)
         };
-        self.additions_tab = tab;
-        self.additions_selection.clear();
-        self.additions_anchor = None;
+        self.show_additions_tab(tab);
         self.status = None;
         self.apply(Action::AddAdditions(kind, items), cx);
     }
@@ -182,9 +180,10 @@ impl Efa {
                     }
                 }
                 if !failed.is_empty() {
-                    g.status = Some(
-                        format!("Imported {imported} fits; failed: {}", failed.join(", ")).into(),
-                    );
+                    g.set_error(format!(
+                        "Imported {imported} fits; failed: {}",
+                        failed.join(", ")
+                    ));
                 }
                 g.clear_selection();
                 g.changed(cx);
@@ -245,14 +244,14 @@ impl Efa {
                 return;
             };
             let path = with_default_extension(path, "xml");
-            let status: SharedString = match render(&path)
+            let outcome = match render(&path)
                 .and_then(|text| std::fs::write(&path, text).map_err(|e| e.to_string()))
             {
-                Ok(()) => format!("Saved {}", path.display()).into(),
-                Err(e) => format!("Saving {} failed: {e}", path.display()).into(),
+                Ok(()) => Ok(format!("Saved {}", path.display()).into()),
+                Err(e) => Err(format!("Saving {} failed: {e}", path.display()).into()),
             };
             let _ = this.update(cx, |g, cx| {
-                g.status = Some(status);
+                g.set_outcome(outcome);
                 cx.notify();
             });
         })
@@ -269,15 +268,16 @@ impl Efa {
             .parent()
             .map_or(Ok(()), std::fs::create_dir_all)
             .and_then(|()| std::fs::write(&path, page));
-        self.status = Some(match written {
-            Ok(()) => format!(
+        let outcome = match written {
+            Ok(()) => Ok(format!(
                 "Exported {} fits to {}",
                 self.saved.fits.len(),
                 path.display()
             )
-            .into(),
-            Err(e) => format!("HTML export to {} failed: {e}", path.display()).into(),
-        });
+            .into()),
+            Err(e) => Err(format!("HTML export to {} failed: {e}", path.display()).into()),
+        };
+        self.set_outcome(outcome);
         cx.notify();
     }
 
@@ -308,7 +308,7 @@ impl Efa {
         if let Some(previous) = self.history.undo(i, current) {
             self.restore(i, previous, cx);
         } else {
-            self.status = Some("Nothing to undo".into());
+            self.set_status("Nothing to undo");
             cx.notify();
         }
     }
@@ -319,7 +319,7 @@ impl Efa {
         if let Some(next) = self.history.redo(i, current) {
             self.restore(i, next, cx);
         } else {
-            self.status = Some("Nothing to redo".into());
+            self.set_status("Nothing to redo");
             cx.notify();
         }
     }

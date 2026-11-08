@@ -13,7 +13,10 @@ use gpui_kit::{
     Window, px,
 };
 
-use super::{Efa, Loaded, actions::RowRef};
+use super::{
+    Efa, Loaded,
+    actions::{Outcome, RowRef},
+};
 use crate::{
     data::Slot,
     engine::ItemRef,
@@ -46,17 +49,6 @@ impl Efa {
             .map(|p| p.describe(|t| loaded.catalog.name(t)))
             .collect();
         (!lines.is_empty()).then(|| lines.join("\n").into())
-    }
-
-    /// Why the current fit, `before`, may not become `after`, if it may not: with the fitting
-    /// restrictions on, anything the ship cannot take; with them off, only a full rack.
-    pub(super) fn refusal(&mut self, loaded: &Loaded, before: &Fit, after: &Fit) -> Option<String> {
-        let pilot = self.pilot(loaded);
-        let engine = &loaded.engine;
-        let old = engine.validate(before, &pilot);
-        let new = engine.validate(after, &pilot);
-        old.refusal(&new, after.ignore_restrictions)
-            .map(|p| p.describe(|t| loaded.catalog.name(t)))
     }
 
     /// Ask first, as pyfa does, then switch the current fit's restrictions.
@@ -103,21 +95,24 @@ impl Efa {
     /// Switch the current fit's restrictions. Turning them back on takes off whatever the ship
     /// cannot take, last first, as pyfa does; one undo step brings it all back.
     pub(super) fn toggle_restrictions(&mut self, cx: &mut Context<Self>) {
-        let (Some(loaded), Some(current)) = (self.loaded(), self.saved.current) else {
+        let Some(current) = self.saved.current else {
             return;
         };
-        let before = self.saved.fits[current].clone();
-        let mut fit = before.clone();
-        fit.ignore_restrictions = !fit.ignore_restrictions;
-        if !fit.ignore_restrictions {
-            let pilot = self.pilot(&loaded);
-            remove_illegal(&mut fit, |fit| loaded.engine.validate(fit, &pilot));
-        }
-        self.saved.fits[current] = fit;
-        self.clear_selection();
-        self.history
-            .record(current, before, &self.saved.fits[current]);
-        self.changed(cx);
+        self.edit_fit(
+            current,
+            false,
+            |fit, env| {
+                fit.ignore_restrictions = !fit.ignore_restrictions;
+                if !fit.ignore_restrictions {
+                    remove_illegal(fit, |fit| env.loaded.engine.validate(fit, env.pilot));
+                }
+                Outcome {
+                    structural: true,
+                    ..Outcome::default()
+                }
+            },
+            cx,
+        );
     }
 }
 

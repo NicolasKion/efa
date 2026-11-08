@@ -430,11 +430,7 @@ impl Efa {
         if count == 0 || self.fit().is_none() {
             return;
         }
-        if self.additions_tab != AdditionsTab::Cargo {
-            self.additions_tab = AdditionsTab::Cargo;
-            self.additions_selection.clear();
-            self.additions_anchor = None;
-        }
+        self.show_additions_tab(AdditionsTab::Cargo);
         self.apply(Action::AddCargo(type_id, count), cx);
     }
 

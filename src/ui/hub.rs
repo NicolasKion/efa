@@ -6,12 +6,9 @@
 
 use std::rc::Rc;
 
-use gpui_kit::{
-    AnyWindowHandle, App, AppContext, Context, Entity, Global, SharedString, Task, WeakEntity,
-    Window,
-};
+use gpui_kit::{App, AppContext, Context, Entity, Global, SharedString, Task, WeakEntity, Window};
 
-use super::{Loaded, character_editor::CharacterEditor, load, wizard::WizardDialog};
+use super::{Loaded, load};
 use crate::{
     character::Characters, engine::Overridden, overrides::Overrides, preferences::Preferences,
     prices::Prices, store::Saved,
@@ -79,15 +76,11 @@ pub struct Hub {
     pub mutation_edits: Vec<MutationEdit>,
     /// Changes the fitting wizard window applies, for the main window to make with undo.
     pub wizard_edits: Vec<WizardEdit>,
-    /// The open fitting wizard, which is brought forward instead of opening a second one.
-    pub(super) wizard: Option<(AnyWindowHandle, WeakEntity<WizardDialog>)>,
     /// The main window's stats pane shows raw HP rather than EHP; the graphs follow it.
     pub raw_hp: bool,
     /// The characters. Replaced, never changed in place, so a window can tell it has the
     /// latest by pointer.
     pub characters: Rc<Characters>,
-    /// The open character editor, which is brought forward instead of opening a second one.
-    pub character_editor: Option<(AnyWindowHandle, WeakEntity<CharacterEditor>)>,
     /// Characters logged in with EVE SSO, and a login under way.
     pub esi: super::esi::EsiState,
     /// Fits other windows (Browse ESI Fittings) want the main window to add as new tabs.
@@ -141,10 +134,8 @@ impl Hub {
             open_requests: Vec::new(),
             mutation_edits: Vec::new(),
             wizard_edits: Vec::new(),
-            wizard: None,
             raw_hp: false,
             characters: Rc::new(contents.characters),
-            character_editor: None,
             esi: super::esi::EsiState::new(contents.accounts),
             fit_imports: Vec::new(),
             overrides_task: None,

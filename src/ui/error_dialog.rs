@@ -10,7 +10,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     App, AppContext, ClipboardItem, Context, Entity, FontWeight, IntoElement, ParentElement,
-    Render, SharedString, Styled, Window, WindowBounds, WindowOptions, div, px, size,
+    Render, SharedString, Styled, Window, div,
 };
 
 use crate::errors::Report;
@@ -35,11 +35,7 @@ pub fn open(reports: &[Report], cx: &mut App) {
         .map(|r| format!("{}\n{}", r.title, r.details))
         .collect::<Vec<_>>()
         .join("\n\n");
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::centered(size(px(640.), px(460.)), cx)),
-        app_id: Some("efa".into()),
-        ..Default::default()
-    };
+    let options = crate::ui::chrome::window_options(640., 460., cx);
     let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
         window.set_window_title("efa: Error");
         cx.new(|cx| ErrorDialog::new(title, text, window, cx))

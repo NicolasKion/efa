@@ -17,10 +17,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext, ClickEvent, ClipboardItem, Context, Entity, Global,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, WindowBounds,
-    WindowOptions, div, prelude::FluentBuilder, px, size,
+    App, AppContext, ClickEvent, ClipboardItem, Context, Entity, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
+    div, prelude::FluentBuilder, px,
 };
 
 use super::{
@@ -384,11 +383,6 @@ enum Naming {
     Copy,
 }
 
-/// The open editor window of each kind, so opening it again brings that one up.
-struct OpenEditor<K: Kind>(Option<(AnyWindowHandle, WeakEntity<Editor<K>>)>);
-
-impl<K: Kind> Global for OpenEditor<K> {}
-
 /// Open the Damage Pattern Editor, or bring it up showing `select` if it is open.
 pub fn open_damage_pattern_editor(hub: Entity<Hub>, select: Option<String>, cx: &mut App) {
     open::<DamagePatterns>(hub, select, cx);
@@ -402,33 +396,19 @@ pub fn open_target_profile_editor(hub: Entity<Hub>, select: Option<String>, cx: 
 }
 
 fn open<K: Kind>(hub: Entity<Hub>, select: Option<String>, cx: &mut App) {
-    let existing = cx
-        .try_global::<OpenEditor<K>>()
-        .and_then(|open| open.0.clone());
-    if let Some((handle, editor)) = existing {
-        let shown = handle.update(cx, |_, window, cx| {
-            if let Some(name) = &select {
-                let _ = editor.update(cx, |e, cx| e.select_name(name, window, cx));
+    let shown = select.clone();
+    crate::ui::chrome::open_single(
+        K::TITLE,
+        (K::WIDTH, 520.),
+        cx,
+        move |e: &mut Editor<K>, window, cx| {
+            if let Some(name) = &shown {
+                e.select_name(name, window, cx);
             }
-            window.activate_window();
-        });
-        if shown.is_ok() {
-            return;
-        }
-    }
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::centered(size(px(K::WIDTH), px(520.)), cx)),
-        app_id: Some("efa".into()),
-        ..Default::default()
-    };
-    let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
-        window.set_window_title(&format!("efa: {}", K::TITLE));
-        cx.new(|cx| Editor::<K>::new(hub, select.as_deref(), window, cx))
-    });
-    match opened {
-        Ok((handle, editor)) => cx.set_global(OpenEditor(Some((handle, editor.downgrade())))),
-        Err(e) => eprintln!("opening the {}: {e}", K::TITLE),
-    }
+        },
+        move |window, cx| Editor::<K>::new(hub, select.as_deref(), window, cx),
+    )
+    .detach();
 }
 
 pub struct Editor<K: Kind> {

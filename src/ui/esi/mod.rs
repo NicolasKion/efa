@@ -17,12 +17,9 @@ use std::{
     },
 };
 
-use gpui_kit::{
-    AnyWindowHandle, App, AppContext, Context, Entity, Global, Render, SharedString, Task,
-    WeakEntity, Window, WindowBounds, WindowOptions, px, size,
-};
+use gpui_kit::{App, AppContext, Context, Entity, SharedString, Task, WeakEntity};
 
-use super::{Efa, Hub};
+use super::{Efa, Hub, chrome::open_single};
 use crate::{
     esi::{Account, Accounts, api::Session, sso::Login},
     preferences::Proxy,
@@ -258,55 +255,22 @@ pub fn pick(accounts: &Accounts, wanted: Option<u64>) -> Option<u64> {
         .or_else(|| accounts.sorted().first().map(|a| a.character_id))
 }
 
-/// A window of one kind that is brought forward rather than opened twice.
-struct Single<V: 'static>(Option<(AnyWindowHandle, WeakEntity<V>)>);
-
-impl<V: 'static> Global for Single<V> {}
-
-/// Bring the open window of this kind forward, or open one with `build`, after the current
-/// update is over.
-fn open_single<V: Render + 'static>(
-    title: &'static str,
-    width: f32,
-    height: f32,
-    cx: &mut App,
-    build: impl FnOnce(&mut Window, &mut Context<V>) -> V + 'static,
-) {
-    cx.defer(move |cx| {
-        if let Some((handle, _)) = cx.try_global::<Single<V>>().and_then(|s| s.0.clone())
-            && handle
-                .update(cx, |_, window, _| window.activate_window())
-                .is_ok()
-        {
-            return;
-        }
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(width), px(height)), cx)),
-            app_id: Some("efa".into()),
-            ..Default::default()
-        };
-        let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
-            window.set_window_title(&format!("efa: {title}"));
-            cx.new(|cx| build(window, cx))
-        });
-        match opened {
-            Ok((handle, view)) => cx.set_global(Single::<V>(Some((handle, view.downgrade())))),
-            Err(e) => eprintln!("opening {title}: {e}"),
-        }
-    });
-}
-
 /// The Manage ESI Characters window.
-pub fn open_characters_window(hub: Entity<Hub>, cx: &mut App) {
-    open_single("ESI Characters", 520., 460., cx, move |window, cx| {
-        EsiCharactersWindow::new(hub, window, cx)
-    });
+pub fn open_characters_window(hub: Entity<Hub>, cx: &mut App) -> Task<Result<(), SharedString>> {
+    open_single(
+        "ESI Characters",
+        (520., 460.),
+        cx,
+        |_, _, _| {},
+        move |window, cx| EsiCharactersWindow::new(hub, window, cx),
+    )
 }
 
 impl Efa {
     /// pyfa's Character > Manage ESI Characters.
     pub(super) fn open_esi_characters(&mut self, cx: &mut Context<Self>) {
-        open_characters_window(self.hub.clone(), cx);
+        let opening = open_characters_window(self.hub.clone(), cx);
+        Self::report_open(opening, cx);
     }
 
     /// Log a character in without opening a window, for the Character menu.
@@ -314,19 +278,16 @@ impl Efa {
         let this = cx.entity().downgrade();
         self.hub.update(cx, |hub, cx| {
             hub.esi_login(cx, move |result, cx| {
-                let status = match result {
-                    Ok(_) => None,
-                    Err(e) => Some(format!("ESI login failed: {e}").into()),
-                };
+                let failure = result.err().map(|e| format!("ESI login failed: {e}"));
                 let _ = this.update(cx, |g, cx| {
-                    if let Some(status) = status {
-                        g.status = Some(status);
+                    if let Some(failure) = failure {
+                        g.set_error(failure);
                     }
                     cx.notify();
                 });
             });
         });
-        self.status = Some("Log in with EVE in your browser".into());
+        self.set_status("Log in with EVE in your browser");
         cx.notify();
     }
 
@@ -334,39 +295,44 @@ impl Efa {
     pub(super) fn open_esi_fittings(&mut self, cx: &mut Context<Self>) {
         let Some(loaded) = self.loaded() else { return };
         let hub = self.hub.clone();
-        open_single("Browse ESI Fittings", 980., 640., cx, move |window, cx| {
-            fittings::EsiFittingsWindow::new(hub, loaded, window, cx)
-        });
+        let opening = open_single(
+            "Browse ESI Fittings",
+            (980., 640.),
+            cx,
+            |_, _, _| {},
+            move |window, cx| fittings::EsiFittingsWindow::new(hub, loaded, window, cx),
+        );
+        Self::report_open(opening, cx);
     }
 
     /// pyfa's Fit > Export to ESI (Ctrl+E), for the current fit.
     pub(super) fn open_export_to_eve(&mut self, cx: &mut Context<Self>) {
         let Some(loaded) = self.loaded() else { return };
         let Some(fit) = self.fit().cloned() else {
-            self.status = Some("Open a fit to export it to EVE".into());
+            self.set_status("Open a fit to export it to EVE");
             cx.notify();
             return;
         };
         if fit.ship.is_none() {
-            self.status = Some("The fit has no ship to export".into());
+            self.set_status("The fit has no ship to export");
             cx.notify();
             return;
         }
         let hub = self.hub.clone();
         let preferred = self.characters.esi_character(fit.character);
-        cx.defer(move |cx| {
-            let options = WindowOptions {
-                window_bounds: Some(WindowBounds::centered(size(px(460.), px(340.)), cx)),
-                app_id: Some("efa".into()),
-                ..Default::default()
-            };
-            let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
-                window.set_window_title("efa: Export to EVE");
-                cx.new(|cx| upload::ExportToEveWindow::new(hub, loaded, fit, preferred, cx))
-            });
-            if let Err(e) = opened {
-                eprintln!("opening Export to EVE: {e}");
-            }
-        });
+        // Open already, it takes this fit instead.
+        let again = (hub.clone(), Rc::clone(&loaded), fit.clone());
+        let opening = open_single(
+            "Export to EVE",
+            (460., 340.),
+            cx,
+            move |w, _, cx| {
+                let (hub, loaded, fit) = again;
+                *w = upload::ExportToEveWindow::new(hub, loaded, fit, preferred, cx);
+                cx.notify();
+            },
+            move |_, cx| upload::ExportToEveWindow::new(hub, loaded, fit, preferred, cx),
+        );
+        Self::report_open(opening, cx);
     }
 }

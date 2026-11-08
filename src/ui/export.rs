@@ -12,9 +12,9 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext, ClipboardItem, Context, Entity, InteractiveElement, IntoElement,
+    AnyElement, App, ClipboardItem, Context, Entity, InteractiveElement, IntoElement,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window,
-    WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, size,
+    div, prelude::FluentBuilder,
 };
 
 use super::{Efa, Hub, Loaded, stats::text};
@@ -34,6 +34,7 @@ type OptionBox = (
 );
 
 /// What the window copies: the fit as it was when the window opened.
+#[derive(Clone)]
 pub struct ExportWindow {
     hub: Entity<Hub>,
     efa: WeakEntity<Efa>,
@@ -63,19 +64,19 @@ impl Efa {
             settings: self.saved.export,
             error: None,
         };
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(380.), px(580.)), cx)),
-            app_id: Some("efa".into()),
-            ..Default::default()
-        };
-        let opened = crate::ui::chrome::open_window(options, cx, move |window_handle, cx| {
-            window_handle.set_window_title("efa: Export");
-            cx.new(|_| window)
-        });
-        if let Err(e) = opened {
-            self.status = Some(format!("Could not open a window: {e}").into());
-            cx.notify();
-        }
+        // Open already, it takes this fit instead.
+        let again = window.clone();
+        let opening = crate::ui::chrome::open_single(
+            "Export",
+            (380., 580.),
+            cx,
+            move |w: &mut ExportWindow, _, cx| {
+                *w = again;
+                cx.notify();
+            },
+            move |_, _| window,
+        );
+        Self::report_open(opening, cx);
     }
 }
 
@@ -128,7 +129,7 @@ impl ExportWindow {
                     .update(cx, |hub, cx| hub.update_saved(|s| s.export = settings, cx));
                 let what = format!("fit as {}", settings.format.label());
                 let _ = self.efa.update(cx, |g, cx| {
-                    g.status = Some(format!("Copied {what} to clipboard").into());
+                    g.set_status(format!("Copied {what} to clipboard"));
                     cx.notify();
                 });
                 window.remove_window();
@@ -158,7 +159,7 @@ impl ExportWindow {
                         prices.get(t)
                     });
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
-                g.status = Some("Copied fit as MultiBuy to clipboard".into());
+                g.set_status("Copied fit as MultiBuy to clipboard");
                 cx.notify();
             });
         });

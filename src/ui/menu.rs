@@ -265,12 +265,8 @@ impl Efa {
         let Some(&tab) = AdditionsTab::ORDER.get(index) else {
             return;
         };
-        if self.additions_tab != tab {
-            self.additions_tab = tab;
-            self.additions_selection.clear();
-            self.additions_anchor = None;
-            cx.notify();
-        }
+        self.show_additions_tab(tab);
+        cx.notify();
     }
 
     /// Alt+1..9, `mainFrame.py` `ItemSelect`: add the market's Nth listed item, as a double-click
@@ -284,8 +280,8 @@ impl Efa {
     }
 
     pub(super) fn new_tab(&mut self, cx: &mut Context<Self>) {
-        let mut fit = self.new_fit("New fit");
-        self.new_fit_defaults(&mut fit);
+        let Some(loaded) = self.loaded() else { return };
+        let fit = self.fresh_fit("New fit", None, &loaded.catalog);
         self.add_fit(fit, cx);
     }
 

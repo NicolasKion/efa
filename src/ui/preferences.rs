@@ -18,7 +18,7 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
-    WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, size,
+    div, prelude::FluentBuilder, px,
 };
 
 use super::{Efa, Hub, port::html_path};
@@ -139,19 +139,14 @@ impl Efa {
     /// pyfa's Global > Preferences.
     pub(super) fn open_preferences(&mut self, cx: &mut Context<Self>) {
         let hub = self.hub.clone();
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(880.), px(640.)), cx)),
-            app_id: Some("efa".into()),
-            ..Default::default()
-        };
-        let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
-            window.set_window_title("efa: Preferences");
-            cx.new(|cx| PreferencesWindow::new(hub, window, cx))
-        });
-        if let Err(e) = opened {
-            self.status = Some(format!("Could not open a window: {e}").into());
-            cx.notify();
-        }
+        let opening = crate::ui::chrome::open_single(
+            "Preferences",
+            (880., 640.),
+            cx,
+            |_: &mut PreferencesWindow, _, _| {},
+            move |window, cx| PreferencesWindow::new(hub, window, cx),
+        );
+        Self::report_open(opening, cx);
     }
 }
 
@@ -967,7 +962,9 @@ impl PreferencesWindow {
         let manage = Button::new("esi-manage")
             .small()
             .label("Manage…")
-            .on_click(move |_, _, cx| super::esi::open_characters_window(hub.clone(), cx))
+            .on_click(move |_, _, cx| {
+                super::esi::open_characters_window(hub.clone(), cx).detach();
+            })
             .into_any_element();
         vec![
             section(

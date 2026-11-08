@@ -437,7 +437,7 @@ impl Efa {
             return;
         };
         if !catalog.projection.projectable.contains(&type_id) {
-            self.status = Some(format!("{} cannot be projected", t.name).into());
+            self.set_error(format!("{} cannot be projected", t.name));
             cx.notify();
             return;
         }

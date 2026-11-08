@@ -261,9 +261,7 @@ impl Efa {
                         t.on_mouse_down(
                             gpui_kit::MouseButton::Left,
                             cx.listener(move |this, _: &gpui_kit::MouseDownEvent, _, cx| {
-                                this.additions_tab = tab;
-                                this.additions_selection.clear();
-                                this.additions_anchor = None;
+                                this.show_additions_tab(tab);
                                 cx.notify();
                             }),
                         )
@@ -285,6 +283,16 @@ impl Efa {
             .child(tab_bar)
             .child(content)
             .into_any_element()
+    }
+
+    /// Bring an additions tab forward. Its selection goes when the tab changes, since it holds
+    /// another tab's rows.
+    pub(in crate::ui) fn show_additions_tab(&mut self, tab: AdditionsTab) {
+        if self.additions_tab != tab {
+            self.additions_tab = tab;
+            self.additions_selection.clear();
+            self.additions_anchor = None;
+        }
     }
 
     fn select_addition(&mut self, i: usize, modifiers: Modifiers, cx: &mut Context<Self>) {

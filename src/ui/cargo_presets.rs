@@ -14,10 +14,10 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, AnyWindowHandle, App, AppContext, ClickEvent, Context, Entity, FocusHandle,
-    Focusable, FontWeight, Global, InteractiveElement, IntoElement, KeyDownEvent, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window,
-    WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, size,
+    AnyElement, App, AppContext, ClickEvent, Context, Entity, FocusHandle, Focusable, FontWeight,
+    InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
+    prelude::FluentBuilder, px,
 };
 
 use super::{
@@ -51,11 +51,6 @@ const VOLUME_W: f32 = 110.;
 
 const NAME_MISSING: &str = "Enter a name for the preset.";
 const NAME_TAKEN: &str = "A preset with this name already exists.";
-
-/// The open editor, which is brought forward instead of opening a second one.
-struct OpenEditor(Option<(AnyWindowHandle, WeakEntity<CargoPresetEditor>)>);
-
-impl Global for OpenEditor {}
 
 /// What the item tree offers: anything a hold can carry.
 fn carried(t: &ItemType) -> bool {
@@ -109,15 +104,11 @@ impl Efa {
             return;
         };
         if self.fit().is_none() {
-            self.status = Some("Open a fit first".into());
+            self.set_status("Open a fit first");
             cx.notify();
             return;
         }
-        if self.additions_tab != AdditionsTab::Cargo {
-            self.additions_tab = AdditionsTab::Cargo;
-            self.additions_selection.clear();
-            self.additions_anchor = None;
-        }
+        self.show_additions_tab(AdditionsTab::Cargo);
         self.apply(Action::ApplyCargoPreset(preset), cx);
     }
 
@@ -129,44 +120,20 @@ impl Efa {
     ) {
         let Some(loaded) = self.loaded() else { return };
         let efa = cx.entity();
+        let shown = select.clone();
         let select = select.or_else(|| self.saved.cargo_presets.first().map(|p| p.name.clone()));
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(EDITOR_W), px(EDITOR_H)), cx)),
-            app_id: Some("efa".into()),
-            ..Default::default()
-        };
-        // Opened once this update is over: the new window draws right away, and drawing reads
-        // this view, which gpui does not allow while it is being updated.
-        cx.defer(move |cx| {
-            let existing = cx
-                .try_global::<OpenEditor>()
-                .and_then(|open| open.0.clone());
-            if let Some((handle, editor)) = existing {
-                let shown = handle.update(cx, |_, window, cx| {
-                    if let Some(name) = select.clone() {
-                        let _ = editor.update(cx, |e, cx| e.select(Some(name), window, cx));
-                    }
-                    window.activate_window();
-                });
-                if shown.is_ok() {
-                    return;
+        let opening = crate::ui::chrome::open_single(
+            "Cargo Presets",
+            (EDITOR_W, EDITOR_H),
+            cx,
+            move |e: &mut CargoPresetEditor, window, cx| {
+                if let Some(name) = shown {
+                    e.select(Some(name), window, cx);
                 }
-            }
-            let weak = efa.downgrade();
-            let opened = crate::ui::chrome::open_window(options, cx, move |window, cx| {
-                window.set_window_title("efa: Cargo Presets");
-                cx.new(|cx| CargoPresetEditor::new(&efa, loaded, select, window, cx))
-            });
-            match opened {
-                Ok((handle, editor)) => {
-                    cx.set_global(OpenEditor(Some((handle, editor.downgrade()))));
-                }
-                Err(e) => Efa::app_update(&weak, cx, |g, cx| {
-                    g.status = Some(format!("Could not open the cargo preset editor: {e}").into());
-                    cx.notify();
-                }),
-            }
-        });
+            },
+            move |window, cx| CargoPresetEditor::new(&efa, loaded, select, window, cx),
+        );
+        Self::report_open(opening, cx);
     }
 
     /// Ask for a name and save the current fit's cargo under it.
@@ -203,7 +170,7 @@ impl Efa {
                 };
                 Efa::app_update(&this, cx, |g, cx| {
                     g.edit_cargo_presets(cx, |presets| presets.push(preset));
-                    g.status = Some(format!("Saved the cargo as preset {name}").into());
+                    g.set_status(format!("Saved the cargo as preset {name}"));
                 });
             },
         );

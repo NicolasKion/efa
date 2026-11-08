@@ -20,8 +20,8 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, AnyView, App, AppContext, Context, Div, Entity, FocusHandle, InteractiveElement,
     IntoElement, KeyDownEvent, MouseButton, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, WindowBounds,
-    WindowOptions, div, prelude::FluentBuilder, px, size,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
+    prelude::FluentBuilder, px,
 };
 
 use super::{Efa, Loaded, hub::Hub, item_stats, widgets};
@@ -211,12 +211,12 @@ impl Efa {
     pub(super) fn open_wizard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(loaded) = self.loaded() else { return };
         if self.fit().and_then(|f| f.ship).is_none() {
-            self.status = Some("The fitting wizard needs a ship first".into());
+            self.set_status("The fitting wizard needs a ship first");
             cx.notify();
             return;
         }
         let Some(data) = item_stats::hover_data(&loaded, cx) else {
-            self.status = Some("Loading item data for the fitting wizard…".into());
+            self.set_status("Loading item data for the fitting wizard…");
             cx.notify();
             let this = cx.entity().downgrade();
             let window_handle = window.window_handle();
@@ -262,34 +262,15 @@ impl Efa {
             return;
         };
         let shared = Rc::new(shared);
-        let open = self.hub.read(cx).wizard.clone();
-        if let Some((handle, dialog)) = open {
-            let shared = Rc::clone(&shared);
-            let shown = handle.update(cx, |_, window, cx| {
-                let _ = dialog.update(cx, |d, cx| d.load(shared, window, cx));
-                window.activate_window();
-            });
-            if shown.is_ok() {
-                return;
-            }
-        }
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(1100.), px(760.)), cx)),
-            app_id: Some("efa".into()),
-            ..Default::default()
-        };
-        let opened = super::chrome::open_window(options, cx, move |window, cx| {
-            cx.new(|cx| WizardDialog::new(shared, window, cx))
-        });
-        match opened {
-            Ok((handle, dialog)) => self.hub.update(cx, |hub, _| {
-                hub.wizard = Some((handle, dialog.downgrade()));
-            }),
-            Err(e) => {
-                self.status = Some(format!("Could not open the fitting wizard: {e}").into());
-                cx.notify();
-            }
-        }
+        let again = Rc::clone(&shared);
+        let opening = super::chrome::open_single(
+            "Fitting Wizard",
+            (1100., 760.),
+            cx,
+            move |d: &mut WizardDialog, window, cx| d.load(again, window, cx),
+            move |window, cx| WizardDialog::new(shared, window, cx),
+        );
+        Self::report_open(opening, cx);
     }
 }
 

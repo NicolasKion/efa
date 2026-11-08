@@ -10,9 +10,10 @@
 
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::{
-    AnyView, AnyWindowHandle, App, AppContext, Context, Entity, InteractiveElement, IntoElement,
-    MouseButton, MouseDownEvent, ParentElement, Render, StatefulInteractiveElement, Styled,
-    TitlebarOptions, Window, WindowControlArea, WindowOptions, div, prelude::FluentBuilder, px,
+    AnyView, AnyWindowHandle, App, AppContext, Context, Entity, Global, InteractiveElement,
+    IntoElement, MouseButton, MouseDownEvent, ParentElement, Render, SharedString,
+    StatefulInteractiveElement, Styled, Task, TitlebarOptions, WeakEntity, Window, WindowBounds,
+    WindowControlArea, WindowOptions, div, prelude::FluentBuilder, px, size,
 };
 
 /// The header's height, the menu bar's included.
@@ -55,6 +56,82 @@ pub fn open_window<V: Render>(
         cx.new(|_| Framed { view: view.into() })
     })?;
     Ok((handle, view_out.expect("open_window ran its build closure")))
+}
+
+/// Options for an efa window of `width` by `height`, centered on the screen.
+pub fn window_options(width: f32, height: f32, cx: &App) -> WindowOptions {
+    WindowOptions {
+        window_bounds: Some(WindowBounds::centered(size(px(width), px(height)), cx)),
+        app_id: Some("efa".into()),
+        ..Default::default()
+    }
+}
+
+/// The open window of view type `V`, for windows there is only ever one of.
+struct Single<V: 'static>(Option<(AnyWindowHandle, WeakEntity<V>)>);
+
+impl<V: 'static> Global for Single<V> {}
+
+/// Open the one window of view type `V`, titled "efa: `title`", or bring it forward when it is
+/// open already, after running `on_existing` on its view.
+///
+/// The window opens once the current update is over, so `build` and the first draw may read
+/// any entity, including the one asking. The task resolves to why the window could not be
+/// opened, if it could not; the failure is logged either way, so dropping the task's result
+/// (with `detach`) loses nothing but the status line. Dropping the task itself cancels the open.
+pub fn open_single<V: Render + 'static>(
+    title: impl Into<SharedString>,
+    (width, height): (f32, f32),
+    cx: &mut App,
+    on_existing: impl FnOnce(&mut V, &mut Window, &mut Context<V>) + 'static,
+    build: impl FnOnce(&mut Window, &mut Context<V>) -> V + 'static,
+) -> Task<Result<(), SharedString>> {
+    let title = title.into();
+    cx.spawn(async move |cx| {
+        cx.update(|cx| {
+            if let Some((handle, view)) = cx.try_global::<Single<V>>().and_then(|s| s.0.clone())
+                && let Some(view) = view.upgrade()
+            {
+                let shown = handle.update(cx, |_, window, cx| {
+                    view.update(cx, |v, cx| on_existing(v, window, cx));
+                    window.activate_window();
+                });
+                if shown.is_ok() {
+                    return Ok(());
+                }
+            }
+            let options = window_options(width, height, cx);
+            let opened = open_window(options, cx, {
+                let title = title.clone();
+                move |window, cx| {
+                    window.set_window_title(&format!("efa: {title}"));
+                    cx.new(|cx| build(window, cx))
+                }
+            });
+            match opened {
+                Ok((handle, view)) => {
+                    let id = view.entity_id();
+                    // Gone with its view, so the next open makes a new one.
+                    cx.observe_release(&view, move |_, cx| {
+                        let ours = cx
+                            .try_global::<Single<V>>()
+                            .and_then(|s| s.0.as_ref())
+                            .is_some_and(|(_, v)| v.entity_id() == id);
+                        if ours {
+                            cx.set_global(Single::<V>(None));
+                        }
+                    })
+                    .detach();
+                    cx.set_global(Single::<V>(Some((handle, view.downgrade()))));
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("opening {title}: {e}");
+                    Err(format!("Could not open {title}: {e}").into())
+                }
+            }
+        })
+    })
 }
 
 /// A window's view under efa's header.
