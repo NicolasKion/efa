@@ -25,10 +25,7 @@ use crate::{
     fit::{Fit, ModuleState},
 };
 
-use build::{
-    Local, add_fit_drone, add_fit_module, add_services, build_local, module_state, rah_incoming,
-    sec_zone,
-};
+use build::{BuildOptions, Built, Placed, module_state};
 use items::{booster_info, drone_info};
 use stats::{damage, fit_stats, resource, slots};
 
@@ -165,139 +162,138 @@ impl Engine {
         pilot: &Pilot,
         options: CalcOptions,
     ) -> Stats {
-        let mut stats = Stats::default();
-        let mut sol = self.sol();
-        sol.set_sec_zone(sec_zone(fit.system_security));
-        if let Some(spool) = options.default_spool {
-            sol.set_default_spool(rc::Spool::SpoolScale(rc::UnitInterval::from_f64_clamped(
-                spool,
-            )));
-        }
-        let mut f = sol.add_fit();
-        let Some(local) = build_local(&mut f, fit, pilot, &mut stats.problems) else {
-            return stats;
+        let build = BuildOptions {
+            surroundings: Some(fits),
+            default_spool: options.default_spool,
         };
-        let Local {
-            ship_id,
-            module_ids,
-            subsystem_ids,
-            drone_ids,
-            booster_ids,
-            fighter_ids,
-            refs,
-        } = local;
-        let fit_id = f.get_fit_id();
-        let projections = self.add_surroundings(&mut sol, fit_id, ship_id, fit, fits);
-        let Ok(mut f) = sol.get_fit(&fit_id) else {
-            return stats;
+        self.build(fit, pilot, build)
+            .map_or_default(|mut built| stats_of(&mut built, fit, options))
+    }
+}
+
+/// Every number the stats pane and the fitting view show, read from a fit built into a solar
+/// system.
+fn stats_of(built: &mut Built, fit: &Fit, options: CalcOptions) -> Stats {
+    let mut stats = Stats {
+        problems: built.fit.problems.clone(),
+        incoming: built.incoming,
+        ..Stats::default()
+    };
+    let Placed {
+        fit_id,
+        ship: ship_id,
+        ref modules,
+        ref subsystems,
+        ref boosters,
+        ref fighters,
+        ref items,
+        ..
+    } = built.fit;
+    let sol = &mut built.sol;
+    let Ok(mut f) = sol.get_fit(&fit_id) else {
+        return stats;
+    };
+    let incoming = pane::dps_profile(stats.incoming);
+    fit_stats(&mut f, &mut stats, incoming, options);
+    stats.validation = validate::validate(&mut f, items);
+    stats.firepower = pane::firepower_detail(&mut f, options.time());
+
+    stats.cargo_capacity = sol.get_item(&ship_id).ok().and_then(|mut ship| {
+        ship.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr::CAPACITY)))
+            .ok()
+            .map(|v| v.modified.into_f64())
+    });
+
+    stats.boosters = boosters.iter().map(|&id| booster_info(sol, id)).collect();
+    stats.drones = built
+        .fit
+        .first_drones()
+        .map(|id| id.map_or_default(|id| drone_info(sol, id)))
+        .collect();
+    stats.fighters = fighters
+        .iter()
+        .map(|&id| surroundings::fighter_info(sol, id))
+        .collect();
+    stats.projected_fighters = built
+        .projections
+        .fighters
+        .iter()
+        .map(|&id| surroundings::fighter_info(sol, id))
+        .collect();
+    stats.projected_spool = built
+        .projections
+        .modules
+        .iter()
+        .map(|id| {
+            let id = id.as_ref()?;
+            let mut module = sol.get_module(id).ok()?;
+            module
+                .get_spool_cycle_count()
+                .map(|info| info.max.into_u32())
+        })
+        .collect();
+    stats.fighter_classes = surroundings::fighter_classes(sol, fit_id);
+
+    for &(slot, i, id) in modules {
+        let (spool_max, charges, charged_cycles) =
+            sol.get_module(&id).ok().map_or_default(|mut m| {
+                (
+                    m.get_spool_cycle_count().map(|info| info.max.into_u32()),
+                    m.get_charge_count().map(rc::Count::into_u32),
+                    m.get_charged_cycle_count().map(rc::Count::into_u32),
+                )
+            });
+        let Ok(mut item) = sol.get_item(&id) else {
+            continue;
         };
-
-        stats.incoming = pane::incoming_mix(&mut f, &fit.damage_profile);
-        let incoming = pane::dps_profile(stats.incoming);
-        let rah = rah_incoming(&mut f, fit, incoming);
-        f.set_rah_incoming_dps(Some(rah));
-
-        fit_stats(&mut f, &mut stats, incoming, options);
-        stats.validation = validate::validate(&mut f, &refs);
-        stats.firepower = pane::firepower_detail(&mut f, options.time());
-
-        stats.cargo_capacity = sol.get_item(&ship_id).ok().and_then(|mut ship| {
-            ship.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr::CAPACITY)))
+        let mut get = |attr: i32| {
+            item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr)))
                 .ok()
                 .map(|v| v.modified.into_f64())
-        });
-
-        stats.boosters = booster_ids
-            .iter()
-            .map(|&id| booster_info(&mut sol, id))
-            .collect();
-        stats.drones = drone_ids
-            .iter()
-            .map(|id| id.map_or_default(|id| drone_info(&mut sol, id)))
-            .collect();
-        stats.fighters = fighter_ids
-            .into_iter()
-            .map(|id| surroundings::fighter_info(&mut sol, id))
-            .collect();
-        stats.projected_fighters = projections
-            .fighters
-            .into_iter()
-            .map(|id| surroundings::fighter_info(&mut sol, id))
-            .collect();
-        stats.projected_spool = projections
-            .modules
-            .iter()
-            .map(|id| {
-                let id = id.as_ref()?;
-                let mut module = sol.get_module(id).ok()?;
-                module
-                    .get_spool_cycle_count()
-                    .map(|info| info.max.into_u32())
-            })
-            .collect();
-        stats.fighter_classes = surroundings::fighter_classes(&mut sol, fit_id);
-
-        for &(slot, i, id) in &module_ids {
-            let (spool_max, charges, charged_cycles) =
-                sol.get_module(&id).ok().map_or_default(|mut m| {
-                    (
-                        m.get_spool_cycle_count().map(|info| info.max.into_u32()),
-                        m.get_charge_count().map(rc::Count::into_u32),
-                        m.get_charged_cycle_count().map(rc::Count::into_u32),
-                    )
-                });
-            let Ok(mut item) = sol.get_item(&id) else {
-                continue;
-            };
-            let mut get = |attr: i32| {
-                item.get_attr(&AttrId::Eve(EveAttrId::from_i32(attr)))
-                    .ok()
-                    .map(|v| v.modified.into_f64())
-            };
-            let cap_need = get(attr::CAP_NEED).filter(|&c| c > 0.0);
-            // Missing attributes read as 0, so filter before falling back: turrets and launchers
-            // cycle on their rate of fire, everything else on its duration.
-            let cycle = get(attr::DURATION)
-                .filter(|&d| d > 0.0)
-                .or_else(|| get(attr::RATE_OF_FIRE).filter(|&d| d > 0.0));
-            let info = ModuleInfo {
-                cpu: get(attr::CPU).filter(|&v| v > 0.0),
-                powergrid: get(attr::POWER).filter(|&v| v > 0.0),
-                cap_per_sec: cap_need.zip(cycle).map(|(need, ms)| need / (ms / 1000.0)),
-                optimal: get(attr::OPTIMAL).filter(|&v| v > 0.0),
-                falloff: get(attr::FALLOFF).filter(|&v| v > 0.0),
-                spool_max,
-                burnout: None,
-                burnout_from_neighbours: false,
-                charges,
-                charged_cycles,
-            };
-            stats.modules.insert((slot, i), info);
-            stats
-                .module_misc
-                .insert(FitItem::Module(slot, i), column::module_misc(&mut sol, id));
-        }
-        for (i, &id) in subsystem_ids.iter().enumerate() {
-            stats
-                .module_misc
-                .insert(FitItem::Subsystem(i), column::module_misc(&mut sol, id));
-        }
-        column::burnout(&mut sol, fit, ship_id, &module_ids, &mut stats);
-
-        let cap_users: Vec<(ItemId, f64)> = module_ids
-            .iter()
-            .filter(|&&(slot, i, _)| {
-                fit.rack(slot)
-                    .get(i)
-                    .and_then(Option::as_ref)
-                    .is_some_and(|m| matches!(m.state, ModuleState::Active | ModuleState::Overload))
-            })
-            .filter_map(|&(slot, i, id)| {
-                let cap = stats.modules.get(&(slot, i))?.cap_per_sec?;
-                Some((id, cap))
-            })
-            .collect();
-        pane::pane_stats(&mut sol, fit_id, ship_id, &cap_users, options, &mut stats);
+        };
+        let cap_need = get(attr::CAP_NEED).filter(|&c| c > 0.0);
+        // Missing attributes read as 0, so filter before falling back: turrets and launchers
+        // cycle on their rate of fire, everything else on its duration.
+        let cycle = get(attr::DURATION)
+            .filter(|&d| d > 0.0)
+            .or_else(|| get(attr::RATE_OF_FIRE).filter(|&d| d > 0.0));
+        let info = ModuleInfo {
+            cpu: get(attr::CPU).filter(|&v| v > 0.0),
+            powergrid: get(attr::POWER).filter(|&v| v > 0.0),
+            cap_per_sec: cap_need.zip(cycle).map(|(need, ms)| need / (ms / 1000.0)),
+            optimal: get(attr::OPTIMAL).filter(|&v| v > 0.0),
+            falloff: get(attr::FALLOFF).filter(|&v| v > 0.0),
+            spool_max,
+            burnout: None,
+            burnout_from_neighbours: false,
+            charges,
+            charged_cycles,
+        };
+        stats.modules.insert((slot, i), info);
         stats
+            .module_misc
+            .insert(FitItem::Module(slot, i), column::module_misc(sol, id));
     }
+    for (i, &id) in subsystems.iter().enumerate() {
+        stats
+            .module_misc
+            .insert(FitItem::Subsystem(i), column::module_misc(sol, id));
+    }
+    column::burnout(sol, fit, ship_id, modules, &mut stats);
+
+    let cap_users: Vec<(ItemId, f64)> = modules
+        .iter()
+        .filter(|&&(slot, i, _)| {
+            fit.rack(slot)
+                .get(i)
+                .and_then(Option::as_ref)
+                .is_some_and(|m| matches!(m.state, ModuleState::Active | ModuleState::Overload))
+        })
+        .filter_map(|&(slot, i, id)| {
+            let cap = stats.modules.get(&(slot, i))?.cap_per_sec?;
+            Some((id, cap))
+        })
+        .collect();
+    pane::pane_stats(sol, fit_id, ship_id, &cap_users, options, &mut stats);
+    stats
 }

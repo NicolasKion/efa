@@ -9,7 +9,7 @@ use rc::{
 };
 use serde_json::{Map, Value, json};
 
-use super::{CalcOptions, Engine, Pilot, Stats, build_local, pane, sec_zone};
+use super::{BuildOptions, CalcOptions, Engine, Pilot, Stats, pane};
 use crate::{
     data::{Catalog, Hardpoint, Kind, Slot, TypeId},
     fit::{Fit, ModuleState},
@@ -350,22 +350,18 @@ fn num(value: Option<f64>) -> Value {
 
 impl Engine {
     fn build_for_efs(&self, fit: &Fit, fits: &[Fit], pilot: &Pilot) -> Option<Built> {
-        let mut sol = self.sol();
-        sol.set_sec_zone(sec_zone(fit.system_security));
-        sol.set_default_spool(rc::Spool::SpoolScale(rc::UnitInterval::from_f64_clamped(
-            1.0,
-        )));
-        let mut f = sol.add_fit();
-        let local = build_local(&mut f, fit, pilot, &mut Vec::new())?;
-        let fit_id = f.get_fit_id();
-        self.add_surroundings(&mut sol, fit_id, local.ship_id, fit, fits);
+        let options = BuildOptions {
+            surroundings: Some(fits),
+            default_spool: Some(1.0),
+        };
+        let built = self.build(fit, pilot, options)?;
         Some(Built {
-            sol,
-            fit_id,
-            ship: local.ship_id,
-            modules: local.module_ids,
-            drones: local.drone_ids,
-            fighters: local.fighter_ids,
+            ship: built.fit.ship,
+            fit_id: built.fit.fit_id,
+            drones: built.fit.first_drones().collect(),
+            modules: built.fit.modules,
+            fighters: built.fit.fighters,
+            sol: built.sol,
         })
     }
 

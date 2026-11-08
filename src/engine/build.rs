@@ -1,16 +1,123 @@
 //! Building a fit into a solar system: the pilot, the ship and everything fitted, the way every
 //! calculation does it.
 
-use rc::{AddMode, AttrId, EveAttrId, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack};
+use std::collections::HashMap;
 
-use super::{ItemRef, Pilot, pane, surroundings, validate};
+use rc::{
+    AddMode, AttrId, EveAttrId, FitId, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack, Sol,
+    SolOwned,
+};
+
+use super::{Engine, FitItem, Pilot, pane, surroundings, surroundings::Projections};
 use crate::{
     data::{Slot, TypeId},
     fit::{DroneStack, Fit, Module, ModuleState, Mutation, RahPattern, SystemSecurity},
 };
 
+/// Settings for [`Engine::build`].
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct BuildOptions<'a> {
+    /// What surrounds the fit: the saved fits its command and projected fits are looked up in.
+    /// Projected items and the environment come in even when that list is empty. None builds
+    /// the fit alone in space.
+    pub surroundings: Option<&'a [Fit]>,
+    /// Spool-up for modules without their own setting, as a fraction of full spool.
+    pub default_spool: Option<f64>,
+}
+
+impl<'a> BuildOptions<'a> {
+    /// The fit with what surrounds it, `fits` being the saved fits.
+    pub fn among(fits: &'a [Fit]) -> Self {
+        Self {
+            surroundings: Some(fits),
+            default_spool: None,
+        }
+    }
+}
+
+/// A fit's own items as added to a solar system, for reading back.
+#[derive(Debug, Clone)]
+pub(super) struct Placed {
+    pub fit_id: FitId,
+    pub ship: ItemId,
+    /// Which item of the fit each refine item stands for, the pilot's skills left out.
+    pub items: HashMap<ItemId, FitItem>,
+    /// Modules by rack and position, services after them.
+    pub modules: Vec<(Slot, usize, ItemId)>,
+    pub subsystems: Vec<ItemId>,
+    /// Each stack's drones, the engaged ones first; all of a stack are the same.
+    pub drones: Vec<Vec<ItemId>>,
+    pub boosters: Vec<ItemId>,
+    /// Every squadron in the fit's order, launched or not.
+    pub fighters: Vec<ItemId>,
+    /// Items refine refused, e.g. a module the ship has no rack position for.
+    pub problems: Vec<String>,
+}
+
+impl Placed {
+    /// The first drone of each stack, which stands for the stack.
+    pub fn first_drones(&self) -> impl Iterator<Item = Option<ItemId>> + '_ {
+        self.drones.iter().map(|stack| stack.first().copied())
+    }
+
+    /// The squadrons that are launched.
+    pub fn launched_fighters<'a>(&'a self, fit: &'a Fit) -> impl Iterator<Item = ItemId> + 'a {
+        self.fighters
+            .iter()
+            .zip(&fit.fighters)
+            .filter(|(_, fighter)| fighter.active)
+            .map(|(&id, _)| id)
+    }
+}
+
+/// A solar system with a fit built into it, ready to read numbers from. Changes made to look at
+/// the fit another way (a module switched off, a charge taken out) belong in a transaction, so
+/// the build reads as it was afterwards.
+#[derive(Clone)]
+pub(super) struct Built {
+    pub sol: SolOwned,
+    pub fit: Placed,
+    /// Projected items the stats read back, in the fit's order.
+    pub projections: Projections,
+    /// The EM, thermal, kinetic, explosive mix the fit's damage profile stands for.
+    pub incoming: [f64; 4],
+}
+
+impl Engine {
+    /// Build `fit` flown by `pilot` into a fresh solar system: the security zone, the fit, what
+    /// surrounds it, and the damage its reactive armor hardener adapts to. None without a ship.
+    pub(super) fn build(
+        &self,
+        fit: &Fit,
+        pilot: &Pilot,
+        options: BuildOptions<'_>,
+    ) -> Option<Built> {
+        let mut sol = self.sol();
+        sol.set_sec_zone(sec_zone(fit.system_security));
+        if let Some(spool) = options.default_spool {
+            sol.set_default_spool(rc::Spool::SpoolScale(rc::UnitInterval::from_f64_clamped(
+                spool,
+            )));
+        }
+        let placed = add_fit(&mut sol, fit, pilot)?;
+        let projections = options.surroundings.map_or_default(|fits| {
+            self.add_surroundings(&mut sol, placed.fit_id, placed.ship, fit, fits)
+        });
+        let mut f = sol.get_fit(&placed.fit_id).ok()?;
+        let incoming = pane::incoming_mix(&mut f, &fit.damage_profile);
+        let rah = rah_incoming(&mut f, fit, pane::dps_profile(incoming));
+        f.set_rah_incoming_dps(Some(rah));
+        Some(Built {
+            sol,
+            fit: placed,
+            projections,
+            incoming,
+        })
+    }
+}
+
 /// The solar system's security, which some structure bonuses depend on.
-pub(super) fn sec_zone(security: SystemSecurity) -> rc::SecZone {
+fn sec_zone(security: SystemSecurity) -> rc::SecZone {
     match security {
         SystemSecurity::HighSec => rc::SecZone::HiSec(rc::SecZoneCorruption::None),
         SystemSecurity::LowSec => rc::SecZone::LowSec(rc::SecZoneCorruption::None),
@@ -19,8 +126,142 @@ pub(super) fn sec_zone(security: SystemSecurity) -> rc::SecZone {
     }
 }
 
+/// What the reactive armor hardener adapts to: the fit's incoming damage, unless the hardener has
+/// a pattern of its own. refine takes one pattern per fit, and a fit holds one hardener at most,
+/// so the first override found decides. Not adapting is no damage at all: with nothing taken, the
+/// hardener has no reason to shift.
+pub(super) fn rah_incoming(
+    f: &mut rc::Fit<'_>,
+    fit: &Fit,
+    incoming: rc::DpsProfile,
+) -> rc::DpsProfile {
+    match fit.modules().find_map(|m| m.rah.as_ref()) {
+        None => incoming,
+        Some(RahPattern::DoNotAdapt) => pane::dps_profile([0.0; 4]),
+        Some(RahPattern::Pattern(profile)) => pane::dps_profile(pane::incoming_mix(f, profile)),
+    }
+}
+
+/// Add `fit` to the solar system as a fit of its own: the pilot and its skills, the ship and
+/// everything on it. None without a ship.
+pub(super) fn add_fit(sol: &mut Sol, fit: &Fit, pilot: &Pilot) -> Option<Placed> {
+    let mut f = sol.add_fit();
+    pilot.board(&mut f);
+    let ship = fit.ship?;
+    let ship_id = f
+        .set_ship(ItemTypeId::from_i32(ship), None, None)
+        .get_item_id();
+    let mut placed = Placed {
+        fit_id: f.get_fit_id(),
+        ship: ship_id,
+        items: HashMap::from([(ship_id, FitItem::Ship)]),
+        modules: Vec::new(),
+        subsystems: Vec::with_capacity(fit.subsystems.len()),
+        drones: Vec::with_capacity(fit.drones.len()),
+        boosters: Vec::with_capacity(fit.boosters.len()),
+        fighters: Vec::with_capacity(fit.fighters.len()),
+        problems: Vec::new(),
+    };
+    for (slot, rack, modules) in [
+        (Slot::High, ModRack::High, &fit.high),
+        (Slot::Mid, ModRack::Mid, &fit.mid),
+        (Slot::Low, ModRack::Low, &fit.low),
+    ] {
+        for (i, m) in modules.iter().enumerate() {
+            let Some(m) = m else { continue };
+            // Each module goes to its own position; heat spreads by position.
+            match add_fit_module(&mut f, rack, at(i), m) {
+                Ok(mut module) => {
+                    let id = module.get_item_id();
+                    placed.modules.push((slot, i, id));
+                    placed.items.insert(id, FitItem::Module(slot, i));
+                    if let Some(charge) = module.get_charge() {
+                        placed
+                            .items
+                            .insert(charge.get_item_id(), FitItem::Charge(slot, i));
+                    }
+                }
+                Err(e) => placed.problems.push(format!("module {}: {e}", m.type_id)),
+            }
+        }
+    }
+    if let Some(mode) = fit.mode {
+        let id = f.set_stance(ItemTypeId::from_i32(mode)).get_item_id();
+        placed.items.insert(id, FitItem::Mode);
+    }
+    f.set_sec_status(rc::FitSecStatus::from_f64_clamped(
+        fit.sec_status.unwrap_or(pilot.sec_status),
+    ));
+    for (i, id) in add_services(&mut f, fit) {
+        placed.modules.push((Slot::Service, i, id));
+        placed.items.insert(id, FitItem::Module(Slot::Service, i));
+    }
+    for (i, rig) in fit.rigs.iter().enumerate() {
+        if let Some(rig) = rig {
+            let id = f.add_rig(ItemTypeId::from_i32(*rig)).get_item_id();
+            placed.items.insert(id, FitItem::Rig(i));
+        }
+    }
+    for (i, &subsystem) in fit.subsystems.iter().enumerate() {
+        let id = f
+            .add_subsystem(ItemTypeId::from_i32(subsystem))
+            .get_item_id();
+        placed.items.insert(id, FitItem::Subsystem(i));
+        placed.subsystems.push(id);
+    }
+    for (n, stack) in fit.drones.iter().enumerate() {
+        let mut ids = Vec::with_capacity(stack.count as usize);
+        for i in 0..stack.count {
+            let state = if i < stack.active {
+                MinionState::Engaging
+            } else {
+                MinionState::InBay
+            };
+            let id = add_fit_drone(&mut f, stack, state).get_item_id();
+            placed.items.insert(id, FitItem::Drone(n));
+            ids.push(id);
+        }
+        placed.drones.push(ids);
+    }
+    for (implant, active) in fit.applied_implants(&pilot.implants) {
+        let mut item = f.add_implant(ItemTypeId::from_i32(implant));
+        if !active {
+            item.set_state(false);
+        }
+        placed
+            .items
+            .insert(item.get_item_id(), FitItem::Implant(implant));
+    }
+    for (i, booster) in fit.boosters.iter().enumerate() {
+        let mut item = f.add_booster(ItemTypeId::from_i32(booster.type_id));
+        item.set_state(booster.active);
+        for &effect in &booster.side_effects {
+            let id = rc::EffectId::Dogma(rc::DogmaEffectId::from_i32(effect));
+            if let Ok(mut side_effect) = item.get_side_effect(&id) {
+                side_effect.set_state(true);
+            }
+        }
+        let id = item.get_item_id();
+        placed.items.insert(id, FitItem::Booster(i));
+        placed.boosters.push(id);
+    }
+    for (i, id) in surroundings::add_fighters(&mut f, &fit.fighters)
+        .into_iter()
+        .enumerate()
+    {
+        placed.items.insert(id, FitItem::Fighter(i));
+        placed.fighters.push(id);
+    }
+    Some(placed)
+}
+
+/// The rack position a module goes to.
+pub(super) fn at(position: usize) -> AddMode {
+    AddMode::Replace(rc::RackPos::from_usize_clamped(position))
+}
+
 /// Put a structure's services into the fit, with each one's position.
-pub(super) fn add_services(f: &mut rc::Fit<'_>, fit: &Fit) -> Vec<(usize, ItemId)> {
+fn add_services(f: &mut rc::Fit<'_>, fit: &Fit) -> Vec<(usize, ItemId)> {
     fit.services
         .iter()
         .enumerate()
@@ -40,157 +281,9 @@ pub(super) fn add_services(f: &mut rc::Fit<'_>, fit: &Fit) -> Vec<(usize, ItemId
         .collect()
 }
 
-/// What the reactive armor hardener adapts to: the fit's incoming damage, unless the hardener has
-/// a pattern of its own. refine takes one pattern per fit, and a fit holds one hardener at most,
-/// so the first override found decides. Not adapting is no damage at all: with nothing taken, the
-/// hardener has no reason to shift.
-pub(super) fn rah_incoming(
-    f: &mut rc::Fit<'_>,
-    fit: &Fit,
-    incoming: rc::DpsProfile,
-) -> rc::DpsProfile {
-    match fit.modules().find_map(|m| m.rah.as_ref()) {
-        None => incoming,
-        Some(RahPattern::DoNotAdapt) => pane::dps_profile([0.0; 4]),
-        Some(RahPattern::Pattern(profile)) => pane::dps_profile(pane::incoming_mix(f, profile)),
-    }
-}
-
-/// The fit's own items as built into a solar system, for reading back.
-pub(super) struct Local {
-    pub(super) ship_id: ItemId,
-    pub(super) module_ids: Vec<(Slot, usize, ItemId)>,
-    pub(super) subsystem_ids: Vec<ItemId>,
-    /// The first drone of each stack.
-    pub(super) drone_ids: Vec<Option<ItemId>>,
-    pub(super) booster_ids: Vec<ItemId>,
-    pub(super) fighter_ids: Vec<ItemId>,
-    /// Which efa item each refine item stands for, for validation.
-    pub(super) refs: validate::Refs,
-}
-
-/// Put the pilot, ship and everything fitted onto `f`. Items refine refuses go to `problems`.
-/// None without a ship.
-pub(super) fn build_local(
-    f: &mut rc::Fit<'_>,
-    fit: &Fit,
-    pilot: &Pilot,
-    problems: &mut Vec<String>,
-) -> Option<Local> {
-    pilot.board(f);
-    let ship = fit.ship?;
-    let ship_id = f
-        .set_ship(ItemTypeId::from_i32(ship), None, None)
-        .get_item_id();
-    let mut refs = validate::Refs::new();
-    refs.insert(ship_id, ItemRef::Ship);
-
-    let mut module_ids: Vec<(Slot, usize, ItemId)> = Vec::new();
-    for (slot, rack, modules) in [
-        (Slot::High, ModRack::High, &fit.high),
-        (Slot::Mid, ModRack::Mid, &fit.mid),
-        (Slot::Low, ModRack::Low, &fit.low),
-    ] {
-        for (i, m) in modules.iter().enumerate() {
-            let Some(m) = m else { continue };
-            // Each module goes to its own position; heat spreads by position.
-            match add_fit_module(
-                f,
-                rack,
-                AddMode::Replace(rc::RackPos::from_usize_clamped(i)),
-                m,
-            ) {
-                Ok(mut module) => {
-                    let id = module.get_item_id();
-                    module_ids.push((slot, i, id));
-                    refs.insert(id, ItemRef::Module(slot, i));
-                    if let Some(charge) = module.get_charge() {
-                        refs.insert(charge.get_item_id(), ItemRef::Module(slot, i));
-                    }
-                }
-                Err(e) => problems.push(format!("module {}: {e}", m.type_id)),
-            }
-        }
-    }
-    if let Some(mode) = fit.mode {
-        let id = f.set_stance(ItemTypeId::from_i32(mode)).get_item_id();
-        refs.insert(id, ItemRef::Mode);
-    }
-    f.set_sec_status(rc::FitSecStatus::from_f64_clamped(
-        fit.sec_status.unwrap_or(pilot.sec_status),
-    ));
-    for (i, id) in add_services(f, fit) {
-        module_ids.push((Slot::Service, i, id));
-        refs.insert(id, ItemRef::Module(Slot::Service, i));
-    }
-    for (i, rig) in fit.rigs.iter().enumerate() {
-        if let Some(rig) = rig {
-            let id = f.add_rig(ItemTypeId::from_i32(*rig)).get_item_id();
-            refs.insert(id, ItemRef::Rig(i));
-        }
-    }
-    let mut subsystem_ids = Vec::with_capacity(fit.subsystems.len());
-    for (i, &subsystem) in fit.subsystems.iter().enumerate() {
-        let id = f
-            .add_subsystem(ItemTypeId::from_i32(subsystem))
-            .get_item_id();
-        refs.insert(id, ItemRef::Subsystem(i));
-        subsystem_ids.push(id);
-    }
-    let mut drone_ids: Vec<Option<ItemId>> = Vec::with_capacity(fit.drones.len());
-    for (stack_index, stack) in fit.drones.iter().enumerate() {
-        let mut first = None;
-        for i in 0..stack.count {
-            let minion_state = if i < stack.active {
-                MinionState::Engaging
-            } else {
-                MinionState::InBay
-            };
-            let id = add_fit_drone(f, stack, minion_state).get_item_id();
-            refs.insert(id, ItemRef::Drone(stack_index));
-            first.get_or_insert(id);
-        }
-        drone_ids.push(first);
-    }
-    for (implant, active) in fit.applied_implants(&pilot.implants) {
-        let mut item = f.add_implant(ItemTypeId::from_i32(implant));
-        if !active {
-            item.set_state(false);
-        }
-        refs.insert(item.get_item_id(), ItemRef::Implant(implant));
-    }
-    let mut booster_ids = Vec::with_capacity(fit.boosters.len());
-    for (i, booster) in fit.boosters.iter().enumerate() {
-        let mut item = f.add_booster(ItemTypeId::from_i32(booster.type_id));
-        item.set_state(booster.active);
-        for &effect in &booster.side_effects {
-            let id = rc::EffectId::Dogma(rc::DogmaEffectId::from_i32(effect));
-            if let Ok(mut side_effect) = item.get_side_effect(&id) {
-                side_effect.set_state(true);
-            }
-        }
-        let id = item.get_item_id();
-        refs.insert(id, ItemRef::Booster(i));
-        booster_ids.push(id);
-    }
-    let fighter_ids = surroundings::add_fighters(f, &fit.fighters);
-    for (i, &id) in fighter_ids.iter().enumerate() {
-        refs.insert(id, ItemRef::Fighter(i));
-    }
-    Some(Local {
-        ship_id,
-        module_ids,
-        subsystem_ids,
-        drone_ids,
-        booster_ids,
-        fighter_ids,
-        refs,
-    })
-}
-
 /// The type refine is given for a fit's module or drone: the base item, which the mutation then
 /// turns into the abyssal one.
-pub(super) fn added_type(type_id: TypeId, mutation: Option<&Mutation>) -> ItemTypeId {
+fn added_type(type_id: TypeId, mutation: Option<&Mutation>) -> ItemTypeId {
     ItemTypeId::from_i32(mutation.map_or(type_id, |m| m.base))
 }
 
@@ -243,7 +336,7 @@ pub(super) fn add_fit_drone<'a>(
 }
 
 /// Set a fresh mutation's attributes to the rolled values.
-pub(super) fn roll(applied: rc::Mutation<'_>, mutation: &Mutation) {
+fn roll(applied: rc::Mutation<'_>, mutation: &Mutation) {
     let rc::Mutation::Effective(mut effective) = applied else {
         return;
     };

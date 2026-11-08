@@ -8,27 +8,14 @@ use rc::{
     val::{ValOptions, ValResultFit, ValSlotCountFail},
 };
 
-use super::{Engine, Pilot};
+use super::{BuildOptions, Engine, FitItem, Pilot};
 use crate::{
     data::{Slot, TypeId},
     fit::Fit,
 };
 
-/// Where on the fit a problem sits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ItemRef {
-    Ship,
-    Mode,
-    /// A module and the charge loaded into it.
-    Module(Slot, usize),
-    Rig(usize),
-    Subsystem(usize),
-    /// A drone stack, by its index in the fit.
-    Drone(usize),
-    Fighter(usize),
-    Implant(TypeId),
-    Booster(usize),
-}
+/// Where on the fit a problem sits: a module's problems include its charge's.
+pub type ItemRef = FitItem;
 
 /// A skill an item needs and the level the pilot has it at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,7 +241,7 @@ impl Validation {
 }
 
 /// Which efa item each refine item stands for.
-pub(super) type Refs = HashMap<ItemId, ItemRef>;
+type Refs = HashMap<ItemId, FitItem>;
 
 /// Everything refine checks, less what needs a target, a security zone or another fit.
 fn options() -> ValOptions {
@@ -287,7 +274,13 @@ pub(super) fn validate(f: &mut rc::Fit<'_>, refs: &Refs) -> Validation {
 )]
 fn convert(r: &ValResultFit, refs: &Refs) -> Validation {
     let mut v = Validation::default();
-    let at = |id: &ItemId| refs.get(id).copied();
+    // A charge's problems show on the module it is loaded into.
+    let at = |id: &ItemId| {
+        refs.get(id).map(|&item| match item {
+            FitItem::Charge(slot, i) => FitItem::Module(slot, i),
+            item => item,
+        })
+    };
 
     let slots = |v: &mut Validation, fail: Option<&ValSlotCountFail>, problem: Problem| {
         for id in fail.iter().flat_map(|f| &f.users) {
@@ -486,11 +479,12 @@ impl Engine {
     /// environment. Cheaper than [`Engine::compute_among`], which carries the same result in
     /// [`super::Stats::validation`]; this is for trying out a change before keeping it.
     pub fn validate(&self, fit: &Fit, pilot: &Pilot) -> Validation {
-        let mut sol = self.sol();
-        let mut f = sol.add_fit();
-        let Some(local) = super::build_local(&mut f, fit, pilot, &mut Vec::new()) else {
+        let Some(mut built) = self.build(fit, pilot, BuildOptions::default()) else {
             return Validation::default();
         };
-        validate(&mut f, &local.refs)
+        built
+            .sol
+            .get_fit(&built.fit.fit_id)
+            .map_or_default(|mut f| validate(&mut f, &built.fit.items))
     }
 }

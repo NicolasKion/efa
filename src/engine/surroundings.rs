@@ -12,11 +12,14 @@ use rc::{
     ModRack, SolOwned, stats::StatSlot,
 };
 
-use super::{DroneInfo, Engine, Slots, add_fit_drone, add_fit_module, drone_info, module_state};
-use crate::fit::{
-    Fit, ModuleState,
-    fighters::Fighter,
-    projected::{EnvEffect, ProjectedModule},
+use super::{DroneInfo, Engine, Slots, build::add_fit, drone_info, module_state};
+use crate::{
+    data::Slot,
+    fit::{
+        Fit, ModuleState,
+        fighters::Fighter,
+        projected::{EnvEffect, ProjectedModule},
+    },
 };
 
 /// The capsule: a ship item with nothing on it that bonuses modules or drones.
@@ -56,15 +59,8 @@ pub struct FighterClasses {
     pub support: Slots,
 }
 
-/// Items of a fit added to the solar system that the stats read back.
-pub(super) struct Built {
-    pub ship: Option<ItemId>,
-    pub modules: Vec<ItemId>,
-    pub drones: Vec<ItemId>,
-    pub fighters: Vec<ItemId>,
-}
-
 /// Projected items the stats read back, in the fit's order.
+#[derive(Debug, Clone, Default)]
 pub(super) struct Projections {
     pub fighters: Vec<ItemId>,
     pub modules: Vec<Option<ItemId>>,
@@ -167,100 +163,10 @@ pub(super) fn fighter_classes(sol: &mut SolOwned, fit_id: rc::FitId) -> FighterC
 }
 
 impl Engine {
-    /// Put a whole fit into the solar system as a fit of its own, the way the main fit is built.
-    pub(super) fn add_other_fit(&self, sol: &mut SolOwned, fit: &Fit) -> (rc::FitId, Built) {
-        let mut f = sol.add_fit();
-        self.add_skills(&mut f);
-        let ship = fit.ship.map(|ship| {
-            f.set_ship(ItemTypeId::from_i32(ship), None, None)
-                .get_item_id()
-        });
-        let mut modules = Vec::new();
-        for (rack, list) in [
-            (ModRack::High, &fit.high),
-            (ModRack::Mid, &fit.mid),
-            (ModRack::Low, &fit.low),
-        ] {
-            for (i, m) in list.iter().enumerate() {
-                let Some(m) = m else { continue };
-                if let Ok(module) = add_fit_module(
-                    &mut f,
-                    rack,
-                    rc::AddMode::Replace(rc::RackPos::from_usize_clamped(i)),
-                    m,
-                ) {
-                    modules.push(module.get_item_id());
-                }
-            }
-        }
-        if let Some(mode) = fit.mode {
-            f.set_stance(ItemTypeId::from_i32(mode));
-        }
-        if let Some(sec) = fit.sec_status {
-            f.set_sec_status(rc::FitSecStatus::from_f64_clamped(sec));
-        }
-        for &rig in fit.rigs.iter().flatten() {
-            f.add_rig(ItemTypeId::from_i32(rig));
-        }
-        for &subsystem in &fit.subsystems {
-            f.add_subsystem(ItemTypeId::from_i32(subsystem));
-        }
-        super::add_services(&mut f, fit);
-        let mut drones = Vec::new();
-        for stack in &fit.drones {
-            for i in 0..stack.count {
-                let state = if i < stack.active {
-                    MinionState::Engaging
-                } else {
-                    MinionState::InBay
-                };
-                let drone = add_fit_drone(&mut f, stack, state);
-                if i < stack.active {
-                    drones.push(drone.get_item_id());
-                }
-            }
-        }
-        let fighters = fit
-            .fighters
-            .iter()
-            .map(|fighter| (fighter.active, add_fighter(&mut f, fighter)))
-            .filter_map(|(active, id)| active.then_some(id))
-            .collect();
-        for (implant, active) in fit.applied_implants(&self.all5.implants) {
-            f.add_implant(ItemTypeId::from_i32(implant))
-                .set_state(active);
-        }
-        for booster in &fit.boosters {
-            let mut item = f.add_booster(ItemTypeId::from_i32(booster.type_id));
-            item.set_state(booster.active);
-            for &effect in &booster.side_effects {
-                let id = rc::EffectId::Dogma(rc::DogmaEffectId::from_i32(effect));
-                if let Ok(mut side_effect) = item.get_side_effect(&id) {
-                    side_effect.set_state(true);
-                }
-            }
-        }
-        let fit_id = f.get_fit_id();
-        (
-            fit_id,
-            Built {
-                ship,
-                modules,
-                drones,
-                fighters,
-            },
-        )
-    }
-
-    /// Other fits fly All 5 for now; pyfa gives each its own character.
-    fn add_skills(&self, f: &mut rc::Fit<'_>) {
-        self.all5.board(f);
-    }
-
     /// A hidden fit to hold loose projected items: a capsule with the character's skills.
     fn add_holder(&self, sol: &mut SolOwned) -> (rc::FitId, ItemId) {
         let mut f = sol.add_fit();
-        self.add_skills(&mut f);
+        self.all5.board(&mut f);
         let ship = f
             .set_ship(ItemTypeId::from_i32(CAPSULE), None, None)
             .get_item_id();
@@ -292,8 +198,11 @@ impl Engine {
                 let _ = f.set_fleet(Some(&fleet));
             }
             for booster in boosters {
-                let (id, _) = self.add_other_fit(sol, booster);
-                if let Ok(mut f) = sol.get_fit(&id) {
+                // Other fits fly All 5 for now; pyfa gives each its own character.
+                let Some(placed) = add_fit(sol, booster, &self.all5) else {
+                    continue;
+                };
+                if let Ok(mut f) = sol.get_fit(&placed.fit_id) {
                     let _ = f.set_fleet(Some(&fleet));
                 }
             }
@@ -304,24 +213,32 @@ impl Engine {
                 continue;
             };
             for _ in 0..projected.amount {
-                let (_, built) = self.add_other_fit(sol, source);
-                if let Some(ship) = built.ship {
-                    place_ship(sol, ship, projected.range, target_radius);
-                }
-                for id in &built.modules {
-                    if let Ok(mut module) = sol.get_module(id) {
+                let Some(placed) = add_fit(sol, source, &self.all5) else {
+                    continue;
+                };
+                place_ship(sol, placed.ship, projected.range, target_radius);
+                for &(slot, _, id) in &placed.modules {
+                    if slot == Slot::Service {
+                        continue;
+                    }
+                    if let Ok(mut module) = sol.get_module(&id) {
                         let _ = module.add_proj(&ship_id);
                     }
                 }
-                for id in &built.drones {
-                    place_minion(sol, *id, projected.range, target_radius);
-                    if let Ok(mut drone) = sol.get_drone(id) {
+                let engaged = placed
+                    .drones
+                    .iter()
+                    .zip(&source.drones)
+                    .flat_map(|(ids, stack)| ids.iter().take(stack.active as usize));
+                for &id in engaged {
+                    place_minion(sol, id, projected.range, target_radius);
+                    if let Ok(mut drone) = sol.get_drone(&id) {
                         let _ = drone.add_proj(&ship_id);
                     }
                 }
-                for id in &built.fighters {
-                    place_minion(sol, *id, projected.range, target_radius);
-                    if let Ok(mut fighter) = sol.get_fighter(id) {
+                for id in placed.launched_fighters(source) {
+                    place_minion(sol, id, projected.range, target_radius);
+                    if let Ok(mut fighter) = sol.get_fighter(&id) {
                         let _ = fighter.add_proj(&ship_id);
                     }
                 }

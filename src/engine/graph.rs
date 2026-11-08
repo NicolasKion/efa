@@ -7,17 +7,16 @@
 use std::collections::HashSet;
 
 use rc::{
-    AddMode, AttrId, Count, EveAttrId, ItemCommon, ItemId, ItemTypeId, MinionState, ModRack,
-    SolOwned, Spool,
+    AttrId, Count, EveAttrId, ItemCommon, ItemId, ItemTypeId, SolOwned, Spool,
     stats::{
         ItemStatsCommon, StatCritOptions, StatDmg, StatItemChargeOptions, StatTimeOptions,
         StatTimeOptionsBurst,
     },
 };
 
-use super::{CalcOptions, Engine, Pilot};
+use super::{BuildOptions, CalcOptions, Engine, Pilot, build::Placed};
 use crate::{
-    data::{Catalog, Hardpoint},
+    data::{Catalog, Hardpoint, Slot},
     fit::{Fit, ModuleState},
     graphs::{
         ammo::{self, AmmoOption, AmmoQuality, WeaponGroup},
@@ -166,7 +165,7 @@ const FTR_ECM_STRENGTH: [i32; 4] = [2246, 2247, 2248, 2249];
 const CIVILIAN_LAUNCHER: i32 = 32461;
 
 /// A module of the fit as placed in the graph solar system.
-struct Placed {
+struct PlacedModule {
     id: ItemId,
     type_id: i32,
     state: ModuleState,
@@ -175,7 +174,7 @@ struct Placed {
 /// What [`Engine::place`] put into the solar system.
 struct Placement {
     ship: ItemId,
-    modules: Vec<Placed>,
+    modules: Vec<PlacedModule>,
     drones: Vec<PlacedDrones>,
     /// Launched squadrons.
     fighters: Vec<ItemId>,
@@ -195,16 +194,16 @@ impl Engine {
             return snap;
         }
         let stats = self.compute_for(fit, pilot, CalcOptions::default());
-        let mut sol = self.sol();
-        let Some(Placement {
+        let Some(mut built) = self.build(fit, pilot, BuildOptions::default()) else {
+            return snap;
+        };
+        let Placement {
             ship: ship_id,
             modules,
             drones,
             fighters,
-        }) = Self::place(&mut sol, fit, pilot)
-        else {
-            return snap;
-        };
+        } = placement(fit, &built.fit);
+        let sol = &mut built.sol;
 
         let mut ship = Ship {
             max_velocity: stats.speed.unwrap_or(0.0),
@@ -251,7 +250,7 @@ impl Engine {
             None => {}
         }
         {
-            let mut get = |a| attr_of(&mut sol, ship_id, a);
+            let mut get = |a| attr_of(sol, ship_id, a);
             ship.radius = get(attr::RADIUS);
             ship.cap_capacity = get(attr::CAP_CAPACITY);
             ship.cap_recharge = get(attr::RECHARGE_RATE) / 1000.0;
@@ -259,7 +258,7 @@ impl Engine {
             ship.shield_recharge = get(attr::SHIELD_RECHARGE_RATE) / 1000.0;
         }
         // Ships without the attribute take breacher damage in full.
-        ship.breacher_resist = attr_opt(&mut sol, ship_id, attr::BREACHER_RESIST).unwrap_or(1.0);
+        ship.breacher_resist = attr_opt(sol, ship_id, attr::BREACHER_RESIST).unwrap_or(1.0);
         ship.subwarp_speed = self
             .subwarp_speed(fit, pilot, catalog)
             .unwrap_or(ship.max_velocity);
@@ -274,23 +273,23 @@ impl Engine {
                 continue;
             }
             let group = item_type.group_id;
-            let effects = effects_of(&mut sol, placed.id);
-            let charge = charge_of(&mut sol, placed.id);
+            let effects = effects_of(sol, placed.id);
+            let charge = charge_of(sol, placed.id);
             if effect::SCRAMMABLE.iter().any(|e| effects.contains(e)) {
                 scrammable.push(placed.type_id);
             }
             let scrams = effect::SCRAM.iter().any(|e| effects.contains(e))
-                && attr_of(&mut sol, placed.id, attr::ACTIVATION_BLOCKED) != 0.0
+                && attr_of(sol, placed.id, attr::ACTIVATION_BLOCKED) != 0.0
                 || effects.contains(&effect::DISRUPT_SPHERE)
                     && charge
                         .as_ref()
                         .is_some_and(|c| c.effects.contains(&effect::FOCUSED_SCRIPT));
             if scrams {
-                let range = max_range(&mut sol, placed.id);
+                let range = max_range(sol, placed.id);
                 snap.scram_range = Some(snap.scram_range.unwrap_or(0.0).max(range));
             }
             if let Some(weapon) = module_weapon(
-                &mut sol,
+                sol,
                 placed,
                 item_type.hardpoint,
                 group,
@@ -300,12 +299,12 @@ impl Engine {
             ) {
                 snap.weapons.push(weapon);
             }
-            snap.ewar.extend(module_ewar(&mut sol, placed.id, &effects));
-            if let Some(rep) = module_rep(&mut sol, placed.id, group) {
+            snap.ewar.extend(module_ewar(sol, placed.id, &effects));
+            if let Some(rep) = module_rep(sol, placed.id, group) {
                 snap.reps.push(rep);
             }
             if let Some(user) = cap_user(
-                &mut sol,
+                sol,
                 placed.id,
                 group,
                 item_type.hardpoint == Hardpoint::Turret,
@@ -318,18 +317,18 @@ impl Engine {
             if stack.active == 0 {
                 continue;
             }
-            let effects = effects_of(&mut sol, stack.id);
-            if let Some(weapon) = drone_weapon(&mut sol, stack) {
+            let effects = effects_of(sol, stack.id);
+            if let Some(weapon) = drone_weapon(sol, stack) {
                 snap.weapons.push(weapon);
             }
-            snap.ewar.extend(drone_ewar(&mut sol, stack, &effects));
-            if let Some(rep) = drone_rep(&mut sol, stack) {
+            snap.ewar.extend(drone_ewar(sol, stack, &effects));
+            if let Some(rep) = drone_rep(sol, stack) {
                 snap.reps.push(rep);
             }
         }
         for &id in &fighters {
-            snap.weapons.extend(fighter_weapons(&mut sol, id));
-            snap.ewar.extend(fighter_ewar(&mut sol, id));
+            snap.weapons.extend(fighter_weapons(sol, id));
+            snap.ewar.extend(fighter_ewar(sol, id));
         }
         if !scrammable.is_empty() {
             ship.scrammed = Some(self.without(fit, pilot, &scrammable));
@@ -347,13 +346,15 @@ impl Engine {
         catalog: &Catalog,
         quality: AmmoQuality,
     ) -> Vec<WeaponGroup> {
-        let mut sol = self.sol();
-        let Some(placement) = Self::place(&mut sol, fit, pilot) else {
+        let Some(mut built) = self.build(fit, pilot, BuildOptions::default()) else {
             return Vec::new();
         };
-        let ship_radius = attr_of(&mut sol, placement.ship, attr::RADIUS);
-        let running = |p: &&Placed| matches!(p.state, ModuleState::Active | ModuleState::Overload);
-        let weapon_of = |p: &Placed| {
+        let placement = placement(fit, &built.fit);
+        let sol = &mut built.sol;
+        let ship_radius = attr_of(sol, placement.ship, attr::RADIUS);
+        let running =
+            |p: &&PlacedModule| matches!(p.state, ModuleState::Active | ModuleState::Overload);
+        let weapon_of = |p: &PlacedModule| {
             catalog
                 .get(p.type_id)
                 .filter(|t| !t.mining)
@@ -382,7 +383,7 @@ impl Engine {
         }
         let mut groups = Vec::new();
         for module in types {
-            let members: Vec<&Placed> = placement
+            let members: Vec<&PlacedModule> = placement
                 .modules
                 .iter()
                 .filter(running)
@@ -399,10 +400,10 @@ impl Engine {
                 let weapons: Vec<Weapon> = members
                     .iter()
                     .filter_map(|p| {
-                        let effects = effects_of(&mut sol, p.id);
-                        let loaded = charge_of(&mut sol, p.id);
+                        let effects = effects_of(sol, p.id);
+                        let loaded = charge_of(sol, p.id);
                         module_weapon(
-                            &mut sol,
+                            sol,
                             p,
                             hardpoint,
                             group,
@@ -466,97 +467,38 @@ impl Engine {
         self.compute_for(&grounded, pilot, CalcOptions::default())
             .speed
     }
+}
 
-    /// Put the fit into `sol` the way [`Engine::compute_with`] does, keeping item IDs.
-    fn place(sol: &mut SolOwned, fit: &Fit, pilot: &Pilot) -> Option<Placement> {
-        let ship = fit.ship?;
-        let mut f = sol.add_fit();
-        pilot.board(&mut f);
-        let ship_id = f
-            .set_ship(ItemTypeId::from_i32(ship), None, None)
-            .get_item_id();
-        let mut placed = Vec::new();
-        for (rack, modules) in [
-            (ModRack::High, &fit.high),
-            (ModRack::Mid, &fit.mid),
-            (ModRack::Low, &fit.low),
-        ] {
-            for (i, m) in modules.iter().enumerate() {
-                let Some(m) = m else { continue };
-                let Ok(module) = super::add_fit_module(
-                    &mut f,
-                    rack,
-                    AddMode::Replace(rc::RackPos::from_usize_clamped(i)),
-                    m,
-                ) else {
-                    continue;
-                };
-                placed.push(Placed {
-                    id: module.get_item_id(),
-                    type_id: m.type_id,
-                    state: m.state,
-                });
-            }
-        }
-        if let Some(mode) = fit.mode {
-            f.set_stance(ItemTypeId::from_i32(mode));
-        }
-        f.set_sec_status(rc::FitSecStatus::from_f64_clamped(
-            fit.sec_status.unwrap_or(pilot.sec_status),
-        ));
-        for &rig in fit.rigs.iter().flatten() {
-            f.add_rig(ItemTypeId::from_i32(rig));
-        }
-        for &subsystem in &fit.subsystems {
-            f.add_subsystem(ItemTypeId::from_i32(subsystem));
-        }
-        super::add_services(&mut f, fit);
-        let mut drones = Vec::new();
-        for stack in &fit.drones {
-            let mut first = None;
-            for i in 0..stack.count {
-                let state = if i < stack.active {
-                    MinionState::Engaging
-                } else {
-                    MinionState::InBay
-                };
-                let id = super::add_fit_drone(&mut f, stack, state).get_item_id();
-                first.get_or_insert(id);
-            }
-            if let Some(id) = first {
-                drones.push(PlacedDrones {
-                    id,
-                    active: stack.active.min(stack.count),
-                });
-            }
-        }
-        for (implant, active) in fit.applied_implants(&pilot.implants) {
-            let mut implant = f.add_implant(ItemTypeId::from_i32(implant));
-            if !active {
-                implant.set_state(false);
-            }
-        }
-        for booster in &fit.boosters {
-            let mut item = f.add_booster(ItemTypeId::from_i32(booster.type_id));
-            item.set_state(booster.active);
-            for &effect in &booster.side_effects {
-                let id = rc::EffectId::Dogma(rc::DogmaEffectId::from_i32(effect));
-                if let Ok(mut side_effect) = item.get_side_effect(&id) {
-                    side_effect.set_state(true);
-                }
-            }
-        }
-        let fighters = super::surroundings::add_fighters(&mut f, &fit.fighters)
-            .into_iter()
-            .zip(&fit.fighters)
-            .filter_map(|(id, fighter)| fighter.active.then_some(id))
-            .collect();
-        Some(Placement {
-            ship: ship_id,
-            modules: placed,
-            drones,
-            fighters,
+/// The modules, drone stacks and launched squadrons of a fit built into a solar system.
+fn placement(fit: &Fit, placed: &Placed) -> Placement {
+    let modules = placed
+        .modules
+        .iter()
+        .filter(|&&(slot, ..)| slot != Slot::Service)
+        .filter_map(|&(slot, i, id)| {
+            let m = fit.rack(slot).get(i)?.as_ref()?;
+            Some(PlacedModule {
+                id,
+                type_id: m.type_id,
+                state: m.state,
+            })
         })
+        .collect();
+    let drones = placed
+        .first_drones()
+        .zip(&fit.drones)
+        .filter_map(|(id, stack)| {
+            Some(PlacedDrones {
+                id: id?,
+                active: stack.active.min(stack.count),
+            })
+        })
+        .collect();
+    Placement {
+        ship: placed.ship,
+        modules,
+        drones,
+        fighters: placed.launched_fighters(fit).collect(),
     }
 }
 
@@ -686,7 +628,7 @@ fn reload_of(sol: &mut SolOwned, id: ItemId) -> (Option<u32>, f64) {
 
 fn module_weapon(
     sol: &mut SolOwned,
-    placed: &Placed,
+    placed: &PlacedModule,
     hardpoint: Hardpoint,
     group: i32,
     effects: &HashSet<i32>,
@@ -1327,6 +1269,7 @@ mod tests {
     use rc::{Coordinates, Value, stats::StatDmgItemKinds};
 
     use super::*;
+    use crate::engine::build::add_fit;
     use crate::graphs::{
         defs::{Graph, Param},
         plot::{self, Options, Request, TargetData},
@@ -1389,13 +1332,15 @@ Damage Control II
     /// surface, before resists.
     fn refine_applied(engine: &Engine, attacker: &Fit, target: &Fit, distance: f64) -> f64 {
         let mut sol = engine.sol();
+        let placed = add_fit(&mut sol, attacker, engine.all5()).expect("attacker places");
         let Placement {
             ship: atk_ship,
             modules,
             ..
-        } = Engine::place(&mut sol, attacker, engine.all5()).expect("attacker places");
-        let Placement { ship: tgt_ship, .. } =
-            Engine::place(&mut sol, target, engine.all5()).expect("target places");
+        } = placement(attacker, &placed);
+        let tgt_ship = add_fit(&mut sol, target, engine.all5())
+            .expect("target places")
+            .ship;
         let c2c = distance
             + attr_of(&mut sol, atk_ship, attr::RADIUS)
             + attr_of(&mut sol, tgt_ship, attr::RADIUS);
@@ -1500,10 +1445,10 @@ Damage Control II
         };
         let attacker = fit(&catalog, RUPTURE);
         let snap = engine.graph_snapshot(&attacker, engine.all5(), &catalog);
-        let mut sol = engine.sol();
-        let Placement { ship, .. } =
-            Engine::place(&mut sol, &attacker, engine.all5()).expect("places");
-        let fit_id = sol.get_ship(&ship).expect("ship").get_fit_id();
+        let mut built = engine
+            .build(&attacker, engine.all5(), BuildOptions::default())
+            .expect("places");
+        let (sol, fit_id) = (&mut built.sol, built.fit.fit_id);
         for time in [30.0, 61.0, 125.0] {
             let options = StatTimeOptions::Sim(rc::stats::StatTimeOptionsSim {
                 time: Some(rc::stats::StatTime::from_f64_checked(time).expect("valid time")),

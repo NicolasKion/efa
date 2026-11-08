@@ -5,8 +5,8 @@
 use rc::{AttrId, EveAttrId, ItemCommon, ItemId, SolOwned};
 
 use super::{
-    CalcOptions, Cap, CapDetail, Engine, Layer, Pilot, Resource, Stats, Tank, attr, build_local,
-    fit_stats, pane, rah_incoming, sec_zone,
+    BuildOptions, Built, CalcOptions, Cap, CapDetail, Engine, Layer, Pilot, Resource, Stats, Tank,
+    attr, fit_stats, pane,
 };
 use crate::fit::{Fit, ModuleState};
 
@@ -38,20 +38,24 @@ impl TankProbe {
 impl Engine {
     /// The fit's resources, layers and sustained repair, flown by `pilot` alone in space.
     pub fn probe_tank(&self, fit: &Fit, pilot: &Pilot) -> TankProbe {
-        let mut sol = self.sol();
-        sol.set_sec_zone(sec_zone(fit.system_security));
-        let mut f = sol.add_fit();
-        let Some(local) = build_local(&mut f, fit, pilot, &mut Vec::new()) else {
+        let Some(Built {
+            mut sol,
+            fit: local,
+            incoming,
+            ..
+        }) = self.build(fit, pilot, BuildOptions::default())
+        else {
             return TankProbe::default();
         };
-        let fit_id = f.get_fit_id();
+        let fit_id = local.fit_id;
+        let Ok(mut f) = sol.get_fit(&fit_id) else {
+            return TankProbe::default();
+        };
         let mut stats = Stats {
-            incoming: pane::incoming_mix(&mut f, &fit.damage_profile),
+            incoming,
             ..Stats::default()
         };
         let incoming = pane::dps_profile(stats.incoming);
-        let rah = rah_incoming(&mut f, fit, incoming);
-        f.set_rah_incoming_dps(Some(rah));
         // Reloads count, so an ancillary repairer is judged by what it repairs on average.
         let options = CalcOptions {
             factor_reload: true,
@@ -65,7 +69,7 @@ impl Engine {
         let sustained = if cap_stable {
             base
         } else {
-            let users = cap_users(&mut sol, fit, &local.module_ids);
+            let users = cap_users(&mut sol, fit, &local.modules);
             let cap = CapDetail {
                 recharge,
                 used,

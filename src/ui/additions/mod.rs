@@ -436,7 +436,7 @@ fn addition_menu(
     let stats_of = match kind {
         AddKind::Drones => StatsOf::Fitted(FitItem::Drone(i)),
         AddKind::Implants => StatsOf::Fitted(FitItem::Implant(type_id)),
-        AddKind::Boosters => StatsOf::Fitted(FitItem::Booster(type_id)),
+        AddKind::Boosters => StatsOf::Fitted(FitItem::Booster(i)),
         AddKind::Cargo => StatsOf::Type(type_id),
     };
     let mut menu = menu.item(stats_entry(this, category, stats_of));
