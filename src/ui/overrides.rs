@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use gpui_kit::assets::IconName as AssetIcon;
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon as UiIcon, Sizable, WindowExt,
+    ActiveTheme, Disableable, Icon as UiIcon, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -15,20 +15,24 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, AppContext, ClickEvent, Context, Entity, FontWeight, InteractiveElement,
-    IntoElement, ParentElement, PathPromptOptions, Render, SharedString,
+    AnyElement, AppContext, ClickEvent, Context, Entity, FocusHandle, FontWeight,
+    InteractiveElement, IntoElement, ParentElement, PathPromptOptions, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
     prelude::FluentBuilder, px,
 };
 
-use super::{Efa, Hub, Loaded, item_data, preferences::section, widgets::icon_box};
+use super::{
+    Efa, Hub, Loaded,
+    dialogs::{Confirm, confirm},
+    editor_kit::{CONTEXT, FocusSearch, Sidebar},
+    item_data,
+    preferences::section,
+    widgets::{empty_line, icon_box, list_row, parse_decimal, redraw_on_change},
+};
 use crate::{data::TypeId, icons::Icon, item_data::ItemData, overrides::Overrides};
 
 /// Most search hits the list shows, so a short query stays cheap to draw.
 const SEARCH_LIMIT: usize = 200;
-const ROW_HEIGHT: f32 = 30.;
-const SIDEBAR_W: f32 = 300.;
-const SIDEBAR_NARROW_W: f32 = 200.;
 /// Below this width the item list narrows and the attributes sit closer to the edges.
 const NARROW_W: f32 = 760.;
 /// What an attribute's name keeps beside its field before the field drops under it.
@@ -53,6 +57,7 @@ pub struct OverridesWindow {
     fields: Vec<Field>,
     /// A message under the header, and whether it is an error.
     notice: Option<(SharedString, bool)>,
+    focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
     field_subscriptions: Vec<Subscription>,
 }
@@ -93,12 +98,10 @@ impl OverridesWindow {
         let subscriptions = vec![
             cx.observe(&hub, |_, _, cx| cx.notify()),
             item_data::observe_data(cx),
-            cx.subscribe(&search, |_, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change) {
-                    cx.notify();
-                }
-            }),
+            redraw_on_change(cx, &search),
         ];
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
         Self {
             hub,
             loaded,
@@ -106,6 +109,7 @@ impl OverridesWindow {
             selected: None,
             fields: Vec::new(),
             notice: None,
+            focus,
             _subscriptions: subscriptions,
             field_subscriptions: Vec::new(),
         }
@@ -153,11 +157,14 @@ impl OverridesWindow {
             .collect();
         // pyfa sorts them by name.
         fields.sort_by_key(|a| a.1.to_lowercase());
-        let overrides = self.overrides(cx).clone();
-        for (attr, name, title, base) in fields {
-            let value = overrides
-                .get(type_id, attr)
-                .map_or_else(String::new, number);
+        let values: Vec<String> = {
+            let overrides = self.overrides(cx);
+            fields
+                .iter()
+                .map(|f| overrides.get(type_id, f.0).map_or_else(String::new, number))
+                .collect()
+        };
+        for ((attr, name, title, base), value) in fields.into_iter().zip(values) {
             let input = cx.new(|cx| {
                 InputState::new(window, cx)
                     .placeholder(number(base))
@@ -207,8 +214,8 @@ impl OverridesWindow {
             });
             return;
         }
-        match text.parse::<f64>() {
-            Ok(value) if value.is_finite() => {
+        match parse_decimal::<f64>(text) {
+            Some(value) if value.is_finite() => {
                 self.notice = None;
                 // Typed back exactly as shown, so an exact match is what counts.
                 if value.to_bits() == base.to_bits() {
@@ -250,37 +257,17 @@ impl OverridesWindow {
 
     fn confirm_clear(window: &mut Window, cx: &mut Context<Self>) {
         let this = cx.weak_entity();
-        window.open_dialog(cx, move |dialog, _, _| {
-            let yes = this.clone();
-            dialog.title("Confirm Delete").w(px(380.)).child(
-                v_flex()
-                    .gap_3()
-                    .child("Are you sure you want to delete all overrides?")
-                    .child(
-                        h_flex()
-                            .justify_end()
-                            .gap_2()
-                            .child(
-                                Button::new("overrides-clear-no")
-                                    .label("No")
-                                    .on_click(|_, window, cx| window.close_dialog(cx)),
-                            )
-                            .child(
-                                Button::new("overrides-clear-yes")
-                                    .danger()
-                                    .label("Delete All")
-                                    .on_click(move |_, window, cx| {
-                                        window.close_dialog(cx);
-                                        let _ = yes.update(cx, |this, cx| {
-                                            this.edit(cx, |o| o.values.clear());
-                                            this.fields.clear();
-                                            this.field_subscriptions.clear();
-                                            cx.notify();
-                                        });
-                                    }),
-                            ),
-                    ),
-            )
+        let question = Confirm {
+            yes: "Delete All".into(),
+            ..Confirm::delete("Are you sure you want to delete all overrides?")
+        };
+        confirm(window, cx, question, move |_, cx| {
+            let _ = this.update(cx, |this, cx| {
+                this.edit(cx, |o| o.values.clear());
+                this.fields.clear();
+                this.field_subscriptions.clear();
+                cx.notify();
+            });
         });
     }
 
@@ -339,172 +326,142 @@ impl OverridesWindow {
 
     /// A type in the list on the left.
     fn type_row(&self, type_id: TypeId, count: usize, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
+        let primary = cx.theme().primary;
         let catalog = &self.loaded.catalog;
         let selected = self.selected == Some(type_id);
-        h_flex()
-            .id(SharedString::from(format!("override-type-{type_id}")))
-            .gap_2()
-            .h(px(ROW_HEIGHT))
-            .px_2()
-            .rounded(px(6.))
-            .when(selected, |d| d.bg(theme.secondary))
-            .when(!selected, |d| {
-                d.hover(|s| s.bg(theme.secondary.opacity(0.5)))
-            })
-            .child(icon_box(
-                catalog,
-                &self.loaded.icons,
-                Icon::Type(type_id),
-                20.,
-            ))
-            .child(
+        list_row(
+            SharedString::from(format!("override-type-{type_id}")),
+            selected,
+            cx,
+        )
+        .gap_2()
+        .px_2()
+        .child(icon_box(
+            catalog,
+            &self.loaded.icons,
+            Icon::Type(type_id),
+            20.,
+        ))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .child(catalog.name(type_id)),
+        )
+        .when(count > 0, |d| {
+            d.child(
                 div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .child(catalog.name(type_id)),
+                    .flex_none()
+                    .text_xs()
+                    .text_color(primary)
+                    .child(count.to_string()),
             )
-            .when(count > 0, |d| {
-                d.child(
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(theme.primary)
-                        .child(count.to_string()),
-                )
-            })
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                this.select(type_id, cx);
-            }))
-            .into_any_element()
+        })
+        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+            this.select(type_id, cx);
+            window.focus(&this.focus, cx);
+        }))
+        .into_any_element()
     }
 
-    fn sidebar(&self, narrow: bool, cx: &mut Context<Self>) -> impl IntoElement {
-        let overrides = self.overrides(cx).clone();
+    fn sidebar(&self, narrow: bool, cx: &mut Context<Self>) -> AnyElement {
         let query = self.search.read(cx).value().trim().to_owned();
         let searching = query.chars().filter(|c| !matches!(c, '*' | '?')).count() >= 3;
-        let (heading, types): (&str, Vec<TypeId>) = if searching {
-            (
-                "RESULTS",
-                crate::market::search(&self.loaded.catalog, &query, SEARCH_LIMIT),
-            )
-        } else {
-            let mut types: Vec<TypeId> = overrides.values.keys().copied().collect();
-            types.sort_by_key(|&t| self.loaded.catalog.name(t));
-            ("OVERRIDDEN ITEMS", types)
+        let catalog = &self.loaded.catalog;
+        // What the rows need, read before they are built.
+        let (enabled, any, listed): (bool, bool, Vec<(TypeId, usize)>) = {
+            let overrides = self.overrides(cx);
+            let types = if searching {
+                crate::market::search(catalog, &query, SEARCH_LIMIT)
+            } else {
+                let mut types: Vec<TypeId> = overrides.values.keys().copied().collect();
+                types.sort_by_key(|&t| catalog.name(t));
+                types
+            };
+            let listed = types
+                .into_iter()
+                .map(|t| (t, overrides.of(t).map_or(0, std::collections::BTreeMap::len)))
+                .collect();
+            (overrides.enabled, !overrides.values.is_empty(), listed)
         };
-        let rows: Vec<AnyElement> = types
-            .iter()
-            .map(|&t| {
-                let count = overrides.of(t).map_or(0, std::collections::BTreeMap::len);
-                self.type_row(t, count, cx)
-            })
+        let rows: Vec<AnyElement> = listed
+            .into_iter()
+            .map(|(t, count)| self.type_row(t, count, cx))
             .collect();
-        let theme = cx.theme();
         let empty = if searching {
             "Nothing matches."
         } else {
             "No overrides yet. Search for an item to override its attributes."
         };
         let switch = Switch::new("overrides-enabled")
-            .checked(overrides.enabled)
+            .checked(enabled)
             .on_click(cx.listener(|this, value: &bool, _, cx| {
                 let value = *value;
                 this.edit(cx, |o| o.enabled = value);
             }));
-        v_flex()
-            .w(px(if narrow { SIDEBAR_NARROW_W } else { SIDEBAR_W }))
-            .h_full()
-            .flex_none()
-            .overflow_hidden()
-            .px_3()
-            .py_4()
-            .gap_3()
-            .border_r_1()
-            .border_color(theme.border)
-            .bg(theme.sidebar)
+        let muted = cx.theme().muted_foreground;
+        let button = |id: &'static str, icon: AssetIcon, label: &'static str| {
+            Button::new(id)
+                .small()
+                .ghost()
+                .icon(UiIcon::new(icon))
+                .when(narrow, |b| b.tooltip(label))
+                .when(!narrow, |b| b.label(label))
+        };
+        let footer = v_flex()
+            .gap_2()
             .child(
                 h_flex()
                     .items_start()
-                    .gap_3()
-                    .px_1()
+                    .gap_2()
                     .child(
                         // The text wraps beside the switch instead of pushing it out.
                         v_flex()
                             .flex_1()
                             .min_w_0()
                             .child(div().font_weight(FontWeight::MEDIUM).child("Use overrides"))
-                            .child(
-                                div().text_xs().text_color(theme.muted_foreground).child(
-                                    "Overridden values replace the base values in every fit.",
-                                ),
-                            ),
+                            .child(div().text_xs().text_color(muted).child(
+                                "Overridden values replace the base values in every fit.",
+                            )),
                     )
                     .child(div().flex_none().child(switch)),
-            )
-            .child(Input::new(&self.search).small().cleanable(true))
-            .child(
-                div()
-                    .px_1()
-                    .text_xs()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme.muted_foreground)
-                    .child(heading),
-            )
-            .child(
-                v_flex()
-                    .id("override-types")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .gap_0p5()
-                    .when(rows.is_empty(), |d| {
-                        d.child(
-                            div()
-                                .px_1()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(empty),
-                        )
-                    })
-                    .children(rows),
             )
             .child(
                 h_flex()
                     .gap_1()
                     .child(
-                        Button::new("overrides-import")
-                            .small()
-                            .ghost()
-                            .icon(UiIcon::new(AssetIcon::FileUp))
-                            .when(narrow, |b| b.tooltip("Import"))
-                            .when(!narrow, |b| b.label("Import"))
+                        button("overrides-import", AssetIcon::FileUp, "Import")
                             .on_click(cx.listener(|_, _: &ClickEvent, _, cx| Self::import(cx))),
                     )
                     .child(
-                        Button::new("overrides-export")
-                            .small()
-                            .ghost()
-                            .icon(UiIcon::new(AssetIcon::FileDown))
-                            .when(narrow, |b| b.tooltip("Export"))
-                            .when(!narrow, |b| b.label("Export"))
-                            .disabled(overrides.values.is_empty())
+                        button("overrides-export", AssetIcon::FileDown, "Export")
+                            .disabled(!any)
                             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.export(cx))),
                     )
                     .child(
-                        Button::new("overrides-clear")
-                            .small()
-                            .ghost()
-                            .icon(UiIcon::new(AssetIcon::Trash))
-                            .when(narrow, |b| b.tooltip("Clear All"))
-                            .when(!narrow, |b| b.label("Clear All"))
-                            .disabled(overrides.values.is_empty())
+                        button("overrides-clear", AssetIcon::Trash, "Clear All")
+                            .disabled(!any)
                             .on_click(cx.listener(|_, _: &ClickEvent, window, cx| {
                                 Self::confirm_clear(window, cx);
                             })),
                     ),
-            )
+            );
+        Sidebar {
+            caption: if searching {
+                "Results"
+            } else {
+                "Overridden items"
+            }
+            .into(),
+            search: Some(self.search.clone()),
+            list_id: "override-types",
+            rows,
+            empty: Some(empty_line(empty, cx).text_xs().into_any_element()),
+            footer: Some(footer.into_any_element()),
+            narrow,
+        }
+        .render(cx)
     }
 
     /// An attribute: its name and base value, the field for its override, and a reset.
@@ -567,32 +524,37 @@ impl OverridesWindow {
     }
 
     fn body(&mut self, narrow: bool, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let (muted_color, danger) = (cx.theme().muted_foreground, cx.theme().danger);
-        let muted = |text: &'static str| {
-            div()
-                .p_8()
-                .text_color(muted_color)
-                .child(text)
-                .into_any_element()
-        };
+        let muted = |text: &'static str, cx: &Context<Self>| empty_line(text, cx).into_any_element();
         let Some(type_id) = self.selected else {
-            return muted("Pick an item on the left to see its attributes.");
+            return muted("Pick an item on the left to see its attributes.", cx);
         };
         let data = match item_data::data(cx) {
             Some(Ok(data)) => data,
             Some(Err(e)) => {
-                return div().p_8().text_color(danger).child(e).into_any_element();
+                return empty_line(e, cx)
+                    .text_color(cx.theme().danger)
+                    .into_any_element();
             }
-            None => return muted("Loading attributes…"),
+            None => return muted("Loading attributes…", cx),
         };
         self.ensure_fields(&data, window, cx);
-        let overrides = self.overrides(cx).clone();
-        let count = overrides
-            .of(type_id)
-            .map_or(0, std::collections::BTreeMap::len);
+        // What the rows need, read before they are built.
+        let (count, enabled, values): (usize, bool, Vec<Option<f64>>) = {
+            let overrides = self.overrides(cx);
+            (
+                overrides
+                    .of(type_id)
+                    .map_or(0, std::collections::BTreeMap::len),
+                overrides.enabled,
+                self.fields
+                    .iter()
+                    .map(|f| overrides.get(type_id, f.attr))
+                    .collect(),
+            )
+        };
         let catalog = &self.loaded.catalog;
         let theme = cx.theme();
-        let summary = match (count, overrides.enabled) {
+        let summary = match (count, enabled) {
             (0, _) => "No attributes overridden.".to_owned(),
             (n, true) => format!("{n} overridden, in effect."),
             (n, false) => format!("{n} overridden, not in effect while overrides are off."),
@@ -640,10 +602,11 @@ impl OverridesWindow {
         let rows: Vec<AnyElement> = self
             .fields
             .iter()
-            .map(|f| Self::field_row(f, overrides.get(type_id, f.attr), cx))
+            .zip(values)
+            .map(|(f, value)| Self::field_row(f, value, cx))
             .collect();
         let content = if rows.is_empty() {
-            muted("This item has no attributes.")
+            muted("This item has no attributes.", cx)
         } else {
             section("Attributes", rows, cx)
         };
@@ -686,13 +649,17 @@ impl Render for OverridesWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let narrow = window.viewport_size().width < px(NARROW_W);
         let body = self.body(narrow, window, cx);
-        let theme = cx.theme();
         h_flex()
             .size_full()
             .items_start()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .text_sm()
+            .key_context(CONTEXT)
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
+                this.search.update(cx, |input, cx| {
+                    input.focus(window, cx);
+                    input.select_all(window, cx);
+                });
+            }))
             .child(self.sidebar(narrow, cx))
             // The attribute list takes the rest of the width and can shrink, so nothing in it
             // pushes past the window.
