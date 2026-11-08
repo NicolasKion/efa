@@ -4,7 +4,7 @@
 use std::{collections::BTreeSet, rc::Rc};
 
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName, Sizable, WindowExt,
+    ActiveTheme, Disableable, IconName, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -24,7 +24,11 @@ use crate::{
         Imported,
         esi::{Fitting, to_fit},
     },
-    ui::{Hub, Loaded, widgets::icon_box},
+    ui::{
+        Hub, Loaded,
+        dialogs::{Confirm, confirm},
+        widgets::{count, icon_box},
+    },
 };
 
 /// Where an item of a fitting sits, for the contents pane, in pyfa's order.
@@ -124,13 +128,8 @@ impl EsiFittingsWindow {
                 w.busy = None;
                 match result {
                     Ok(fittings) => {
-                        w.message = Some((
-                            match fittings.len() {
-                                1 => "1 fitting".into(),
-                                n => format!("{n} fittings").into(),
-                            },
-                            false,
-                        ));
+                        w.message =
+                            Some((count(fittings.len(), "fitting", "fittings").into(), false));
                         w.fittings = fittings;
                         w.fetched_for = Some(character);
                         w.selected
@@ -189,16 +188,13 @@ impl EsiFittingsWindow {
                 Err(e) => errors.push(format!("{}: {e}", f.name)),
             }
         }
-        let count = all.fits.len();
-        if count > 0 {
+        let fits = all.fits.len();
+        if fits > 0 {
             self.hub.update(cx, |hub, cx| hub.import_fits(all, cx));
         }
         self.message = Some(if errors.is_empty() {
             (
-                match count {
-                    1 => "Imported 1 fit into efa".into(),
-                    n => format!("Imported {n} fits into efa").into(),
-                },
+                format!("Imported {} into efa", count(fits, "fit", "fits")).into(),
                 false,
             )
         } else {
@@ -230,30 +226,9 @@ impl EsiFittingsWindow {
             ),
         };
         let this = cx.weak_entity();
-        window.open_dialog(cx, move |dialog, _, _| {
-            let (this, ids) = (this.clone(), ids.clone());
-            dialog.title("Confirm Delete").w(px(380.)).child(
-                v_flex().gap_3().child(question.clone()).child(
-                    h_flex()
-                        .justify_end()
-                        .gap_2()
-                        .child(
-                            Button::new("esi-delete-no")
-                                .label("No")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(
-                            Button::new("esi-delete-yes")
-                                .danger()
-                                .label("Yes")
-                                .on_click(move |_, window, cx| {
-                                    window.close_dialog(cx);
-                                    let ids = ids.clone();
-                                    let _ = this.update(cx, |w, cx| w.delete(character, ids, cx));
-                                }),
-                        ),
-                ),
-            )
+        confirm(window, cx, Confirm::delete(question), move |_, cx| {
+            let ids = ids.clone();
+            let _ = this.update(cx, |w, cx| w.delete(character, ids, cx));
         });
     }
 
@@ -285,10 +260,11 @@ impl EsiFittingsWindow {
                         w.message = Some(match error {
                             Some(e) => (e.into(), true),
                             None => (
-                                match deleted.len() {
-                                    1 => "Deleted 1 fitting from EVE".into(),
-                                    n => format!("Deleted {n} fittings from EVE").into(),
-                                },
+                                format!(
+                                    "Deleted {} from EVE",
+                                    count(deleted.len(), "fitting", "fittings")
+                                )
+                                .into(),
                                 false,
                             ),
                         });
@@ -506,9 +482,6 @@ impl Render for EsiFittingsWindow {
             .size_full()
             .p_3()
             .gap_2()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .text_sm()
             .child(
                 h_flex()
                     .flex_wrap()

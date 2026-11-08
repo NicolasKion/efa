@@ -221,14 +221,10 @@ impl Render for ExportToEveWindow {
                         cx,
                     )),
             );
-        let theme = cx.theme();
         v_flex()
             .size_full()
             .p_4()
             .gap_3()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .text_sm()
             .child(body)
             .child(login_status(&self.hub, cx))
             .when_some(message, |col, (text, error)| {

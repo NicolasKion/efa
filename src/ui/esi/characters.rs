@@ -152,9 +152,6 @@ impl Render for EsiCharactersWindow {
             .size_full()
             .p_4()
             .gap_3()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .text_sm()
             .child(
                 div().text_xs().text_color(theme.muted_foreground).child(
                     "Characters efa may read skills and fittings for, and save fittings to.",
