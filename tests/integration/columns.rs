@@ -186,7 +186,7 @@ fn structures_fit_services() {
     assert_eq!(stats.service.used, 1);
 
     // Services go in and out of EFT text in their own section.
-    let text = fit.to_eft(&catalog);
+    let text = efa::port::eft::export(&fit, &catalog, &efa::port::eft::Options::default(), None);
     assert!(text.contains("Standup Manufacturing Plant I"), "{text}");
     let (back, unknown) = Fit::from_eft(&catalog, &text).expect("parses");
     assert!(unknown.is_empty(), "{unknown:?}");

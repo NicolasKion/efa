@@ -4,7 +4,7 @@
 
 use std::fmt::Write;
 
-use super::{dna, eft, escape_xml};
+use super::{dna, eft, escape_markup};
 use crate::{data::Catalog, fit::Fit};
 
 /// Where pyfa's links send a fit's DNA.
@@ -36,9 +36,9 @@ pub fn export(fits: &[Fit], catalog: &Catalog, minimal: bool) -> String {
             let _ = writeln!(
                 out,
                 "<a class=\"outOfGameBrowserLink\" target=\"_blank\" href=\"{}\">{}: {}</a><br>",
-                escape_xml(&link(fit)),
-                escape_xml(ship),
-                escape_xml(&fit.name)
+                escape_markup(&link(fit)),
+                escape_markup(ship),
+                escape_markup(&fit.name)
             );
         }
         return out;
@@ -54,17 +54,17 @@ pub fn export(fits: &[Fit], catalog: &Catalog, minimal: bool) -> String {
     let mut last_group = None;
     for (group, ship, fit) in &rows {
         if last_group != Some(group) {
-            let _ = writeln!(out, "<h2>{}</h2>", escape_xml(group));
+            let _ = writeln!(out, "<h2>{}</h2>", escape_markup(group));
             last_group = Some(group);
         }
         let text = eft::export(fit, catalog, &eft::Options::default(), None);
         let _ = writeln!(
             out,
             "<details><summary><a target=\"_blank\" href=\"{}\">{}: {}</a></summary><pre>{}</pre></details>",
-            escape_xml(&link(fit)),
-            escape_xml(ship),
-            escape_xml(&fit.name),
-            escape_xml(&text)
+            escape_markup(&link(fit)),
+            escape_markup(ship),
+            escape_markup(&fit.name),
+            escape_markup(&text)
         );
     }
     out.push_str("</body>\n</html>\n");

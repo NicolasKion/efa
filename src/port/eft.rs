@@ -3,10 +3,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{Imported, muta::Blocks, sort_cargo};
+use super::{Imported, muta::Blocks, new_fit, sort_cargo};
 use crate::{
     data::{Catalog, Kind, Slot},
-    fit::{DroneStack, Fit, Module, ModuleState, fighters::Fighter},
+    fit::{DroneStack, Fit, Module, ModuleState, fighters::Fighter, split_count},
 };
 
 /// pyfa's EFT export options, with its defaults.
@@ -176,7 +176,7 @@ pub fn parse_drones(catalog: &Catalog, text: &str) -> Vec<DroneStack> {
         .filter(|l| !l.is_empty())
         .filter_map(|line| {
             let (line, reference) = super::muta::split_reference(line);
-            let (name, count) = crate::fit::split_count(line);
+            let (name, count) = split_count(line);
             let t = catalog.find(name).filter(|t| t.kind == Kind::Drone)?;
             let mut stack = DroneStack::new(t.id, count.unwrap_or(1), 0);
             if let Some((result, mutation)) = reference
@@ -227,28 +227,160 @@ fn is_header(line: &str) -> bool {
         && !line.starts_with("[Empty ")
 }
 
-/// pyfa writes "/offline", the game "/OFFLINE"; the fit parser knows the latter.
-fn normalize_offline(line: &str) -> String {
-    let trimmed = line.trim_end();
-    match trimmed.len().checked_sub(OFFLINE.len()) {
-        Some(at) if trimmed.is_char_boundary(at) && trimmed[at..].eq_ignore_ascii_case(OFFLINE) => {
-            format!("{}{OFFLINE}", &trimmed[..at])
-        }
-        _ => line.to_owned(),
-    }
-}
-
+/// pyfa writes "/offline", the game "/OFFLINE"; either reads.
 const OFFLINE: &str = "/OFFLINE";
+
+/// Parse an EFT block. Lines are placed by what the item is rather than which section it sits in,
+/// so slightly mangled pastes still come through. Unknown names are returned alongside.
+pub fn parse(catalog: &Catalog, text: &str) -> Result<(Fit, Vec<String>), String> {
+    let mut all: Vec<String> = text.lines().map(|l| l.trim().to_owned()).collect();
+    let mutations = super::muta::take_blocks(catalog, &mut all);
+    let mut lines = all.iter().map(String::as_str).skip_while(|l| l.is_empty());
+    let header = lines.next().ok_or("nothing to import")?;
+    let header = header
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .ok_or("an EFT fit starts with [Ship, Name]")?;
+    let (ship_name, fit_name) = header.split_once(',').unwrap_or((header, ""));
+    let ship = catalog
+        .find(ship_name)
+        .filter(|t| t.kind == Kind::Ship)
+        .ok_or_else(|| format!("unknown ship \"{}\"", ship_name.trim()))?;
+
+    let mut fit = new_fit(catalog, ship.id, fit_name.trim().to_owned());
+    let mut unknown = Vec::new();
+    let mut in_cargo_section = false;
+    let mut seen_stacks = false;
+
+    // pyfa's fighter bay: a section of nothing but counted fighters. When there is one,
+    // counted fighters anywhere else are spare squadrons in cargo.
+    let lines: Vec<&str> = lines.collect();
+    let fighter_bays: Vec<bool> = lines
+        .split(|l| l.is_empty())
+        .map(|section| {
+            !section.is_empty()
+                && section.iter().all(|line| {
+                    let (line, _) = super::muta::split_reference(line);
+                    let (name, count) = split_count(line);
+                    count.is_some() && catalog.find(name).is_some_and(|t| t.kind == Kind::Fighter)
+                })
+        })
+        .collect();
+    let has_fighter_bay = fighter_bays.contains(&true);
+    let mut section = 0;
+
+    for line in lines {
+        if line.is_empty() {
+            // Charges after the drone section are cargo, not ammo for anything.
+            in_cargo_section = seen_stacks;
+            section += 1;
+            continue;
+        }
+        if let Some(empty) = line
+            .strip_prefix("[Empty ")
+            .and_then(|l| l.strip_suffix(" slot]"))
+        {
+            match empty {
+                "High" => fit.high.push(None),
+                "Med" => fit.mid.push(None),
+                "Low" => fit.low.push(None),
+                "Rig" => fit.rigs.push(None),
+                "Service" => fit.services.push(None),
+                _ => {}
+            }
+            continue;
+        }
+        let (line, reference) = super::muta::split_reference(line);
+        let mutation = reference.and_then(|r| mutations.get(&r));
+        let (line, offline) = match line
+            .len()
+            .checked_sub(OFFLINE.len())
+            .filter(|&at| line.is_char_boundary(at))
+            .filter(|&at| line[at..].eq_ignore_ascii_case(OFFLINE))
+        {
+            Some(at) => (line[..at].trim(), true),
+            None => (line, false),
+        };
+        let (name, count) = split_count(line);
+        let (name, charge) = match count {
+            Some(_) => (name, None),
+            None => match name.split_once(", ") {
+                Some((module, charge)) => (module, Some(charge)),
+                None => (name, None),
+            },
+        };
+        let Some(t) = catalog.find(name) else {
+            unknown.push(name.to_owned());
+            continue;
+        };
+        match (t.kind, count) {
+            (Kind::Fighter, Some(n)) if !has_fighter_bay || fighter_bays[section] => {
+                seen_stacks = true;
+                fit.fighters.push(Fighter::with_size(catalog, t.id, n));
+            }
+            (Kind::Drone, Some(n)) => {
+                seen_stacks = true;
+                let mut stack = DroneStack::new(t.id, n, 0);
+                if let Some((result, m)) = mutation.and_then(|m| m.mutation(catalog)) {
+                    stack.type_id = result;
+                    stack.mutation = Some(m);
+                }
+                fit.drones.push(stack);
+            }
+            (_, Some(n)) => {
+                seen_stacks = true;
+                fit.cargo.push((t.id, n));
+            }
+            (Kind::Charge, None) if in_cargo_section => fit.cargo.push((t.id, 1)),
+            (Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low | Slot::Service)), None) => {
+                let state = match (offline, t.activatable) {
+                    (true, _) => ModuleState::Offline,
+                    (false, true) => ModuleState::Active,
+                    (false, false) => ModuleState::Online,
+                };
+                let charge = charge.and_then(|name| {
+                    let found = catalog.find(name).map(|c| c.id);
+                    if found.is_none() {
+                        unknown.push(name.to_owned());
+                    }
+                    found
+                });
+                let mut module = Module {
+                    state,
+                    charge,
+                    ..Module::new(catalog, t.id)
+                };
+                if let Some((result, m)) = mutation.and_then(|m| m.mutation(catalog)) {
+                    module.type_id = result;
+                    module.mutation = Some(m);
+                }
+                fit.rack_mut(slot).push(Some(module));
+            }
+            // EFT lists rigs in position, empty slots included.
+            (Kind::Module(Slot::Rig), None) => fit.rigs.push(Some(t.id)),
+            _ => {
+                fit.add(catalog, t.id);
+            }
+        }
+    }
+    // Launch drones in the order they were listed, up to what can be in space.
+    let mut room = crate::fit::MAX_LAUNCHED;
+    for stack in &mut fit.drones {
+        stack.active = stack.count.min(room);
+        room -= stack.active;
+    }
+    Ok((fit, unknown))
+}
 
 /// Every fit in EFT text: one per "[Ship, Name]" header, so several pasted at once all come in.
 pub fn import(catalog: &Catalog, text: &str) -> Result<Imported, String> {
-    let mut blocks: Vec<Vec<String>> = Vec::new();
+    let mut blocks: Vec<Vec<&str>> = Vec::new();
     for line in text.lines() {
         if is_header(line.trim()) {
             blocks.push(Vec::new());
         }
         if let Some(block) = blocks.last_mut() {
-            block.push(normalize_offline(line));
+            block.push(line);
         }
     }
     if blocks.is_empty() {
@@ -257,7 +389,7 @@ pub fn import(catalog: &Catalog, text: &str) -> Result<Imported, String> {
     let mut imported = Imported::default();
     let mut errors = Vec::new();
     for block in blocks {
-        match Fit::from_eft(catalog, &block.join("\n")) {
+        match parse(catalog, &block.join("\n")) {
             Ok((fit, unknown)) => {
                 imported.fits.push(fit);
                 imported.unknown.extend(unknown);
@@ -281,10 +413,9 @@ pub fn import_config(catalog: &Catalog, ship_name: &str, text: &str) -> Result<I
     let mut imported = Imported::default();
     for line in text.lines().map(str::trim) {
         if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
-            let mut fit = Fit::new(name);
-            fit.ship = Some(ship.id);
-            fit.mode = catalog.modes_for(ship.id).first().copied();
-            imported.fits.push(fit);
+            imported
+                .fits
+                .push(new_fit(catalog, ship.id, name.to_owned()));
             continue;
         }
         let Some(fit) = imported.fits.last_mut() else {

@@ -536,7 +536,7 @@ fn answer(mut stream: TcpStream, state: &str) -> Callback {
     let body = format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>efa</title></head>\
          <body style=\"font-family:sans-serif;margin:3em\"><p>{}</p></body></html>",
-        escape_html(&message)
+        crate::port::escape_markup(&message)
     );
     let _ = write!(
         stream,
@@ -546,12 +546,6 @@ fn answer(mut stream: TcpStream, state: &str) -> Callback {
     );
     let _ = stream.flush();
     callback
-}
-
-fn escape_html(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 /// A login on its way: the browser is to be sent to `url`, then [`Login::finish`] waits for it.

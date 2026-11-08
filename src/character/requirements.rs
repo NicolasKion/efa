@@ -9,6 +9,7 @@ use crate::{
 };
 
 use super::roman;
+use crate::port::escape_markup as escape;
 
 /// A skill the character has below what is needed, with its own missing prerequisites.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,13 +274,6 @@ pub fn plan_xml(character: &str, plan: &[PlanEntry]) -> String {
     }
     out.push_str("</plan>\n");
     out
-}
-
-pub(super) fn escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
 }
 
 #[cfg(test)]

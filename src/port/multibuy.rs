@@ -3,10 +3,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{Tally, charge_count, sort_cargo};
+use super::{Tally, sort_cargo};
 use crate::{
     data::{Catalog, TypeId},
-    fit::Fit,
+    fit::{Fit, Place},
     prices::optimize,
 };
 
@@ -40,42 +40,18 @@ impl Default for Options {
 
 /// The items the list holds and how many of each, the ship left out, in fit order.
 pub fn amounts(fit: &Fit, catalog: &Catalog, options: &Options) -> Vec<(TypeId, u32)> {
-    let mut amounts: Tally<TypeId> = Tally::default();
-    let mut add = |type_id: TypeId, count: u32| amounts.add(type_id, count);
-    for m in fit.modules() {
-        add(m.type_id, 1);
-        if let Some(charge) = m.charge.filter(|_| options.loaded_charges) {
-            add(charge, charge_count(catalog, m.type_id, charge));
-        }
-    }
-    for &rig in fit.rigs.iter().flatten() {
-        add(rig, 1);
-    }
-    for &subsystem in &fit.subsystems {
-        add(subsystem, 1);
-    }
-    for d in &fit.drones {
-        add(d.type_id, d.count);
-    }
-    for f in &fit.fighters {
-        add(f.type_id, f.size(catalog));
-    }
-    if options.cargo {
-        for &(type_id, count) in &fit.cargo {
-            add(type_id, count);
-        }
-    }
-    if options.implants {
-        for &implant in &fit.implants {
-            add(implant, 1);
-        }
-    }
-    if options.boosters {
-        for b in &fit.boosters {
-            add(b.type_id, 1);
-        }
-    }
-    amounts.into_vec()
+    fit.items()
+        .filter(|i| match i.place {
+            Place::Ship => false,
+            Place::Charge { .. } => options.loaded_charges,
+            Place::Cargo => options.cargo,
+            Place::Implant => options.implants,
+            Place::Booster => options.boosters,
+            Place::Module | Place::Rig | Place::Subsystem | Place::Drone | Place::Fighter => true,
+        })
+        .map(|i| (i.type_id, i.count(catalog)))
+        .collect::<Tally<TypeId>>()
+        .into_vec()
 }
 
 /// The list as it is, whatever `options` says about optimizing prices.

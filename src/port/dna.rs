@@ -3,10 +3,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{Bay, Imported, Tally, charge_count, new_fit, place, sorted_subsystems};
+use super::{Bay, Imported, Tally, new_fit, place, sorted_subsystems};
 use crate::{
     data::{Catalog, Kind, TypeId},
-    fit::Fit,
+    fit::{Fit, Place},
 };
 
 /// pyfa's DNA export option, with its default.
@@ -35,30 +35,26 @@ pub fn export(fit: &Fit, catalog: &Catalog, options: &Options) -> String {
         parts.push(format!("{subsystem};1"));
     }
     let mut modules: Tally<TypeId> = Tally::default();
+    let mut bays: Vec<(TypeId, u32)> = Vec::new();
     let mut charges: Tally<TypeId> = Tally::default();
-    let fitted = fit
-        .modules()
-        .map(|m| (m.type_id, m.charge))
-        .chain(fit.rigs.iter().flatten().map(|&r| (r, None)));
-    for (type_id, charge) in fitted {
-        modules.add(type_id, 1);
-        if let Some(charge) = charge {
-            charges.add(charge, charge_count(catalog, type_id, charge));
+    for item in fit.items() {
+        let count = || item.count(catalog);
+        match item.place {
+            Place::Module | Place::Rig => modules.add(item.type_id, 1),
+            // Every stack and squadron is an entry of its own.
+            Place::Drone | Place::Fighter => bays.push((item.type_id, count())),
+            Place::Charge { .. } => charges.add(item.type_id, count()),
+            Place::Cargo
+                if catalog
+                    .get(item.type_id)
+                    .is_some_and(|t| t.kind == Kind::Charge) =>
+            {
+                charges.add(item.type_id, count());
+            }
+            _ => {}
         }
     }
-    for &(type_id, count) in &fit.cargo {
-        if catalog.get(type_id).is_some_and(|t| t.kind == Kind::Charge) {
-            charges.add(type_id, count);
-        }
-    }
-    let drones = fit.drones.iter().map(|d| (d.type_id, d.count));
-    let fighters = fit.fighters.iter().map(|f| (f.type_id, f.size(catalog)));
-    for (type_id, count) in modules
-        .into_iter()
-        .chain(drones)
-        .chain(fighters)
-        .chain(charges)
-    {
+    for (type_id, count) in modules.into_iter().chain(bays).chain(charges) {
         parts.push(format!("{type_id};{count}"));
     }
     let dna = format!("{}::", parts.join(":"));

@@ -6,8 +6,6 @@ pub mod fighters;
 pub mod mutation;
 pub mod projected;
 
-use std::fmt::Write;
-
 use serde::{Deserialize, Serialize};
 
 pub use mutation::Mutation;
@@ -336,7 +334,7 @@ pub enum DamageProfile {
 }
 
 /// Drones a character can have in space at once, without skills or ship bonuses changing it.
-const MAX_LAUNCHED: u32 = 5;
+pub(crate) const MAX_LAUNCHED: u32 = 5;
 
 impl Fit {
     pub fn new(name: impl Into<String>) -> Self {
@@ -759,243 +757,117 @@ impl Fit {
         }
     }
 
-    pub fn to_eft(&self, catalog: &Catalog) -> String {
-        let mut out = String::new();
-        let ship = self
-            .ship
-            .map_or_else(|| "No ship".to_owned(), |s| catalog.name(s));
-        let _ = writeln!(out, "[{ship}, {}]", self.name);
-
-        let mut blocks = crate::port::muta::Blocks::default();
-        let mut module_line = |empty: &'static str, m: &Option<Module>| {
-            let Some(m) = m else {
-                return format!("[Empty {empty} slot]");
-            };
-            let mut line = catalog.name(m.base_type());
-            if let Some(charge) = m.charge {
-                let _ = write!(line, ", {}", catalog.name(charge));
-            }
-            if m.state == ModuleState::Offline {
-                line.push_str(" /OFFLINE");
-            }
-            if let Some(mutation) = &m.mutation {
-                line.push_str(&blocks.add(catalog, mutation));
-            }
-            line
-        };
-        let low = self.low.iter().map(|m| module_line("Low", m)).collect();
-        let mid = self.mid.iter().map(|m| module_line("Med", m)).collect();
-        let high = self.high.iter().map(|m| module_line("High", m)).collect();
-        let services = self
-            .services
-            .iter()
-            .map(|m| module_line("Service", m))
-            .collect();
-        let drones = self
-            .drones
-            .iter()
-            .map(|d| {
-                let mut line = format!("{} x{}", catalog.name(d.base_type()), d.count);
-                if let Some(mutation) = &d.mutation {
-                    line.push_str(&blocks.add(catalog, mutation));
-                }
-                line
-            })
-            .collect();
-        let mut sections: Vec<Vec<String>> = vec![
-            low,
-            mid,
-            high,
-            self.rigs
-                .iter()
-                .map(|r| r.map_or_else(|| "[Empty Rig slot]".to_owned(), |r| catalog.name(r)))
-                .collect(),
-            self.subsystems
-                .iter()
-                .chain(&self.mode)
-                .map(|&s| catalog.name(s))
-                .collect(),
-            services,
-            drones,
-            self.fighters
-                .iter()
-                .map(|f| format!("{} x{}", catalog.name(f.type_id), f.size(catalog)))
-                .collect(),
-            self.implants.iter().map(|&i| catalog.name(i)).collect(),
-            self.boosters
-                .iter()
-                .map(|b| catalog.name(b.type_id))
-                .collect(),
-            self.cargo
-                .iter()
-                .map(|&(t, n)| format!("{} x{n}", catalog.name(t)))
-                .collect(),
-            blocks.render().lines().map(str::to_owned).collect(),
-        ];
-        sections.retain(|s| !s.is_empty());
-        for (n, section) in sections.into_iter().enumerate() {
-            if n > 0 {
-                out.push('\n');
-            }
-            for line in section {
-                out.push_str(&line);
-                out.push('\n');
-            }
-        }
-        out
+    /// Parse an EFT block; see [`crate::port::eft::parse`].
+    pub fn from_eft(catalog: &Catalog, text: &str) -> Result<(Self, Vec<String>), String> {
+        crate::port::eft::parse(catalog, text)
     }
 
-    /// Parse an EFT block. Lines are placed by what the item is rather than which section it sits
-    /// in, so slightly mangled pastes still come through. Unknown names are returned alongside.
-    pub fn from_eft(catalog: &Catalog, text: &str) -> Result<(Self, Vec<String>), String> {
-        let mut all: Vec<String> = text.lines().map(|l| l.trim().to_owned()).collect();
-        let mutations = crate::port::muta::take_blocks(catalog, &mut all);
-        let mut lines = all.iter().map(String::as_str).skip_while(|l| l.is_empty());
-        let header = lines.next().ok_or("nothing to import")?;
-        let header = header
-            .strip_prefix('[')
-            .and_then(|h| h.strip_suffix(']'))
-            .ok_or("an EFT fit starts with [Ship, Name]")?;
-        let (ship_name, fit_name) = header.split_once(',').unwrap_or((header, ""));
-        let ship = catalog
-            .find(ship_name)
-            .filter(|t| t.kind == Kind::Ship)
-            .ok_or_else(|| format!("unknown ship \"{}\"", ship_name.trim()))?;
-
-        let mut fit = Fit::new(fit_name.trim());
-        fit.ship = Some(ship.id);
-        fit.mode = catalog.modes_for(ship.id).first().copied();
-        let mut unknown = Vec::new();
-        let mut in_cargo_section = false;
-        let mut seen_stacks = false;
-
-        // pyfa's fighter bay: a section of nothing but counted fighters. When there is one,
-        // counted fighters anywhere else are spare squadrons in cargo.
-        let lines: Vec<&str> = lines.collect();
-        let fighter_bays: Vec<bool> = lines
-            .split(|l| l.is_empty())
-            .map(|section| {
-                !section.is_empty()
-                    && section.iter().all(|line| {
-                        let (line, _) = crate::port::muta::split_reference(line);
-                        let (name, count) = split_count(line);
-                        count.is_some()
-                            && catalog.find(name).is_some_and(|t| t.kind == Kind::Fighter)
-                    })
-            })
-            .collect();
-        let has_fighter_bay = fighter_bays.contains(&true);
-        let mut section = 0;
-
-        for line in lines {
-            if line.is_empty() {
-                // Charges after the drone section are cargo, not ammo for anything.
-                in_cargo_section = seen_stacks;
-                section += 1;
-                continue;
-            }
-            if let Some(empty) = line
-                .strip_prefix("[Empty ")
-                .and_then(|l| l.strip_suffix(" slot]"))
-            {
-                match empty {
-                    "High" => fit.high.push(None),
-                    "Med" => fit.mid.push(None),
-                    "Low" => fit.low.push(None),
-                    "Rig" => fit.rigs.push(None),
-                    "Service" => fit.services.push(None),
-                    _ => {}
-                }
-                continue;
-            }
-            let (line, reference) = crate::port::muta::split_reference(line);
-            let mutation = reference.and_then(|r| mutations.get(&r));
-            let (line, offline) = match line
-                .len()
-                .checked_sub(OFFLINE.len())
-                .filter(|&at| line.is_char_boundary(at))
-                .filter(|&at| line[at..].eq_ignore_ascii_case(OFFLINE))
-            {
-                Some(at) => (line[..at].trim(), true),
-                None => (line, false),
+    /// Every item on the fit with where it sits, the ship first, then modules each followed by
+    /// its charge (high, mid, low, services), rigs, subsystems, drones, fighters, implants,
+    /// boosters and cargo. The tactical mode is no item anyone buys and is left out.
+    pub fn items(&self) -> impl Iterator<Item = Item> + '_ {
+        let item = |type_id, place, amount| Item {
+            type_id,
+            place,
+            mutated: false,
+            amount,
+        };
+        let modules = self.modules().flat_map(move |m| {
+            let module = Item {
+                mutated: m.mutation.is_some(),
+                ..item(m.type_id, Place::Module, Some(1))
             };
-            let (name, count) = split_count(line);
-            let (name, charge) = match count {
-                Some(_) => (name, None),
-                None => match name.split_once(", ") {
-                    Some((module, charge)) => (module, Some(charge)),
-                    None => (name, None),
-                },
-            };
-            let Some(t) = catalog.find(name) else {
-                unknown.push(name.to_owned());
-                continue;
-            };
-            match (t.kind, count) {
-                (Kind::Fighter, Some(n)) if !has_fighter_bay || fighter_bays[section] => {
-                    seen_stacks = true;
-                    fit.fighters
-                        .push(fighters::Fighter::with_size(catalog, t.id, n));
-                }
-                (Kind::Drone, Some(n)) => {
-                    seen_stacks = true;
-                    let mut stack = DroneStack::new(t.id, n, 0);
-                    if let Some((result, m)) = mutation.and_then(|m| m.mutation(catalog)) {
-                        stack.type_id = result;
-                        stack.mutation = Some(m);
-                    }
-                    fit.drones.push(stack);
-                }
-                (_, Some(n)) => {
-                    seen_stacks = true;
-                    fit.cargo.push((t.id, n));
-                }
-                (Kind::Charge, None) if in_cargo_section => fit.cargo.push((t.id, 1)),
-                (
-                    Kind::Module(slot @ (Slot::High | Slot::Mid | Slot::Low | Slot::Service)),
-                    None,
-                ) => {
-                    let state = match (offline, t.activatable) {
-                        (true, _) => ModuleState::Offline,
-                        (false, true) => ModuleState::Active,
-                        (false, false) => ModuleState::Online,
-                    };
-                    let charge = charge.and_then(|name| {
-                        let found = catalog.find(name).map(|c| c.id);
-                        if found.is_none() {
-                            unknown.push(name.to_owned());
-                        }
-                        found
-                    });
-                    let mut module = Module {
-                        state,
-                        charge,
-                        ..Module::new(catalog, t.id)
-                    };
-                    if let Some((result, m)) = mutation.and_then(|m| m.mutation(catalog)) {
-                        module.type_id = result;
-                        module.mutation = Some(m);
-                    }
-                    fit.rack_mut(slot).push(Some(module));
-                }
-                // EFT lists rigs in position, empty slots included.
-                (Kind::Module(Slot::Rig), None) => fit.rigs.push(Some(t.id)),
-                _ => {
-                    fit.add(catalog, t.id);
-                }
-            }
-        }
-        // Launch drones in the order they were listed, up to what can be in space.
-        let mut room = MAX_LAUNCHED;
-        for stack in &mut fit.drones {
-            stack.active = stack.count.min(room);
-            room -= stack.active;
-        }
-        Ok((fit, unknown))
+            let charge = m
+                .charge
+                .map(|c| item(c, Place::Charge { module: m.type_id }, None));
+            std::iter::once(module).chain(charge)
+        });
+        let drones = self.drones.iter().map(move |d| Item {
+            mutated: d.mutation.is_some(),
+            ..item(d.type_id, Place::Drone, Some(d.count))
+        });
+        self.ship
+            .map(|s| item(s, Place::Ship, Some(1)))
+            .into_iter()
+            .chain(modules)
+            .chain(
+                self.rigs
+                    .iter()
+                    .flatten()
+                    .map(move |&r| item(r, Place::Rig, Some(1))),
+            )
+            .chain(
+                self.subsystems
+                    .iter()
+                    .map(move |&s| item(s, Place::Subsystem, Some(1))),
+            )
+            .chain(drones)
+            .chain(
+                self.fighters
+                    .iter()
+                    .map(move |f| item(f.type_id, Place::Fighter, f.amount)),
+            )
+            .chain(
+                self.implants
+                    .iter()
+                    .map(move |&i| item(i, Place::Implant, Some(1))),
+            )
+            .chain(
+                self.boosters
+                    .iter()
+                    .map(move |b| item(b.type_id, Place::Booster, Some(1))),
+            )
+            .chain(
+                self.cargo
+                    .iter()
+                    .map(move |&(t, n)| item(t, Place::Cargo, Some(n))),
+            )
     }
 }
 
-const OFFLINE: &str = "/OFFLINE";
+/// Where an item sits on a fit, for [`Fit::items`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    Ship,
+    Module,
+    /// Loaded into a module of this type.
+    Charge {
+        module: TypeId,
+    },
+    Rig,
+    Subsystem,
+    Drone,
+    Fighter,
+    Implant,
+    Booster,
+    Cargo,
+}
+
+/// One item on a fit, as [`Fit::items`] walks them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Item {
+    pub type_id: TypeId,
+    pub place: Place,
+    /// A mutated module or drone stack.
+    pub mutated: bool,
+    /// How many, when the fit alone says.
+    amount: Option<u32>,
+}
+
+impl Item {
+    /// How many there are: a stack's size, as many charges as the module holds, or the full
+    /// squadron for a fighter kept at full size.
+    pub fn count(&self, catalog: &Catalog) -> u32 {
+        match (self.amount, self.place) {
+            (Some(n), _) => n,
+            (None, Place::Charge { module }) => {
+                crate::port::charge_count(catalog, module, self.type_id)
+            }
+            (None, Place::Fighter) => catalog.projection.squadron_size(self.type_id).unwrap_or(1),
+            (None, _) => 1,
+        }
+    }
+}
 
 /// The slot an implant takes; implants without one sort last.
 pub fn implant_slot(catalog: &Catalog, type_id: TypeId) -> u8 {

@@ -3,7 +3,7 @@
 
 use std::fmt::Write;
 
-use super::{Bay, Imported, Tally, charge_count, escape_xml, new_fit, place, subsystem_flag};
+use super::{Bay, Imported, Tally, charge_count, escape_markup, new_fit, place, subsystem_flag};
 use crate::{
     data::{Catalog, Kind, Slot},
     fit::{DroneStack, Fit, Mutation},
@@ -18,13 +18,17 @@ pub fn export(fits: &[&Fit], catalog: &Catalog) -> String {
     let _ = writeln!(out, "<fittings count=\"{}\">", fits.len());
     for fit in fits {
         let Some(ship) = fit.ship else { continue };
-        let _ = writeln!(out, "\t<fitting name=\"{}\">", escape_xml(&fit.name));
+        let _ = writeln!(out, "\t<fitting name=\"{}\">", escape_markup(&fit.name));
         let notes = description(&fit.notes);
-        let _ = writeln!(out, "\t\t<description value=\"{}\"/>", escape_xml(&notes));
+        let _ = writeln!(
+            out,
+            "\t\t<description value=\"{}\"/>",
+            escape_markup(&notes)
+        );
         let _ = writeln!(
             out,
             "\t\t<shipType value=\"{}\"/>",
-            escape_xml(&catalog.name(ship))
+            escape_markup(&catalog.name(ship))
         );
         let mut charges: Tally<String> = Tally::default();
         let mut add_charge = |name: String, count: u32| charges.add(name, count);
@@ -32,7 +36,7 @@ pub fn export(fits: &[&Fit], catalog: &Catalog) -> String {
             let _ = writeln!(
                 out,
                 "\t\t<hardware slot=\"{slot}\" type=\"{}\"{}/>",
-                escape_xml(&catalog.name(type_id)),
+                escape_markup(&catalog.name(type_id)),
                 mutant_attrs(catalog, mutation)
             );
         };
@@ -59,7 +63,7 @@ pub fn export(fits: &[&Fit], catalog: &Catalog) -> String {
                 out,
                 "\t\t<hardware qty=\"{}\" slot=\"drone bay\" type=\"{}\"{}/>",
                 d.count,
-                escape_xml(&catalog.name(d.type_id)),
+                escape_markup(&catalog.name(d.type_id)),
                 mutant_attrs(catalog, d.mutation.as_ref())
             );
         }
@@ -68,7 +72,7 @@ pub fn export(fits: &[&Fit], catalog: &Catalog) -> String {
                 out,
                 "\t\t<hardware qty=\"{}\" slot=\"fighter bay\" type=\"{}\"/>",
                 f.size(catalog),
-                escape_xml(&catalog.name(f.type_id))
+                escape_markup(&catalog.name(f.type_id))
             );
         }
         for &(type_id, count) in &fit.cargo {
@@ -78,7 +82,7 @@ pub fn export(fits: &[&Fit], catalog: &Catalog) -> String {
             let _ = writeln!(
                 out,
                 "\t\t<hardware qty=\"{count}\" slot=\"cargo\" type=\"{}\"/>",
-                escape_xml(&name)
+                escape_markup(&name)
             );
         }
         out.push_str("\t</fitting>\n");
@@ -92,9 +96,9 @@ fn mutant_attrs(catalog: &Catalog, mutation: Option<&Mutation>) -> String {
     mutation.map_or_else(String::new, |m| {
         format!(
             " base_type=\"{}\" mutaplasmid=\"{}\" mutated_attrs=\"{}\"",
-            escape_xml(&catalog.name(m.base)),
-            escape_xml(&catalog.name(m.mutaplasmid)),
-            escape_xml(&m.render_attrs(catalog))
+            escape_markup(&catalog.name(m.base)),
+            escape_markup(&catalog.name(m.mutaplasmid)),
+            escape_markup(&m.render_attrs(catalog))
         )
     })
 }

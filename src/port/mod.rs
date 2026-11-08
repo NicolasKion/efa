@@ -308,8 +308,8 @@ pub(crate) fn new_fit(catalog: &Catalog, ship: TypeId, name: String) -> Fit {
     fit
 }
 
-/// Text with XML's five entities escaped, for attribute values.
-pub(crate) fn escape_xml(text: &str) -> String {
+/// Text with the five XML entities escaped, for XML and HTML text and attribute values.
+pub fn escape_markup(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
         match c {
@@ -326,20 +326,7 @@ pub(crate) fn escape_xml(text: &str) -> String {
 
 /// Every type a fit uses, ship included, for pricing.
 pub fn fit_types(fit: &Fit) -> impl Iterator<Item = TypeId> + '_ {
-    fit.ship
-        .into_iter()
-        .chain(
-            fit.modules()
-                .flat_map(|m| [Some(m.type_id), m.charge])
-                .flatten(),
-        )
-        .chain(fit.rigs.iter().flatten().copied())
-        .chain(fit.subsystems.iter().copied())
-        .chain(fit.drones.iter().map(|d| d.type_id))
-        .chain(fit.fighters.iter().map(|f| f.type_id))
-        .chain(fit.implants.iter().copied())
-        .chain(fit.boosters.iter().map(|b| b.type_id))
-        .chain(fit.cargo.iter().map(|&(t, _)| t))
+    fit.items().map(|i| i.type_id)
 }
 
 #[cfg(test)]

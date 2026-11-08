@@ -7,28 +7,15 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::{
     data::{Catalog, TypeId},
-    fit::Fit,
+    fit::{Fit, Place},
 };
 
 /// Every item of a fit pyfa looks at, the ship left out: modules, charges, rigs, subsystems,
 /// drones, fighters, implants, boosters and cargo. Mutated items stay as they are.
 pub fn fit_items(fit: &Fit) -> HashSet<TypeId> {
-    fit.modules()
-        .filter(|m| m.mutation.is_none())
-        .map(|m| m.type_id)
-        .chain(fit.modules().filter_map(|m| m.charge))
-        .chain(fit.rigs.iter().flatten().copied())
-        .chain(fit.subsystems.iter().copied())
-        .chain(
-            fit.drones
-                .iter()
-                .filter(|d| d.mutation.is_none())
-                .map(|d| d.type_id),
-        )
-        .chain(fit.fighters.iter().map(|f| f.type_id))
-        .chain(fit.implants.iter().copied())
-        .chain(fit.boosters.iter().map(|b| b.type_id))
-        .chain(fit.cargo.iter().map(|&(t, _)| t))
+    fit.items()
+        .filter(|i| i.place != Place::Ship && !i.mutated)
+        .map(|i| i.type_id)
         .collect()
 }
 
@@ -143,35 +130,10 @@ pub fn optimize(
 /// What everything on a fit costs, the ship left out: each item times how many there are,
 /// loaded charges included. Unpriced items count as free.
 pub fn value(fit: &Fit, catalog: &Catalog, price: impl Fn(TypeId) -> Option<f64>) -> f64 {
-    let each = |t: TypeId, n: u32| price(t).unwrap_or(0.0) * f64::from(n);
-    let modules: f64 = fit
-        .modules()
-        .map(|m| {
-            each(m.type_id, 1)
-                + m.charge.map_or(0.0, |c| {
-                    each(c, crate::port::charge_count(catalog, m.type_id, c))
-                })
-        })
-        .sum();
-    let single = fit
-        .rigs
-        .iter()
-        .flatten()
-        .chain(&fit.subsystems)
-        .chain(&fit.implants)
-        .copied()
-        .chain(fit.boosters.iter().map(|b| b.type_id))
-        .map(|t| each(t, 1))
-        .sum::<f64>();
-    let stacks = fit
-        .drones
-        .iter()
-        .map(|d| (d.type_id, d.count))
-        .chain(fit.fighters.iter().map(|f| (f.type_id, f.size(catalog))))
-        .chain(fit.cargo.iter().copied())
-        .map(|(t, n)| each(t, n))
-        .sum::<f64>();
-    modules + single + stacks
+    fit.items()
+        .filter(|i| i.place != Place::Ship)
+        .map(|i| price(i.type_id).unwrap_or(0.0) * f64::from(i.count(catalog)))
+        .sum()
 }
 
 /// Cheaper replacements for a list of `(type, amount)`, merged like pyfa's multibuy export

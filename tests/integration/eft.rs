@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use efa::{data::Catalog, fit::Fit};
+use efa::{data::Catalog, fit::Fit, port::eft};
 
 const DATA: &str = "data/eve";
 
@@ -55,12 +55,21 @@ fn eft_round_trips() {
     assert_eq!(fit.launched(), 5);
     assert_eq!(fit.drones[0].active, 5);
 
-    let exported = fit.to_eft(&catalog);
+    let export = |fit: &Fit| eft::export(fit, &catalog, &eft::Options::default(), None);
+    let exported = export(&fit);
     let (again, unknown) = Fit::from_eft(&catalog, &exported).expect("the export parses");
     assert!(
         unknown.is_empty(),
         "unknown items after export: {unknown:?}"
     );
-    assert_eq!(again.to_eft(&catalog), exported, "export is stable");
-    assert_eq!(exported.trim(), VEXOR.trim(), "export matches the input");
+    assert_eq!(export(&again), exported, "export is stable");
+    // The same lines in the same order; pyfa's layout spaces sections further apart and writes
+    // "/offline" in lower case.
+    let lines = |text: &str| -> Vec<String> {
+        text.lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(str::to_lowercase)
+            .collect()
+    };
+    assert_eq!(lines(&exported), lines(VEXOR), "export matches the input");
 }

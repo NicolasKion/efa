@@ -28,5 +28,6 @@ fn main() {
     let stats = engine.compute(&fit);
     println!("compute: {:?}", t.elapsed());
     println!("{stats:#?}");
-    print!("{}", fit.to_eft(&catalog));
+    let options = efa::port::eft::Options::default();
+    print!("{}", efa::port::eft::export(&fit, &catalog, &options, None));
 }
