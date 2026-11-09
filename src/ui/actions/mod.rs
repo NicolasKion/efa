@@ -67,6 +67,12 @@ pub enum Action {
         others: Vec<RowRef>,
         offline: bool,
     },
+    /// A right click on a module's state: it overheats, or stops overheating when it was, and
+    /// `others` that can overheat follow it.
+    ToggleOverheat {
+        main: (Slot, usize),
+        others: Vec<RowRef>,
+    },
     /// The state click on a rig: the clicked rig switches on or off and the others follow.
     ToggleRigs(usize, Vec<usize>),
     SetCharge(Vec<RowRef>, Option<TypeId>),
@@ -344,6 +350,7 @@ fn apply_action(fit: &mut Fit, action: Action, env: &EditEnv) -> Outcome {
     match action {
         Action::CycleState { .. }
         | Action::ToggleRigs(..)
+        | Action::ToggleOverheat { .. }
         | Action::ToggleGrouped(..)
         | Action::SetCharge(..)
         | Action::SetSpool(..)

@@ -56,6 +56,30 @@ pub(super) fn apply(fit: &mut Fit, action: Action, env: &EditEnv) -> Outcome {
                 m.state = next.min(highest_state(&loaded.catalog, m.type_id));
             }
         }
+        Action::ToggleOverheat {
+            main: (slot, i),
+            others,
+        } => {
+            let group = fit.group(slot, i);
+            let Some(Some(m)) = fit.rack(slot).get(i) else {
+                return Outcome::skipped();
+            };
+            let next = if m.state == ModuleState::Overload {
+                ModuleState::Active
+            } else {
+                ModuleState::Overload
+            };
+            let rows: Vec<RowRef> = group
+                .into_iter()
+                .map(|j| RowRef::Module(slot, j))
+                .chain(others)
+                .collect();
+            for m in modules_mut(fit, &rows) {
+                if highest_state(&loaded.catalog, m.type_id) == ModuleState::Overload {
+                    m.state = next;
+                }
+            }
+        }
         Action::ToggleRigs(clicked, rows) => fit.toggle_rigs(clicked, &rows),
         Action::ToggleGrouped(slot) => {
             if !fit.grouped.remove(&slot) {
@@ -357,6 +381,10 @@ pub(super) fn with_groups(fit: &crate::fit::Fit, action: Action) -> Action {
             main,
             others: widen(others),
             offline,
+        },
+        Action::ToggleOverheat { main, others } => Action::ToggleOverheat {
+            main,
+            others: widen(others),
         },
         Action::SetRah(rows, pattern) => Action::SetRah(widen(rows), pattern),
         Action::SetCharge(rows, charge) => Action::SetCharge(widen(rows), charge),

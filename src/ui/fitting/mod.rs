@@ -449,6 +449,7 @@ impl Efa {
             ModuleState::Active => (AssetIcon::CircleCheck, palette.green),
             ModuleState::Overload => (AssetIcon::Flame, palette.orange),
         };
+        let overheats = catalog.get(m.type_id).is_some_and(|t| t.overloadable);
         let layout = self.column_layout;
         let prices = &self.prices;
         let expanded = self
@@ -473,6 +474,28 @@ impl Efa {
                         .text_color(color(mark_color)),
                 )
                 .tip(m.state.label())
+                // A right click overheats, or stops overheating; other modules keep the menu.
+                .when(overheats, |cell| {
+                    cell.on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                            let row = RowRef::Module(slot, i);
+                            let others = if event.modifiers.alt {
+                                this.targets(row, Scope::Similar)
+                            } else {
+                                this.targets(row, Scope::Selection)
+                            };
+                            this.apply(
+                                Action::ToggleOverheat {
+                                    main: (slot, i),
+                                    others,
+                                },
+                                cx,
+                            );
+                        }),
+                    )
+                })
                 .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                     cx.stop_propagation();
                     // Like pyfa: a click on a selected module takes the selection along, Alt
