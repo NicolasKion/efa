@@ -105,7 +105,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo "tag=$(gh api repos/NicolasKion/deimos/releases/latest --jq .tag_name)" >> "$GITHUB_OUTPUT"
-          if [ -x scripts/build-pack.sh ]; then echo "script=true" >> "$GITHUB_OUTPUT"; fi
+          # The Singularity pack is committed on this branch.
+          if [ -x scripts/build-pack.sh ] && [ ! -f assets/data/efa-data.pack ]; then echo "script=true" >> "$GITHUB_OUTPUT"; fi
 
       # The pack's format is efa's own, so code changes invalidate it too.
       - name: Restore pack
