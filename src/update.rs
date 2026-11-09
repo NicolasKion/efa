@@ -143,7 +143,7 @@ fn newest_release(proxy: &Proxy) -> Result<Option<String>, String> {
 fn newest(releases: &[Release]) -> Option<&Release> {
     releases
         .iter()
-        .filter(|r| !r.draft)
+        .filter(|r| !r.draft && r.tag_name.contains("-sisi"))
         .filter_map(|r| Some((Version::parse(r.tag_name.trim_start_matches('v')).ok()?, r)))
         .max_by(|(a, _), (b, _)| a.cmp(b))
         .map(|(_, r)| r)

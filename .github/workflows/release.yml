@@ -105,7 +105,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo "tag=$(gh api repos/NicolasKion/deimos/releases/latest --jq .tag_name)" >> "$GITHUB_OUTPUT"
-          if [ -x scripts/build-pack.sh ]; then echo "script=true" >> "$GITHUB_OUTPUT"; fi
+          # The Singularity pack is committed on this branch.
+          if [ -x scripts/build-pack.sh ] && [ ! -f assets/data/efa-data.pack ]; then echo "script=true" >> "$GITHUB_OUTPUT"; fi
 
       # The pack's format is efa's own, so code changes invalidate it too.
       - name: Restore pack
@@ -185,7 +186,7 @@ jobs:
           - name: Linux
             platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            formats: deb,appimage
+            formats: appimage
             updater: linux-x86_64
           - name: Windows
             platform: windows-latest
@@ -292,7 +293,7 @@ jobs:
           fi
           case "${{ matrix.updater }}" in
             macos-*)
-              bundle=dist/efa.app.tar.gz
+              bundle=$(find dist -maxdepth 1 -name '*.app.tar.gz' | head -1)
               format=app
               name="efa_${VERSION}_${{ matrix.target }}.app.tar.gz"
               cp "$bundle" "$name"
