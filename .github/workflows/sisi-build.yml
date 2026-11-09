@@ -1,0 +1,36 @@
+name: Singularity build
+
+# One-off Windows build on Singularity data, as an artifact only: no release, no updater key.
+on:
+  push:
+    branches: [sisi-build]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        shell: bash
+        run: rustup toolchain install && rustup target add x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-x86_64-pc-windows-msvc
+          save-if: false
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --version 0.11.8 --locked --force
+      - name: Package
+        shell: bash
+        env:
+          CARGO_BUILD_TARGET: x86_64-pc-windows-msvc
+        run: |
+          export EFA_PACK="$GITHUB_WORKSPACE/assets/data/efa-data.pack"
+          cargo packager --release --target x86_64-pc-windows-msvc --formats nsis --out-dir dist
+          mkdir upload
+          for f in dist/*-setup.exe; do cp "$f" "upload/$(basename "$f" | tr ' ' '-')"; done
+          cp target/x86_64-pc-windows-msvc/release/efa.exe upload/efa-singularity-portable.exe
+          ls -la upload
+      - uses: actions/upload-artifact@v7
+        with:
+          name: efa-singularity-windows
+          path: upload

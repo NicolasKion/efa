@@ -43,8 +43,8 @@ cargo-packager-updater = "0.2"
 winresource = "0.1"
 
 [package.metadata.packager]
-product-name = "efa"
-identifier = "com.nicolaskion.efa"
+product-name = "efa Singularity"
+identifier = "com.nicolaskion.efa.sisi"
 description = "EVE Online fitting tool"
 homepage = "https://github.com/NicolasKion/efa"
 category = "Utility"

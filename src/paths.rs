@@ -11,9 +11,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const APP: &str = "efa";
+const APP: &str = "efa-sisi";
 /// efa's name before, whose folder [`crate::persist::move_old_data`] brings along.
-const OLD_APP: &str = "gyfa";
+const OLD_APP: &str = "gyfa-sisi";
 /// Where a development build looks for a deimos dump when `EFA_DATA` is not set.
 const DEFAULT_DUMP: &str = "data/eve";
 
