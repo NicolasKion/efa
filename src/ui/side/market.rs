@@ -566,8 +566,8 @@ impl Efa {
             .into_any_element()
     }
 
-    /// Meta group toggles over the results. A click switches one on or off, Ctrl+click shows
-    /// only that one; with none pressed everything shows. Categories the results do not hold
+    /// Meta group toggles over the results. A click shows only that one (a second click shows
+    /// everything again), Ctrl+click adds or removes one; with none pressed everything shows. Categories the results do not hold
     /// are greyed out, unless pressed, so they can still be switched off.
     fn meta_buttons(&self, present: &HashSet<MetaCategory>, cx: &mut Context<Self>) -> AnyElement {
         h_flex()
@@ -586,8 +586,8 @@ impl Efa {
                         .selected(self.meta_filter.is_on(category))
                         .disabled(!present.contains(&category) && !self.meta_filter.is_on(category))
                         .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
-                            let ctrl = event.modifiers().control;
-                            this.meta_filter.click(category, ctrl);
+                            let m = event.modifiers();
+                            this.meta_filter.click(category, !(m.control || m.platform));
                             cx.notify();
                         })),
                 )

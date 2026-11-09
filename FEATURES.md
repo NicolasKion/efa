@@ -40,7 +40,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Search box (builtinMarketBrowser/searchBox.py, pfSearchBox.py): searches the whole market into the results pane; clearing it goes back to the picked group
 - [x] Double-click to add to fit (builtinMarketBrowser/itemView.py)
 - [x] Item icons (itemView.py), from the client CDN, cached on disk
-- [x] Meta group filter buttons (builtinMarketBrowser/metaButton.py), different from pyfa on purpose: six buttons (T1, T2, T3, Faction, Deadspace, Officer) where pyfa has four (Normal, Faction, Complex, Officer); a click toggles one, Ctrl+click shows only that one, none pressed shows everything. They sit in the results pane's filter bar
+- [x] Meta group filter buttons (builtinMarketBrowser/metaButton.py), different from pyfa on purpose: six buttons (T1, T2, T3, Faction, Deadspace, Officer) where pyfa has four (Normal, Faction, Complex, Officer); a click shows only that one (again: everything), Ctrl+click adds or removes one, none pressed shows everything. They sit in the results pane's filter bar
 - [x] Recently used items (itemView.py, service/market.py): pyfa's "Recently Used Items" tree entry, listed in the results pane, the last 20 items added from the market (double-click, menus, drags), saved with the fits
 - [x] "Charges For Active Fit" tree entry (itemView.py), listed in the results pane: every charge the fit's modules take, in market order
 - [~] Search delay and meta button behaviour prefs (pyfaMarketPreferences.py), search delay done; pyfa's four meta button modes (search and recents, group selection, empty view, market jump) are missing

@@ -40,11 +40,11 @@ impl MetaFilter {
         !self.active() || self.is_on(MetaCategory::of_item(t))
     }
 
-    /// A click on a button switches it on or off. With Ctrl it shows only that category, or
-    /// everything again when it already was the only one.
-    pub fn click(&mut self, category: MetaCategory, ctrl: bool) {
+    /// With `only` the click shows only that category, or everything again when it already was
+    /// the only one; without, it switches the category on or off next to the others.
+    pub fn click(&mut self, category: MetaCategory, only: bool) {
         let i = category.index();
-        if ctrl {
+        if only {
             let only = self.on[i] && self.on.iter().filter(|&&on| on).count() == 1;
             self.on = [false; MetaCategory::ALL.len()];
             self.on[i] = !only;
