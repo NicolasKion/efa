@@ -407,7 +407,11 @@ impl Efa {
         cell.id(SharedString::from(format!("state-rig-{i}")))
             .flex()
             .items_center()
-            .child(UiIcon::new(mark).size(px(15.)).text_color(color(mark_color)))
+            .child(
+                UiIcon::new(mark)
+                    .size(px(15.))
+                    .text_color(color(mark_color)),
+            )
             .tip(if off { "Off" } else { "On" })
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 cx.stop_propagation();

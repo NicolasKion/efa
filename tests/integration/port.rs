@@ -372,7 +372,10 @@ fn html_links_every_fit() {
     let minimal = html::export(&fits, catalog, true);
     assert_eq!(minimal.matches("<a ").count(), 2);
     assert!(minimal.contains("Tengu: Missile Tengu"), "{minimal}");
-    assert!(minimal.contains("href=\"https://eveship.fit/?fit=dna:"), "{minimal}");
+    assert!(
+        minimal.contains("href=\"https://eveship.fit/?fit=dna:"),
+        "{minimal}"
+    );
 }
 
 #[test]

@@ -5,9 +5,9 @@ pub mod cargo;
 mod drones;
 pub mod fighters;
 mod implants;
-mod rigs;
 pub mod mutation;
 pub mod projected;
+mod rigs;
 
 use serde::{Deserialize, Serialize};
 

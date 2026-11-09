@@ -4,7 +4,8 @@
 //! and from. Lists keep their order in a `position` column; racks keep their empty slots as
 //! rows without a type. A fit's parts hang off it by `fit_id` and go with it on delete.
 
-pub const MIGRATIONS: &[&str] = &[r"
+pub const MIGRATIONS: &[&str] = &[
+    r"
 CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
 
 CREATE TABLE fits (
@@ -347,7 +348,9 @@ CREATE TABLE esi_account_scopes (
     scope TEXT NOT NULL,
     PRIMARY KEY (account_id, position)
 );
-", r"
+",
+    r"
 -- Rigs switched off in efa.
 ALTER TABLE fit_rigs ADD COLUMN active INTEGER NOT NULL DEFAULT 1;
-"];
+",
+];
