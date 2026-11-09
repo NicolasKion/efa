@@ -348,6 +348,7 @@ fn full_fit(name: &str) -> Fit {
         drones: vec![drone, DroneStack::new(2454, 3, 0)],
         implants: vec![13_219, 13_220, 13_221],
         inactive_implants: vec![13_220],
+        inactive_rigs: vec![(2, 31_790)],
         implant_source: ImplantSource::Character,
         boosters: vec![
             Booster {

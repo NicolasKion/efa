@@ -56,6 +56,7 @@ pub(super) fn apply(fit: &mut Fit, action: Action, env: &EditEnv) -> Outcome {
                 m.state = next.min(highest_state(&loaded.catalog, m.type_id));
             }
         }
+        Action::ToggleRigs(clicked, rows) => fit.toggle_rigs(clicked, &rows),
         Action::ToggleGrouped(slot) => {
             if !fit.grouped.remove(&slot) {
                 fit.grouped.insert(slot);
@@ -147,7 +148,10 @@ pub(super) fn apply(fit: &mut Fit, action: Action, env: &EditEnv) -> Outcome {
                     if fit.rigs.len() <= i.max(j) {
                         fit.rigs.resize(i.max(j) + 1, None);
                     }
+                    let on = (fit.rig_active(i), fit.rig_active(j));
                     fit.rigs.swap(i, j);
+                    fit.set_rig_active(i, on.1);
+                    fit.set_rig_active(j, on.0);
                     trim_rack(&mut fit.rigs);
                 }
                 _ => return Outcome::skipped(),
@@ -181,6 +185,8 @@ pub(super) fn apply(fit: &mut Fit, action: Action, env: &EditEnv) -> Outcome {
                     fit.rigs.resize(j + 1, None);
                 }
                 fit.rigs[j] = Some(rig);
+                let on = fit.rig_active(i);
+                fit.set_rig_active(j, on);
             }
             _ => return Outcome::skipped(),
         },
@@ -201,9 +207,11 @@ pub(super) fn apply(fit: &mut Fit, action: Action, env: &EditEnv) -> Outcome {
                         }
                     }
                     RowRef::Rig(i) => {
+                        let on = fit.rig_active(i);
                         if let Some(r) = fit.rigs.get_mut(i).filter(|r| r.is_some()) {
                             *r = Some(type_id);
                         }
+                        fit.set_rig_active(i, on);
                     }
                     RowRef::Subsystem(i) => {
                         if let Some(s) = fit.subsystems.get_mut(i) {

@@ -347,4 +347,7 @@ CREATE TABLE esi_account_scopes (
     scope TEXT NOT NULL,
     PRIMARY KEY (account_id, position)
 );
+", r"
+-- Rigs switched off in efa.
+ALTER TABLE fit_rigs ADD COLUMN active INTEGER NOT NULL DEFAULT 1;
 "];

@@ -67,6 +67,8 @@ pub enum Action {
         others: Vec<RowRef>,
         offline: bool,
     },
+    /// The state click on a rig: the clicked rig switches on or off and the others follow.
+    ToggleRigs(usize, Vec<usize>),
     SetCharge(Vec<RowRef>, Option<TypeId>),
     SetSpool(Vec<RowRef>, Option<u32>),
     /// What reactive armor hardeners adapt to; None goes back to the fit's pattern.
@@ -341,6 +343,7 @@ fn apply_action(fit: &mut Fit, action: Action, env: &EditEnv) -> Outcome {
     let action = modules::with_groups(fit, action);
     match action {
         Action::CycleState { .. }
+        | Action::ToggleRigs(..)
         | Action::ToggleGrouped(..)
         | Action::SetCharge(..)
         | Action::SetSpool(..)

@@ -203,10 +203,10 @@ impl Item for Fit {
     fn write_parts(&self, tx: &Transaction<'_>, id: i64) -> rusqlite::Result<()> {
         write_modules(tx, id, self)?;
         let mut rig = tx.prepare_cached(
-            "INSERT INTO fit_rigs (fit_id, position, type_id) VALUES (?1, ?2, ?3)",
+            "INSERT INTO fit_rigs (fit_id, position, type_id, active) VALUES (?1, ?2, ?3, ?4)",
         )?;
         for (i, t) in self.rigs.iter().enumerate() {
-            rig.execute(params![id, i, t])?;
+            rig.execute(params![id, i, t, self.rig_active(i)])?;
         }
         let mut sub = tx.prepare_cached(
             "INSERT INTO fit_subsystems (fit_id, position, type_id) VALUES (?1, ?2, ?3)",
@@ -310,9 +310,14 @@ impl Item for Fit {
         read_modules(conn, &mut fits)?;
         fits.parts(
             conn,
-            "SELECT fit_id, type_id FROM fit_rigs ORDER BY fit_id, position",
-            |r| r.get(1),
-            |fit, t| fit.rigs.push(t),
+            "SELECT fit_id, type_id, active FROM fit_rigs ORDER BY fit_id, position",
+            |r| Ok((r.get(1)?, r.get::<_, bool>(2)?)),
+            |fit, (t, active): (Option<crate::data::TypeId>, bool)| {
+                if let Some(t) = t.filter(|_| !active) {
+                    fit.inactive_rigs.push((fit.rigs.len(), t));
+                }
+                fit.rigs.push(t);
+            },
         )?;
         fits.parts(
             conn,

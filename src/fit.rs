@@ -5,6 +5,7 @@ pub mod cargo;
 mod drones;
 pub mod fighters;
 mod implants;
+mod rigs;
 pub mod mutation;
 pub mod projected;
 
@@ -180,6 +181,9 @@ pub struct Fit {
     /// Implants switched off: they stay on the fit but do nothing, like pyfa's unchecked ones.
     #[serde(default)]
     pub inactive_implants: Vec<TypeId>,
+    /// Rigs switched off, by position and type; see [`Fit::rig_active`].
+    #[serde(default)]
+    pub inactive_rigs: Vec<(usize, TypeId)>,
     #[serde(default)]
     pub implant_source: ImplantSource,
     /// What the firepower view applies damage to; none shows raw damage.

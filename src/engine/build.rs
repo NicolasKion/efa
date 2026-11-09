@@ -200,8 +200,11 @@ pub(super) fn add_fit(sol: &mut Sol, fit: &Fit, pilot: &Pilot) -> Option<Placed>
     }
     for (i, rig) in fit.rigs.iter().enumerate() {
         if let Some(rig) = rig {
-            let id = f.add_rig(ItemTypeId::from_i32(*rig)).get_item_id();
-            placed.items.insert(id, FitItem::Rig(i));
+            let mut item = f.add_rig(ItemTypeId::from_i32(*rig));
+            if !fit.rig_active(i) {
+                item.set_state(false);
+            }
+            placed.items.insert(item.get_item_id(), FitItem::Rig(i));
         }
     }
     for (i, &subsystem) in fit.subsystems.iter().enumerate() {

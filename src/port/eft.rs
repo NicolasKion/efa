@@ -79,7 +79,12 @@ pub fn export(fit: &Fit, catalog: &Catalog, options: &Options, sizes: Option<Rac
     let mut rigs: Vec<String> = fit
         .rigs
         .iter()
-        .map(|r| r.map_or_else(|| "[Empty Rig slot]".to_owned(), |r| catalog.name(r)))
+        .enumerate()
+        .map(|(i, r)| match r {
+            None => "[Empty Rig slot]".to_owned(),
+            Some(r) if fit.rig_active(i) => catalog.name(*r),
+            Some(r) => format!("{} /offline", catalog.name(*r)),
+        })
         .collect();
     rigs.extend((fit.rigs.len()..sizes.rig).map(|_| "[Empty Rig slot]".to_owned()));
     let racks: Vec<String> = [
@@ -357,7 +362,12 @@ pub fn parse(catalog: &Catalog, text: &str) -> Result<(Fit, Vec<String>), String
                 fit.rack_mut(slot).push(Some(module));
             }
             // EFT lists rigs in position, empty slots included.
-            (Kind::Module(Slot::Rig), None) => fit.rigs.push(Some(t.id)),
+            (Kind::Module(Slot::Rig), None) => {
+                if offline {
+                    fit.inactive_rigs.push((fit.rigs.len(), t.id));
+                }
+                fit.rigs.push(Some(t.id));
+            }
             _ => {
                 fit.add(catalog, t.id);
             }

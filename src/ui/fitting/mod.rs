@@ -303,12 +303,15 @@ impl Efa {
                             RowRef::Rig(_) => fit.rigs[i].unwrap_or_default(),
                             _ => fit.subsystems[i],
                         };
-                        base.child(div().w(px(STATE_W)).flex_none())
+                        let off = matches!(item, RowRef::Rig(_)) && !fit.rig_active(i);
+                        let muted = theme.muted_foreground;
+                        base.child(self.rig_state(item, off, cx))
                             .child(icon_box(catalog, &loaded.icons, Icon::Type(id), 22.))
                             .child(
                                 self.column_layout
                                     .cell(Col::Name)
                                     .truncate()
+                                    .when(off, |d| d.text_color(muted))
                                     .child(catalog.name(id)),
                             )
                             // Empty cells up to the price, so it lines up with the modules'.
@@ -387,6 +390,38 @@ impl Efa {
                 cx.stop_propagation();
                 this.apply(Action::ToggleGrouped(slot), cx);
             }))
+    }
+
+    /// A rig's on/off mark, which a click flips for it and the selected rigs; subsystems have
+    /// none.
+    fn rig_state(&self, item: RowRef, off: bool, cx: &mut Context<Self>) -> AnyElement {
+        let cell = div().w(px(STATE_W)).flex_none();
+        let RowRef::Rig(i) = item else {
+            return cell.into_any_element();
+        };
+        let (mark, mark_color) = if off {
+            (AssetIcon::Power, self.palette.muted)
+        } else {
+            (AssetIcon::Circle, self.palette.yellow)
+        };
+        cell.id(SharedString::from(format!("state-rig-{i}")))
+            .flex()
+            .items_center()
+            .child(UiIcon::new(mark).size(px(15.)).text_color(color(mark_color)))
+            .tip(if off { "Off" } else { "On" })
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                cx.stop_propagation();
+                let others = this
+                    .targets(item, Scope::Selection)
+                    .into_iter()
+                    .filter_map(|r| match r {
+                        RowRef::Rig(j) => Some(j),
+                        _ => None,
+                    })
+                    .collect();
+                this.apply(Action::ToggleRigs(i, others), cx);
+            }))
+            .into_any_element()
     }
 
     #[expect(clippy::too_many_arguments, reason = "one row needs all of these")]
