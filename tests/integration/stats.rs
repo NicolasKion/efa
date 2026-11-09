@@ -110,3 +110,29 @@ fn sustained_repair_never_beats_reinforced() {
     );
     assert!(stats.sustained.armor >= 0.0);
 }
+
+#[test]
+fn launchers_show_how_far_their_missiles_fly() {
+    let Some((catalog, engine)) = setup() else {
+        return;
+    };
+    let (fit, unknown) = efa::fit::Fit::from_eft(
+        catalog,
+        "[Caracal, Missile Range]
+
+
+Rapid Light Missile Launcher II, Scourge Light Missile
+Rapid Light Missile Launcher II
+Core Probe Launcher I, Core Scanner Probe I
+",
+    )
+    .expect("the fit parses");
+    assert!(unknown.is_empty(), "{unknown:?}");
+    let stats = engine.compute(&fit);
+    let range = |i| stats.modules[&(efa::data::Slot::High, i)].optimal;
+    // 3750 m/s for 5 s before skills and hull.
+    let loaded = range(0).expect("a loaded launcher has a range");
+    assert!((18_000.0..120_000.0).contains(&loaded), "{loaded}");
+    assert_eq!(range(1), None, "nothing loaded, nothing to fly");
+    assert_eq!(range(2), None, "probes are not missiles");
+}

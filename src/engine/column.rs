@@ -14,7 +14,7 @@ use rc::{
 use super::{Damage, FitItem, Stats, pane, read};
 use crate::{
     data::Slot,
-    dogma::attr,
+    dogma::{attr, effect},
     fit::{Fit, ModuleState},
 };
 
@@ -463,6 +463,34 @@ pub(super) fn burnout(
             }
         }
     }
+}
+
+/// How far a launcher's loaded missile flies, pyfa's `maxRange` for launchers: the range of the
+/// whole seconds around its flight time, weighed by the chance of reaching the longer one. None
+/// for anything else, probe launchers included.
+pub(super) fn missile_range(
+    sol: &mut SolOwned,
+    id: ItemId,
+    type_id: i32,
+    ship_radius: f64,
+) -> Option<f64> {
+    let launcher = read::effects(sol, id).contains(&effect::LAUNCHER_FITTED)
+        || type_id == super::graph::CIVILIAN_LAUNCHER;
+    if !launcher {
+        return None;
+    }
+    let charge = sol.get_module(&id).ok()?.get_charge()?.get_item_id();
+    let fof = read::effects(sol, charge).contains(&effect::FOF_MISSILE);
+    let range = crate::graphs::math::missile_range(
+        read::attr_or_zero(sol, charge, attr::MAX_VELOCITY),
+        read::attr_or_zero(sol, charge, attr::EXPLOSION_DELAY),
+        read::attr_or_zero(sol, charge, attr::MASS),
+        read::attr_or_zero(sol, charge, attr::AGILITY),
+        ship_radius,
+        fof.then(|| read::attr_or_zero(sol, charge, attr::MAX_FOF_RANGE)),
+    )?;
+    Some(range.lower * (1.0 - range.higher_chance) + range.higher * range.higher_chance)
+        .filter(|&r| r > 0.0)
 }
 
 #[cfg(test)]

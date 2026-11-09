@@ -46,7 +46,7 @@ mod ability {
 }
 
 /// The civilian launcher has no launcher hardpoint but fires missiles.
-const CIVILIAN_LAUNCHER: i32 = 32461;
+pub(super) const CIVILIAN_LAUNCHER: i32 = 32461;
 
 /// A module of the fit as placed in the graph solar system.
 struct PlacedModule {

@@ -217,6 +217,7 @@ fn stats_of(built: &mut Built, fit: &Fit, options: CalcOptions) -> Stats {
         .collect();
     stats.fighter_classes = surroundings::fighter_classes(sol, fit_id);
 
+    let ship_radius = read::attr_or_zero(sol, ship_id, attr::RADIUS);
     for &(slot, i, id) in modules {
         let (spool_max, charges, charged_cycles) =
             sol.get_module(&id).ok().map_or_default(|mut m| {
@@ -233,7 +234,10 @@ fn stats_of(built: &mut Built, fit: &Fit, options: CalcOptions) -> Stats {
             cpu: read::positive_attr(sol, id, attr::CPU),
             powergrid: read::positive_attr(sol, id, attr::POWER),
             cap_per_sec: read::cap_per_sec(sol, id),
-            optimal: read::positive_attr(sol, id, attr::MAX_RANGE),
+            optimal: read::positive_attr(sol, id, attr::MAX_RANGE).or_else(|| {
+                let type_id = fit.rack(slot).get(i)?.as_ref()?.type_id;
+                column::missile_range(sol, id, type_id, ship_radius)
+            }),
             falloff: read::positive_attr(sol, id, attr::FALLOFF),
             spool_max,
             burnout: None,

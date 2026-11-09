@@ -168,6 +168,8 @@ pub mod attr {
 
 /// Dogma effect IDs.
 pub mod effect {
+    /// Takes a launcher hardpoint.
+    pub const LAUNCHER_FITTED: i32 = 40;
     pub const FOF_MISSILE: i32 = 104;
     pub const DISRUPT_SPHERE: i32 = 3380;
     pub const NOSFERATU: i32 = 6197;
