@@ -241,6 +241,9 @@ type Refs = HashMap<ItemId, FitItem>;
 fn options() -> ValOptions {
     let off = || OptionExt::Disabled;
     ValOptions::new(true)
+        // A charge's launcherGroup list: CCP's data lists only the Light Missile Launcher for
+        // light missiles, which rapid light launchers take as well. pyfa does not check it.
+        .with_charge_parent_group(off())
         .with_activation_blocked(off())
         .with_effect_stopper(off())
         .with_cloaking_blocked(off())
@@ -396,9 +399,6 @@ fn convert(r: &ValResultFit, refs: &Refs) -> Validation {
         v.push(at(&item.item_id), Problem::Skills(missing));
     }
     for c in r.charge_group.iter().flat_map(|f| &f.charges) {
-        v.push(at(&c.parent_item_id), Problem::Charge);
-    }
-    for c in r.charge_parent_group.iter().flat_map(|f| &f.charges) {
         v.push(at(&c.parent_item_id), Problem::Charge);
     }
     for c in r.charge_size.iter().flat_map(|f| &f.charges) {

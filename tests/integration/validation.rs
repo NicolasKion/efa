@@ -245,3 +245,21 @@ Damage Control II
         Some(&Problem::SlotCount(Slot::Low))
     );
 }
+
+#[test]
+fn light_missiles_fit_rapid_light_launchers() {
+    let Some((catalog, engine)) = setup() else {
+        return;
+    };
+    let fit = eft(
+        catalog,
+        "[Orthrus, Rapid Lights]
+
+
+Rapid Light Missile Launcher II, Scourge Light Missile
+Caldari Navy Rapid Light Missile Launcher, Scourge Light Missile
+",
+    );
+    let validation = engine.validate(&fit, engine.all5());
+    assert!(validation.is_empty(), "unexpected: {:?}", validation.items);
+}
