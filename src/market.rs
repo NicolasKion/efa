@@ -263,11 +263,20 @@ pub struct Filtered {
 
 /// Run the results pane's filters over the listed sections: the text, the ship, then the meta
 /// buttons, which are pressed so the list is not empty because of them, as pyfa does.
+/// Whether `t` is anything but a rig of another size than `size`. The market keeps to the
+/// current hull's rig size even with the ship filter off, as Axis does.
+fn rig_fits(t: &ItemType, size: f64) -> bool {
+    t.kind != Kind::Module(Slot::Rig)
+        || t.rig_size
+            .is_none_or(|rig| (rig - size).abs() < f64::EPSILON)
+}
+
 pub fn filter_results(
     catalog: &Catalog,
     sections: &[Section],
     text: Option<&TextFilter>,
     room: Option<&ShipRoom>,
+    rig_size: Option<f64>,
     meta: MetaFilter,
 ) -> Filtered {
     let kept: Vec<(Option<&String>, Vec<&ItemType>)> = sections
@@ -279,6 +288,7 @@ pub fn filter_results(
                 .filter_map(|&id| catalog.get(id))
                 .filter(|t| text.is_none_or(|f| f.matches(t)))
                 .filter(|t| room.is_none_or(|r| r.can_use(t)))
+                .filter(|t| rig_size.is_none_or(|size| rig_fits(t, size)))
                 .collect();
             (s.title.as_ref(), items)
         })
@@ -556,6 +566,32 @@ mod tests {
     }
 
     #[test]
+    fn rigs_keep_to_the_hull_size() {
+        let mut small = item(1, "Small Anti-EM Pump I", Kind::Module(Slot::Rig));
+        small.rig_size = Some(1.0);
+        let mut medium = item(2, "Medium Anti-EM Pump I", Kind::Module(Slot::Rig));
+        medium.rig_size = Some(2.0);
+        let catalog = catalog(vec![
+            small,
+            medium,
+            item(3, "Damage Control II", Kind::Module(Slot::Low)),
+        ]);
+        let sections = vec![Section {
+            title: None,
+            items: vec![1, 2, 3],
+        }];
+        let kept = filter_results(
+            &catalog,
+            &sections,
+            None,
+            None,
+            Some(2.0),
+            MetaFilter::default(),
+        );
+        assert_eq!(kept.rows, [ResultRow::Item(2), ResultRow::Item(3)]);
+    }
+
+    #[test]
     fn filters_drop_empty_sections_and_count_what_is_left() {
         let mut faction = item(3, "Caldari Navy Scourge Heavy Missile", Kind::Charge);
         faction.meta_group = Some(4);
@@ -576,11 +612,11 @@ mod tests {
         ];
         let jargon = Jargon::default();
         let mut meta = MetaFilter::default();
-        let all = filter_results(&catalog, &sections, None, None, meta);
+        let all = filter_results(&catalog, &sections, None, None, None, meta);
         assert_eq!((all.count, all.total, all.rows.len()), (3, 3, 5));
 
         let text = TextFilter::new("scourge", &jargon);
-        let some = filter_results(&catalog, &sections, text.as_ref(), None, meta);
+        let some = filter_results(&catalog, &sections, text.as_ref(), None, None, meta);
         assert_eq!(
             some.rows,
             [
@@ -591,18 +627,18 @@ mod tests {
         );
 
         meta.click(MetaCategory::Faction, false);
-        let faction_only = filter_results(&catalog, &sections, text.as_ref(), None, meta);
+        let faction_only = filter_results(&catalog, &sections, text.as_ref(), None, None, meta);
         assert_eq!(faction_only.count, 1);
         assert!(faction_only.present.contains(&MetaCategory::Tech1));
 
         // A button that hides everything stays pressed; the pane offers to clear it.
         let inferno = TextFilter::new("inferno", &jargon);
-        let hidden = filter_results(&catalog, &sections, inferno.as_ref(), None, meta);
+        let hidden = filter_results(&catalog, &sections, inferno.as_ref(), None, None, meta);
         assert_eq!(hidden.count, 0);
         assert!(meta.is_on(MetaCategory::Faction));
 
         let none = TextFilter::new("nothing like this", &jargon);
-        let empty = filter_results(&catalog, &sections, none.as_ref(), None, meta);
+        let empty = filter_results(&catalog, &sections, none.as_ref(), None, None, meta);
         assert_eq!(empty.rows, [] as [ResultRow; 0]);
         assert_eq!(empty.total, 3);
     }

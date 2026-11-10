@@ -68,6 +68,8 @@ pub(in crate::ui) struct FilterKey {
     meta: crate::market::MetaFilter,
     /// The calculation the ship filter used, when it is on.
     ship: Option<u64>,
+    /// The current hull's rig size, which rigs are kept to.
+    rig_size: Option<f64>,
 }
 
 impl FilterKey {
@@ -77,7 +79,11 @@ impl FilterKey {
             (None, None) => true,
             _ => false,
         };
-        sections && self.text == other.text && self.meta == other.meta && self.ship == other.ship
+        sections
+            && self.text == other.text
+            && self.meta == other.meta
+            && self.ship == other.ship
+            && self.rig_size == other.rig_size
     }
 }
 
@@ -388,6 +394,10 @@ impl Efa {
             text: self.results_filter_text.clone(),
             meta: self.meta_filter,
             ship: room.is_some().then_some(self.calc_generation),
+            rig_size: self
+                .fit()
+                .and_then(|f| catalog.get(f.ship?))
+                .and_then(|s| s.rig_size),
         };
         let filtered = match &self.filtered_cache {
             Some((last, filtered)) if last.same(&filter_key) => Rc::clone(filtered),
@@ -399,6 +409,7 @@ impl Efa {
                         sections,
                         text.as_ref(),
                         room.as_ref(),
+                        filter_key.rig_size,
                         self.meta_filter,
                     )
                 }));
