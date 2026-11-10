@@ -270,12 +270,15 @@ impl Efa {
             .map_or(Ok(()), std::fs::create_dir_all)
             .and_then(|()| std::fs::write(&path, page));
         let outcome = match written {
-            Ok(()) => Ok(format!(
-                "Exported {} fits to {}",
-                self.saved.fits.len(),
-                path.display()
-            )
-            .into()),
+            Ok(()) => {
+                cx.open_url(&file_url(&path));
+                Ok(format!(
+                    "Exported {} fits to {}",
+                    self.saved.fits.len(),
+                    path.display()
+                )
+                .into())
+            }
             Err(e) => Err(format!("HTML export to {} failed: {e}", path.display()).into()),
         };
         self.set_outcome(outcome);
@@ -330,6 +333,27 @@ impl Efa {
         }
         self.open_fit(index, cx);
     }
+}
+
+/// A file's address for the browser: forward slashes, and the characters a URL cannot hold as
+/// they are escaped.
+fn file_url(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    let mut url = String::from(if path.starts_with('/') {
+        "file://"
+    } else {
+        "file:///"
+    });
+    for c in path.chars() {
+        match c {
+            ' ' => url.push_str("%20"),
+            '#' => url.push_str("%23"),
+            '%' => url.push_str("%25"),
+            '?' => url.push_str("%3F"),
+            c => url.push(c),
+        }
+    }
+    url
 }
 
 /// Where the HTML export goes: the preference, or a file in efa's data directory.
@@ -416,5 +440,13 @@ mod tests {
             PathBuf::from("/tmp/fits.xml")
         );
         assert_eq!(html_path(" /tmp/x.html "), PathBuf::from("/tmp/x.html"));
+        assert_eq!(
+            file_url(std::path::Path::new("/home/a b/fits#1.html")),
+            "file:///home/a%20b/fits%231.html"
+        );
+        assert_eq!(
+            file_url(std::path::Path::new("C:\\Users\\a\\fits.html")),
+            "file:///C:/Users/a/fits.html"
+        );
     }
 }
