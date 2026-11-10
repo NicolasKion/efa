@@ -6,7 +6,7 @@
 //! main window, which applies them to the fit as one undoable edit.
 
 use gpui_kit::component::{
-    ActiveTheme, Sizable,
+    ActiveTheme, Disableable, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -19,7 +19,7 @@ use gpui_kit::{
     Window, div, px, relative,
 };
 
-use super::{ItemStats, Target, format};
+use super::{ItemStats, Target};
 use crate::ui::widgets::parse_decimal;
 use crate::{
     data::{TypeId, muta::Limits},
@@ -56,6 +56,10 @@ struct Row {
     better: f64,
     /// The unit's internal name, which decides how the value is shown.
     unit: Option<String>,
+    /// What follows a value in the worst and best labels.
+    suffix: String,
+    /// What - and + move the shown value by: pyfa's round step for the roll range.
+    step: Option<f64>,
     slider: Entity<SliderState>,
     input: Entity<InputState>,
 }
@@ -92,12 +96,45 @@ fn value_at(worse: f64, base: f64, better: f64, position: f32) -> f64 {
     }
 }
 
-/// A value as the field shows it: converted for its unit, with up to five decimals as pyfa's
-/// spin control does.
+/// A value as the field shows it, converted for its unit and rounded as abyssal market sites
+/// show rolls: to three decimals first, then to three for multipliers and two for the rest.
 fn shown(unit: Option<&str>, value: f64) -> String {
-    let text = format!("{:.5}", simplify(unit, value));
+    let value = simplify(unit, value);
+    let value = format!("{value:.3}").parse().unwrap_or(value);
+    let digits = if matches!(unit, Some("Multiplier" | "Inversed Modifier Percent")) {
+        3
+    } else {
+        2
+    };
+    let text = format!("{value:.digits$}");
     let text = text.trim_end_matches('0').trim_end_matches('.');
     if text == "-0" { "0" } else { text }.to_owned()
+}
+
+/// pyfa's spin step for a range of shown values: 1, 2 or 5 times a power of ten, the largest
+/// that leaves at least ten steps across it.
+fn step(range: f64) -> Option<f64> {
+    let range = range.abs();
+    if !range.is_normal() {
+        return None;
+    }
+    [1.0, 2.0, 5.0]
+        .into_iter()
+        .map(|base: f64| base * 10f64.powf(((range / base).log10() - 1.0).floor()))
+        .reduce(f64::max)
+}
+
+/// The next multiple of `step` above `shown` (or below, going down), so - and + land on round
+/// numbers.
+fn stepped(shown: f64, step: f64, up: bool) -> f64 {
+    // A value already on a multiple, give or take float noise, moves a whole step.
+    let at = shown / step;
+    let next = if up {
+        (at + 1e-6).floor() + 1.0
+    } else {
+        (at - 1e-6).ceil() - 1.0
+    };
+    next * step
 }
 
 impl Row {
@@ -117,6 +154,11 @@ impl Row {
     fn shown(&self, value: f64) -> String {
         shown(self.unit.as_deref(), value)
     }
+
+    /// A value for the worst and best labels.
+    fn label(&self, value: f64) -> String {
+        format!("{}{}", self.shown(value), self.suffix)
+    }
 }
 
 /// A value as pyfa shows it for its unit (`Unit.SimplifyValue`).
@@ -126,6 +168,7 @@ fn simplify(unit: Option<&str>, value: f64) -> f64 {
         Some("Modifier Percent") => (value - 1.0) * 100.0,
         Some("Absolute Percent") => value * 100.0,
         Some("Milliseconds") => value / 1000.0,
+        Some("Hitpoints/Second" | "CubicMetersPerSecond") => value * 1000.0,
         _ => value,
     }
 }
@@ -137,6 +180,7 @@ fn complicate(unit: Option<&str>, shown: f64) -> f64 {
         Some("Modifier Percent") => shown / 100.0 + 1.0,
         Some("Absolute Percent") => shown / 100.0,
         Some("Milliseconds") => shown * 1000.0,
+        Some("Hitpoints/Second" | "CubicMetersPerSecond") => shown / 1000.0,
         _ => shown,
     }
 }
@@ -213,10 +257,17 @@ impl ItemStats {
             } else {
                 (limits.high(), limits.low())
             };
-            let unit = data
-                .attr(attr)
-                .and_then(|a| data.unit(a))
-                .map(|u| u.name.clone());
+            let info = data.attr(attr).and_then(|a| data.unit(a));
+            let unit = info.map(|u| u.name.clone());
+            let suffix = match unit.as_deref() {
+                Some("Hitpoints/Second") => " HP/s".to_owned(),
+                Some("CubicMetersPerSecond") => " m³/s".to_owned(),
+                _ => info
+                    .and_then(|u| u.display_name.clone())
+                    .filter(|d| !d.is_empty())
+                    .map_or_default(|d| format!(" {d}")),
+            };
+            let step = step(simplify(unit.as_deref(), better) - simplify(unit.as_deref(), worse));
             let at = position(worse, limits.base, better, value);
             let slider = cx.new(|_| {
                 SliderState::new()
@@ -233,6 +284,8 @@ impl ItemStats {
                 worse,
                 better,
                 unit,
+                suffix,
+                step,
                 slider,
                 input,
             };
@@ -292,6 +345,10 @@ impl ItemStats {
             .mutation()
             .and_then(|m| m.attrs.get(&attr).copied())
             .unwrap_or(row.limits.base);
+        // The field shows a rounded roll; leaving it as it was keeps the exact one.
+        if text.trim() == row.shown(current) {
+            return;
+        }
         let value = parse_decimal::<f64>(text.trim().trim_end_matches('%'))
             .map_or(current, |shown| {
                 row.limits.clamp(complicate(row.unit.as_deref(), shown))
@@ -301,6 +358,21 @@ impl ItemStats {
         if changed {
             self.set_rolls(&[(attr, value)], true, cx);
         }
+    }
+
+    /// pyfa's spin buttons: the shown value to the next round step down or up.
+    fn nudge(&mut self, attr: i32, up: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(row) = self.row(attr) else { return };
+        let Some(step) = row.step else { return };
+        let unit = row.unit.as_deref();
+        let current = self
+            .mutation()
+            .and_then(|m| m.attrs.get(&attr).copied())
+            .unwrap_or(row.limits.base);
+        let target = stepped(simplify(unit, current), step, up);
+        let value = row.limits.clamp(complicate(unit, target));
+        self.sync_row(attr, value, window, cx);
+        self.set_rolls(&[(attr, value)], true, cx);
     }
 
     fn row(&self, attr: i32) -> Option<&Row> {
@@ -392,7 +464,7 @@ impl ItemStats {
             return Self::empty("Not mutated.", cx);
         };
         let catalog = &self.loaded.catalog;
-        let theme = cx.theme();
+        let theme = cx.theme().clone();
         let (good, bad) = (theme.success, theme.danger);
         let header = h_flex()
             .justify_center()
@@ -416,7 +488,6 @@ impl ItemStats {
                     .and_then(|i| i.display_name.clone())
                     .or_else(|| info.map(|i| i.name.clone()))
                     .unwrap_or_else(|| row.attr.to_string());
-                let shown = |v: f64| format::value(data, catalog, info, v);
                 let value = mutation
                     .attrs
                     .get(&row.attr)
@@ -447,15 +518,17 @@ impl ItemStats {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child(name),
                             )
-                            .child(div().text_color(bad).child(shown(row.worse)))
+                            .child(div().text_color(bad).child(row.label(row.worse)))
                             .child(" \u{2500} ")
-                            .child(div().text_color(good).child(shown(row.better))),
+                            .child(div().text_color(good).child(row.label(row.better))),
                     )
                     .child(
                         h_flex()
                             .gap_2()
                             .child(div().flex_1().child(game_slider(row, good, bad, cx)))
+                            .child(nudge_button(row, false, cx))
                             .child(div().w(px(110.)).child(Input::new(&row.input).small()))
+                            .child(nudge_button(row, true, cx))
                             .child(
                                 div()
                                     .w(px(64.))
@@ -542,6 +615,21 @@ impl ItemStats {
             )
             .into_any_element()
     }
+}
+
+/// A - or + button beside a roll's field; none when the roll has no range to step through.
+fn nudge_button(row: &Row, up: bool, cx: &mut Context<ItemStats>) -> AnyElement {
+    let attr = row.attr;
+    let id = SharedString::from(format!("muta-{}-{attr}", if up { "up" } else { "down" }));
+    Button::new(id)
+        .xsmall()
+        .ghost()
+        .label(if up { "+" } else { "\u{2212}" })
+        .disabled(row.step.is_none())
+        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+            this.nudge(attr, up, window, cx);
+        }))
+        .into_any_element()
 }
 
 /// A slider drawn like the game's mutation bars: a red half and a green half meeting at the base
@@ -642,6 +730,32 @@ mod tests {
             assert!((back - value).abs() < 1e-12, "{unit:?}");
         }
         assert!((simplify(Some("Modifier Percent"), 1.05) - 5.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn rolls_round_like_mutamarket() {
+        assert_eq!(shown(Some("Multiplier"), 1.234_567_8), "1.235");
+        assert_eq!(shown(None, 1_234.567_8), "1234.57");
+        assert_eq!(shown(Some("Hitpoints/Second"), 0.0125), "12.5");
+        assert_eq!(shown(Some("Milliseconds"), 5000.0), "5");
+        assert_eq!(shown(None, -0.001), "0");
+    }
+
+    #[test]
+    fn steps_land_on_round_numbers() {
+        // 10 to 50 steps across the range, pyfa's choice.
+        let close = |range: f64, want: f64| {
+            let got = step(range).expect("a step");
+            assert!((got - want).abs() < want * 1e-9, "{range}: {got}");
+        };
+        close(45.0, 2.0);
+        close(120.0, 10.0);
+        close(0.3, 0.02);
+        assert_eq!(step(0.0), None);
+        assert!((stepped(12.34, 0.5, true) - 12.5).abs() < 1e-9);
+        assert!((stepped(12.5, 0.5, true) - 13.0).abs() < 1e-9);
+        assert!((stepped(12.34, 0.5, false) - 12.0).abs() < 1e-9);
+        assert!((stepped(-3.0, 1.0, false) + 4.0).abs() < 1e-9);
     }
 
     #[test]
