@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use gpui_kit::{Context, PathPromptOptions, Task, WeakEntity};
+use gpui_kit::{AppContext, Context, PathPromptOptions, Task, WeakEntity};
 
 use super::{Action, AddKind, AdditionsTab, Efa};
 use crate::{
@@ -92,6 +92,13 @@ impl Efa {
                 self.changed(cx);
             }
             Err(e) => {
+                // An item link from the game: the mutated item it names, fetched from ESI.
+                let link = port::muta::parse_item_link(&text)
+                    .filter(|_| self.saved.settings.current.is_some());
+                if let Some((type_id, item_id)) = link {
+                    self.paste_item_link(type_id, item_id, cx);
+                    return;
+                }
                 // pyfa fits a pasted mutated item, as its muta text, into the current fit.
                 let mutant = port::muta::parse_single(&loaded.catalog, &text)
                     .and_then(|p| p.mutation(&loaded.catalog))
@@ -110,6 +117,44 @@ impl Efa {
                 }
             }
         }
+    }
+
+    /// A mutated item linked from the game, as pyfa pastes one: ESI says what it was made from
+    /// and what it rolled, and it goes into the current fit.
+    fn paste_item_link(&mut self, type_id: TypeId, item_id: i64, cx: &mut Context<Self>) {
+        let network = self.saved.settings.preferences.network.clone();
+        if !network.enabled {
+            self.set_error("Pasting an item from the game needs the network, which is off in Preferences > Network");
+            cx.notify();
+            return;
+        }
+        self.set_status("Fetching the item from ESI...");
+        cx.notify();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let fetched = cx
+                .background_spawn(async move {
+                    let http = network.proxy.client()?;
+                    port::muta::fetch_item(&http, type_id, item_id)
+                })
+                .await;
+            let _ = this.update(cx, |g, cx| {
+                let Some(loaded) = g.loaded() else { return };
+                let catalog = &loaded.catalog;
+                match fetched.map(|parsed| parsed.mutation(catalog)) {
+                    Ok(Some((abyssal, mutation))) if g.saved.settings.current.is_some() => {
+                        g.apply(Action::AddMutated(abyssal, mutation), cx);
+                    }
+                    Ok(Some(_)) => g.set_error("No fit open to paste the item into"),
+                    Ok(None) => g.set_error(format!(
+                        "{} is not a mutated item efa knows",
+                        catalog.name(type_id)
+                    )),
+                    Err(e) => g.set_error(format!("Could not fetch the item: {e}")),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Items pasted onto the current fit, routed like pyfa's additions import: all drones go to

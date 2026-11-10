@@ -226,7 +226,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Multibuy export (service/port/multibuy.py) with the Optimize Prices option
 - [x] EFS stats JSON export (service/port/efs.py), the copy dialog's "EFS" format
 - [x] Ship stats export (service/port/shipstats.py), the copy dialog's "Stats" format
-- [x] Mutated item (muta) format (service/port/muta.py): pasting one mutated item fits it into the current fit, drone copy/paste carries mutations; ESI dynamic item links are not fetched
+- [x] Mutated item (muta) format (service/port/muta.py): pasting one mutated item fits it into the current fit, drone copy/paste carries mutations; an item link copied from the game is fetched from ESI's dynamic item route and fitted the same way (muta.py parseDynamicItemString, fetchDynamicItem)
 - [x] HTML export of all fits (pyfaHTMLExportPreferences.py), full and minimal; the page opens in the browser once written, which pyfa does not do
 - [x] Export item stats to CSV (gui/itemStats.py)
 - [x] Export implants/boosters/charges lists (builtinContextMenus/additionsExportAll.py)

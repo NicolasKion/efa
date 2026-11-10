@@ -4,9 +4,12 @@
 
 use std::collections::HashMap;
 
+use serde::Deserialize;
+
 use crate::{
     data::{Catalog, TypeId},
     fit::Mutation,
+    net::{COMPATIBILITY_DATE, ESI_BASE, Http},
 };
 
 /// pyfa's `renderMutant`: base item, mutaplasmid and attributes, the first line after
@@ -90,6 +93,53 @@ pub fn parse_single(catalog: &Catalog, text: &str) -> Option<Parsed> {
     parse(catalog, &lines).filter(|p| p.mutaplasmid.is_some())
 }
 
+/// The item link the game client copies, `<url=showinfo:TYPE//ITEM>Name</url>`, as its type and
+/// item IDs (pyfa's `parseDynamicItemString`).
+pub fn parse_item_link(text: &str) -> Option<(TypeId, i64)> {
+    const OPEN: &str = "<url=showinfo:";
+    let rest = &text[text.find(OPEN)? + OPEN.len()..];
+    let (type_id, rest) = rest.split_once("//")?;
+    let (item_id, rest) = rest.split_once('>')?;
+    let closed = rest.find("</url>").is_some_and(|end| end > 0);
+    closed.then_some(())?;
+    Some((type_id.parse().ok()?, item_id.parse().ok()?))
+}
+
+#[derive(Deserialize)]
+struct DynamicItem {
+    source_type_id: TypeId,
+    mutator_type_id: TypeId,
+    dogma_attributes: Vec<DynamicAttr>,
+}
+
+#[derive(Deserialize)]
+struct DynamicAttr {
+    attribute_id: i32,
+    value: f64,
+}
+
+/// What a mutated item in the game is, from ESI's public dynamic item route (pyfa's
+/// `fetchDynamicItem`): the base item, the mutaplasmid and every attribute's value.
+pub fn fetch_item(http: &dyn Http, type_id: TypeId, item_id: i64) -> Result<Parsed, String> {
+    let url = format!("{ESI_BASE}/dogma/dynamic/items/{type_id}/{item_id}");
+    let reply = http.get(&url, &[("X-Compatibility-Date", COMPATIBILITY_DATE)])?;
+    if reply.status == 404 || reply.status == 400 {
+        return Err("the game does not know it as a mutated item".to_owned());
+    }
+    let reply = reply.ok(&url)?;
+    let item: DynamicItem =
+        serde_json::from_slice(&reply.body).map_err(|e| format!("{url}: {e}"))?;
+    Ok(Parsed {
+        base: item.source_type_id,
+        mutaplasmid: Some(item.mutator_type_id),
+        attrs: item
+            .dogma_attributes
+            .into_iter()
+            .map(|a| (a.attribute_id, a.value))
+            .collect(),
+    })
+}
+
 /// pyfa's `importGetMutationData`: take the "[n] Base" blocks, with the lines that follow each up
 /// to a blank one, out of `lines`, and read them.
 pub fn take_blocks(catalog: &Catalog, lines: &mut Vec<String>) -> HashMap<u32, Parsed> {
@@ -165,6 +215,54 @@ impl Blocks {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::net::Reply;
+
+    #[test]
+    fn item_links_read_like_pyfa() {
+        let link = "<url=showinfo:47820//1043563011234>Unstable Large Shield Extender</url>";
+        assert_eq!(parse_item_link(link), Some((47_820, 1_043_563_011_234)));
+        assert_eq!(
+            parse_item_link(&format!("Look: {link} nice")),
+            Some((47_820, 1_043_563_011_234))
+        );
+        assert_eq!(parse_item_link("<url=showinfo:47820//1>"), None, "unclosed");
+        assert_eq!(
+            parse_item_link("<url=showinfo:587>Rifter</url>"),
+            None,
+            "no item ID"
+        );
+        assert_eq!(parse_item_link("Large Shield Extender II"), None);
+    }
+
+    struct Esi(u16, &'static str);
+
+    impl Http for Esi {
+        fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Reply, String> {
+            assert_eq!(url, "https://esi.evetech.net/dogma/dynamic/items/47820/42");
+            assert!(headers.iter().any(|&(k, _)| k == "X-Compatibility-Date"));
+            Ok(Reply {
+                status: self.0,
+                body: self.1.as_bytes().to_vec(),
+                ..Reply::default()
+            })
+        }
+    }
+
+    #[test]
+    fn dynamic_items_come_from_esi() {
+        let body = r#"{"created_by": 1, "dogma_attributes": [{"attribute_id": 72, "value": 1650.5}],
+            "dogma_effects": [], "mutator_type_id": 47819, "source_type_id": 3841}"#;
+        let parsed = fetch_item(&Esi(200, body), 47_820, 42).expect("fetched");
+        assert_eq!(
+            parsed,
+            Parsed {
+                base: 3841,
+                mutaplasmid: Some(47_819),
+                attrs: vec![(72, 1650.5)],
+            }
+        );
+        assert!(fetch_item(&Esi(404, "{}"), 47_820, 42).is_err());
+    }
 
     #[test]
     fn references_split_off() {
