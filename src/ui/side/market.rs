@@ -256,8 +256,14 @@ impl Efa {
 
     fn market_tree(&self, loaded: &Loaded, jump: bool, cx: &mut Context<Self>) -> AnyElement {
         let mut entries = Vec::new();
+        // With a hull's rig size to keep to, a rig category lists its rigs itself rather than
+        // opening into Small to Capital, which would all but one be empty.
+        let sized = self
+            .fit()
+            .and_then(|f| loaded.catalog.get(f.ship?))
+            .is_some_and(|s| s.rig_size.is_some());
         for &root in &loaded.catalog.market_roots {
-            self.tree_group(loaded, root, 0, &mut entries);
+            self.tree_group(loaded, root, 0, sized, &mut entries);
         }
         entries.push(TreeEntry {
             id: RECENT_GROUP,
@@ -301,21 +307,30 @@ impl Efa {
             .into_any_element()
     }
 
-    fn tree_group(&self, loaded: &Loaded, id: i32, depth: usize, out: &mut Vec<TreeEntry>) {
+    fn tree_group(
+        &self,
+        loaded: &Loaded,
+        id: i32,
+        depth: usize,
+        sized: bool,
+        out: &mut Vec<TreeEntry>,
+    ) {
         let Some(group) = loaded.catalog.market_groups.get(&id) else {
             return;
         };
+        let branch = !group.children.is_empty()
+            && (!sized || !crate::market::rigs_by_size(&loaded.catalog, id));
         out.push(TreeEntry {
             id,
             depth,
             name: group.name.clone().into(),
             icon: GroupIcon::Game(group.icon_id),
-            branch: !group.children.is_empty(),
+            branch,
             listing: Listing::Group(id),
         });
-        if self.expanded_groups.contains(&id) {
+        if branch && self.expanded_groups.contains(&id) {
             for &child in &group.children {
-                self.tree_group(loaded, child, depth + 1, out);
+                self.tree_group(loaded, child, depth + 1, sized, out);
             }
         }
     }

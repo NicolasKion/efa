@@ -131,6 +131,26 @@ impl Section {
 
 /// A market group's items in market order: its own, or all of its subgroups' when it lists
 /// none itself, so a click on "Hybrid Charges" shows every hybrid charge.
+/// Whether `group` only splits rigs by size, like Armor Rigs into Small to Capital: groups with
+/// nothing below them, holding rigs that all have a size.
+pub fn rigs_by_size(catalog: &Catalog, group: i32) -> bool {
+    let Some(g) = catalog.market_groups.get(&group) else {
+        return false;
+    };
+    !g.children.is_empty()
+        && g.children.iter().all(|child| {
+            catalog.market_groups.get(child).is_some_and(|c| {
+                c.children.is_empty()
+                    && !c.types.is_empty()
+                    && c.types.iter().all(|&t| {
+                        catalog.get(t).is_some_and(|t| {
+                            t.kind == Kind::Module(Slot::Rig) && t.rig_size.is_some()
+                        })
+                    })
+            })
+        })
+}
+
 pub fn group_items(catalog: &Catalog, group: i32) -> Vec<TypeId> {
     let Some(g) = catalog.market_groups.get(&group) else {
         return Vec::new();
@@ -589,6 +609,38 @@ mod tests {
             MetaFilter::default(),
         );
         assert_eq!(kept.rows, [ResultRow::Item(2), ResultRow::Item(3)]);
+    }
+
+    #[test]
+    fn rig_categories_split_by_size() {
+        let mut small = item(1, "Small Anti-EM Pump I", Kind::Module(Slot::Rig));
+        small.rig_size = Some(1.0);
+        small.market_group = Some(11);
+        let mut medium = item(2, "Medium Anti-EM Pump I", Kind::Module(Slot::Rig));
+        medium.rig_size = Some(2.0);
+        let mut catalog = catalog(vec![
+            small,
+            medium,
+            item(3, "Damage Control II", Kind::Module(Slot::Low)),
+        ]);
+        let group = |id, children: Vec<i32>, types: Vec<TypeId>| crate::data::MarketGroup {
+            id,
+            name: String::new(),
+            parent: None,
+            children,
+            types,
+            icon_id: None,
+        };
+        catalog.market_groups.extend([
+            (10, group(10, vec![11, 12], Vec::new())),
+            (11, group(11, Vec::new(), vec![1])),
+            (12, group(12, Vec::new(), vec![2])),
+            (20, group(20, vec![21], Vec::new())),
+            (21, group(21, Vec::new(), vec![3])),
+        ]);
+        assert!(rigs_by_size(&catalog, 10));
+        assert!(!rigs_by_size(&catalog, 11), "no groups below");
+        assert!(!rigs_by_size(&catalog, 20), "not rigs");
     }
 
     #[test]
