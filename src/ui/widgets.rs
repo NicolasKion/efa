@@ -678,14 +678,6 @@ pub fn short(v: f64) -> String {
     format!("{scaled:.digits$}{suffix}")
 }
 
-pub fn km(meters: f64) -> String {
-    if meters >= 1000.0 {
-        format!("{:.1}km", meters / 1000.0)
-    } else {
-        format!("{meters:.0}m")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

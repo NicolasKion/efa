@@ -160,6 +160,13 @@ pub mod attr {
     ];
     /// A fighter's jam strength per sensor type.
     pub const FTR_ECM_STRENGTH: [i32; 4] = [2246, 2247, 2248, 2249];
+    /// pyfa's range attributes, the first one a module has being its optimal: maxRange,
+    /// shieldTransferRange, powerTransferRange, empFieldRange, ecmBurstRange, warpScrambleRange,
+    /// cargoScanRange, shipScanRange, surveyScanRange.
+    pub const RANGE_ATTRS: [i32; 9] = [54, 87, 91, 99, 142, 103, 126, 125, 197];
+    /// pyfa's falloff attributes, likewise: falloffEffectiveness (neutralizers, nosferatus and
+    /// remote repairers), falloff, shipScanFalloff.
+    pub const FALLOFF_ATTRS: [i32; 3] = [2044, 158, 510];
     /// warfareBuff1ID to warfareBuff4ID.
     pub const WARFARE_BUFF_IDS: [i32; 4] = [2468, 2470, 2472, 2536];
     /// warfareBuff1Value to warfareBuff4Value.
@@ -173,6 +180,8 @@ pub mod effect {
     /// Takes a launcher hardpoint.
     pub const LAUNCHER_FITTED: i32 = 40;
     pub const FOF_MISSILE: i32 = 104;
+    /// The burst projectors' effects, one each; their range counts from the ship's centre.
+    pub const BURST_PROJECTORS: [i32; 7] = [6476, 6477, 6478, 6479, 6481, 6482, 6513];
     pub const DISRUPT_SPHERE: i32 = 3380;
     pub const NOSFERATU: i32 = 6197;
     pub const DOOMSDAY_WEB: i32 = 6476;

@@ -152,3 +152,44 @@ fn cap_boosters_count_in_the_cap_delta() {
     let gained = recharge(", Navy Cap Booster 400") - recharge("");
     assert!((10.0..200.0).contains(&gained), "{gained}");
 }
+
+#[test]
+fn ranges_come_from_the_attribute_each_module_uses() {
+    use efa::data::Slot::{High, Mid};
+    let Some((catalog, engine)) = setup() else {
+        return;
+    };
+    let (fit, unknown) = efa::fit::Fit::from_eft(
+        catalog,
+        "[Vexor, Ranges]
+
+Damage Control II
+
+Warp Scrambler II
+Cargo Scanner II
+
+Medium Remote Shield Booster II
+Medium Energy Neutralizer II
+Heavy Energy Nosferatu II
+",
+    )
+    .expect("the fit parses");
+    assert!(unknown.is_empty(), "{unknown:?}");
+    let stats = engine.compute(&fit);
+    let range = |slot, i| {
+        let info = &stats.modules[&(slot, i)];
+        (info.optimal, info.falloff)
+    };
+    // Neutralizers, nosferatus and remote reps keep their falloff in falloffEffectiveness.
+    for (slot, i) in [(High, 0), (High, 1), (High, 2)] {
+        let (optimal, falloff) = range(slot, i);
+        assert!(
+            optimal.is_some() && falloff.is_some(),
+            "{slot:?} {i}: {optimal:?} {falloff:?}"
+        );
+    }
+    // A scrambler's falloff is 0, which pyfa leaves out.
+    assert!(matches!(range(Mid, 0), (Some(_), None)));
+    // Cargo scanners have their own range attribute.
+    assert!(range(Mid, 1).0.is_some());
+}

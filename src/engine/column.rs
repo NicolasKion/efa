@@ -1,6 +1,7 @@
 //! What the fitting view's Miscellanea and Heat columns read off modules (pyfa's
 //! gui/builtinViewColumns/misc.py and heat.py), gathered after the main recalculation.
 
+use crate::graphs::math::MissileRange;
 use std::collections::{HashMap, HashSet};
 
 use rc::{
@@ -473,7 +474,7 @@ pub(super) fn missile_range(
     id: ItemId,
     type_id: i32,
     ship_radius: f64,
-) -> Option<f64> {
+) -> Option<MissileRange> {
     let launcher = read::effects(sol, id).contains(&effect::LAUNCHER_FITTED)
         || type_id == super::graph::CIVILIAN_LAUNCHER;
     if !launcher {
@@ -481,16 +482,44 @@ pub(super) fn missile_range(
     }
     let charge = sol.get_module(&id).ok()?.get_charge()?.get_item_id();
     let fof = read::effects(sol, charge).contains(&effect::FOF_MISSILE);
-    let range = crate::graphs::math::missile_range(
+    crate::graphs::math::missile_range(
         read::attr_or_zero(sol, charge, attr::MAX_VELOCITY),
         read::attr_or_zero(sol, charge, attr::EXPLOSION_DELAY),
         read::attr_or_zero(sol, charge, attr::MASS),
         read::attr_or_zero(sol, charge, attr::AGILITY),
         ship_radius,
         fof.then(|| read::attr_or_zero(sol, charge, attr::MAX_FOF_RANGE)),
-    )?;
-    Some(range.lower * (1.0 - range.higher_chance) + range.higher * range.higher_chance)
-        .filter(|&r| r > 0.0)
+    )
+    .filter(|r| r.higher > 0.0)
+}
+
+/// pyfa's Max Range column for a module: the first range attribute it has, less the ship's
+/// radius for burst projectors, or else how far its missiles fly on average.
+pub(super) fn optimal(
+    sol: &mut SolOwned,
+    id: ItemId,
+    missile: Option<MissileRange>,
+    ship_radius: f64,
+) -> Option<f64> {
+    let range = attr::RANGE_ATTRS
+        .iter()
+        .find_map(|&a| read::positive_attr(sol, id, a));
+    let Some(range) = range else {
+        return missile.map(|r| r.lower * (1.0 - r.higher_chance) + r.higher * r.higher_chance);
+    };
+    let effects = read::effects(sol, id);
+    if effect::BURST_PROJECTORS.iter().any(|e| effects.contains(e)) {
+        return Some(range - ship_radius);
+    }
+    Some(range)
+}
+
+/// The first falloff attribute the module has; pyfa leaves out anything under 5 m.
+pub(super) fn falloff(sol: &mut SolOwned, id: ItemId) -> Option<f64> {
+    attr::FALLOFF_ATTRS
+        .iter()
+        .find_map(|&a| read::positive_attr(sol, id, a))
+        .filter(|&f| f >= 5.0)
 }
 
 #[cfg(test)]

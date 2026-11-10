@@ -536,8 +536,18 @@ impl Efa {
                 .children(text(Col::Name)),
         )
         .children(
-            [Col::Powergrid, Col::Cpu, Col::Capacitor, Col::Range]
+            [Col::Powergrid, Col::Cpu, Col::Capacitor]
                 .map(|col| layout.cell(col).truncate().children(text(col))),
+        )
+        .child(
+            layout
+                .cell(Col::Range)
+                .id(SharedString::from(format!("range-{slot:?}-{i}")))
+                .truncate()
+                .children(text(Col::Range))
+                .when_some(super::columns::range_tooltip(&info), |cell, tip| {
+                    cell.tip(SharedString::from(tip))
+                }),
         )
         .child(misc_cell(
             layout,

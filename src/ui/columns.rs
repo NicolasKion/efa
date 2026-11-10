@@ -15,7 +15,7 @@ use std::{collections::HashMap, rc::Rc};
 
 use super::{
     Efa, Loaded, stats,
-    widgets::{self, icon, icon_box, km, short},
+    widgets::{self, icon, icon_box, short},
 };
 use crate::{
     data::{Catalog, Slot},
@@ -142,11 +142,7 @@ impl Col {
             Self::Powergrid => info.powergrid.map(short),
             Self::Cpu => info.cpu.map(short),
             Self::Capacitor => info.cap_per_sec.map(|v| format!("{:+.1}/s", -v)),
-            Self::Range => match (info.optimal, info.falloff) {
-                (Some(o), Some(f)) => Some(format!("{}+{}", km(o), km(f))),
-                (Some(o), None) => Some(km(o)),
-                _ => None,
-            },
+            Self::Range => range_text(info.optimal, info.falloff),
             // pyfa prices the module alone, not what it has loaded.
             Self::Price => prices
                 .get(m.type_id)
@@ -512,9 +508,55 @@ impl Efa {
     }
 }
 
+/// pyfa's Max Range text: "10km+5km", three significant digits, the falloff alone when there is
+/// no optimal.
+pub(super) fn range_text(optimal: Option<f64>, falloff: Option<f64>) -> Option<String> {
+    let metres = |v: f64| format!("{}m", stats::format::amount(v, 3, 0, 3));
+    let falloff = falloff.map(|f| format!("+{}", metres(f)));
+    match (optimal, falloff) {
+        (Some(o), f) => Some(format!("{}{}", metres(o), f.unwrap_or_default())),
+        (None, f) => f,
+    }
+}
+
+/// pyfa's Max Range tooltip: a missile's odds of flying each whole second, or what the figures
+/// are.
+pub(super) fn range_tooltip(info: &crate::engine::ModuleInfo) -> Option<String> {
+    if let Some(m) = info.missile {
+        // pyfa rounds the chance to three decimals before leaving out a sure thing.
+        if !(0.0005..0.9995).contains(&m.higher_chance) {
+            return Some("Missile flight range".to_owned());
+        }
+        let line = |share: f64, range: f64| {
+            format!(
+                "{}% chance to fly {}m",
+                stats::format::amount(share * 100.0, 3, 0, 0),
+                stats::format::amount(range, 3, 0, 3)
+            )
+        };
+        return Some(format!(
+            "Missile flight range\n{}\n{}",
+            line(1.0 - m.higher_chance, m.lower),
+            line(m.higher_chance, m.higher)
+        ));
+    }
+    (info.optimal.is_some() || info.falloff.is_some()).then(|| "Optimal + Falloff".to_owned())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::charge_text;
+    use super::{charge_text, range_text};
+
+    #[test]
+    fn ranges_read_like_pyfa() {
+        assert_eq!(
+            range_text(Some(10_000.0), Some(5_000.0)).as_deref(),
+            Some("10km+5km")
+        );
+        assert_eq!(range_text(Some(42_390.0), None).as_deref(), Some("42.4km"));
+        assert_eq!(range_text(None, Some(500.0)).as_deref(), Some("+500m"));
+        assert_eq!(range_text(None, None), None);
+    }
 
     #[test]
     fn charge_text_follows_pyfa() {

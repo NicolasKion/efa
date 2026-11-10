@@ -101,6 +101,8 @@ pub struct ModuleInfo {
     pub cap_per_sec: Option<f64>,
     pub optimal: Option<f64>,
     pub falloff: Option<f64>,
+    /// How far the loaded missiles fly, for the range's tooltip.
+    pub missile: Option<crate::graphs::math::MissileRange>,
     /// Cycles to full spool, for modules that spool up.
     pub spool_max: Option<u32>,
     /// Expected seconds until the module burns out: an overheated one from its own heat and
