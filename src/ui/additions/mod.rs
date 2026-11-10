@@ -121,7 +121,14 @@ fn tab_count(
         (_, AdditionsTab::Cargo) => fit.cargo.len(),
         (_, AdditionsTab::Fighters) => fit.fighters.iter().filter(|f| f.active || !active).count(),
         (_, AdditionsTab::Projected) => fit.projected.len(),
-        (_, AdditionsTab::Command) => fit.command.iter().filter(|c| c.active || !active).count(),
+        (_, AdditionsTab::Command) => {
+            fit.command.iter().filter(|c| c.active || !active).count()
+                + fit
+                    .command_links
+                    .iter()
+                    .filter(|l| l.active || !active)
+                    .count()
+        }
     }
 }
 

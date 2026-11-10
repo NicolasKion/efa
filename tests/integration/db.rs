@@ -15,6 +15,7 @@ use efa::{
         Booster, DamageProfile, DroneStack, Fit, ImplantSource, Module, ModuleState, Mutation,
         RahPattern, SystemSecurity,
         fighters::Fighter,
+        links::{CommandLink, LinkCategory, LinkSet},
         projected::{
             CommandFit, EnvEffect, ProjectedDrone, ProjectedFighter, ProjectedFit, ProjectedModule,
         },
@@ -418,6 +419,14 @@ fn full_fit(name: &str) -> Fit {
                 active: false,
             },
         ],
+        command_links: vec![
+            CommandLink::new(LinkSet::All, 3, true),
+            CommandLink {
+                active: false,
+                ..CommandLink::new(LinkSet::Charge(42_838), 0, false)
+            },
+            CommandLink::new(LinkSet::Category(LinkCategory::Mining), 5, false),
+        ],
         ignore_restrictions: true,
         grouped: [Slot::High, Slot::Low, Slot::Service].into_iter().collect(),
         modified: 1_700_000_123,
@@ -429,7 +438,7 @@ fn fit_json(fit: &Fit) -> serde_json::Value {
 }
 
 /// Every table holding part of a fit, and the fits.
-const FIT_TABLES: [&str; 22] = [
+const FIT_TABLES: [&str; 23] = [
     "fit_modules",
     "module_mutations",
     "module_mutation_attrs",
@@ -450,6 +459,7 @@ const FIT_TABLES: [&str; 22] = [
     "fit_projected_drones",
     "fit_projected_env",
     "fit_command",
+    "fit_command_links",
     "fit_grouped_racks",
     "fits",
 ];

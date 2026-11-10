@@ -29,7 +29,7 @@ use crate::{
 };
 
 /// The capsule: a ship item with nothing on it that bonuses modules or drones.
-const CAPSULE: i32 = 670;
+pub(super) const CAPSULE: i32 = 670;
 
 /// Fighter abilities pyfa leaves off when a squadron has no attack to start with.
 const PROPULSION_ABILITIES: [i32; 2] = [4, 13];
@@ -235,17 +235,21 @@ impl Engine {
             .filter(|c| c.active)
             .filter_map(|c| find(c.fit))
             .collect();
-        if !boosters.is_empty() {
+        // Other fits fly All 5 for now; pyfa gives each its own character.
+        let mut fleet_fits: Vec<rc::FitId> = boosters
+            .into_iter()
+            .filter_map(|booster| add_fit(sol, booster, &self.all5))
+            .map(|placed| placed.fit_id)
+            .collect();
+        fleet_fits.extend(super::links::add_link_booster(
+            sol,
+            &fit.command_links,
+            &self.all5,
+        ));
+        if !fleet_fits.is_empty() {
             let fleet = sol.add_fleet().get_fleet_id();
-            if let Ok(mut f) = sol.get_fit(&fit_id) {
-                let _ = f.set_fleet(Some(&fleet));
-            }
-            for booster in boosters {
-                // Other fits fly All 5 for now; pyfa gives each its own character.
-                let Some(placed) = add_fit(sol, booster, &self.all5) else {
-                    continue;
-                };
-                if let Ok(mut f) = sol.get_fit(&placed.fit_id) {
+            for id in fleet_fits.into_iter().chain([fit_id]) {
+                if let Ok(mut f) = sol.get_fit(&id) {
                     let _ = f.set_fleet(Some(&fleet));
                 }
             }

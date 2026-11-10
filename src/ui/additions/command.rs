@@ -1,6 +1,6 @@
 //! The Command tab, pyfa's command pane: fits boosting this one from its fleet, switched on and
 //! off from the state column, added from the fittings browser, open tabs or a list of every fit
-//! that carries a command burst.
+//! that carries a command burst, and pyfa's generic links below them.
 
 use std::rc::Rc;
 
@@ -22,7 +22,10 @@ use super::{
 use crate::ui::widgets::DropHighlight;
 use crate::{
     data::Catalog,
-    fit::Fit,
+    fit::{
+        Fit,
+        links::{CommandLink, LinkCategory, LinkSet, STRENGTHS, link_name},
+    },
     icons::Icon,
     store::Saved,
     ui::{
@@ -35,28 +38,60 @@ use crate::{
 /// Past this many command fits pyfa groups its menu by ship.
 const GROUP_BY_SHIP_FROM: usize = 15;
 
-/// A row of the pane: the command entry's index and the saved fit it points at.
+/// A row of the pane.
 #[derive(Debug, Clone, Copy)]
-struct Row {
-    entry: usize,
-    fit: usize,
+enum Row {
+    /// A command entry's index and the saved fit it points at.
+    Fit { entry: usize, fit: usize },
+    /// A generic link's index.
+    Link(usize),
 }
 
-/// Command fits in pyfa's order, by fit name. Entries whose fit was deleted are left out.
+/// The command entries and generic links some rows stand for.
+#[derive(Debug, Default)]
+struct Entries {
+    fits: Vec<usize>,
+    links: Vec<usize>,
+}
+
+impl Entries {
+    fn of(rows: impl IntoIterator<Item = Row>) -> Self {
+        let mut entries = Self::default();
+        for row in rows {
+            match row {
+                Row::Fit { entry, .. } => entries.fits.push(entry),
+                Row::Link(i) => entries.links.push(i),
+            }
+        }
+        entries
+    }
+}
+
+/// Command fits in pyfa's order, by fit name, then the generic links. Entries whose fit was
+/// deleted are left out.
 fn rows(saved: &Saved, fit: &Fit) -> Vec<Row> {
-    let mut rows: Vec<Row> = fit
+    let mut fits: Vec<(usize, usize)> = fit
         .command
         .iter()
         .enumerate()
-        .filter_map(|(entry, c)| {
-            Some(Row {
-                entry,
-                fit: saved.fit_index(c.fit)?,
-            })
-        })
+        .filter_map(|(entry, c)| Some((entry, saved.fit_index(c.fit)?)))
         .collect();
-    rows.sort_by(|a, b| saved.fits[a.fit].name.cmp(&saved.fits[b.fit].name));
-    rows
+    fits.sort_by(|a, b| saved.fits[a.1].name.cmp(&saved.fits[b.1].name));
+    fits.into_iter()
+        .map(|(entry, fit)| Row::Fit { entry, fit })
+        .chain((0..fit.command_links.len()).map(Row::Link))
+        .collect()
+}
+
+/// Removes `indices` from `list`, each once.
+fn remove_indices<T>(list: &mut Vec<T>, mut indices: Vec<usize>) {
+    indices.sort_unstable();
+    indices.dedup();
+    for i in indices.into_iter().rev() {
+        if i < list.len() {
+            list.remove(i);
+        }
+    }
 }
 
 /// How the command pane names a fit: "Fit (Ship)".
@@ -68,44 +103,63 @@ fn row_label(catalog: &Catalog, fit: &Fit) -> String {
 }
 
 impl Efa {
-    /// The command entries behind the clicked row and the selection it belongs to.
-    fn command_targets(&self, clicked: usize) -> Vec<usize> {
+    /// The rows at `places`.
+    fn command_entries(&self, places: &[usize]) -> Entries {
         let Some(fit) = self.fit() else {
-            return Vec::new();
+            return Entries::default();
         };
         let rows = rows(&self.saved, fit);
-        self.addition_targets(clicked)
-            .into_iter()
-            .filter_map(|n| rows.get(n).map(|r| r.entry))
-            .collect()
+        Entries::of(places.iter().filter_map(|&n| rows.get(n).copied()))
     }
 
-    fn remove_command_fits(&mut self, entries: Vec<usize>, cx: &mut Context<Self>) {
+    /// The rows behind the clicked row and the selection it belongs to.
+    fn command_targets(&self, clicked: usize) -> Entries {
+        self.command_entries(&self.addition_targets(clicked))
+    }
+
+    fn remove_command_entries(&mut self, entries: Entries, cx: &mut Context<Self>) {
         self.edit_current(cx, |fit, _| {
-            let mut entries = entries;
-            entries.sort_unstable();
-            entries.dedup();
-            for i in entries.into_iter().rev() {
-                if i < fit.command.len() {
-                    fit.command.remove(i);
-                }
-            }
+            remove_indices(&mut fit.command, entries.fits);
+            remove_indices(&mut fit.command_links, entries.links);
             true
         });
     }
 
-    /// pyfa's toggle: the clicked fit's state decides whether all of them go on or off.
-    fn toggle_command_fits(&mut self, clicked: usize, entries: Vec<usize>, cx: &mut Context<Self>) {
+    /// pyfa's toggle: the clicked row's state decides whether all of them go on or off.
+    fn toggle_command_entries(&mut self, clicked: Row, entries: Entries, cx: &mut Context<Self>) {
         self.edit_current(cx, |fit, _| {
-            let Some(on) = fit.command.get(clicked).map(|c| !c.active) else {
-                return false;
+            let on = match clicked {
+                Row::Fit { entry, .. } => fit.command.get(entry).map(|c| !c.active),
+                Row::Link(i) => fit.command_links.get(i).map(|l| !l.active),
             };
-            for i in entries.into_iter().chain([clicked]) {
+            let Some(on) = on else { return false };
+            let (mut fits, mut links) = (entries.fits, entries.links);
+            match clicked {
+                Row::Fit { entry, .. } => fits.push(entry),
+                Row::Link(i) => links.push(i),
+            }
+            for i in fits {
                 if let Some(c) = fit.command.get_mut(i) {
                     c.active = on;
                 }
             }
+            for i in links {
+                if let Some(l) = fit.command_links.get_mut(i) {
+                    l.active = on;
+                }
+            }
             false
+        });
+    }
+
+    /// Add a generic link, unless the same one is there.
+    fn add_command_link(&mut self, link: CommandLink, cx: &mut Context<Self>) {
+        self.edit_current(cx, |fit, _| {
+            if fit.command_links.contains(&link) {
+                return false;
+            }
+            fit.command_links.push(link);
+            true
         });
     }
 
@@ -159,18 +213,37 @@ impl Efa {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme();
-        let target = &self.saved.fits[row.fit];
-        let active = self
-            .fit()
-            .and_then(|f| f.command.get(row.entry))
-            .is_some_and(|c| c.active);
+        let Some(fit) = self.fit() else {
+            return div().into_any_element();
+        };
+        let catalog = &loaded.catalog;
+        let (active, icon, label) = match row {
+            Row::Fit { entry, fit: index } => {
+                let target = &self.saved.fits[index];
+                (
+                    fit.command.get(entry).is_some_and(|c| c.active),
+                    target.ship,
+                    row_label(catalog, target),
+                )
+            }
+            Row::Link(i) => {
+                let Some(link) = fit.command_links.get(i) else {
+                    return div().into_any_element();
+                };
+                let category = link.set.charges().first().map(|&(c, _)| c);
+                (
+                    link.active,
+                    category.map(LinkCategory::burst),
+                    link.label(catalog),
+                )
+            }
+        };
         let (mark, mark_color) = if active {
             ("✓", self.palette.green)
         } else {
             ("○", self.palette.muted)
         };
         let selected = self.additions_selection.contains(&n);
-        let entry = row.entry;
         h_flex()
             .id(SharedString::from(format!("command-{n}")))
             .gap_1()
@@ -189,27 +262,20 @@ impl Efa {
                     .on_click(cx.listener(move |g, _: &ClickEvent, _, cx| {
                         cx.stop_propagation();
                         let entries = g.command_targets(n);
-                        g.toggle_command_fits(entry, entries, cx);
+                        g.toggle_command_entries(row, entries, cx);
                     })),
             )
             .child(
-                div().w(px(ICON_W)).flex_none().children(
-                    target.ship.map(|ship| {
-                        icon_box(&loaded.catalog, &loaded.icons, Icon::Type(ship), 22.)
-                    }),
-                ),
-            )
-            .child(
                 div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .child(row_label(&loaded.catalog, target)),
+                    .w(px(ICON_W))
+                    .flex_none()
+                    .children(icon.map(|t| icon_box(catalog, &loaded.icons, Icon::Type(t), 22.))),
             )
+            .child(div().flex_1().min_w_0().truncate().child(label))
             .on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
                 window.focus(&g.additions_focus, cx);
                 if event.click_count() >= 2 {
-                    g.remove_command_fits(vec![entry], cx);
+                    g.remove_command_entries(Entries::of([row]), cx);
                 } else {
                     g.select_addition(n, event.modifiers(), cx);
                 }
@@ -224,9 +290,18 @@ impl Efa {
             )
             .context_menu({
                 let (this, loaded) = (cx.weak_entity(), Rc::clone(loaded));
-                let fit_index = row.fit;
                 move |menu, window, cx| {
-                    let menu = command_fit_menu(menu, &this, n, fit_index, cx);
+                    let menu = match row {
+                        Row::Fit { fit, .. } => command_fit_menu(menu, &this, n, fit, cx),
+                        Row::Link(_) => {
+                            menu.item(entry(IconName::Delete, "Remove Generic Link").on_click(
+                                on_efa(&this, move |g, _, _, cx| {
+                                    let entries = g.command_targets(n);
+                                    g.remove_command_entries(entries, cx);
+                                }),
+                            ))
+                        }
+                    };
                     command_view_menu(menu.separator(), &this, &loaded, window, cx)
                 }
             })
@@ -241,13 +316,8 @@ impl Efa {
             count,
             true,
             |g, places, cx| {
-                let Some(fit) = g.fit() else { return };
-                let rows = rows(&g.saved, fit);
-                let entries = places
-                    .iter()
-                    .filter_map(|&n| rows.get(n).map(|r| r.entry))
-                    .collect();
-                g.remove_command_fits(entries, cx);
+                let entries = g.command_entries(&places);
+                g.remove_command_entries(entries, cx);
             },
             cx,
         );
@@ -275,13 +345,13 @@ fn command_fit_menu(
     menu.item(
         entry(IconName::Delete, "Remove Command Fit").on_click(on_efa(this, move |g, _, _, cx| {
             let entries = g.command_targets(n);
-            g.remove_command_fits(entries, cx);
+            g.remove_command_entries(entries, cx);
         })),
     )
 }
 
 /// pyfa's commandView entries: add fits from the browser, from open tabs, or from every fit
-/// with a command burst. Its Generic Links need boosts without a fit, which refine cannot do.
+/// with a command burst, and generic links.
 fn command_view_menu(
     menu: PopupMenu,
     this: &WeakEntity<Efa>,
@@ -290,6 +360,7 @@ fn command_view_menu(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let menu = add_fit_entries(menu, this, loaded, Link::Command, window, cx);
+    let menu = generic_links_menu(menu, this, loaded, window, cx);
     let Some(g) = this.upgrade() else { return menu };
     let catalog = &loaded.catalog;
     let mut boosters: Vec<(usize, String, String)> = g
@@ -347,6 +418,74 @@ fn command_view_menu(
                     })
                 })
             })
+        },
+    )
+}
+
+/// pyfa's "Generic Links": every link at its strongest in one click, all links, or a category's
+/// or a single link, each at a ship bonus with or without a mindlink.
+fn generic_links_menu(
+    menu: PopupMenu,
+    this: &WeakEntity<Efa>,
+    loaded: &Rc<Loaded>,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let this = this.clone();
+    let loaded = Rc::clone(loaded);
+    let add = move |set: LinkSet, strength: u8, mindlink: bool| {
+        on_efa(&this, move |g, _, _, cx| {
+            g.add_command_link(CommandLink::new(set, strength, mindlink), cx);
+        })
+    };
+    let max = add.clone();
+    let strengths = move |menu: PopupMenu, set: LinkSet| {
+        let mindlinks = STRENGTHS.iter().fold(menu, |menu, &s| {
+            menu.item(
+                PopupMenuItem::new(format!("{s}%/lvl + Mindlink")).on_click(add(set, s, true)),
+            )
+        });
+        STRENGTHS.iter().fold(mindlinks.separator(), |menu, &s| {
+            menu.item(PopupMenuItem::new(format!("{s}%/lvl")).on_click(add(set, s, false)))
+        })
+    };
+    menu.submenu_with_element(
+        "Generic Links",
+        icon_label(IconName::Plus, "Generic Links"),
+        window,
+        cx,
+        move |menu, window, cx| {
+            let max =
+                PopupMenuItem::new("Max Links").on_click(max(LinkSet::All, STRENGTHS[0], true));
+            let strengths_all = strengths.clone();
+            let mut menu = menu
+                .item(max)
+                .separator()
+                .submenu("All Links", window, cx, move |menu, _, _| {
+                    strengths_all(menu, LinkSet::All)
+                })
+                .separator();
+            for category in LinkCategory::ALL {
+                let strengths = strengths.clone();
+                let loaded = Rc::clone(&loaded);
+                menu = menu.submenu(category.label(), window, cx, move |menu, window, cx| {
+                    let mut sets = vec![(
+                        LinkSet::Category(category),
+                        format!("All {} Links", category.label()),
+                    )];
+                    sets.extend(
+                        category
+                            .charges()
+                            .iter()
+                            .map(|&t| (LinkSet::Charge(t), link_name(&loaded.catalog, t))),
+                    );
+                    sets.into_iter().fold(menu, |menu, (set, label)| {
+                        let strengths = strengths.clone();
+                        menu.submenu(label, window, cx, move |menu, _, _| strengths(menu, set))
+                    })
+                });
+            }
+            menu
         },
     )
 }

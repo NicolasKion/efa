@@ -5,7 +5,10 @@ use crate::common::setup;
 use efa::{
     data::Catalog,
     engine::{CalcOptions, FitItem, SourceKind, Stats},
-    fit::{Fit, ModuleState},
+    fit::{
+        Fit, ModuleState,
+        links::{CommandLink, LinkCategory, LinkSet},
+    },
 };
 
 /// shieldCapacity.
@@ -72,6 +75,37 @@ fn command_bursts_boost_fleet_members() {
     target.command[0].active = false;
     let off = engine.compute_among(&target, &fits, engine.all5(), CalcOptions::default());
     assert!((off.shield.hp - alone.shield.hp).abs() < 1e-6);
+}
+
+#[test]
+fn generic_links_boost_like_pyfa() {
+    let Some((catalog, engine)) = setup() else {
+        return;
+    };
+    let mut target = rifter(catalog);
+    let fits = vec![target.clone()];
+    let shield = |fit: &Fit| {
+        engine
+            .compute_among(fit, &fits, engine.all5(), CalcOptions::default())
+            .shield
+            .hp
+    };
+    let alone = shield(&target);
+    let shield_links = LinkSet::Category(LinkCategory::Shield);
+
+    // Shield Extension is +8% base, times 1.5 for skills and 1.25 for a T2 burst; the ship
+    // bonus and mindlink multiply that further.
+    for (strength, mindlink, gain) in [(0, false, 0.15), (5, true, 0.234_375)] {
+        target.command_links = vec![CommandLink::new(shield_links, strength, mindlink)];
+        let boosted = shield(&target);
+        assert!(
+            (boosted / alone - 1. - gain).abs() < 1e-6,
+            "{strength}%/lvl, mindlink {mindlink}: shield {alone} -> {boosted}"
+        );
+    }
+
+    target.command_links[0].active = false;
+    assert!((shield(&target) - alone).abs() < 1e-6);
 }
 
 #[test]

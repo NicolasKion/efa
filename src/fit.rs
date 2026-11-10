@@ -5,6 +5,7 @@ pub mod cargo;
 mod drones;
 pub mod fighters;
 mod implants;
+pub mod links;
 pub mod mutation;
 pub mod projected;
 mod rigs;
@@ -203,6 +204,9 @@ pub struct Fit {
     /// Fleet boosters, pyfa's command fits.
     #[serde(default)]
     pub command: Vec<projected::CommandFit>,
+    /// pyfa's generic links: boosts at a chosen strength, without a booster fit.
+    #[serde(default)]
+    pub command_links: Vec<links::CommandLink>,
     /// pyfa's "Disable Fitting Restrictions": anything goes on, and what breaks the rules shows
     /// red.
     #[serde(default)]

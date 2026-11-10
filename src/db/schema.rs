@@ -353,4 +353,16 @@ CREATE TABLE esi_account_scopes (
 -- Rigs switched off in efa.
 ALTER TABLE fit_rigs ADD COLUMN active INTEGER NOT NULL DEFAULT 1;
 ",
+    r"
+-- pyfa's generic links: 'all', a category, or a burst charge's type id.
+CREATE TABLE fit_command_links (
+    fit_id INTEGER NOT NULL REFERENCES fits (id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    link TEXT NOT NULL,
+    strength INTEGER NOT NULL,
+    mindlink INTEGER NOT NULL,
+    active INTEGER NOT NULL,
+    PRIMARY KEY (fit_id, position)
+);
+",
 ];

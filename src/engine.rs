@@ -7,6 +7,7 @@ mod efs;
 mod graph;
 mod inspect;
 mod items;
+mod links;
 mod overrides;
 mod pane;
 mod pilot;

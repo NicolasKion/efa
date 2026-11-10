@@ -1,7 +1,7 @@
 # Feature parity with pyfa
 
 Rough coverage: fitting, stats, additions, item stats, graphs, editors, context menus, the file formats, ESI/SSO, prices and Optimize Fit Price are mostly there.
-Biggest gaps: minimal stats views, generic command links.
+Biggest gaps: minimal stats views.
 Most of the missing calculation is already in refine (fleets, projections, system effects, stances, fighters, applied dps, cap sim, RAH, spool, validation, attribute modification trees), so the bulk of the remaining work is UI and persistence.
 Not in refine: prices, ESI/SSO, file formats, skill plans, graph sampling over distance/time, abstract target profiles for applied damage, lock/warp time formulas (all done graph-side in src/graphs).
 
@@ -31,6 +31,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Per-fit damage pattern and target profile (gui/builtinStatsViews, contextMenus/damagePatternChange.py, targetProfile/switcher.py)
 - [x] Fit notes, carried by duplicates, shown in the fittings browser tooltip cut to 200 characters (builtinAdditionPanes/notesView.py, builtinShipBrowser/fitItem.py); EFT text has no notes in pyfa either
 - [x] Mark fit as fleet booster / command fit (builtinAdditionPanes/commandView.py), from the fittings browser's "Add Command Booster", drags, and the Command tab's menus
+- [x] Generic command links (gui/builtinContextMenus/commandLinkAdd.py, eos/saveddata/commandLink.py): the Command tab's "Generic Links" menu adds Max Links, all links, a category or one link at 0 to 5%/lvl with or without a mindlink; rows switch on and off and are saved with the fit. refine only boosts from real bursts, so they fly on a hidden capsule with T2 bursts and All 5, loaded with copies of the charges scaled for the ship bonus and mindlink. The Mining category also has Mining Laser Efficiency, which pyfa leaves out
 - [x] Backup all fits to XML (mainMenuBar.py backupFits)
 - [x] Fit browser lite dialog for picking fits (gui/fitBrowserLite.py): a searchable list of saved fits for the Projected and Command tabs' "Add Fit..."
 
@@ -81,7 +82,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] Drag and drop modules between slots, swap/rearrange (fittingView.py, fitCommands/gui/localModule)
 - [x] Ctrl drag to copy a module or rig onto an empty slot of its rack, Ctrl+Alt drag to fill the rack with copies (fittingView.py swapItems), drag module to cargo (fitCommands/gui/localModuleCargo), module/charge to and from cargo with Ctrl to copy
 - [x] Multi-select and bulk state change (fittingView.py): Shift/Ctrl selection, a state click takes the selection along, Alt every similar module, Ctrl switches them off
-- [x] Delete key removes selection, Ctrl+A selects all, Escape clears (fittingView.py)
+- [x] Delete key removes selection, Ctrl+A selects all, Escape or a click beside the modules clears (fittingView.py)
 - [x] Column: ship/item icon and charge icon (baseIcon.py, ammoIcon.py)
 - [x] Column: CPU, PG per module (attributeDisplay.py), refine: item get_attr
 - [x] Column: capacitor usage per module (capacitorUse.py), refine: item get_attr

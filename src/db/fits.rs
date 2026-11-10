@@ -13,6 +13,7 @@ use crate::{
         Booster, DamageProfile, DroneStack, Fit, ImplantSource, Module, ModuleState, Mutation,
         RahPattern, SystemSecurity,
         fighters::Fighter,
+        links::{CommandLink, LinkSet},
         projected::{
             CommandFit, EnvEffect, ProjectedDrone, ProjectedFighter, ProjectedFit, ProjectedModule,
         },
@@ -175,6 +176,7 @@ impl Item for Fit {
         ("fit_projected_drones", "fit_id"),
         ("fit_projected_env", "fit_id"),
         ("fit_command", "fit_id"),
+        ("fit_command_links", "fit_id"),
         ("fit_grouped_racks", "fit_id"),
     ];
 
@@ -265,6 +267,20 @@ impl Item for Fit {
         )?;
         for (i, c) in self.command.iter().enumerate() {
             command.execute(params![id, i, c.fit, c.active])?;
+        }
+        let mut links = tx.prepare_cached(
+            "INSERT INTO fit_command_links (fit_id, position, link, strength, mindlink, active)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )?;
+        for (i, l) in self.command_links.iter().enumerate() {
+            links.execute(params![
+                id,
+                i,
+                l.set.key(),
+                l.strength,
+                l.mindlink,
+                l.active
+            ])?;
         }
         let mut grouped =
             tx.prepare_cached("INSERT INTO fit_grouped_racks (fit_id, rack) VALUES (?1, ?2)")?;
@@ -365,6 +381,24 @@ impl Item for Fit {
                 })
             },
             |fit, c| fit.command.push(c),
+        )?;
+        // A link this version does not know is dropped rather than losing the fit.
+        fits.parts(
+            conn,
+            "SELECT fit_id, link, strength, mindlink, active FROM fit_command_links
+             ORDER BY fit_id, position",
+            |r| {
+                let Some(set) = LinkSet::parse(&r.get::<_, String>(1)?) else {
+                    return Ok(None);
+                };
+                Ok(Some(CommandLink {
+                    set,
+                    strength: r.get(2)?,
+                    mindlink: r.get(3)?,
+                    active: r.get(4)?,
+                }))
+            },
+            |fit, l| fit.command_links.extend(l),
         )?;
         fits.parts(
             conn,

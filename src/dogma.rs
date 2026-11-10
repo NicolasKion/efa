@@ -164,6 +164,8 @@ pub mod attr {
     pub const WARFARE_BUFF_IDS: [i32; 4] = [2468, 2470, 2472, 2536];
     /// warfareBuff1Value to warfareBuff4Value.
     pub const WARFARE_BUFF_VALUES: [i32; 4] = [2469, 2471, 2473, 2537];
+    /// warfareBuff1Multiplier to warfareBuff4Multiplier: a burst charge's base strengths.
+    pub const WARFARE_BUFF_MULTIPLIERS: [i32; 4] = [2596, 2597, 2598, 2599];
 }
 
 /// Dogma effect IDs.

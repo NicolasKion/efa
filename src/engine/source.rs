@@ -87,8 +87,8 @@ impl PackedEngine {
     }
 }
 
-/// refine's data source with `values` as the base values of their types. Empty values give the
-/// plain data.
+/// refine's data source with `values` as the base values of their types, and the charges generic
+/// links need.
 pub fn load_src(source: &EngineSource, values: &Values) -> Result<Src, String> {
     match source {
         EngineSource::Dump {
@@ -97,28 +97,21 @@ pub fn load_src(source: &EngineSource, values: &Values) -> Result<Src, String> {
         } => {
             let edh = redh::PhbFsEdh::new(data_dir).into();
             let plain = || radc::PostcardZfsAdc::new(cache_dir, "tq");
-            let src = Src::new(&edh, Some(&plain().into()))
+            Src::new(&edh, Some(&plain().into()))
                 .map_err(|e| format!("loading engine data: {e}"))?;
-            if values.is_empty() {
-                return Ok(src);
-            }
             // The plain load brought the cache up to date, so the patched one reads it rather
             // than generating fresh, unpatched data.
             let patched = Patched::new(Box::new(plain()), values.clone());
-            Src::new(&edh, Some(&patched.into())).map_err(|e| format!("applying overrides: {e}"))
+            Src::new(&edh, Some(&patched.into())).map_err(|e| format!("loading engine data: {e}"))
         }
         EngineSource::Packed(packed) => {
             let edh = PackEdh(Arc::clone(packed)).into();
             let adc = PackAdc(Arc::clone(packed));
             // refine only fails here when it wanted EVE data, after a fingerprint mismatch or
             // unreadable adapted data; its error does not carry the handler's message.
-            let src = if values.is_empty() {
-                Src::new(&edh, Some(&adc.into()))
-            } else {
-                let patched = Patched::new(Box::new(adc), values.clone());
-                Src::new(&edh, Some(&patched.into()))
-            }
-            .map_err(|e| format!("{} (refine: {e})", mismatch(packed)))?;
+            let patched = Patched::new(Box::new(adc), values.clone());
+            let src = Src::new(&edh, Some(&patched.into()))
+                .map_err(|e| format!("{} (refine: {e})", mismatch(packed)))?;
             match &src.get_info().origin {
                 SrcOrigin::Cached(_) => Ok(src),
                 SrcOrigin::Generated(_) => Err(mismatch(packed)),

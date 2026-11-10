@@ -3,7 +3,8 @@
 //! projected or command fit, the way pyfa swaps the original value for the override.
 //!
 //! refine has no API to change a base value, so a cacher that loads the cached adapted data and
-//! patches it stands in for the usual one.
+//! patches it stands in for the usual one. It also adds the scaled burst charges generic command
+//! links fly with.
 
 use rc::{
     Src,
@@ -39,6 +40,7 @@ impl AdaptedDataCacherCore for Patched {
     fn load_from_cache(&self) -> Result<AData, AdaptedDataCacherError> {
         let mut data = self.inner.load_from_cache()?;
         patch(&mut data, &self.values).map_err(AdaptedDataCacherError::new)?;
+        super::links::add_scaled_charges(&mut data).map_err(AdaptedDataCacherError::new)?;
         Ok(data)
     }
 
@@ -104,7 +106,7 @@ fn patch(data: &mut AData, values: &Values) -> Result<(), postcard::Error> {
 
 /// A copy of `item` with other attributes. Adapted items cannot be cloned or changed in place,
 /// so the parts that are not plain values are copied through their serialized form.
-fn with_attrs(item: &AItem, attrs: AItemAttrs) -> Result<AItem, postcard::Error> {
+pub(super) fn with_attrs(item: &AItem, attrs: AItemAttrs) -> Result<AItem, postcard::Error> {
     Ok(AItem {
         id: item.id,
         grp_id: item.grp_id,
