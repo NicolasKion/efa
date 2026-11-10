@@ -121,6 +121,14 @@ impl Efa {
                             .min_h_0()
                             .overflow_y_scroll()
                             .track_focus(&self.fitting_focus)
+                            // A click beside the modules clears the selection; rows stop theirs.
+                            .on_click(cx.listener(|g, _: &ClickEvent, window, cx| {
+                                window.focus(&g.fitting_focus, cx);
+                                if !g.selection.is_empty() {
+                                    g.selection.clear();
+                                    cx.notify();
+                                }
+                            }))
                             .on_key_down(cx.listener(|g, event: &KeyDownEvent, _, cx| {
                                 g.fitting_key(event, cx);
                             }))
@@ -602,6 +610,7 @@ fn item_row_behaviour(
     let this = cx.weak_entity();
     let loaded = Rc::clone(loaded);
     base.on_click(cx.listener(move |g, event: &ClickEvent, window, cx| {
+        cx.stop_propagation();
         window.focus(&g.fitting_focus, cx);
         if event.click_count() >= 2 {
             g.apply(Action::Remove(vec![item]), cx);
