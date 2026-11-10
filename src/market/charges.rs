@@ -81,8 +81,15 @@ pub(crate) fn structure_charges(
             }
             ChargeMenu::Missile(by_type)
         }
+        // Smallest first, so cap booster charges run 25, 50 ... 3200 rather than by name.
         Hardpoint::Turret | Hardpoint::None => {
-            ChargeMenu::Flat(charges.iter().map(|c| c.id).collect())
+            let mut sorted = charges;
+            sorted.sort_by(|a, b| {
+                a.volume
+                    .total_cmp(&b.volume)
+                    .then_with(|| a.name.cmp(&b.name))
+            });
+            ChargeMenu::Flat(sorted.into_iter().map(|c| c.id).collect())
         }
     }
 }
