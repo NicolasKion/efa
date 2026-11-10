@@ -136,3 +136,19 @@ Core Probe Launcher I, Core Scanner Probe I
     assert_eq!(range(1), None, "nothing loaded, nothing to fly");
     assert_eq!(range(2), None, "probes are not missiles");
 }
+
+#[test]
+fn cap_boosters_count_in_the_cap_delta() {
+    let Some((catalog, engine)) = setup() else {
+        return;
+    };
+    let recharge = |charge: &str| {
+        let text = format!("[Caracal, Cap Booster]\n\n\nMedium Capacitor Booster II{charge}\n");
+        let (fit, unknown) = efa::fit::Fit::from_eft(catalog, &text).expect("the fit parses");
+        assert!(unknown.is_empty(), "{unknown:?}");
+        engine.compute(&fit).cap_detail.recharge
+    };
+    // 400 GJ every cycle of a few seconds, averaged.
+    let gained = recharge(", Navy Cap Booster 400") - recharge("");
+    assert!((10.0..200.0).contains(&gained), "{gained}");
+}

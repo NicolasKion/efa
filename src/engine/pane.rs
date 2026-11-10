@@ -99,7 +99,7 @@ pub struct Mining {
 /// What pyfa's capacitor view shows besides capacity and stability.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CapDetail {
-    /// GJ/s gained at peak recharge, plus transfers and nosferatus.
+    /// GJ/s gained at peak recharge, plus cap boosters, transfers and nosferatus.
     pub recharge: f64,
     /// GJ/s spent by active modules and incoming neutralizers.
     pub used: f64,
@@ -393,8 +393,8 @@ pub(super) fn pane_stats(
         .collect();
 }
 
-/// Capacitor gained and spent per second. Cap injectors stay out, like pyfa's delta, which only
-/// counts what flows steadily.
+/// Capacitor gained and spent per second. Cap boosters count as gained, averaged over their
+/// cycles, as pyfa adds them to its peak recharge.
 pub(super) fn cap_flow(s: &mut rc::stats::FitStats<'_>) -> (f64, f64) {
     let mut balance = |kinds| {
         s.get_stat_cap_balance(kinds, StatTimeOptions::default())
@@ -403,6 +403,7 @@ pub(super) fn cap_flow(s: &mut rc::stats::FitStats<'_>) -> (f64, f64) {
     let recharge = balance(
         StatCapBlcSrcKinds::new(false)
             .with_regen(OptionExt::Enabled)
+            .with_cap_injectors(true)
             .with_nosfs(OptionExt::Enabled)
             .with_incoming_transfers(true),
     );
