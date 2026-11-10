@@ -148,9 +148,11 @@ fn cap_boosters_count_in_the_cap_delta() {
         assert!(unknown.is_empty(), "{unknown:?}");
         engine.compute(&fit).cap_detail.recharge
     };
-    // 400 GJ every cycle of a few seconds, averaged.
+    // Three charges of 400 GJ, 12 s cycles, then 10 s to reload, which pyfa always counts for
+    // cap boosters.
     let gained = recharge(", Navy Cap Booster 400") - recharge("");
-    assert!((10.0..200.0).contains(&gained), "{gained}");
+    let pyfa = 3.0 * 400.0 / (3.0 * 12.0 + 10.0);
+    assert!((gained - pyfa).abs() < 1e-6, "{gained}, pyfa {pyfa}");
 }
 
 #[test]

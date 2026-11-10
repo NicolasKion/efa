@@ -394,25 +394,35 @@ pub(super) fn pane_stats(
 }
 
 /// Capacitor gained and spent per second. Cap boosters count as gained, averaged over their
-/// cycles, as pyfa adds them to its peak recharge.
+/// cycles and reloads, as pyfa adds them to its peak recharge: it always counts a booster's
+/// reload, whatever the reload setting.
 pub(super) fn cap_flow(s: &mut rc::stats::FitStats<'_>) -> (f64, f64) {
-    let mut balance = |kinds| {
-        s.get_stat_cap_balance(kinds, StatTimeOptions::default())
+    let mut balance = |kinds, time| {
+        s.get_stat_cap_balance(kinds, time)
             .map_or(0.0, rc::Value::into_f64)
     };
-    let recharge = balance(
+    let steady = balance(
         StatCapBlcSrcKinds::new(false)
             .with_regen(OptionExt::Enabled)
-            .with_cap_injectors(true)
             .with_nosfs(OptionExt::Enabled)
             .with_incoming_transfers(true),
+        StatTimeOptions::default(),
+    );
+    let boosters = balance(
+        StatCapBlcSrcKinds::new(false).with_cap_injectors(true),
+        CalcOptions {
+            factor_reload: true,
+            default_spool: None,
+        }
+        .time(),
     );
     let used = -balance(
         StatCapBlcSrcKinds::new(false)
             .with_consumers(true)
             .with_incoming_neuts(true),
+        StatTimeOptions::default(),
     );
-    (recharge, used)
+    (steady + boosters, used)
 }
 
 /// pyfa's sustainable tank: capacitor-using repairers only count for the share of their cycles
