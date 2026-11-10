@@ -82,6 +82,7 @@ gpui_kit::actions!(
         TargetProfileEditor,
         AttributeOverrides,
         ToggleOverrides,
+        CheckUpdates,
         About,
     ]
 );
@@ -232,6 +233,7 @@ impl Efa {
                 }
             }))
             .on_action(cx.listener(|_, _: &About, window, cx| Efa::open_about(window, cx)))
+            .on_action(cx.listener(|g, _: &CheckUpdates, _, cx| g.check_updates_now(cx)))
             .on_action(cx.listener(|_, _: &Quit, _, cx| cx.quit()))
             .on_action(cx.listener(|g, _: &NextTab, _, cx| g.cycle_tab(true, cx)))
             .on_action(cx.listener(|g, _: &PreviousTab, _, cx| g.cycle_tab(false, cx)))
@@ -561,6 +563,11 @@ fn help_menu(menu: PopupMenu, _: Flags) -> PopupMenu {
             .on_click(|_, _, cx| cx.open_url(FORUM_URL)),
     )
     .separator()
+    .item(command(
+        IconName::RefreshCw,
+        "Check for Updates",
+        CheckUpdates,
+    ))
     .item(command(IconName::Info, "About", About))
 }
 

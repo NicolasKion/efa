@@ -227,7 +227,7 @@ Legend: `[x]` done, `[~]` partial, `[ ]` missing. "refine:" names the engine API
 - [x] EFS stats JSON export (service/port/efs.py), the copy dialog's "EFS" format
 - [x] Ship stats export (service/port/shipstats.py), the copy dialog's "Stats" format
 - [x] Mutated item (muta) format (service/port/muta.py): pasting one mutated item fits it into the current fit, drone copy/paste carries mutations; ESI dynamic item links are not fetched
-- [x] HTML export of all fits (pyfaHTMLExportPreferences.py), full and minimal
+- [x] HTML export of all fits (pyfaHTMLExportPreferences.py), full and minimal; the page opens in the browser once written, which pyfa does not do
 - [x] Export item stats to CSV (gui/itemStats.py)
 - [x] Export implants/boosters/charges lists (builtinContextMenus/additionsExportAll.py)
 
@@ -280,7 +280,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [~] ESI (pyfaEsiPreferences.py): Client ID, callback port and the callback URL to register with a copy button, the scopes to register; pyfa's login modes and server choice are not there
 - [x] Database paths and resets (pyfaDatabasePreferences.py): shows where fits, characters and the cache live; Delete All Damage Pattern Profiles, Delete All Target Profiles and Delete All Prices, each after pyfa's question
 - [ ] Logging (pyfaLoggingPreferences.py)
-- [ ] Update checks (pyfaUpdatePreferences.py, service/update.py)
+- [x] Update checks (pyfaUpdatePreferences.py, service/update.py): at start and hourly, from Preferences > Network, and from Help > Check for Updates with the answer in the status bar
 - [x] HTML export path (pyfaHTMLExportPreferences.py)
 - [x] Attribute overrides editor (gui/propertyEditor.py, eos/saveddata/override.py, mainMenuBar.py Global > Attribute Overrides and Turn Overrides On/Off): a window to search a type or pick an overridden one, type a base value per attribute, reset one or all of a type, clear all, and import/export pyfa's override CSV; overrides and the on/off switch are saved; while on they replace the type's base value for every item of it, in projected and command fits, graphs and item stats too, and the item stats window marks them. refine has no API for base values, so the engine's adapted data is patched on load and rebuilt in the background when overrides change. The search leaves out skills; pyfa searches everything
 
@@ -311,7 +311,7 @@ The graph window (Fit > Graphs, Ctrl+G) samples numbers read once per fit from r
 - [~] Keyboard shortcuts (mainMenuBar.py, mainFrame.py registerMenu): Ctrl+T, W, Alt+W, Z, Y, Shift+Z, C, V, O, S, P, I, K, G, Alt+G, B, E, D, F (search box of the browser shown), Space (switch market and fittings browser), Tab, Shift+Tab, PgUp/PgDn (next/previous tab), F4 and Alt+F4 (close tab, close all), 1..9 (additions tab), Alt+1..9 (market item), D (optimize price) done; missing Ctrl+B and Ctrl+E (ESI)
 - [x] About dialog, version info (gui/aboutData.py)
 - [x] Error dialog with details (gui/errorDialog.py): unreadable data files, failed saves and panics, with the details to copy. A panic that ends efa is kept in crash.txt and shown on the next start
-- [ ] Update notifications (gui/updateDialog.py, service/update.py)
+- [x] Update notifications (gui/updateDialog.py, service/update.py), with download and install
 - [ ] Data prefetch/cache warmup (service/prefetch.py)
 - [~] Dark/bright themes (pyfaGeneralPreferences.py): efa follows the Omarchy theme live, with a plain dark theme otherwise; no theme choice
 - [ ] Translations (pyfa locale/)

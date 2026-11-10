@@ -317,3 +317,36 @@ fn notice(updates: &Entity<Updates>, cx: &App) -> Option<impl IntoElement> {
             }),
     )
 }
+
+impl super::Efa {
+    /// Help > Check for Updates: a check like the one in the preferences, its answer in the
+    /// status bar. A release that is out also shows the update notice.
+    pub(super) fn check_updates_now(&mut self, cx: &mut Context<Self>) {
+        let updates = self.hub.read(cx).updates.clone();
+        updates.update(cx, |u, cx| u.check(true, cx));
+        self.set_status("Checking for updates...");
+        cx.notify();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            loop {
+                let done =
+                    updates.read_with(cx, |u, _| (!u.checking).then(|| u.last_result.clone()));
+                match done {
+                    Some(result) => {
+                        let _ = this.update(cx, |g, cx| {
+                            let text = result.unwrap_or_else(|| "Could not check.".into());
+                            if text.starts_with("Could not") || text.starts_with("The network") {
+                                g.set_error(text);
+                            } else {
+                                g.set_status(text);
+                            }
+                            cx.notify();
+                        });
+                        break;
+                    }
+                    None => cx.background_executor().timer(PROGRESS_TICK).await,
+                }
+            }
+        })
+        .detach();
+    }
+}
