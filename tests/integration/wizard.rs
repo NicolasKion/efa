@@ -617,3 +617,46 @@ fn a_repair_tank_counts_the_repair_while_it_runs() {
         "{modules:?}"
     );
 }
+
+#[test]
+fn a_tight_budget_still_leaves_room_for_rigs() {
+    let Some(all) = setup() else {
+        return;
+    };
+    let catalog = all.0;
+    let fit = ship(catalog, "Abaddon");
+    let tiers = SearchTiers::of(&[
+        SearchGroup::T2,
+        SearchGroup::Faction,
+        SearchGroup::Deadspace,
+    ]);
+    let edit = |budget: Budget| {
+        move |c: &mut Choices| {
+            c.layer = Layer::Armor;
+            c.goal = Goal::Resists;
+            c.search_tiers = tiers;
+            c.budget = budget;
+        }
+    };
+    // T1 and T2 items cheap, the rest dear enough that a few of them use up the budget.
+    let types = problem(all, &fit, &Prices::default(), edit(Budget::default())).types();
+    let prices = Prices::fixed(types.into_iter().map(|t| {
+        let name = catalog.name(t);
+        let cheap = name.ends_with(" I") || name.ends_with(" II");
+        (t, if cheap { 1e6 } else { 1e8 })
+    }));
+    let budget = Budget {
+        each: None,
+        total: Some(400_000_000),
+    };
+    let problem = problem(all, &fit, &prices, edit(budget));
+    let found = tank::optimise(all.1, &problem, &Progress::default(), 1);
+    let best = found.outcomes.first().expect("a tank");
+    assert!(best.price <= 4e8, "{}", best.price);
+    assert_eq!(
+        best.rig_types.len(),
+        problem.rig_positions.len(),
+        "{:?}",
+        names(catalog, &best.rig_types)
+    );
+}

@@ -1,5 +1,5 @@
-//! The search itself: tanks grown a module at a time from the best few of the stage before, rigs
-//! tried on the best tanks last, each scored on a bench the fit is built on once.
+//! The search itself: tanks grown a module or rig at a time from the best few of the stage
+//! before, each scored on a bench the fit is built on once.
 
 use std::{collections::HashSet, sync::atomic::Ordering};
 
@@ -14,9 +14,6 @@ use crate::{
 
 /// Tanks kept from one stage to grow in the next.
 const BEAM: usize = 20;
-
-/// Tanks the rigs are tried on.
-const RIG_SEEDS: usize = 8;
 
 /// Threads a search spreads over at most, leaving the rest of the machine some room.
 const MAX_THREADS: usize = 6;
@@ -39,7 +36,7 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
     let depth = problem.positions.len();
     let rig_depth = problem.rig_positions.len();
     progress.total.store(
-        (depth * BEAM * n + rig_depth * BEAM * problem.rigs.len() + 1).max(1),
+        ((depth + rig_depth) * BEAM * (n + problem.rigs.len()) + 1).max(1),
         Ordering::Relaxed,
     );
     let mut seen: HashSet<State> = HashSet::new();
@@ -47,7 +44,7 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
     let mut rejected = Rejected::default();
 
     // Besides the empty start, starts with a powergrid or CPU rig on, so the modules can use
-    // the room it makes; the rig stage later fills any rig slots still free.
+    // the room it makes.
     let mut starts = vec![State::default()];
     if !problem.rig_positions.is_empty() {
         for (r, rig) in problem.rigs.iter().enumerate() {
@@ -63,38 +60,71 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
     let (beam, dropped) = evaluate_all(bench, problem, &starts, progress);
     rejected += dropped;
     states.extend(beam.iter().cloned());
+    // What filling the slots still free costs at the least, so a tank on a budget keeps that
+    // much back to grow on rather than spending it all on its first modules.
+    let cheapest = |prices: &mut dyn Iterator<Item = TypeId>| {
+        prices
+            .filter_map(|id| problem.prices.get(&id).copied())
+            .fold(f64::INFINITY, f64::min)
+    };
+    let cheapest_module = cheapest(&mut problem.candidates.iter().map(|c| c.module.type_id));
+    let cheapest_rig = cheapest(&mut problem.rigs.iter().map(|r| r.type_id));
+    let reserve = |state: &State| {
+        let missing = |left: usize, price: f64| if left == 0 { 0.0 } else { left as f64 * price };
+        missing(depth.saturating_sub(state.modules.len()), cheapest_module)
+            + missing(rig_depth.saturating_sub(state.rigs.len()), cheapest_rig)
+    };
+    let reserve = &reserve;
     let mut beam = beam;
-    for _ in 0..depth {
+    // Each stage adds a module or a rig, so cheap rigs compete with costly modules for the
+    // budget rather than coming last onto tanks that spent it all.
+    for _ in 0..depth + rig_depth {
         let mut next = Vec::new();
         for (state, _) in &beam {
-            for (c, candidate) in problem.candidates.iter().enumerate() {
-                // Variations of one module share its limit, so a T2 and a faction damage
-                // control do not both go on.
-                let count = state
-                    .modules
-                    .iter()
-                    .filter(|&&m| problem.candidates[m].base == candidate.base)
-                    .count();
-                // A chosen number of repairers is a ceiling while growing, and exact at the end.
-                if candidate.role == Role::Repair
-                    && problem
-                        .repairers
-                        .is_some_and(|n| repair_count(problem, &state.modules) >= n)
-                {
-                    continue;
-                }
-                if count >= candidate.max {
-                    continue;
-                }
-                let mut modules = state.modules.clone();
-                modules.push(c);
-                modules.sort_unstable();
-                let grown = State {
-                    modules,
-                    rigs: state.rigs.clone(),
-                };
+            let mut grow = |grown: State| {
                 if seen.insert(grown.clone()) {
                     next.push(grown);
+                }
+            };
+            if state.modules.len() < depth {
+                for (c, candidate) in problem.candidates.iter().enumerate() {
+                    // Variations of one module share its limit, so a T2 and a faction damage
+                    // control do not both go on.
+                    let count = state
+                        .modules
+                        .iter()
+                        .filter(|&&m| problem.candidates[m].base == candidate.base)
+                        .count();
+                    // A chosen number of repairers is a ceiling while growing, and exact at
+                    // the end.
+                    if candidate.role == Role::Repair
+                        && problem
+                            .repairers
+                            .is_some_and(|n| repair_count(problem, &state.modules) >= n)
+                    {
+                        continue;
+                    }
+                    if count >= candidate.max {
+                        continue;
+                    }
+                    let mut modules = state.modules.clone();
+                    modules.push(c);
+                    modules.sort_unstable();
+                    grow(State {
+                        modules,
+                        rigs: state.rigs.clone(),
+                    });
+                }
+            }
+            if state.rigs.len() < rig_depth {
+                for r in 0..problem.rigs.len() {
+                    let mut rigs = state.rigs.clone();
+                    rigs.push(r);
+                    rigs.sort_unstable();
+                    grow(State {
+                        modules: state.modules.clone(),
+                        rigs,
+                    });
                 }
             }
         }
@@ -107,42 +137,8 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
             break;
         }
         sort(&mut scored);
-        beam = scored.iter().take(BEAM).cloned().collect();
+        beam = pick_beam(problem, &scored, reserve);
         states.extend(scored);
-    }
-
-    // The rigs, on the best tanks.
-    if rig_depth > 0 && !problem.rigs.is_empty() && !progress.cancelled() {
-        sort(&mut states);
-        let mut beam: Vec<(State, Outcome)> = states.iter().take(RIG_SEEDS).cloned().collect();
-        for _ in 0..rig_depth {
-            let mut next = Vec::new();
-            for (state, _) in &beam {
-                for r in 0..problem.rigs.len() {
-                    let mut rigs = state.rigs.clone();
-                    rigs.push(r);
-                    rigs.sort_unstable();
-                    let grown = State {
-                        modules: state.modules.clone(),
-                        rigs,
-                    };
-                    if seen.insert(grown.clone()) {
-                        next.push(grown);
-                    }
-                }
-            }
-            if next.is_empty() || progress.cancelled() {
-                break;
-            }
-            let (mut scored, dropped) = evaluate_all(bench, problem, &next, progress);
-            rejected += dropped;
-            if scored.is_empty() {
-                break;
-            }
-            sort(&mut scored);
-            beam = scored.iter().take(BEAM).cloned().collect();
-            states.extend(scored);
-        }
     }
     if progress.cancelled() {
         return Found::default();
@@ -202,6 +198,22 @@ fn repair_count(problem: &Problem, modules: &[usize]) -> usize {
         .iter()
         .filter(|&&m| problem.candidates[m].role == Role::Repair)
         .count()
+}
+
+/// The tanks to grow next: the best that leave room in the budget to fill their free slots,
+/// topped up with the best of the rest.
+fn pick_beam(
+    problem: &Problem,
+    scored: &[(State, Outcome)],
+    reserve: &dyn Fn(&State) -> f64,
+) -> Vec<(State, Outcome)> {
+    let Some(max) = problem.max_total else {
+        return scored.iter().take(BEAM).cloned().collect();
+    };
+    let (room, rest): (Vec<_>, Vec<_>) = scored
+        .iter()
+        .partition(|(s, o)| o.price + reserve(s) <= max);
+    room.into_iter().chain(rest).take(BEAM).cloned().collect()
 }
 
 fn sort(scored: &mut [(State, Outcome)]) {

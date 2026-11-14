@@ -3,8 +3,8 @@
 //! of the fit stays as it is.
 //!
 //! Trying every combination is out of reach on a battleship, so it searches in stages: each
-//! stage adds one module to the best few tanks of the stage before, and the rigs are tried on the
-//! best tanks last. Tanks that do not fit the CPU, powergrid or calibration are dropped.
+//! stage adds one module or rig to the best few tanks of the stage before. Tanks that do not fit
+//! the CPU, powergrid, calibration or budget are dropped.
 
 mod candidates;
 mod search;
