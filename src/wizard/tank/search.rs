@@ -1,7 +1,10 @@
 //! The search itself: tanks grown a module or rig at a time from the best few of the stage
 //! before, each scored on a bench the fit is built on once.
 
-use std::{collections::HashSet, sync::atomic::Ordering};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::Ordering,
+};
 
 use super::{
     Candidate, Found, Goal, Numbers, Outcome, Problem, Progress, Rejected, RigCandidate, Role,
@@ -60,15 +63,23 @@ pub fn optimise(engine: &Engine, problem: &Problem, progress: &Progress, keep: u
     let (beam, dropped) = evaluate_all(bench, problem, &starts, progress);
     rejected += dropped;
     states.extend(beam.iter().cloned());
-    // What filling the slots still free costs at the least, so a tank on a budget keeps that
-    // much back to grow on rather than spending it all on its first modules.
-    let cheapest = |prices: &mut dyn Iterator<Item = TypeId>| {
-        prices
-            .filter_map(|id| problem.prices.get(&id).copied())
-            .fold(f64::INFINITY, f64::min)
-    };
-    let cheapest_module = cheapest(&mut problem.candidates.iter().map(|c| c.module.type_id));
-    let cheapest_rig = cheapest(&mut problem.rigs.iter().map(|r| r.type_id));
+    // What filling the slots still free costs, so a tank on a budget keeps that much back to
+    // grow on rather than spending it all on its first modules: the cheapest module for each
+    // module slot, and for each rig slot enough for the cheapest variation of any tank rig.
+    let price = |id: TypeId| problem.prices.get(&id).copied();
+    let cheapest_module = problem
+        .candidates
+        .iter()
+        .filter_map(|c| price(c.module.type_id))
+        .fold(f64::INFINITY, f64::min);
+    let mut cheapest_by_rig: HashMap<TypeId, f64> = HashMap::new();
+    for rig in problem.rigs.iter().filter(|r| !r.fitting) {
+        if let Some(p) = price(rig.type_id) {
+            let at = cheapest_by_rig.entry(rig.base).or_insert(p);
+            *at = at.min(p);
+        }
+    }
+    let cheapest_rig = cheapest_by_rig.into_values().fold(0.0, f64::max);
     let reserve = |state: &State| {
         let missing = |left: usize, price: f64| if left == 0 { 0.0 } else { left as f64 * price };
         missing(depth.saturating_sub(state.modules.len()), cheapest_module)
