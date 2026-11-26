@@ -14,6 +14,7 @@ mod editor_kit;
 mod error_dialog;
 mod esi;
 mod export;
+mod finder;
 mod fits;
 mod fitting;
 mod graphs;
@@ -257,6 +258,8 @@ pub struct Efa {
     history: history::History,
     /// The market search waiting out the search delay preference.
     search_debounce: Option<Task<()>>,
+    /// The universal search, which opens over the window.
+    finder: finder::Finder,
     stats_view: stats::View,
     status: Option<status_bar::Status>,
     /// The hub's theme colors, as of its last change.
@@ -422,6 +425,7 @@ impl Efa {
             collapsed_sections: HashSet::new(),
             history: history::History::default(),
             search_debounce: None,
+            finder: finder::Finder::new(window, cx),
             stats_view: stats::View::default(),
             status: None,
             palette,
@@ -437,6 +441,8 @@ impl Efa {
             _tasks: vec![poller],
         };
         this.pull(cx);
+        // The shortcuts work from the start, before anything in the window was clicked.
+        this.root_focus.focus(window, cx);
         this
     }
 

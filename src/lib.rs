@@ -10,6 +10,7 @@ pub mod dogma;
 pub mod engine;
 pub mod errors;
 pub mod esi;
+pub mod finder;
 pub mod fit;
 pub mod graphs;
 pub mod icons;

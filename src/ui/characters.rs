@@ -91,7 +91,7 @@ impl Efa {
     }
 
     /// Fly the current fit with another character. New fits get it too, as in pyfa.
-    fn set_fit_character(&mut self, id: CharacterId, cx: &mut Context<Self>) {
+    pub(super) fn set_fit_character(&mut self, id: CharacterId, cx: &mut Context<Self>) {
         let Some(i) = self.saved.settings.current else {
             return;
         };

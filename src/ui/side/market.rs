@@ -174,7 +174,7 @@ impl Efa {
     }
 
     /// What the current fit has room for, for the "Fits current ship" filter.
-    fn ship_room<'a>(&self, catalog: &'a Catalog) -> Option<ShipRoom<'a>> {
+    pub(in crate::ui) fn ship_room<'a>(&self, catalog: &'a Catalog) -> Option<ShipRoom<'a>> {
         let fit = self.fit()?;
         let ship = catalog.get(fit.ship?)?;
         let stats = self.stats.as_ref()?;

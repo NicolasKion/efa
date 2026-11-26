@@ -24,8 +24,8 @@ use crate::prices::optimize;
 /// Key context of a fit window, so text fields keep their own Ctrl+C, Ctrl+V and Ctrl+Z.
 const CONTEXT: &str = "Efa";
 
-const WIKI_URL: &str = "https://github.com/pyfa-org/Pyfa/wiki";
-const FORUM_URL: &str = "https://forums.eveonline.com/t/27156";
+pub(super) const WIKI_URL: &str = "https://github.com/pyfa-org/Pyfa/wiki";
+pub(super) const FORUM_URL: &str = "https://forums.eveonline.com/t/27156";
 
 gpui_kit::actions!(
     efa,
@@ -84,6 +84,7 @@ gpui_kit::actions!(
         ToggleOverrides,
         CheckUpdates,
         About,
+        SearchEverything,
     ]
 );
 
@@ -109,6 +110,7 @@ macro_rules! numbered {
 /// Bind pyfa's shortcuts. Call once at startup.
 pub fn init(cx: &mut App) {
     super::editor_kit::bind_keys(cx);
+    super::finder::bind_keys(cx);
     cx.bind_keys([
         KeyBinding::new("ctrl-t", NewTab, Some(CONTEXT)),
         KeyBinding::new("ctrl-w", CloseTab, Some(CONTEXT)),
@@ -139,6 +141,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-space", ToggleBrowser, Some(CONTEXT)),
         KeyBinding::new("ctrl-b", BrowseEsiFittings, Some(CONTEXT)),
         KeyBinding::new("ctrl-e", ExportToEve, Some(CONTEXT)),
+        // Not pyfa's: the universal search, where editors have their command palette.
+        KeyBinding::new("ctrl-shift-p", SearchEverything, Some(CONTEXT)),
     ]);
     macro_rules! bind_numbered {
         ($cx:ident; $(($tab:ident, $item:ident, $index:expr, $key:literal)),*) => {
@@ -238,6 +242,9 @@ impl Efa {
             .on_action(cx.listener(|g, _: &NextTab, _, cx| g.cycle_tab(true, cx)))
             .on_action(cx.listener(|g, _: &PreviousTab, _, cx| g.cycle_tab(false, cx)))
             .on_action(cx.listener(|g, _: &FocusSearch, window, cx| g.focus_search(window, cx)))
+            .on_action(cx.listener(|g, _: &SearchEverything, window, cx| {
+                g.open_finder(window, cx);
+            }))
             .on_action(cx.listener(|g, _: &ToggleBrowser, _, cx| g.toggle_browser(cx)));
         macro_rules! on_numbered {
             ($root:ident, $cx:ident; $(($tab:ident, $item:ident, $index:expr, $key:literal)),*) => {
@@ -350,26 +357,25 @@ impl Efa {
         self.changed(cx);
     }
 
+    /// What the menu bar's entries, and the universal search's commands, depend on.
+    pub(super) fn menu_flags(&self) -> Flags {
+        Flags {
+            has_fit: self.saved.settings.current.is_some(),
+            has_ship: self.fit().is_some_and(|f| f.ship.is_some()),
+            has_fits: !self.saved.fits.is_empty(),
+            unrestricted: self.fit().is_some_and(|f| f.ignore_restrictions),
+            can_undo: self.can_undo(),
+            can_redo: self.can_redo(),
+            overrides_on: self.saved.settings.overrides.enabled,
+        }
+    }
+
     pub(super) fn menu_bar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let this = cx.weak_entity();
-        let has_fit = self.saved.settings.current.is_some();
-        let has_ship = self.fit().is_some_and(|f| f.ship.is_some());
-        let has_fits = !self.saved.fits.is_empty();
-        let unrestricted = self.fit().is_some_and(|f| f.ignore_restrictions);
-        let (can_undo, can_redo) = (self.can_undo(), self.can_redo());
-        let overrides_on = self.saved.settings.overrides.enabled;
+        let flags = self.menu_flags();
         let root = self.root_focus.clone();
         let menu =
             |id: &'static str, label: &'static str, build: fn(PopupMenu, Flags) -> PopupMenu| {
-                let flags = Flags {
-                    has_fit,
-                    has_ship,
-                    has_fits,
-                    unrestricted,
-                    can_undo,
-                    can_redo,
-                    overrides_on,
-                };
                 // The entries' actions go to the window's root, where they are handled.
                 let root = root.clone();
                 Button::new(id).ghost().small().label(label).dropdown_menu(
@@ -403,6 +409,14 @@ impl Efa {
             .child(menu("menu-global", "Global", global_menu))
             .child(menu("menu-editors", "Editors", editors_menu))
             .child(menu("menu-help", "Help", help_menu))
+            .child(
+                Button::new("menu-search")
+                    .ghost()
+                    .small()
+                    .icon(IconName::Search)
+                    .tooltip("Search everything (Ctrl+Shift+P)")
+                    .on_click(cx.listener(|g, _, window, cx| g.open_finder(window, cx))),
+            )
             // With the window buttons in the bar, the room left over moves the window.
             .when(builtin, |bar| {
                 bar.child(
@@ -441,14 +455,14 @@ impl Efa {
     clippy::struct_excessive_bools,
     reason = "independent facts about the window, one per entry they enable"
 )]
-struct Flags {
-    has_fit: bool,
-    has_ship: bool,
-    has_fits: bool,
-    unrestricted: bool,
-    can_undo: bool,
-    can_redo: bool,
-    overrides_on: bool,
+pub(super) struct Flags {
+    pub has_fit: bool,
+    pub has_ship: bool,
+    pub has_fits: bool,
+    pub unrestricted: bool,
+    pub can_undo: bool,
+    pub can_redo: bool,
+    pub overrides_on: bool,
 }
 
 fn file_menu(menu: PopupMenu, f: Flags) -> PopupMenu {
