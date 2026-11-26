@@ -39,8 +39,9 @@ const SHORT_H: f32 = 520.;
 const PAGES_W: f32 = 200.;
 const PAGES_NARROW_W: f32 = 48.;
 
+/// A page of the preferences window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Page {
+pub(in crate::ui) enum Page {
     General,
     Engine,
     Stats,
@@ -53,7 +54,7 @@ enum Page {
 }
 
 impl Page {
-    const ALL: [Self; 9] = [
+    pub(in crate::ui) const ALL: [Self; 9] = [
         Self::General,
         Self::Engine,
         Self::Stats,
@@ -65,7 +66,7 @@ impl Page {
         Self::Database,
     ];
 
-    fn title(self) -> &'static str {
+    pub(in crate::ui) fn title(self) -> &'static str {
         match self {
             Self::General => "General",
             Self::Engine => "Fitting Engine",
@@ -79,7 +80,7 @@ impl Page {
         }
     }
 
-    fn icon(self) -> AssetIcon {
+    pub(in crate::ui) fn icon(self) -> AssetIcon {
         match self {
             Self::General => AssetIcon::Settings,
             Self::Engine => AssetIcon::Cpu,
@@ -93,7 +94,7 @@ impl Page {
         }
     }
 
-    fn summary(self) -> &'static str {
+    pub(in crate::ui) fn summary(self) -> &'static str {
         match self {
             Self::General => "How the fitting view, tabs and browsers look and behave.",
             Self::Engine => "How the fitting engine works out the numbers.",
@@ -130,13 +131,32 @@ pub struct PreferencesWindow {
 impl Efa {
     /// pyfa's Global > Preferences.
     pub(super) fn open_preferences(&mut self, cx: &mut Context<Self>) {
+        self.open_preferences_at(None, cx);
+    }
+
+    /// The preferences on one of their pages, for the universal search.
+    pub(super) fn open_preferences_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        self.open_preferences_at(Some(page), cx);
+    }
+
+    /// Open the preferences, or bring them forward, on `page` or wherever they are.
+    fn open_preferences_at(&mut self, page: Option<Page>, cx: &mut Context<Self>) {
         let hub = self.hub.clone();
         let opening = crate::ui::chrome::open_single(
             "Preferences",
             (880., 640.),
             cx,
-            |_: &mut PreferencesWindow, _, _| {},
-            move |window, cx| PreferencesWindow::new(hub, window, cx),
+            move |preferences: &mut PreferencesWindow, _, cx| {
+                if let Some(page) = page {
+                    preferences.page = page;
+                    cx.notify();
+                }
+            },
+            move |window, cx| {
+                let mut preferences = PreferencesWindow::new(hub, window, cx);
+                preferences.page = page.unwrap_or(preferences.page);
+                preferences
+            },
         );
         Self::report_open(opening, cx);
     }

@@ -90,7 +90,7 @@ impl Efa {
     }
 
     /// A new fit for a ship from the fittings browser, named the way pyfa's browser names it.
-    pub(super) fn new_fit_for_ship(&mut self, ship: TypeId, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn new_fit_for_ship(&mut self, ship: TypeId, cx: &mut Context<Self>) {
         let Some(loaded) = self.loaded() else { return };
         let name = format!("{} fit", loaded.catalog.name(ship));
         let fit = self.fresh_fit(name, Some(ship), &loaded.catalog);
